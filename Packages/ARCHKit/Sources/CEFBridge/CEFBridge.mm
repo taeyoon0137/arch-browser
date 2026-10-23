@@ -391,6 +391,16 @@ private:
     }
 }
 
+- (double)zoomLevel {
+    return _browser ? _browser->GetHost()->GetZoomLevel() : 0;
+}
+
+- (void)setZoomLevel:(double)zoomLevel {
+    if (_browser) {
+        _browser->GetHost()->SetZoomLevel(zoomLevel);
+    }
+}
+
 - (void)close {
     if (_browser) {
         _browser->GetHost()->CloseBrowser(true);

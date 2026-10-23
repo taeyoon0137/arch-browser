@@ -39,6 +39,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) BOOL canGoForward;
 @property (nonatomic, readonly, copy) NSString *currentURL;
 @property (nonatomic, readonly, copy) NSString *title;
+/// Chromium's zoom level. 0 is the default size; each level scales the page by a factor of 1.2.
+@property (nonatomic) double zoomLevel;
 - (void)loadURL:(NSString *)url;
 - (void)reload;
 - (void)reloadIgnoringCache;

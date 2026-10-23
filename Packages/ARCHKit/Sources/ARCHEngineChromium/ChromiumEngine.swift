@@ -124,7 +124,11 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
-    public var zoomFactor: Double = 1
+    /// Chromium scales the page by 1.2 per zoom level, and level 0 is the default size.
+    public var zoomFactor: Double {
+        get { browser.map { pow(1.2, $0.zoomLevel) } ?? 1 }
+        set { browser?.zoomLevel = log(newValue) / log(1.2) }
+    }
     public private(set) var url: URL?
     public private(set) var title = ""
     public private(set) var isLoading = false
