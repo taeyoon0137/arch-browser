@@ -12,7 +12,10 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
     @Published public var currentSpaceID: UUID
-    @Published public var selectedTabID: UUID?
+    /// Selecting a tab also switches to its space so the sidebar and page show the same space.
+    @Published public var selectedTabID: UUID? {
+        didSet { if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID } }
+    }
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
@@ -157,7 +160,7 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// A URL only when the text is one: a full URL, or a dotted host without spaces.
+    /// Returns a URL only for a full URL with a scheme and host, or a dotted host without spaces. Adds `https://` to a dotted host.
     public static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let parsed = URL(string: text), parsed.scheme != nil, parsed.host != nil { return parsed }
