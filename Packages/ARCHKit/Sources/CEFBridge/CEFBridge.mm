@@ -73,11 +73,8 @@ static const int64_t kTimerDelayPlaceholder = INT64_MAX;
     return pump;
 }
 
+// Called on the main thread only.
 - (void)scheduleWork:(int64_t)delayMilliseconds {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self scheduleWork:delayMilliseconds]; });
-        return;
-    }
     if (delayMilliseconds == kTimerDelayPlaceholder && _timer != nil) {
         return;
     }
@@ -132,8 +129,11 @@ class BridgeApp : public CefApp, public CefBrowserProcessHandler {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
+    // CEF calls this from any thread, including the main thread from inside one of its own API calls such as `LoadURL`.
+    // Running `CefDoMessageLoopWork()` there re-enters the message loop and hangs, so the work always waits for the next
+    // pass of the main run loop, as the CEF client sample does.
     void OnScheduleMessagePumpWork(int64_t delay_ms) override {
-        [[ARCHCEFPump shared] scheduleWork:delay_ms];
+        dispatch_async(dispatch_get_main_queue(), ^{ [[ARCHCEFPump shared] scheduleWork:delay_ms]; });
     }
 
     // Unsigned development builds lack a stable code identity. The login keychain would therefore prompt for the cookie
