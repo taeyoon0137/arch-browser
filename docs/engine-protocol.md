@@ -64,9 +64,8 @@ Chromium-specific UI callbacks, including translation bubbles, extension install
 ## Engine switching
 
 - `EngineKind` identifies `webKit` and `chromium`. `EngineRegistry` holds registered engines. `UserDefaults` stores the default engine under `ARCHDefaultEngine`.
-- Engine selection uses a profile default (`EngineSelection.profileDefault`) and a per-tab override (`EngineWebContentsConfiguration.engineOverride`). Different tabs can use different engines once a feature makes the selection. No feature does so yet.
-- The debug menu selects the default engine or reopens the current tab in another engine. It belongs in the `Arch` app target. It is not implemented.
-- Each engine keeps profile data, including cookies and history, in separate directories. Engines do not share this data. Sidebar and tab models belong to the feature modules. These models are independent of the engine.
+- Engine selection uses a profile default (`EngineSelection.profileDefault`) and a per-tab override (`EngineWebContentsConfiguration.engineOverride`). Different tabs can use different engines once a feature makes the selection; `docs/plan.md` tasks I.11 to I.13 add it, with tabs inheriting their opener's engine and switching from the address bar's site settings.
+- Each engine keeps profile data in its own directory. Cookies are shared by copying between the engines' stores (I.13); other site data stays per engine. Sidebar and tab models belong to the feature modules. These models are independent of the engine.
 
 ## Current state and next steps
 

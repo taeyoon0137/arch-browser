@@ -39,6 +39,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 8 | Tab switcher and tab close log | Custom implementation | None | not started |
 | 9 | Profile isolation | `WKWebsiteDataStore(forIdentifier:)` | Profiles | not started |
 | 10 | Window themes and appearance (light, dark, automatic) | SwiftUI and AppKit appearance APIs | None | in progress |
+| 48 | Engine per tab: WebKit or Chromium, switchable from the address bar's site settings, inherited by tabs a page opens, with cookies shared between the engines | Both engine adapters in one session; cookies copied between `WKHTTPCookieStore` and the Chromium cookie manager | Cookies | not started |
 
 ## 2. Navigation and Input
 
