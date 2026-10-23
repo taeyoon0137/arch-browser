@@ -63,6 +63,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     public let dataStore: WKWebsiteDataStore
+    lazy var webKitDownloads = WebKitDownloads(context: self)
 
     init(attributes: EngineBrowserContextAttributes) {
         self.attributes = attributes
@@ -73,7 +74,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public var type: EngineBrowserContextType { attributes.type }
     public var userVisibleName: String { attributes.userVisibleName }
     public var history: any EngineHistory { fatalError("skeleton") }
-    public var downloads: any EngineDownloads { fatalError("skeleton") }
+    public var downloads: any EngineDownloads { webKitDownloads }
     public var extensions: (any EngineExtensions)? { nil }
 }
 
@@ -153,12 +154,14 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
     public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView)
+    let allowsDownloads: Bool
     var bridge: WebKitDelegateBridge?
     var observers: [any EngineWebContentsNavigationObserver] = []
 
     public init(sessionID: String, context: WebKitBrowserContext, configuration: EngineWebContentsConfiguration) {
         self.sessionID = sessionID
         self.context = context
+        self.allowsDownloads = !configuration.disallowDownloads
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.websiteDataStore = context.dataStore
         self.webView = WKWebView(frame: .zero, configuration: webConfiguration)
@@ -173,6 +176,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     init(sessionID: String, parentConfiguration: WKWebViewConfiguration, context: WebKitBrowserContext) {
         self.sessionID = sessionID
         self.context = context
+        self.allowsDownloads = true
         self.webView = WKWebView(frame: .zero, configuration: parentConfiguration)
         super.init()
         installBridge()

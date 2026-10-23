@@ -37,15 +37,34 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // A link marked for download starts one instead of a navigation once the page policy allows it.
+        let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (owner.allowsDownloads ? .download : .cancel) : .allow
         guard let url = navigationAction.request.url, let delegate = owner.navigationDelegate else {
-            decisionHandler(.allow)
+            decisionHandler(allowed)
             return
         }
         let disposition: EngineNavigationDisposition = navigationAction.targetFrame == nil ? .newForegroundTab : .currentTab
         let action = EngineNavigationAction(url: url, disposition: disposition,
                                             isUserInitiated: navigationAction.navigationType == .linkActivated,
                                             referrer: (navigationAction.value(forKey: "sourceFrame") as? WKFrameInfo)?.request.url)
-        decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? .allow : .cancel)
+        decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? allowed : .cancel)
+    }
+
+    /// A response WebKit cannot render, or one served as an attachment, becomes a download.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        guard navigationResponse.canShowMIMEType, !disposition.lowercased().hasPrefix("attachment") else {
+            return decisionHandler(owner.allowsDownloads ? .download : .cancel)
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        owner.context.webKitDownloads.add(download, from: webView)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        owner.context.webKitDownloads.add(download, from: webView)
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {

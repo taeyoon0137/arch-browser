@@ -1,0 +1,145 @@
+// `WKDownload` adapter for the `ARCHEngine` download protocols. One list per browser context.
+import ARCHEngine
+import Foundation
+import WebKit
+
+/// Every download started from the context's tabs. An item stays listed until `remove()`.
+public final class WebKitDownloads: EngineDownloads {
+    public weak var delegate: (any EngineDownloadsDelegate)?
+    public private(set) var items: [any EngineDownloadItem] = []
+    unowned let context: WebKitBrowserContext
+
+    init(context: WebKitBrowserContext) {
+        self.context = context
+    }
+
+    /// Wraps a download WebKit has just started and announces it.
+    func add(_ download: WKDownload, from webView: WKWebView) {
+        let item = WebKitDownloadItem(download: download, webView: webView, owner: self)
+        items.append(item)
+        delegate?.downloads(self, didCreate: item)
+    }
+
+    func remove(_ item: WebKitDownloadItem) {
+        items.removeAll { $0 === item }
+        delegate?.downloads(self, didRemove: item)
+    }
+
+    /// The destination when no delegate picks one: the preferred folder or `~/Downloads`, with a name that does not collide. WebKit refuses to overwrite.
+    func defaultDestination(for filename: String) -> URL {
+        let directory = context.preferences.downloadFilePath
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            counter += 1
+            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+        }
+        return candidate
+    }
+}
+
+/// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. Pause keeps WebKit's resume data; resume restarts from it on the originating web view.
+final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate {
+    let id = UUID().uuidString
+    let sourceURL: URL
+    private(set) var targetPath: URL?
+    private(set) var state: EngineDownloadState = .inProgress
+    private(set) var completedBytes: Int64 = 0
+    private(set) var totalBytes: Int64 = 0
+    let startTime = Date()
+    private var download: WKDownload
+    private weak var webView: WKWebView?
+    private unowned let owner: WebKitDownloads
+    private var resumeData: Data?
+    private var observations: [NSKeyValueObservation] = []
+
+    init(download: WKDownload, webView: WKWebView, owner: WebKitDownloads) {
+        self.download = download
+        self.webView = webView
+        self.owner = owner
+        self.sourceURL = download.originalRequest?.url ?? webView.url ?? URL(string: "about:blank")!
+        super.init()
+        attach(download)
+    }
+
+    private func attach(_ download: WKDownload) {
+        self.download = download
+        download.delegate = self
+        let progress = download.progress
+        observations = [
+            progress.observe(\.completedUnitCount) { [weak self] progress, _ in DispatchQueue.main.async { self?.report(progress) } },
+            progress.observe(\.totalUnitCount) { [weak self] progress, _ in DispatchQueue.main.async { self?.report(progress) } },
+        ]
+    }
+
+    private func report(_ progress: Progress) {
+        completedBytes = progress.completedUnitCount
+        totalBytes = progress.totalUnitCount
+        owner.delegate?.downloads(owner, didUpdate: self)
+    }
+
+    private func setState(_ newState: EngineDownloadState) {
+        state = newState
+        owner.delegate?.downloads(owner, didUpdate: self)
+    }
+
+    func pause() {
+        guard state == .inProgress else { return }
+        setState(.paused)
+        download.cancel { [weak self] data in
+            guard let self else { return }
+            self.resumeData = data
+            if data == nil { self.setState(.cancelled) }
+        }
+    }
+
+    func resume() {
+        guard let resumeData, let webView else { return }
+        webView.resumeDownload(fromResumeData: resumeData) { [weak self] download in
+            guard let self else { return }
+            self.resumeData = nil
+            self.attach(download)
+            self.setState(.inProgress)
+        }
+    }
+
+    func cancel() {
+        guard state == .inProgress || state == .paused else { return }
+        if state == .inProgress { download.cancel() }
+        resumeData = nil
+        setState(.cancelled)
+    }
+
+    func remove() {
+        cancel()
+        owner.remove(self)
+    }
+
+    // MARK: WKDownloadDelegate
+
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let choose = { [weak self] (url: URL?) in
+            guard let self else { return completionHandler(nil) }
+            self.targetPath = url
+            completionHandler(url)
+            if url == nil { self.setState(.cancelled) }
+        }
+        guard let delegate = owner.delegate else { return choose(owner.defaultDestination(for: suggestedFilename)) }
+        delegate.downloads(owner, determineFilenameFor: self, defaultFilename: suggestedFilename, completion: choose)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        setState(.completed)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        // A pause or cancel already recorded its own state before WebKit reports the interruption.
+        guard state == .inProgress else { return }
+        self.resumeData = resumeData
+        setState(.failed)
+    }
+}
