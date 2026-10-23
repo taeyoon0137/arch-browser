@@ -49,8 +49,8 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | not started |
 | 14 | Back, forward, reload, zoom | `WKWebView` | Navigation | in progress |
 | 15 | Find in page | `WKWebView.find(_:configuration:)` | Find | in progress |
-| 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | not started |
-| 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | not started |
+| 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
+| 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | in progress |
 | 18 | Drag and drop (tabs, links, files) | AppKit drag APIs | None | not started |
 
 ## 3. Content and Media
@@ -59,15 +59,15 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 19 | Previews (link previews on hover) | Custom implementation with a secondary `WKWebView` window | Navigation | not started |
 | 20 | Media controls and picture-in-picture (PiP) | Both engines use system PiP. WebKit has it built in. The Chromium engine routes PiP to AVKit through a patched CEF build so it matches the macOS experience (needs verification). `MPNowPlayingInfoCenter` for media controls (needs verification) | Media sessions | not started |
-| 21 | Download management | `WKDownload`, `NSSavePanel` | Downloads | not started |
+| 21 | Download management | `WKDownload`, `NSSavePanel` | Downloads | in progress |
 | 22 | Capture (region, full page) and screenshot storage | `WKWebView.takeSnapshot`, `createPDF`, ScreenCaptureKit | Capture | in progress |
 | 23 | Ad and tracker blocking | `WKContentRuleList` with converted EasyList rules, CSS injection to hide elements | Content blocking | not started |
 | 24 | Translation | Translation framework (macOS 15+, needs verification) | Translation | not started |
 | 25 | PDF viewing and printing | Built-in WebKit PDF support, `NSPrintOperation` | PDF | in progress |
-| 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | not started |
-| 27 | Fullscreen and sad tabs (crash recovery) | `WKWebView` fullscreen APIs, `webViewWebContentProcessDidTerminate` | Renderer termination | not started |
+| 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | in progress |
+| 27 | Fullscreen and sad tabs (crash recovery) | `WKWebView` fullscreen APIs, `webViewWebContentProcessDidTerminate` | Renderer termination | in progress |
 | 28 | Favicons and theme colors | Custom favicon collection, `WKWebView.themeColor` | None | in progress |
-| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage | Cookies and history | not started |
+| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage | Cookies and history | in progress |
 
 ## 4. Creation and Sharing
 
