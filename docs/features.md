@@ -38,7 +38,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 7 | Multiple windows and window restoration | Custom implementation using `WKWebView.interactionState` | Session restoration | not started |
 | 8 | Tab switcher and tab close log | Custom implementation | None | not started |
 | 9 | Profile isolation | `WKWebsiteDataStore(forIdentifier:)` | Profiles | not started |
-| 10 | Window themes and appearance (light, dark, automatic) | SwiftUI and AppKit appearance APIs | None | not started |
+| 10 | Window themes and appearance (light, dark, automatic) | SwiftUI and AppKit appearance APIs | None | in progress |
 
 ## 2. Navigation and Input
 
@@ -46,7 +46,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 11 | Command bar (URLs, search, commands, tab switching) | Custom implementation. AppKit text completion shows suggestions from local history and bookmarks, plus public search engine endpoints. No engine autocomplete is used | None | in progress |
 | 12 | Site Search | Custom implementation with a local search engine list | None | not started |
-| 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | not started |
+| 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | in progress |
 | 14 | Back, forward, reload, zoom | `WKWebView` | Navigation | in progress |
 | 15 | Find in page | `WKWebView.find(_:configuration:)` | Find | in progress |
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
