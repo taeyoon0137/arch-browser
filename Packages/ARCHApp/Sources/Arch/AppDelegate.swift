@@ -22,12 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             registry.register(chromium)
         }
         let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
-        // Try the default engine first and fall back to the others when it fails to start.
-        for kind in [registry.defaultKind] + registry.registeredKinds.filter({ $0 != registry.defaultKind }) where session == nil {
-            guard let engine = registry.engine(for: kind) else { continue }
-            session = try? BrowserSession(engine: engine, userDataDirectory: supportDirectory)
-        }
-        guard session != nil else { fatalError("No engine could start") }
+        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them.
+        guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory) else { fatalError("No engine could start") }
+        self.session = session
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()

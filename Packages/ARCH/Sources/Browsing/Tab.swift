@@ -52,6 +52,9 @@ public final class Tab: ObservableObject, Identifiable {
         webContents.uiDelegate = self
     }
 
+    /// The engine that renders the tab.
+    public var engineKind: EngineKind { webContents.engineKind }
+
     public var displayTitle: String {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"

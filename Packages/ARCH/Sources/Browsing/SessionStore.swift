@@ -1,7 +1,11 @@
 // Saves and restores sidebar state (spaces, favorites, tabs, closed tabs, and selection) in one JSON file, `session.json`. The session supplies the directory: the app's Application Support folder.
+import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
+    /// Version 2 adds each tab's engine. Files without a version are version 1.
+    static let currentVersion = 2
+
     struct TabRecord: Codable {
         var spaceID: UUID
         var url: URL?
@@ -9,7 +13,11 @@ struct SessionSnapshot: Codable {
         var isPinned: Bool
         /// `nil` in closed-tab records and in files written before activation tracking.
         var lastActivatedAt: Date?
+        /// `nil` in version 1 files; such a tab opens in the default engine.
+        var engine: EngineKind?
     }
+
+    var version: Int?
 
     var spaces: [Space]
     var currentSpaceID: UUID

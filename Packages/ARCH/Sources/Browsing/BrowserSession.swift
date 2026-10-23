@@ -1,13 +1,30 @@
-// Owns the engine application, one profile, and one browser for the window. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list. Archives inactive tabs on a timer.
+// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
 import Foundation
 
+/// One engine's running pieces: its application, the profile, and the browser that owns its tabs' web contents.
+final class EngineRuntime {
+    let kind: EngineKind
+    let application: any EngineApplication
+    let context: any EngineBrowserContext
+    let browser: any EngineBrowser
+
+    init(kind: EngineKind, application: any EngineApplication, context: any EngineBrowserContext, browser: any EngineBrowser) {
+        self.kind = kind
+        self.application = application
+        self.context = context
+        self.browser = browser
+    }
+}
+
 public final class BrowserSession: ObservableObject {
-    public let application: any EngineApplication
-    public let context: any EngineBrowserContext
-    public private(set) var browser: (any EngineBrowser)!
+    private let registry: EngineRegistry
+    private let userDataDirectory: URL
+    private var runtimes: [EngineKind: EngineRuntime] = [:]
+    /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
+    private let primaryEngine: EngineKind
     @Published public private(set) var tabs: [Tab] = []
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
@@ -56,23 +73,27 @@ public final class BrowserSession: ObservableObject {
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
-    /// The engine's running total of page process crashes, kept for the tab close log (III.8).
-    public private(set) var rendererCrashCount = 0
+    /// Each engine's running total of page process crashes.
+    private var crashCounts: [EngineKind: Int] = [:]
+    /// The engines' total of page process crashes, kept for the tab close log (III.8).
+    public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. They close once the engine creates the download.
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert)?
 
-    public init(engine: any Engine, userDataDirectory: URL) throws {
-        let configuration = EngineApplicationConfiguration(userDataDirectory: userDataDirectory,
-                                                           cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
-        application = try engine.makeApplication(configuration: configuration)
-        var created: (any EngineBrowserContext)?
-        let attributes = EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "default"), userVisibleName: "Default", type: .regular)
-        application.createBrowserContext(attributes) { created = try? $0.get() }
-        guard let context = created else { throw SessionError.contextUnavailable }
-        self.context = context
+    /// Starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them.
+    public init(registry: EngineRegistry = .shared, userDataDirectory: URL) throws {
+        self.registry = registry
+        self.userDataDirectory = userDataDirectory
+        let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
+        var started: StartedEngine?
+        for kind in candidates where started == nil {
+            started = Self.startEngine(kind, registry: registry, userDataDirectory: userDataDirectory)
+        }
+        guard let started else { throw SessionError.noEngineStarted }
+        primaryEngine = started.kind
         store = SessionStore(directory: userDataDirectory)
         let snapshot = store.load()
         let restoredSpaces = snapshot?.spaces ?? []
@@ -81,11 +102,7 @@ public final class BrowserSession: ObservableObject {
         currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
         favorites = snapshot?.favorites ?? []
         closedTabs = snapshot?.closedTabs ?? []
-        application.delegate = self
-        application.run()
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
-        context.downloads.delegate = self
-        downloads = context.downloads.items.map(DownloadEntry.init)
+        adoptRuntime(started)
         restoreTabs(snapshot)
         observeChanges()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
@@ -96,7 +113,66 @@ public final class BrowserSession: ObservableObject {
     }
 
     public enum SessionError: Error {
-        case contextUnavailable
+        case noEngineStarted
+    }
+
+    // MARK: Engines
+
+    /// The engines a tab can use.
+    public var availableEngines: [EngineKind] { registry.registeredKinds }
+
+    /// The engine for new tabs that no page opened. Settings changes it, and the change applies to the next new tab.
+    public var defaultEngine: EngineKind {
+        get { registry.defaultKind }
+        set {
+            objectWillChange.send()
+            registry.defaultKind = newValue
+        }
+    }
+
+    private struct StartedEngine {
+        let kind: EngineKind
+        let application: any EngineApplication
+        let context: any EngineBrowserContext
+    }
+
+    /// Creates an engine's application and its default profile. Returns nil when the engine cannot start.
+    private static func startEngine(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> StartedEngine? {
+        guard let engine = registry.engine(for: kind) else { return nil }
+        let configuration = EngineApplicationConfiguration(userDataDirectory: userDataDirectory,
+                                                           cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
+        guard let application = try? engine.makeApplication(configuration: configuration) else { return nil }
+        var created: (any EngineBrowserContext)?
+        let attributes = EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "default"), userVisibleName: "Default", type: .regular)
+        application.createBrowserContext(attributes) { created = try? $0.get() }
+        guard let context = created else { return nil }
+        return StartedEngine(kind: kind, application: application, context: context)
+    }
+
+    /// Runs a started engine with the session as its delegate, creates its browser, and lists its downloads.
+    @discardableResult
+    private func adoptRuntime(_ started: StartedEngine) -> EngineRuntime {
+        started.application.delegate = self
+        started.application.run()
+        let browser = started.application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: started.context, delegate: self, window: nil)
+        let runtime = EngineRuntime(kind: started.kind, application: started.application, context: started.context, browser: browser)
+        runtimes[started.kind] = runtime
+        started.context.downloads.delegate = self
+        downloads += started.context.downloads.items.map(DownloadEntry.init)
+        return runtime
+    }
+
+    /// The runtime for `kind`, started on first use. Falls back to the primary engine's runtime when `kind` cannot start.
+    private func runtime(for kind: EngineKind) -> EngineRuntime {
+        if let runtime = runtimes[kind] { return runtime }
+        if let started = Self.startEngine(kind, registry: registry, userDataDirectory: userDataDirectory) {
+            return adoptRuntime(started)
+        }
+        return runtimes[primaryEngine]!
+    }
+
+    private func runtime(owning downloads: any EngineDownloads) -> EngineRuntime? {
+        runtimes.values.first { ($0.context.downloads as AnyObject) === (downloads as AnyObject) }
     }
 
     // MARK: Spaces
@@ -156,17 +232,19 @@ public final class BrowserSession: ObservableObject {
         tabs.first { $0.id == selectedTabID }
     }
 
+    /// Opens a tab in `engine`, or in the default engine when no engine is given.
     @discardableResult
-    public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true) -> Tab {
-        let webContents = browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL))
+    public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil) -> Tab {
+        let webContents = runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL))
         return adopt(webContents, spaceID: spaceID ?? currentSpaceID, pinned: pinned, select: select)
     }
 
     private func adopt(_ webContents: any EngineWebContents, spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
         let tab = Tab(webContents: webContents, spaceID: spaceID, isPinned: pinned)
+        // A tab a page opens comes from the page's engine.
         tab.openNewTab = { [weak self] popup in
             guard let self else { return }
-            self.browser.takeOwnership(of: popup)
+            self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
             _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
         }
         tab.didClose = { [weak self, weak tab] in
@@ -208,9 +286,9 @@ public final class BrowserSession: ObservableObject {
         cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
-        browser.closeWebContents(tab.webContents)
+        runtimes[tab.engineKind]?.browser.closeWebContents(tab.webContents)
         if remember {
-            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned))
+            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
         if selectedTabID == tab.id {
@@ -235,7 +313,7 @@ public final class BrowserSession: ObservableObject {
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        openTab(url: record.url, in: spaceID, pinned: record.isPinned)
+        openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine)
     }
 
     /// The current space's tabs in sidebar order: pinned first, then open.
@@ -410,9 +488,9 @@ public final class BrowserSession: ObservableObject {
         downloads.filter(\.isFinished).forEach { $0.item.remove() }
     }
 
-    /// The folder set in the profile preferences, falling back to the user's Downloads folder, then the temporary folder.
+    /// The folder set in the primary engine's profile preferences, falling back to the user's Downloads folder, then the temporary folder.
     private var downloadsDirectory: URL {
-        context.preferences.downloadFilePath
+        runtimes[primaryEngine]?.context.preferences.downloadFilePath
             ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
     }
@@ -510,7 +588,7 @@ public final class BrowserSession: ObservableObject {
                 closedTabs.append(record)
                 continue
             }
-            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
+            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -530,7 +608,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func scheduleSave() {
-        store.scheduleSave { [weak self] in self?.snapshot() ?? SessionSnapshot(spaces: [], currentSpaceID: UUID(), favorites: [], tabs: [], selectedTabIndex: nil) }
+        store.scheduleSave { [weak self] in self?.snapshot() ?? SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: [], currentSpaceID: UUID(), favorites: [], tabs: [], selectedTabIndex: nil) }
     }
 
     public func saveNow() {
@@ -538,8 +616,8 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func snapshot() -> SessionSnapshot {
-        SessionSnapshot(spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt) },
+        SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind) },
                         selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
     }
 }
@@ -562,7 +640,7 @@ extension BrowserSession: EngineApplicationDelegate {
     public func application(_ application: any EngineApplication, didCreateBrowser browser: any EngineBrowser) {}
     public func application(_ application: any EngineApplication, didCloseBrowser browser: any EngineBrowser) {}
     public func application(_ application: any EngineApplication, didChangeBrowserContextAttributes attributes: [EngineBrowserContextAttributes]) {}
-    public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { rendererCrashCount = count }
+    public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
 }
 
 extension BrowserSession: EngineBrowserDelegate {
@@ -573,7 +651,7 @@ extension BrowserSession: EngineBrowserDelegate {
 
 extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
-        self.downloads = items.map(DownloadEntry.init)
+        self.downloads += items.filter { item in !self.downloads.contains { $0.id == item.id } }.map(DownloadEntry.init)
     }
 
     /// A new download opens the downloads list so the user can see it start. The list stays closed when the sidebar it opens from is hidden.
@@ -601,7 +679,7 @@ extension BrowserSession: EngineDownloadsDelegate {
 
     /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
-        guard context.preferences.promptForDownloadPath else {
+        guard runtime(owning: downloads)?.context.preferences.promptForDownloadPath == true else {
             return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
         }
         let panel = NSSavePanel()
