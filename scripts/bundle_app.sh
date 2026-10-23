@@ -6,12 +6,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-debug}"
 BIN="$ROOT/.build/$CONFIG"
 CEF="$ROOT/Frameworks/cef/Release/Chromium Embedded Framework.framework"
+ICON_SOURCE="$ROOT/resources/assets/sym_arch.png"
 APP="$ROOT/build/Arch.app"
 VERSION="0.1.0"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
+[ -f "$ICON_SOURCE" ] || { echo "missing app icon source at $ICON_SOURCE" >&2; exit 1; }
 
 write_plist() {
   # Arguments: `$1` is the output path, `$2` the executable name, `$3` the bundle identifier, and `$4` the user interface element flag (0/1). `$5` holds extra keys for the main app.
@@ -40,7 +42,8 @@ PLIST
 }
 
 # The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, or location access on a page's behalf.
-APP_KEYS='	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
+APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
+	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Web pages can use the microphone after you allow them.</string>
 	<key>NSLocationUsageDescription</key><string>Web pages can use your location after you allow them.</string>
 	<key>CFBundleURLTypes</key>
@@ -58,6 +61,17 @@ cp "$BIN/Arch" "$APP/Contents/MacOS/Arch"
 write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
+
+# Build the icon set from the 1024-pixel symbol. Each size appears at 1x and 2x, as `iconutil` requires.
+ICONSET="$(mktemp -d)/Arch.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  double=$((size * 2))
+  sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Arch.icns"
+rm -rf "$(dirname "$ICONSET")"
 
 for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   name="Arch Helper$suffix"
