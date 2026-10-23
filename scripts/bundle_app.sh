@@ -9,6 +9,7 @@ CEF="$ROOT/Frameworks/cef/Release/Chromium Embedded Framework.framework"
 ICON_SOURCE="$ROOT/resources/assets/sym_arch.png"
 APP="$ROOT/build/Arch.app"
 VERSION="0.1.0"
+MIN_MACOS="13.0"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
@@ -30,7 +31,7 @@ write_plist() {
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$VERSION</string>
 	<key>CFBundleVersion</key><string>$VERSION</string>
-	<key>LSMinimumSystemVersion</key><string>13.0</string>
+	<key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
 	<key>LSEnvironment</key><dict><key>MallocNanoZone</key><string>0</string></dict>
 	<key>LSUIElement</key><string>$4</string>
 	<key>NSHighResolutionCapable</key><true/>
@@ -58,6 +59,10 @@ APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BIN/Arch" "$APP/Contents/MacOS/Arch"
+# SwiftPM records the deployment target as the SDK version, and macOS then runs the app with that older SDK's design, such as the old window buttons. Recording the SDK the app was built with gives it the current system design. vtool warns that this invalidates the signature; the bundle is signed at the end.
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+xcrun vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
+mv "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
 write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
