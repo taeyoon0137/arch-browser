@@ -44,7 +44,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         let disposition: EngineNavigationDisposition = navigationAction.targetFrame == nil ? .newForegroundTab : .currentTab
         let action = EngineNavigationAction(url: url, disposition: disposition,
                                             isUserInitiated: navigationAction.navigationType == .linkActivated,
-                                            referrer: navigationAction.sourceFrame.request.url)
+                                            referrer: (navigationAction.value(forKey: "sourceFrame") as? WKFrameInfo)?.request.url)
         decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? .allow : .cancel)
     }
 

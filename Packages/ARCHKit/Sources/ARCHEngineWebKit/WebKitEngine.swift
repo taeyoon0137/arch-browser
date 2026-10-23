@@ -1,4 +1,4 @@
-// WKWebView adapter for the ARCHEngine protocols. Secondary engine; prefers Apple APIs.
+// `WKWebView` adapter for the `ARCHEngine` protocols. This secondary engine prefers Apple APIs.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -37,14 +37,27 @@ public final class WebKitApplication: EngineApplication {
     public func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { fatalError("skeleton") }
     public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
     public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
-    public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser { fatalError("skeleton") }
-    public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) { fatalError("skeleton") }
-    /// Converting EasyList-format lists to WKContentRuleList is not implemented yet.
+    public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
+        makeBrowser(sessionID: UUID().uuidString, context: context, delegate: delegate, window: window)
+    }
+    /// Nothing is persisted yet, so restoring yields an empty browser with the same session identifier.
+    public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) {
+        completion(makeBrowser(sessionID: sessionID, context: context, delegate: delegate, window: nil))
+    }
+    private func makeBrowser(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> WebKitBrowser {
+        guard let context = context as? WebKitBrowserContext else {
+            preconditionFailure("WebKit browsers require a WebKit browser context")
+        }
+        let browser = WebKitBrowser(sessionID: sessionID, context: context, delegate: delegate, window: window)
+        self.delegate?.application(self, didCreateBrowser: browser)
+        return browser
+    }
+    /// Conversion from EasyList-format lists to `WKContentRuleList` is not implemented.
     public func setBlockLists(_ lists: [URL]) { fatalError("skeleton") }
     public func setExcludedDomains(_ domains: [String]) { fatalError("skeleton") }
 }
 
-/// One profile. WKWebsiteDataStore owns cookies and cache; history needs its own store (not implemented).
+/// One profile. `WKWebsiteDataStore` owns cookies and cache. History needs a separate store, which is not implemented.
 public final class WebKitBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
     public weak var delegate: (any EngineBrowserContextDelegate)?
@@ -64,7 +77,73 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public var extensions: (any EngineExtensions)? { nil }
 }
 
-/// One WKWebView per tab.
+/// Tabs for one window. Cookies use the context's `WKHTTPCookieStore`.
+public final class WebKitBrowser: EngineBrowser {
+    public let sessionID: String
+    public let webKitContext: WebKitBrowserContext
+    public weak var window: NSWindow?
+    public weak var delegate: (any EngineBrowserDelegate)?
+    private var ownedWebContents: [WebKitWebContents] = []
+
+    init(sessionID: String, context: WebKitBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
+        self.sessionID = sessionID
+        self.webKitContext = context
+        self.delegate = delegate
+        self.window = window
+    }
+
+    public var context: any EngineBrowserContext { webKitContext }
+
+    public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
+        let webContents = WebKitWebContents(sessionID: UUID().uuidString, context: webKitContext, configuration: configuration)
+        ownedWebContents.append(webContents)
+        return webContents
+    }
+    public func canRestoreWebContents(sessionID: String) -> Bool { false }
+    public func restoreWebContents(sessionID: String) -> (any EngineWebContents)? { nil }
+    public func takeOwnership(of webContents: any EngineWebContents) {
+        guard let webContents = webContents as? WebKitWebContents, !ownedWebContents.contains(where: { $0 === webContents }) else { return }
+        ownedWebContents.append(webContents)
+    }
+    public func closeWebContents(_ webContents: any EngineWebContents) {
+        guard let index = ownedWebContents.firstIndex(where: { $0 === (webContents as AnyObject) }) else { return }
+        let closing = ownedWebContents.remove(at: index)
+        closing.webView.stopLoading()
+        closing.webView.removeFromSuperview()
+    }
+    public func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) {
+        ownedWebContents.removeAll()
+        completion(true)
+    }
+
+    public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
+        webKitContext.dataStore.httpCookieStore.getAllCookies { cookies in
+            completion(cookies.map { EngineCookie(name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, expires: $0.expiresDate, isSecure: $0.isSecure, isHTTPOnly: $0.isHTTPOnly) })
+        }
+    }
+    public func setCookie(_ cookie: EngineCookie, for url: URL) {
+        var properties: [HTTPCookiePropertyKey: Any] = [.name: cookie.name, .value: cookie.value, .domain: cookie.domain, .path: cookie.path, .originURL: url]
+        if let expires = cookie.expires { properties[.expires] = expires }
+        if cookie.isSecure { properties[.secure] = "TRUE" }
+        if cookie.isHTTPOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        guard let httpCookie = HTTPCookie(properties: properties) else { return }
+        webKitContext.dataStore.httpCookieStore.setCookie(httpCookie)
+    }
+    public func removeCookie(named name: String, for url: URL) {
+        let store = webKitContext.dataStore.httpCookieStore
+        store.getAllCookies { cookies in
+            let host = url.host ?? ""
+            for cookie in cookies where cookie.name == name {
+                let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+                if (host == domain || host.hasSuffix("." + domain)) && url.path.hasPrefix(cookie.path) {
+                    store.delete(cookie)
+                }
+            }
+        }
+    }
+}
+
+/// One `WKWebView` per tab.
 public final class WebKitWebContents: NSObject, EngineWebContents {
     public let engineKind: EngineKind = .webKit
     public let sessionID: String
@@ -136,7 +215,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             completion(error.map { .failure($0) } ?? .success(value))
         }
     }
-    /// Site customization CSS injection: inserts a <style> element through WKUserScript.
+    /// Injects CSS for site customization by inserting a `<style>` element through `WKUserScript`.
     public func insertStylesheet(_ css: String, identifier: String) {
         let escaped = css.replacingOccurrences(of: "`", with: "\\`")
         let source = "(function(){var s=document.getElementById('arch-style-\(identifier)');if(!s){s=document.createElement('style');s.id='arch-style-\(identifier)';document.documentElement.appendChild(s);}s.textContent=`\(escaped)`;})();"

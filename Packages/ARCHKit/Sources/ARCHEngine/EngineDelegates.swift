@@ -85,7 +85,7 @@ public protocol EngineWebContentsNavigationObserver: AnyObject {
     func webContents(_ webContents: any EngineWebContents, didFinishInPageNavigation navigation: EngineNavigation)
 }
 
-/// Lightweight UI delegate surface. Autofill, translation bubble, and vendor-integration callbacks are excluded.
+/// A lightweight user interface (UI) delegate. It excludes callbacks for autofill, translation bubbles, and vendor integrations.
 public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents)
     func webContentsDidChangeURL(_ webContents: any EngineWebContents)
@@ -112,4 +112,33 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, blockedPopupCountDidChange count: Int)
     func webContentsProcessDidTerminate(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, didConsumeKeyEvent event: NSEvent) -> Bool
+}
+
+// Default implementations let feature code override only the callbacks it handles. Dialogs and permissions default to the safe answer.
+public extension EngineWebContentsUIDelegate {
+    func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {}
+    func webContentsDidChangeURL(_ webContents: any EngineWebContents) {}
+    func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {}
+    func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
+    func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents) {}
+    func webContents(_ webContents: any EngineWebContents, didChangeStatusText text: String?) {}
+    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
+    func webContentsDidClose(_ webContents: any EngineWebContents) {}
+    func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
+    func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}
+    func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) {}
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) { completion() }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) { completion(nil) }
+    func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) { completion(true) }
+    func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {}
+    func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool { false }
+    func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) { completion(nil) }
+    func webContents(_ webContents: any EngineWebContents, didChangeAudibleState isAudible: Bool) {}
+    func webContents(_ webContents: any EngineWebContents, didChangeMuteState isMuted: Bool) {}
+    func webContents(_ webContents: any EngineWebContents, blockedPopupCountDidChange count: Int) {}
+    func webContentsProcessDidTerminate(_ webContents: any EngineWebContents) {}
+    func webContents(_ webContents: any EngineWebContents, didConsumeKeyEvent event: NSEvent) -> Bool { false }
 }
