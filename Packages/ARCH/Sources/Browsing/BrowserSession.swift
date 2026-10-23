@@ -155,6 +155,9 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
+        tab.requestPermission = { [weak tab] request, completion in
+            Self.askPermission(request, on: tab?.webContents.view.window, completion: completion)
+        }
         // The session republishes changes to the selected tab so views that read the tab through the session refresh.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
             guard let self else { return }
@@ -382,6 +385,37 @@ public final class BrowserSession: ObservableObject {
             candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
         }
         return candidate
+    }
+
+    // MARK: Site permissions
+
+    /// Asks with a sheet on the page's window, or an app-modal alert when the page has no window yet. The answer reaches the engine once.
+    private static func askPermission(_ request: EnginePermissionRequest, on window: NSWindow?, completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Don\u{2019}t Allow")
+        let finish = { (response: NSApplication.ModalResponse) in completion(response == .alertFirstButtonReturn) }
+        if let window = window ?? NSApp.keyWindow {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
+    private static func permissionDescription(for types: [EnginePermissionType]) -> String {
+        let phrases = types.map { type -> String in
+            switch type {
+            case .camera: return "use the camera"
+            case .microphone: return "use the microphone"
+            case .screenCapture: return "record the screen"
+            case .geolocation: return "see your location"
+            case .notifications: return "send notifications"
+            case .clipboard: return "read the clipboard"
+            case .midi: return "use MIDI devices"
+            }
+        }
+        return ListFormatter.localizedString(byJoining: phrases)
     }
 
     public func goBack() { selectedTab?.webContents.navigationController.goBack() }

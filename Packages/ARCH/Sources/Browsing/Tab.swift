@@ -22,6 +22,8 @@ public final class Tab: ObservableObject, Identifiable {
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
     var didClose: (() -> Void)?
+    /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
+    var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
 
@@ -61,5 +63,9 @@ extension Tab: EngineWebContentsUIDelegate {
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
+    }
+    public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
+        guard let requestPermission else { return completion(false) }
+        requestPermission(request, completion)
     }
 }
