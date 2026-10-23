@@ -17,11 +17,24 @@ public final class BrowserSession: ObservableObject {
         didSet {
             selectedTab?.lastActivatedAt = Date()
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
+            // A search belongs to one page, so switching tabs ends it.
+            if isFindBarVisible, oldValue != selectedTabID {
+                tabs.first { $0.id == oldValue }?.webContents.stopFind()
+                isFindBarVisible = false
+                findResult = nil
+            }
         }
     }
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
+    @Published public private(set) var isFindBarVisible = false
+    /// The text in the find bar. Each change searches the selected tab from its current match.
+    @Published public var findText = "" {
+        didSet { if findText != oldValue { runFind(forward: true) } }
+    }
+    /// The last result for `findText`. `nil` while no search has finished.
+    @Published public private(set) var findResult: EngineFindResult?
     /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
@@ -284,6 +297,46 @@ public final class BrowserSession: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let view = self?.selectedTab?.webContents.view, let window = view.window else { return }
             window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.first)
+        }
+    }
+
+    // MARK: Find in page
+
+    public func showFindBar() {
+        guard selectedTab != nil else { return }
+        isFindBarVisible = true
+        runFind(forward: true)
+    }
+
+    public func hideFindBar() {
+        guard isFindBarVisible else { return }
+        isFindBarVisible = false
+        findResult = nil
+        selectedTab?.webContents.stopFind()
+        focusPage()
+    }
+
+    /// Steps to the next match. Shows the bar when it is hidden so the user can see what is being found.
+    public func findNext() {
+        if !isFindBarVisible { showFindBar() } else { runFind(forward: true) }
+    }
+
+    public func findPrevious() {
+        if !isFindBarVisible { showFindBar() } else { runFind(forward: false) }
+    }
+
+    private func runFind(forward: Bool) {
+        guard isFindBarVisible, let tab = selectedTab else { return }
+        let text = findText
+        guard !text.isEmpty else {
+            tab.webContents.stopFind()
+            findResult = nil
+            return
+        }
+        tab.webContents.find(text, forward: forward, matchCase: false) { [weak self] result in
+            // A result for text the user has already changed is dropped.
+            guard let self, self.isFindBarVisible, self.findText == text else { return }
+            self.findResult = result
         }
     }
 

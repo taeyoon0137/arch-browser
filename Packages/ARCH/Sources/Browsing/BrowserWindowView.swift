@@ -20,6 +20,12 @@ public struct BrowserWindowView: View {
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .padding(EdgeInsets(top: session.isSidebarVisible ? 8 : 38, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
             }
+            if session.isFindBarVisible {
+                FindBarView(session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 20)
+                    .padding(.trailing, 24)
+            }
             if let mode = session.commandPaletteMode {
                 // Give each mode its own view identity to reset the typed text and initial address.
                 CommandPaletteView(session: session, mode: mode)

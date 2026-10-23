@@ -95,6 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(findNext), keyEquivalent: "g")
+        let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPrevious), keyEquivalent: "G")
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
         mainMenu.addItem(submenu(editMenu, title: "Edit"))
 
         let viewMenu = NSMenu(title: "View")
@@ -164,6 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
     @objc private func reload() { session.reload() }
+    @objc private func showFindBar() { session.showFindBar() }
+    @objc private func findNext() { session.findNext() }
+    @objc private func findPrevious() { session.findPrevious() }
     @objc private func goBack() { session.goBack() }
     @objc private func goForward() { session.goForward() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
