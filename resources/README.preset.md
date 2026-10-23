@@ -6,9 +6,8 @@
 
 <!-- Hero Image -->
 <!--
-  To add a hero image, add resources/hero.png (or .jpg).
-  Light/dark variants go in resources/hero.light.png and resources/hero.dark.png.
-  After adding images, run ./scripts/readme_update.sh; existing images are embedded into resources/readme-hero.svg as base64.
+  The hero image comes from resources/assets/img_hero_light.png and resources/assets/img_hero_dark.png.
+  After changing them, run ./scripts/readme_update.sh; it embeds both into resources/readme-hero.svg as base64.
 -->
 <p align="center">
   <a href="${repositoryUrl}">
@@ -58,10 +57,15 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository is at an early stage. It contains the engine abstraction and the WebKit adapter. Write feature modules one feature at a time, using `docs/features.md`. `swift build` builds the engine modules.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Browsing`, `History`, and `Preferences`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+
+Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
 ```bash
+./scripts/setup_cef.sh
 swift build
+./scripts/bundle_app.sh
+open build/Arch.app
 ```
 
 After cloning, enable the commit message hook once:
@@ -90,6 +94,8 @@ git config core.hooksPath .githooks
 
 | Command | Description |
 | :-- | :-- |
+| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, and the app icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 
 <a id="repository-structure"></a>
@@ -101,7 +107,7 @@ arch-browser
 ├── .githooks/
 │   └── commit-msg                  # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules, starting with Browsing
+│   ├── ARCH/Sources/               # Feature modules: Browsing, History, Preferences
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   └── ARCHKit/Sources/
 │       ├── ARCHEngine/             # Engine protocols, registry, and selection
@@ -110,12 +116,17 @@ arch-browser
 │       └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
 ├── docs/                           # Design documents
 ├── resources/
+│   ├── assets/
+│   │   ├── img_hero_light.png      # Hero image, light appearance
+│   │   ├── img_hero_dark.png       # Hero image, dark appearance
+│   │   └── sym_arch.png            # App icon source
 │   ├── README.preset.md            # README source of truth
-│   ├── hero.jpg                    # Hero image
 │   ├── readme-hero.preset.svg      # Hero wrapper source
 │   └── readme-hero.svg             # Generated hero SVG
 ├── scripts/
-│   └── readme_update.sh            # README generator
+│   ├── bundle_app.sh               # Assembles build/Arch.app
+│   ├── readme_update.sh            # README generator
+│   └── setup_cef.sh                # Downloads the pinned CEF distribution
 ├── .gitattributes                  # Line ending and attribute rules
 ├── .gitignore                      # Git exclusions
 ├── AGENTS.md                       # Agent working instructions (source of truth)
