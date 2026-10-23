@@ -11,6 +11,8 @@ struct WebContentsHostView: NSViewRepresentable {
         container.layer?.cornerRadius = 8
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = true
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor.separatorColor.cgColor
         return container
     }
 
