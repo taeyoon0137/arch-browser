@@ -17,6 +17,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var favicon: NSImage?
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
+    /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
+    var didClose: (() -> Void)?
 
     init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
         self.webContents = webContents
@@ -41,6 +43,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) { url = webContents.url }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
+    public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         isLoading = webContents.isLoading
         canGoBack = webContents.canGoBack

@@ -16,11 +16,14 @@ public struct BrowserWindowView: View {
                     SidebarView(session: session)
                         .frame(width: 250)
                 }
+                // When the sidebar is hidden, the page starts below the window buttons.
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
-                    .padding(EdgeInsets(top: 8, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
+                    .padding(EdgeInsets(top: session.isSidebarVisible ? 8 : 38, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
             }
             if let mode = session.commandPaletteMode {
+                // Give each mode its own view identity to reset the typed text and initial address.
                 CommandPaletteView(session: session, mode: mode)
+                    .id(mode)
             }
         }
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))

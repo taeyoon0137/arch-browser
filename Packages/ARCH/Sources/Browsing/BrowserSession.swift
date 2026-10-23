@@ -123,9 +123,17 @@ public final class BrowserSession: ObservableObject {
             self.browser.takeOwnership(of: popup)
             _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
         }
-        tabObservers[tab.id] = tab.objectWillChange.sink { [weak self] _ in self?.scheduleSave() }
+        tab.didClose = { [weak self, weak tab] in
+            if let self, let tab { self.closeTab(tab) }
+        }
+        // The session republishes changes to the selected tab so views that read the tab through the session refresh.
+        tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
+            guard let self else { return }
+            if tab?.id == self.selectedTabID { self.objectWillChange.send() }
+            self.scheduleSave()
+        }
         tabs.append(tab)
-        if select || selectedTabID == nil { selectedTabID = tab.id }
+        if select { selectedTabID = tab.id }
         return tab
     }
 
@@ -181,14 +189,28 @@ public final class BrowserSession: ObservableObject {
     // MARK: Command palette
 
     public func showCommandPalette(_ mode: CommandPaletteMode) { commandPaletteMode = mode }
-    public func dismissCommandPalette() { commandPaletteMode = nil }
+    public func dismissCommandPalette() {
+        commandPaletteMode = nil
+        focusPage()
+    }
 
     public func submitCommandPalette(_ input: String) {
-        defer { commandPaletteMode = nil }
+        defer {
+            commandPaletteMode = nil
+            focusPage()
+        }
         guard let mode = commandPaletteMode, let url = Self.destination(forInput: input) else { return }
         switch mode {
         case .editCurrent where selectedTab != nil: navigate(to: input)
         case .editCurrent, .newTab: openTab(url: url)
+        }
+    }
+
+    /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a newly opened tab's view is in the window.
+    private func focusPage() {
+        DispatchQueue.main.async { [weak self] in
+            guard let view = self?.selectedTab?.webContents.view, let window = view.window else { return }
+            window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.first)
         }
     }
 
@@ -205,7 +227,7 @@ public final class BrowserSession: ObservableObject {
         for record in snapshot.tabs where spaces.contains(where: { $0.id == record.spaceID }) {
             openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
         }
-        if let index = snapshot.selectedTabIndex, tabs.indices.contains(index), tabs[index].spaceID == currentSpaceID {
+        if let index = snapshot.selectedTabIndex, tabs.indices.contains(index) {
             selectedTabID = tabs[index].id
         } else {
             selectedTabID = tabs.first { $0.spaceID == currentSpaceID }?.id
