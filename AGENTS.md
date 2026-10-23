@@ -14,7 +14,7 @@ Arch is a sidebar-first macOS browser with its own implementation. It runs on Ch
 
 - The repository contains the engine abstraction, the WebKit adapter, and the Chromium adapter built on CEF. It also contains `Browsing`, the first feature module, and the `Arch` app shell. `docs/plan.md` lists what each part supports.
 - For implementation decisions, read `docs/plan.md` first. It covers the goals, approach, current state, working rules, and next steps.
-- Do not name other browser products in code or documents.
+- Do not name other browser products in code or documents. The one exception is the opening of the README, which credits the project's inspiration by name.
 
 ## Instruction priority
 

@@ -20,6 +20,7 @@
 
 <p align="center">
   <a href="../docs/plan.md"><img src="https://img.shields.io/badge/status-early-4D24E2" alt="status: early" /></a>
+  <a href="https://techcrunch.com/2026/10/22/arc-browser-sunsets-december-22-as-the-browser-company-doubles-down-on-dia/"><img src="https://img.shields.io/badge/Arc%20Browser-In%20loving%20memory%20%C2%B7%20Dec%2022%2C%202026-F54F8D" alt="Arc Browser: in loving memory, December 22, 2026" /></a>
 </p>
 <p align="center">
   <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-%23F05138?logo=swift&logoColor=%23FFFFFF" alt="Swift" /></a>
@@ -36,6 +37,10 @@
 <a id="role"></a>
 
 ## 🧭 Role
+
+Arch is inspired by [Arc](https://arc.net). We deeply regret that Arc's service ends on December 22, 2026. Arch started as an open-source home for the features we loved in Arc, so that the features we need can arrive quickly and anyone can customize the browser for themselves. Its defining features from the start are WebKit support alongside Chromium and the fullest possible use of Apple's native APIs.
+
+We also recommend [Dia](https://www.diabrowser.com), the new browser from the team behind Arc, and we are cheering them on.
 
 Arch is a sidebar-first macOS browser with its own implementation: spaces, pinned tabs, split view, a command bar, customizations for each site, notes, and media controls.
 
