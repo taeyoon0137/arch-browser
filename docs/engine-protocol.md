@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `ARCHEngine` | `Packages/ARCHKit/Sources/ARCHEngine` | Protocols, value types, `EngineRegistry`, `EngineSelection` | AppKit, Foundation |
 | `ARCHEngineWebKit` | `Packages/ARCHKit/Sources/ARCHEngineWebKit` | `WKWebView` adapter. Secondary and debug engine | `ARCHEngine`, WebKit |
-| `ARCHEngineChromium` | `Packages/ARCHKit/Sources/ARCHEngineChromium` | Primary engine. Swift adapter for CEF in Chrome style, with an Objective-C++ bridge. Build steps: `docs/plan.md` | `ARCHEngine`, CEF framework |
+| `ARCHEngineChromium` | `Packages/ARCHKit/Sources/ARCHEngineChromium` | Primary engine. Swift adapter over the `CEFBridge` Objective-C++ target. The embedded browser uses Alloy style, which CEF requires for embedding in a client view. Chrome style requires a CEF Views window. Support for Chrome style is evaluated separately. Chrome extensions depend on Chrome style. Build steps: `docs/plan.md` | `ARCHEngine`, `CEFBridge`, CEF framework |
 
 - Both existing modules are maintained by hand and declared in `Package.swift`. Add `ARCHEngineChromium` when its bridge exists.
 

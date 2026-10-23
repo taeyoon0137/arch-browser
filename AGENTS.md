@@ -42,7 +42,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 ## Files and sources of truth
 
 - `Package.swift` is maintained by hand. Add one target for each new module.
-- Engine modules are in `Packages/ARCHKit/Sources/ARCHEngine*`. Feature modules go in `Packages/ARCH/Sources/<Feature>`.
+- Engine modules are in `Packages/ARCHKit/Sources/ARCHEngine*`. The CEF bridge is in `Packages/ARCHKit/Sources/CEFBridge`. Feature modules go in `Packages/ARCH/Sources/<Feature>`. The app target and CEF helper are in `Packages/ARCHApp/Sources/`.
 - `README.md` is generated from `resources/README.preset.md` by `./scripts/readme_update.sh`. Edit the preset, not the output.
 - `CLAUDE.md` is a symbolic link to `AGENTS.md`. Do not replace it with a copy.
 - Every document in `docs/` is maintained by hand.
