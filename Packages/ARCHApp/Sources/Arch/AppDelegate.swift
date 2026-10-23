@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them.
         guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory) else { fatalError("No engine could start") }
         self.session = session
+        session.showSettings = { PreferencesWindowController.shared.show() }
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()
@@ -201,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func selectLastTab() { session.selectLastTab() }
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
-    @objc private func toggleDownloads() { session.toggleDownloadsPopover() }
+    @objc private func toggleDownloads() { session.toggleLibrary() }
     @objc private func reload() { session.reload() }
     @objc private func showFindBar() { session.showFindBar() }
     @objc private func findNext() { session.findNext() }

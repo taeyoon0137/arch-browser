@@ -7,6 +7,12 @@ public struct Space: Identifiable, Codable, Hashable {
     public var symbol: String
     public var tint: SpaceTint
 
+    /// The symbols the space menu offers, with their names.
+    public static let symbolChoices: [(symbol: String, name: String)] = [
+        ("circle.fill", "Circle"), ("star.fill", "Star"), ("heart.fill", "Heart"), ("house.fill", "House"), ("briefcase.fill", "Briefcase"),
+        ("book.fill", "Book"), ("graduationcap.fill", "Graduation Cap"), ("leaf.fill", "Leaf"), ("gamecontroller.fill", "Game Controller"), ("cart.fill", "Cart"),
+    ]
+
     public init(id: UUID = UUID(), name: String, symbol: String = "circle.fill", tint: SpaceTint = .blue) {
         self.id = id
         self.name = name

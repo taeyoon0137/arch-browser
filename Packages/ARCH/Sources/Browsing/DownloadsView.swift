@@ -1,4 +1,4 @@
-// The downloads list appears in a sidebar popover. Each row reflects one engine download item and offers open, reveal, pause, resume, cancel, and remove actions.
+// The downloads list fills the top of the sidebar's library. Each row reflects one engine download item and offers open, reveal, pause, resume, cancel, and remove actions.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -38,40 +38,42 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     }
 }
 
-struct DownloadsListView: View {
+struct DownloadsSectionView: View {
     @ObservedObject var session: BrowserSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Downloads")
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("Clear", action: session.clearFinishedDownloads)
                     .buttonStyle(.plain)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .disabled(!session.downloads.contains(where: \.isFinished))
             }
-            Divider()
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
             if session.downloads.isEmpty {
                 Text("No downloads")
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 16)
             } else {
                 ScrollView {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 2) {
                         // Newest first.
                         ForEach(session.downloads.reversed()) { entry in
                             DownloadRowView(session: session, entry: entry)
                         }
                     }
                 }
-                .frame(maxHeight: 320)
+                .scrollIndicators(.never)
             }
         }
-        .padding(12)
-        .frame(width: 340)
     }
 }
 

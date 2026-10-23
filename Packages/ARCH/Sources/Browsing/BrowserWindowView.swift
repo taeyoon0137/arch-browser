@@ -1,4 +1,4 @@
-// Main window content. The system's translucent window material fills the window with a faint wash of the current space's tint. The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs, and the space switcher. The page fills the remaining space with nothing above it.
+// Main window content. The system's translucent window material fills the window with a faint wash of the current space's tint. The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs or the library, and the library button with the space switcher. The page fills the remaining space with nothing above it.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -208,6 +208,7 @@ struct SidebarView: View {
     }
 
     private func swipeChanged(_ travel: CGFloat) {
+        guard !session.isLibraryVisible else { return }
         swipeTranslation = pageTranslation(for: travel)
         let passesHalfway = abs(swipeTranslation) > Self.width / 2
         if passesHalfway != swipePassesHalfway {
@@ -218,6 +219,7 @@ struct SidebarView: View {
 
     /// Moves to the neighboring space when the swipe went far or fast enough, otherwise returns to the current one.
     private func swipeEnded(_ travel: CGFloat, velocity: CGFloat) {
+        guard !session.isLibraryVisible else { return }
         let translation = pageTranslation(for: travel)
         let isFling = abs(velocity) > 300
         var target = currentIndex
@@ -242,19 +244,32 @@ struct SidebarView: View {
                 SidebarTopRow(session: session, windowButtons: windowButtons)
                 AddressPillView(session: session, tab: nil)
             }
-            if !session.favorites.isEmpty {
-                FavoritesGridView(session: session)
-                    .padding(.top, 6)
+            // The library pushes the favorites and space pages out toward the page. Both reach the sidebar's edges so that they slide in from outside it.
+            ZStack {
+                if session.isLibraryVisible {
+                    LibraryView(session: session)
+                        .padding(.horizontal, Self.inset)
+                        .transition(.move(edge: .leading))
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !session.favorites.isEmpty {
+                            FavoritesGridView(session: session)
+                                .padding(.horizontal, Self.inset)
+                        }
+                        SpacePagesView(session: session, translation: swipeTranslation)
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(.move(edge: .trailing))
+                }
             }
-            // The pages reach the sidebar's edges so that they slide in from outside it.
-            SpacePagesView(session: session, translation: swipeTranslation)
-                .padding(.horizontal, -Self.inset)
-                .padding(.top, 6)
-            Spacer(minLength: 0)
-            SpaceSwitcherView(session: session)
+            .padding(.top, 6)
+            .padding(.horizontal, -Self.inset)
+            .clipped()
+            SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
+        .animation(Self.pageSpring, value: session.isLibraryVisible)
         .background(SpaceSwipeView(onChange: swipeChanged, onEnd: swipeEnded))
     }
 }
@@ -521,17 +536,10 @@ struct SpaceTabsView: View {
         let open = session.tabs(in: space.id, pinned: false)
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: space.symbol)
-                        .font(.system(size: 10))
-                        .foregroundStyle(space.tint.color)
-                    Text(space.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 4)
+                SpaceHeaderView(session: session, space: space)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 4)
+                    .padding(.bottom, 4)
                 ForEach(pinned) { tab in
                     TabRowView(session: session, tab: tab)
                 }
@@ -662,33 +670,128 @@ struct NewTabButton: View {
     }
 }
 
-/// Shows one symbol per space at the bottom of the sidebar, plus buttons to open the downloads list and add a space.
-struct SpaceSwitcherView: View {
+/// The space's symbol and name above its tabs, with a button for the space menu. Double-clicking the name renames the space in place.
+struct SpaceHeaderView: View {
+    @ObservedObject var session: BrowserSession
+    let space: Space
+    @State private var draftName = ""
+    @FocusState private var isNameFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: space.symbol)
+                .font(.system(size: 10))
+                .foregroundStyle(space.tint.color)
+            if session.renamingSpaceID == space.id {
+                TextField("Space Name", text: $draftName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .focused($isNameFocused)
+                    .onSubmit { session.renameSpace(space.id, to: draftName) }
+                    .onExitCommand { session.renamingSpaceID = nil }
+                    .onChange(of: isNameFocused) { focused in
+                        if !focused, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+                    }
+                    .onAppear {
+                        draftName = space.name
+                        DispatchQueue.main.async { isNameFocused = true }
+                    }
+            } else {
+                Text(space.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .onTapGesture(count: 2) { session.renamingSpaceID = space.id }
+            }
+            Spacer(minLength: 0)
+            Menu {
+                SpaceMenuItems(session: session, space: space)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(.secondary)
+            .help("Space Options")
+            .accessibilityLabel("Space Options")
+        }
+        .frame(height: 22)
+    }
+}
+
+/// The space menu, shared by the button beside a space's name and the context menu of its symbol at the bottom of the sidebar.
+struct SpaceMenuItems: View {
+    @ObservedObject var session: BrowserSession
+    let space: Space
+
+    private var index: Int? { session.spaces.firstIndex { $0.id == space.id } }
+
+    var body: some View {
+        Button("Rename Space") {
+            session.switchToSpace(space.id)
+            session.renamingSpaceID = space.id
+        }
+        Picker("Color", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
+            ForEach(SpaceTint.allCases, id: \.self) { tint in
+                Text(tint.rawValue.capitalized).tag(tint)
+            }
+        }
+        Picker("Icon", selection: Binding(get: { space.symbol }, set: { session.setSymbol($0, ofSpace: space.id) })) {
+            ForEach(Space.symbolChoices, id: \.symbol) { choice in
+                Label(choice.name, systemImage: choice.symbol).tag(choice.symbol)
+            }
+        }
+        Divider()
+        Button("Move Left") { session.moveSpace(space.id, by: -1) }
+            .disabled(index == 0)
+        Button("Move Right") { session.moveSpace(space.id, by: 1) }
+            .disabled(index == session.spaces.count - 1)
+        Divider()
+        Button("New Space", action: session.addSpace)
+        Button("Delete Space") { session.deleteSpace(space.id) }
+            .disabled(session.spaces.count < 2)
+    }
+}
+
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them.
+struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(session.spaces) { space in
-                let isCurrent = space.id == session.currentSpaceID
-                Button(action: { session.switchToSpace(space.id) }) {
-                    Image(systemName: space.symbol)
-                        .font(.system(size: isCurrent ? 12 : 9))
-                        .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(space.name)
-                .accessibilityLabel(space.name)
-                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        ZStack {
+            HStack {
+                LibraryButton(session: session)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
-            SidebarIconButton(symbol: session.downloads.contains(where: { $0.state == .inProgress }) ? "arrow.down.circle.fill" : "arrow.down.circle",
-                              label: "Downloads", action: session.toggleDownloadsPopover)
-                .popover(isPresented: $session.isDownloadsPopoverVisible, arrowEdge: .top) {
-                    DownloadsListView(session: session)
+            HStack(spacing: 4) {
+                ForEach(session.spaces) { space in
+                    let isCurrent = space.id == session.currentSpaceID && !session.isLibraryVisible
+                    Button(action: { session.switchToSpace(space.id) }) {
+                        Image(systemName: space.symbol)
+                            .font(.system(size: isCurrent ? 12 : 9))
+                            .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { SpaceMenuItems(session: session, space: space) }
+                    .help(space.name)
+                    .accessibilityLabel(space.name)
+                    .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 }
-            SidebarIconButton(symbol: "plus", label: "New Space", action: session.addSpace)
+            }
+            // The new space button sits just after the last symbol without moving the symbols off center.
+            .overlay(alignment: .trailing) {
+                SidebarIconButton(symbol: "plus", label: "New Space", action: session.addSpace)
+                    .fixedSize()
+                    .alignmentGuide(.trailing) { $0[.leading] }
+            }
         }
+        .frame(height: 28)
     }
 }

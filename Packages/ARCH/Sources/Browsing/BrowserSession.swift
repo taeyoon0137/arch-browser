@@ -45,10 +45,7 @@ public final class BrowserSession: ObservableObject {
             showNextSheet()
         }
     }
-    /// The downloads popover opens from the sidebar, so hiding the sidebar closes it.
-    @Published public var isSidebarVisible = true {
-        didSet { if !isSidebarVisible { isDownloadsPopoverVisible = false } }
-    }
+    @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Where the open palette came from, which sets the direction it appears from.
@@ -64,7 +61,16 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var findResult: EngineFindResult?
     /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
-    @Published public var isDownloadsPopoverVisible = false
+    /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
+    @Published public var isLibraryVisible = false {
+        didSet { if isLibraryVisible { unseenDownloadIDs.removeAll() } }
+    }
+    /// Downloads that finished while the library was closed. The library button shows their count.
+    @Published public private(set) var unseenDownloadIDs: Set<String> = []
+    /// The space whose name is being edited in the sidebar.
+    @Published public var renamingSpaceID: UUID?
+    /// The app sets this to open its Settings window from the library.
+    public var showSettings: (() -> Void)?
     /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
@@ -210,6 +216,7 @@ public final class BrowserSession: ObservableObject {
 
     public func switchToSpace(_ id: UUID) {
         guard spaces.contains(where: { $0.id == id }) else { return }
+        isLibraryVisible = false
         currentSpaceID = id
         if selectedTab?.spaceID != id {
             selectedTabID = (tabs(in: id, pinned: false).first ?? tabs(in: id, pinned: true).first)?.id
@@ -220,6 +227,41 @@ public final class BrowserSession: ObservableObject {
         guard let index = spaces.firstIndex(where: { $0.id == currentSpaceID }) else { return }
         let next = (index + (forward ? 1 : spaces.count - 1)) % spaces.count
         switchToSpace(spaces[next].id)
+    }
+
+    /// Keeps the old name when the new one is empty.
+    public func renameSpace(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { updateSpace(id) { $0.name = trimmed } }
+        renamingSpaceID = nil
+    }
+
+    public func setTint(_ tint: SpaceTint, ofSpace id: UUID) {
+        updateSpace(id) { $0.tint = tint }
+    }
+
+    public func setSymbol(_ symbol: String, ofSpace id: UUID) {
+        updateSpace(id) { $0.symbol = symbol }
+    }
+
+    /// Moves a space one place left (`-1`) or right (`1`) in the switcher.
+    public func moveSpace(_ id: UUID, by offset: Int) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }), spaces.indices.contains(index + offset) else { return }
+        spaces.swapAt(index, index + offset)
+    }
+
+    /// Removes a space. Its tabs move to the space before it, or to the next one for the first space, so no tab closes.
+    public func deleteSpace(_ id: UUID) {
+        guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let destination = spaces[index == 0 ? 1 : index - 1].id
+        for tab in tabs where tab.spaceID == id { tab.spaceID = destination }
+        if currentSpaceID == id { switchToSpace(destination) }
+        spaces.remove(at: index)
+    }
+
+    private func updateSpace(_ id: UUID, _ change: (inout Space) -> Void) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        change(&spaces[index])
     }
 
     // MARK: Favorites
@@ -368,6 +410,8 @@ public final class BrowserSession: ObservableObject {
             requestCloseTab(tab)
         }
     }
+
+    public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
     /// Restores the newest closed tab into its space, or the current space when that space is gone.
     public func reopenLastClosedTab() {
@@ -534,10 +578,10 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Downloads
 
-    /// Shows the sidebar first if hidden because the downloads popover opens from it.
-    public func toggleDownloadsPopover() {
+    /// Shows the sidebar first if hidden because the library opens in it.
+    public func toggleLibrary() {
         if !isSidebarVisible { isSidebarVisible = true }
-        isDownloadsPopoverVisible.toggle()
+        isLibraryVisible.toggle()
     }
 
     public func removeDownload(_ entry: DownloadEntry) {
@@ -739,10 +783,9 @@ extension BrowserSession: EngineDownloadsDelegate {
         self.downloads += items.filter { item in !self.downloads.contains { $0.id == item.id } }.map(DownloadEntry.init)
     }
 
-    /// A new download opens the downloads list so the user can see it start. The list stays closed when the sidebar it opens from is hidden.
+    /// The library button shows a new download's progress, so the library itself stays as it is.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         self.downloads.append(DownloadEntry(item: item))
-        if isSidebarVisible { isDownloadsPopoverVisible = true }
         let finishedTabIDs = downloadOnlyTabIDs
         downloadOnlyTabIDs.removeAll()
         // The engine is still choosing the file's destination, so the tabs close once that callback returns.
@@ -762,12 +805,16 @@ extension BrowserSession: EngineDownloadsDelegate {
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
         objectWillChange.send()
-        self.downloads.first { $0.id == item.id }?.refresh()
+        guard let entry = self.downloads.first(where: { $0.id == item.id }) else { return }
+        let wasFinished = entry.isFinished
+        entry.refresh()
+        if !wasFinished, entry.state == .completed, !isLibraryVisible { unseenDownloadIDs.insert(entry.id) }
         closeDownloadPagesIfIdle()
     }
 
     public func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem) {
         self.downloads.removeAll { $0.id == item.id }
+        unseenDownloadIDs.remove(item.id)
         closeDownloadPagesIfIdle()
     }
 
