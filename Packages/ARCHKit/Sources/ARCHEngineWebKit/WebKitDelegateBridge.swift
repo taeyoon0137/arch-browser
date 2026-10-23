@@ -39,7 +39,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // A link marked for download starts one instead of a navigation once the page policy allows it.
-        let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (owner.allowsDownloads ? .download : .cancel) : .allow
+        let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         guard let url = navigationAction.request.url, let delegate = owner.navigationDelegate else {
             decisionHandler(allowed)
             return
@@ -55,9 +55,16 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
         guard navigationResponse.canShowMIMEType, !disposition.lowercased().hasPrefix("attachment") else {
-            return decisionHandler(owner.allowsDownloads ? .download : .cancel)
+            return decisionHandler(mayDownload(navigationResponse.response.url, in: webView) ? .download : .cancel)
         }
         decisionHandler(.allow)
+    }
+
+    /// A web view that has not committed a navigation has never shown a page.
+    private func mayDownload(_ url: URL?, in webView: WKWebView) -> Bool {
+        guard owner.allowsDownloads else { return false }
+        guard let url, let delegate = owner.uiDelegate else { return true }
+        return delegate.webContents(owner, shouldDownload: url, hasPage: webView.backForwardList.currentItem != nil)
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

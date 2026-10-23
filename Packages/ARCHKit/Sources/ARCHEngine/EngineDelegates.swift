@@ -103,6 +103,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void)
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void)
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void)
+    /// Asks whether a download that `url` starts may proceed. `hasPage` is false when the web contents never showed a page, as when a tab opens straight onto a file.
+    func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu)
     func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool
     func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void)
@@ -132,6 +134,7 @@ public extension EngineWebContentsUIDelegate {
     func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) { completion(nil) }
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) { completion(true) }
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool { true }
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {}
     func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool { false }
     func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) { completion(false) }

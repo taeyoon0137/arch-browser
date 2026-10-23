@@ -56,6 +56,8 @@ public final class BrowserSession: ObservableObject {
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
+    /// Tabs that only ever pointed at a file. They close once the engine creates the download.
+    private var downloadOnlyTabIDs: Set<UUID> = []
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert)?
@@ -167,6 +169,17 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
+        // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
+        tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
+            guard let self, let tab else { return }
+            if downloads {
+                self.downloadOnlyTabIDs.insert(tab.id)
+            } else {
+                DispatchQueue.main.async { [weak self, weak tab] in
+                    if let self, let tab { self.closeTab(tab, remember: false) }
+                }
+            }
+        }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
             self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
@@ -186,14 +199,17 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
-    public func closeTab(_ tab: Tab) {
+    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
+    public func closeTab(_ tab: Tab, remember: Bool = true) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
         browser.closeWebContents(tab.webContents)
-        closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned))
-        if closedTabs.count > 100 { closedTabs.removeFirst() }
+        if remember {
+            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned))
+            if closedTabs.count > 100 { closedTabs.removeFirst() }
+        }
         if selectedTabID == tab.id {
             let siblings = tabs.filter { $0.spaceID == tab.spaceID }
             selectedTabID = (siblings.first { !$0.isPinned } ?? siblings.first)?.id
@@ -201,7 +217,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     public func closeSelectedTab() {
-        selectedTab.map(closeTab)
+        selectedTab.map { closeTab($0) }
     }
 
     /// Keeps pinned tabs and the selected tab; closes the rest of the selected tab's space.
@@ -493,6 +509,7 @@ public final class BrowserSession: ObservableObject {
             }
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
+            tab.isRestored = true
             // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
             if index == snapshot.selectedTabIndex { selected = tab }
@@ -551,6 +568,13 @@ extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         self.downloads.append(DownloadEntry(item: item))
         if isSidebarVisible { isDownloadsPopoverVisible = true }
+        let finishedTabIDs = downloadOnlyTabIDs
+        downloadOnlyTabIDs.removeAll()
+        // The engine is still choosing the file's destination, so the tabs close once that callback returns.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for tab in self.tabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false) }
+        }
     }
 
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.

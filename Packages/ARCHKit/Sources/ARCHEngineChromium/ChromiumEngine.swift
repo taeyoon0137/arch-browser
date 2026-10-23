@@ -289,6 +289,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidClose() {
         uiDelegate?.webContentsDidClose(self)
     }
+    public func cefBrowserShouldDownloadURL(_ url: String, hasDocument: Bool) -> Bool {
+        guard let uiDelegate, let url = URL(string: url) else { return true }
+        return uiDelegate.webContents(self, shouldDownload: url, hasPage: hasDocument)
+    }
     public func cefBrowserDidStart(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
         guard let downloads = context?.chromiumDownloads else { return decision(nil, true) }
         downloads.begin(download, suggestedName: suggestedName, decision: decision)

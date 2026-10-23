@@ -28,6 +28,12 @@ public final class Tab: ObservableObject, Identifiable {
     var presentAlert: ((NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
+    /// The session sets this for tabs it restores from the saved session.
+    var isRestored = false
+    /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
+    var didOpenOnlyDownload: ((Bool) -> Void)?
+    /// Set when the tab turned out to point at a file, so the file's address does not enter history.
+    private var isDownloadOnly = false
 
     init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
         self.webContents = webContents
@@ -58,7 +64,7 @@ extension Tab: EngineWebContentsUIDelegate {
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         // Record a page when it finishes loading, when its title is usually known.
-        if !isLoading, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             HistoryStore.shared.record(url, title: webContents.title)
         }
@@ -69,6 +75,14 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
+    }
+
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again.
+    public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
+        guard !hasPage else { return true }
+        isDownloadOnly = true
+        didOpenOnlyDownload?(!isRestored)
+        return !isRestored
     }
 
     // MARK: JavaScript dialogs

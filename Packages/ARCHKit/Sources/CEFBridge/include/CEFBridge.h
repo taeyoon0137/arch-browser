@@ -50,6 +50,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
+/// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
+- (BOOL)cefBrowserShouldDownloadURL:(NSString *)url hasDocument:(BOOL)hasDocument;
 /// Asks for a download destination. Call `decision` with the full destination path, or with `nil` and `showDialog` to open the engine's Save As dialog.
 - (void)cefBrowserDidStartDownload:(ARCHCEFDownload *)download
                      suggestedName:(NSString *)suggestedName

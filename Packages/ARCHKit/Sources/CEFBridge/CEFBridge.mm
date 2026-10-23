@@ -288,6 +288,7 @@ bool gInitialized = false;
 
 @interface ARCHCEFBrowser ()
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser;
+- (void)handleDoClose;
 - (void)handleTitle:(NSString *)title;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
@@ -301,6 +302,7 @@ bool gInitialized = false;
                     decision:(void (^)(NSString *_Nullable, BOOL))decision;
 - (void)handleDownloadUpdate:(ARCHCEFDownload *)download;
 - (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision;
+- (BOOL)handleShouldDownload:(NSString *)url hasDocument:(BOOL)hasDocument;
 - (void)handleRenderProcessTerminated;
 @end
 
@@ -369,7 +371,7 @@ public:
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
     bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString &url, const CefString &request_method) override {
-        return owner_ != nil && owner_.allowsDownloads;
+        return owner_ != nil && owner_.allowsDownloads && [owner_ handleShouldDownload:ToNSString(url) hasDocument:browser->HasDocument()];
     }
 
     bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item, const CefString &suggested_name,
@@ -439,6 +441,15 @@ public:
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         [owner_ handlePopup:ToNSString(target_url)];
+        return true;
+    }
+
+    // Returning false would make CEF close the window that holds the browser's view, which is the app's window. The view leaves its parent instead, and CEF finishes closing the browser once the view is released.
+    bool DoClose(CefRefPtr<CefBrowser> browser) override {
+        if (!owner_) {
+            return false;
+        }
+        [owner_ handleDoClose];
         return true;
     }
 
@@ -609,6 +620,11 @@ private:
     [_delegate cefBrowserDidRequestPopupWithURL:url];
 }
 
+- (void)handleDoClose {
+    [_browserView removeFromSuperview];
+    _browserView = nil;
+}
+
 - (void)handleBeforeClose {
     _browser = nullptr;
     _browserView = nil;
@@ -642,6 +658,11 @@ private:
 
 - (void)handleDownloadUpdate:(ARCHCEFDownload *)download {
     [_delegate cefBrowserDidUpdateDownload:download];
+}
+
+- (BOOL)handleShouldDownload:(NSString *)url hasDocument:(BOOL)hasDocument {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    return delegate == nil || [delegate cefBrowserShouldDownloadURL:url hasDocument:hasDocument];
 }
 
 - (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision {
