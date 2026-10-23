@@ -5,11 +5,14 @@
 #include <dispatch/dispatch.h>
 #include <map>
 
+#include <atomic>
+
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_cookie.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
@@ -153,6 +156,139 @@ bool gInitialized = false;
 }  // namespace
 
 #pragma mark - Runtime
+
+@implementation ARCHCEFCookie
+@end
+
+namespace {
+
+NSDate *ToNSDate(const cef_basetime_t &time) {
+    cef_time_t exploded;
+    double seconds = 0;
+    if (!cef_time_from_basetime(time, &exploded) || !cef_time_to_doublet(&exploded, &seconds)) {
+        return nil;
+    }
+    return [NSDate dateWithTimeIntervalSince1970:seconds];
+}
+
+cef_basetime_t ToBaseTime(NSDate *date) {
+    cef_time_t exploded;
+    cef_basetime_t time = {};
+    if (cef_time_from_doublet(date.timeIntervalSince1970, &exploded)) {
+        cef_time_to_basetime(&exploded, &time);
+    }
+    return time;
+}
+
+// Collects cookies as CEF visits them and reports the list when CEF releases the visitor, which also happens when the store has no cookies or cannot be read.
+class CookieCollector : public CefCookieVisitor {
+  public:
+    explicit CookieCollector(void (^completion)(NSArray<ARCHCEFCookie *> *)) : completion_([completion copy]), cookies_([NSMutableArray array]) {}
+
+    ~CookieCollector() override {
+        NSArray<ARCHCEFCookie *> *cookies = [cookies_ copy];
+        void (^completion)(NSArray<ARCHCEFCookie *> *) = completion_;
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(cookies); });
+    }
+
+    bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
+        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
+        item.name = ToNSString(CefString(&cookie.name));
+        item.value = ToNSString(CefString(&cookie.value));
+        item.domain = ToNSString(CefString(&cookie.domain));
+        item.path = ToNSString(CefString(&cookie.path));
+        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
+        item.secure = cookie.secure != 0;
+        item.httpOnly = cookie.httponly != 0;
+        [cookies_ addObject:item];
+        return true;
+    }
+
+  private:
+    void (^completion_)(NSArray<ARCHCEFCookie *> *);
+    NSMutableArray<ARCHCEFCookie *> *cookies_;
+    IMPLEMENT_REFCOUNTING(CookieCollector);
+};
+
+// Counts down the cookie writes of one batch and reports once the last finishes.
+class CookieBatchCallback : public CefSetCookieCallback {
+  public:
+    CookieBatchCallback(int count, void (^completion)(void)) : remaining_(count), completion_([completion copy]) {}
+
+    void OnComplete(bool success) override { Finish(); }
+
+    void Finish() {
+        if (--remaining_ == 0) {
+            void (^completion)(void) = completion_;
+            dispatch_async(dispatch_get_main_queue(), completion);
+        }
+    }
+
+  private:
+    std::atomic<int> remaining_;
+    void (^completion_)(void);
+    IMPLEMENT_REFCOUNTING(CookieBatchCallback);
+};
+
+CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
+    CefCookie value;
+    CefString(&value.name) = cookie.name.UTF8String;
+    CefString(&value.value) = cookie.value.UTF8String;
+    CefString(&value.domain) = cookie.domain.UTF8String;
+    CefString(&value.path) = cookie.path.UTF8String;
+    value.secure = cookie.secure;
+    value.httponly = cookie.httpOnly;
+    if (cookie.expires) {
+        value.has_expires = true;
+        value.expires = ToBaseTime(cookie.expires);
+    }
+    return value;
+}
+
+}  // namespace
+
+@implementation ARCHCEFCookieStore
+
++ (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {
+    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+    CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
+    if (manager) {
+        manager->VisitAllCookies(collector);
+    }
+}
+
++ (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
+    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+    if (!manager) {
+        return;
+    }
+    manager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
+}
+
++ (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
+    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+    NSUInteger count = MIN(cookies.count, urls.count);
+    if (!manager || count == 0) {
+        dispatch_async(dispatch_get_main_queue(), completion);
+        return;
+    }
+    CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
+    for (NSUInteger index = 0; index < count; index++) {
+        // A cookie CEF refuses never calls back, so it counts as finished at once.
+        if (!manager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
+            callback->Finish();
+        }
+    }
+}
+
++ (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
+    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+    if (manager) {
+        manager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
+    }
+}
+
+@end
 
 @implementation ARCHCEFRuntime
 

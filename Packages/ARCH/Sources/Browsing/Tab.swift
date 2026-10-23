@@ -27,6 +27,8 @@ public final class Tab: ObservableObject, Identifiable {
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
     var didClose: (() -> Void)?
+    /// The session sets this callback to learn that a page finished loading.
+    var didFinishLoad: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show a page's dialog as a sheet, which waits until the tab is selected. Without it the handler receives `.cancel` and the page gets the dialog's safe answer.
@@ -73,6 +75,7 @@ extension Tab: EngineWebContentsUIDelegate {
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
+        if !isLoading { didFinishLoad?() }
         // Record a page when it finishes loading, when its title is usually known.
         if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url

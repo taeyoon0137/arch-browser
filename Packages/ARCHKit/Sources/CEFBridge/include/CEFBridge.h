@@ -25,6 +25,30 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
     ARCHCEFPermissionMidi = 1 << 6,
 };
 
+/// A cookie as the bridge passes it between Swift and CEF's cookie manager.
+@interface ARCHCEFCookie : NSObject
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *value;
+@property (nonatomic, copy) NSString *domain;
+@property (nonatomic, copy) NSString *path;
+/// `nil` for a session cookie.
+@property (nonatomic, copy, nullable) NSDate *expires;
+@property (nonatomic) BOOL secure;
+@property (nonatomic) BOOL httpOnly;
+@end
+
+/// CEF's global cookie manager, which every browser in the app shares. Use after `ARCHCEFRuntime` initializes.
+@interface ARCHCEFCookieStore : NSObject
+/// Calls `completion` once on the main thread with every stored cookie, or with none when the store cannot be read.
++ (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *cookies))completion;
+/// Stores `cookie` as if `url` had set it. The URL must belong to the cookie's domain.
++ (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url;
+/// Stores each cookie as if the URL at the same index had set it, then calls `completion` once on the main thread.
++ (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion;
+/// Deletes the cookies named `name` that `url` would send.
++ (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name;
+@end
+
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;

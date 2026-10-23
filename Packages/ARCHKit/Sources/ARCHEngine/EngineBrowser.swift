@@ -18,6 +18,16 @@ public struct EngineCookie: Hashable, Sendable {
         self.isSecure = isSecure
         self.isHTTPOnly = isHTTPOnly
     }
+
+    /// An address the cookie belongs to, for stores that set cookies by URL.
+    public var originURL: URL? {
+        let host = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+        var components = URLComponents()
+        components.scheme = isSecure ? "https" : "http"
+        components.host = host
+        components.path = path.isEmpty ? "/" : path
+        return components.url
+    }
 }
 
 public protocol EngineBrowserDelegate: AnyObject {
@@ -43,7 +53,11 @@ public protocol EngineBrowser: AnyObject {
 
     func allCookies(completion: @escaping ([EngineCookie]) -> Void)
     func setCookie(_ cookie: EngineCookie, for url: URL)
+    /// Stores the cookies, each for its own domain, and calls `completion` on the main thread once all are stored.
+    func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void)
     func removeCookie(named name: String, for url: URL)
+    /// Called after the cookie store changes, when the engine can tell. The Chromium engine cannot.
+    var cookiesDidChange: (() -> Void)? { get set }
 }
 
 public extension EngineBrowserDelegate {

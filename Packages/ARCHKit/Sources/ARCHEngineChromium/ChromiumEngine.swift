@@ -93,6 +93,8 @@ public final class ChromiumBrowser: EngineBrowser {
     public weak var window: NSWindow?
     public weak var delegate: (any EngineBrowserDelegate)?
     private var ownedWebContents: [ChromiumWebContents] = []
+    /// CEF does not report cookie changes, so this is never called.
+    public var cookiesDidChange: (() -> Void)?
 
     init(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
         self.sessionID = sessionID
@@ -121,9 +123,34 @@ public final class ChromiumBrowser: EngineBrowser {
         ownedWebContents.removeAll()
         completion(true)
     }
-    public func allCookies(completion: @escaping ([EngineCookie]) -> Void) { completion([]) }
-    public func setCookie(_ cookie: EngineCookie, for url: URL) {}
-    public func removeCookie(named name: String, for url: URL) {}
+    /// Every browser shares CEF's global cookie manager.
+    public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
+        ARCHCEFCookieStore.visitAllCookies { cookies in
+            completion(cookies.map { EngineCookie(name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, expires: $0.expires, isSecure: $0.secure, isHTTPOnly: $0.httpOnly) })
+        }
+    }
+    public func setCookie(_ cookie: EngineCookie, for url: URL) {
+        ARCHCEFCookieStore.setCookie(Self.bridgeCookie(cookie), forURL: url.absoluteString)
+    }
+    public func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
+        let addressed = cookies.compactMap { cookie in cookie.originURL.map { (Self.bridgeCookie(cookie), $0.absoluteString) } }
+        ARCHCEFCookieStore.setCookies(addressed.map(\.0), forURLs: addressed.map(\.1), completion: completion)
+    }
+    public func removeCookie(named name: String, for url: URL) {
+        ARCHCEFCookieStore.deleteCookies(forURL: url.absoluteString, name: name)
+    }
+    private static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
+        let value = ARCHCEFCookie()
+        value.name = cookie.name
+        value.value = cookie.value
+        // CEF makes a host-only cookie from an empty domain; a domain without a leading dot is host-only in the other stores.
+        value.domain = cookie.domain.hasPrefix(".") ? cookie.domain : ""
+        value.path = cookie.path
+        value.expires = cookie.expires
+        value.secure = cookie.isSecure
+        value.httpOnly = cookie.isHTTPOnly
+        return value
+    }
 }
 
 /// A single CEF browser embedded in a container view hosted by the user interface.

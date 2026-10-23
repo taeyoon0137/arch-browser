@@ -94,12 +94,22 @@ public final class WebKitBrowser: EngineBrowser {
     public weak var window: NSWindow?
     public weak var delegate: (any EngineBrowserDelegate)?
     private var ownedWebContents: [WebKitWebContents] = []
+    private let cookieObserver = CookieObserver()
+    public var cookiesDidChange: (() -> Void)? {
+        get { cookieObserver.handler }
+        set { cookieObserver.handler = newValue }
+    }
 
     init(sessionID: String, context: WebKitBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
         self.sessionID = sessionID
         self.webKitContext = context
         self.delegate = delegate
         self.window = window
+        context.dataStore.httpCookieStore.add(cookieObserver)
+    }
+
+    deinit {
+        webKitContext.dataStore.httpCookieStore.remove(cookieObserver)
     }
 
     public var context: any EngineBrowserContext { webKitContext }
@@ -132,12 +142,25 @@ public final class WebKitBrowser: EngineBrowser {
         }
     }
     public func setCookie(_ cookie: EngineCookie, for url: URL) {
+        guard let httpCookie = Self.httpCookie(cookie, for: url) else { return }
+        webKitContext.dataStore.httpCookieStore.setCookie(httpCookie)
+    }
+    public func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
+        let store = webKitContext.dataStore.httpCookieStore
+        let group = DispatchGroup()
+        for cookie in cookies {
+            guard let url = cookie.originURL, let httpCookie = Self.httpCookie(cookie, for: url) else { continue }
+            group.enter()
+            store.setCookie(httpCookie) { group.leave() }
+        }
+        group.notify(queue: .main, execute: completion)
+    }
+    private static func httpCookie(_ cookie: EngineCookie, for url: URL) -> HTTPCookie? {
         var properties: [HTTPCookiePropertyKey: Any] = [.name: cookie.name, .value: cookie.value, .domain: cookie.domain, .path: cookie.path, .originURL: url]
         if let expires = cookie.expires { properties[.expires] = expires }
         if cookie.isSecure { properties[.secure] = "TRUE" }
         if cookie.isHTTPOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
-        guard let httpCookie = HTTPCookie(properties: properties) else { return }
-        webKitContext.dataStore.httpCookieStore.setCookie(httpCookie)
+        return HTTPCookie(properties: properties)
     }
     public func removeCookie(named name: String, for url: URL) {
         let store = webKitContext.dataStore.httpCookieStore
@@ -150,6 +173,15 @@ public final class WebKitBrowser: EngineBrowser {
                 }
             }
         }
+    }
+}
+
+/// Forwards the cookie store's change reports. The store keeps its observers weakly, so the browser holds this one.
+final class CookieObserver: NSObject, WKHTTPCookieStoreObserver {
+    var handler: (() -> Void)?
+
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        DispatchQueue.main.async { [weak self] in self?.handler?() }
     }
 }
 

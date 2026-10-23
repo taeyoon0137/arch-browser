@@ -50,7 +50,8 @@
 | `tabGroups` | Planned | None |
 | `translation` | Planned | Translation framework (macOS 15+, needs verification) |
 | `pictureInPicture` | System PiP through AVKit using decoded video frames. Requires a patched CEF source build (needs verification) | System PiP through WebKit (AVKit). Users enter PiP from video controls. `closeAllMediaPresentations` exits PiP. No custom code |
-| `sessionRestore`, `contentBlocking`, `cookies` | Planned | The platform supports these features; adapter methods are not yet implemented |
+| `sessionRestore`, `contentBlocking` | Planned | The platform supports these features; adapter methods are not yet implemented |
+| `cookies` | CEF's global cookie manager: visit, set in batches, delete; no change reports | `WKHTTPCookieStore`, with change reports through `WKHTTPCookieStoreObserver` |
 
 ## Excluded from the protocols
 
@@ -64,7 +65,7 @@ Chromium-specific UI callbacks, including translation bubbles, extension install
 ## Engine switching
 
 - `EngineKind` identifies `webKit` and `chromium`. `EngineRegistry` holds registered engines. `UserDefaults` stores the default engine under `ARCHDefaultEngine`.
-- Engine selection uses a profile default (`EngineSelection.profileDefault`) and a per-tab override (`EngineWebContentsConfiguration.engineOverride`). `BrowserSession` runs one application, profile, and browser per engine, so tabs of both engines share a session: new tabs use the default engine and tabs a page opens use that page's engine. The address pill's site settings switch a tab's engine by loading its page in a web contents from the other engine; sharing cookies between the engines (I.13) is queued in `docs/plan.md`.
+- Engine selection uses a profile default (`EngineSelection.profileDefault`) and a per-tab override (`EngineWebContentsConfiguration.engineOverride`). `BrowserSession` runs one application, profile, and browser per engine, so tabs of both engines share a session: new tabs use the default engine and tabs a page opens use that page's engine. The address pill's site settings switch a tab's engine by loading its page in a web contents from the other engine; `CookieSync` in `Browsing` copies cookies between the engines through `allCookies`, `setCookies`, and `cookiesDidChange`.
 - Each engine keeps profile data in its own directory. Cookies are shared by copying between the engines' stores (I.13); other site data stays per engine. Sidebar and tab models belong to the feature modules. These models are independent of the engine.
 
 ## Current state and next steps

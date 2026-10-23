@@ -25,6 +25,7 @@ public final class BrowserSession: ObservableObject {
     private var runtimes: [EngineKind: EngineRuntime] = [:]
     /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
     private let primaryEngine: EngineKind
+    private let cookieSync = CookieSync()
     @Published public private(set) var tabs: [Tab] = []
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
@@ -102,6 +103,7 @@ public final class BrowserSession: ObservableObject {
         currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
         favorites = snapshot?.favorites ?? []
         closedTabs = snapshot?.closedTabs ?? []
+        cookieSync.runtimes = { [weak self] in self.map { Array($0.runtimes.values) } ?? [] }
         adoptRuntime(started)
         restoreTabs(snapshot)
         observeChanges()
@@ -159,6 +161,11 @@ public final class BrowserSession: ObservableObject {
         runtimes[started.kind] = runtime
         started.context.downloads.delegate = self
         downloads += started.context.downloads.items.map(DownloadEntry.init)
+        browser.cookiesDidChange = { [weak self] in self?.cookieSync.scheduleCopy(from: started.kind) }
+        // An engine that starts after another has none of its cookies yet.
+        if let source = runtimes.values.first(where: { $0.kind != started.kind }) {
+            cookieSync.copy(from: source, to: runtime) {}
+        }
         return runtime
     }
 
@@ -250,6 +257,10 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
+        // Chromium does not report cookie changes, so a finished load is the moment to copy them.
+        tab.didFinishLoad = { [weak self, weak tab] in
+            if let self, let tab { self.cookieSync.scheduleCopy(from: tab.engineKind) }
+        }
         // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
         tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
             guard let self, let tab else { return }
@@ -284,15 +295,19 @@ public final class BrowserSession: ObservableObject {
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
         guard tab.engineKind != kind, tabs.contains(where: { $0.id == tab.id }) else { return }
         let target = runtime(for: kind)
-        guard target.kind == kind else { return }
-        let old = tab.webContents
-        let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
-        // Sheets and searches belong to the old page.
-        cancelSheets(for: tab)
-        if tab.id == selectedTabID, isFindBarVisible { hideFindBar() }
-        tab.replaceWebContents(with: replacement)
-        runtimes[old.engineKind]?.browser.closeWebContents(old)
-        scheduleSave()
+        guard target.kind == kind, let source = runtimes[tab.engineKind] else { return }
+        // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
+        cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
+            guard let self, let tab, tab.engineKind != kind, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+            let old = tab.webContents
+            let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
+            // Sheets and searches belong to the old page.
+            self.cancelSheets(for: tab)
+            if tab.id == self.selectedTabID, self.isFindBarVisible { self.hideFindBar() }
+            tab.replaceWebContents(with: replacement)
+            self.runtimes[old.engineKind]?.browser.closeWebContents(old)
+            self.scheduleSave()
+        }
     }
 
     /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
