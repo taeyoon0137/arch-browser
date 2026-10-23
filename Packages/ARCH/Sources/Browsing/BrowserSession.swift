@@ -25,7 +25,10 @@ public final class BrowserSession: ObservableObject {
             }
         }
     }
-    @Published public var isSidebarVisible = true
+    /// The downloads popover hangs off the sidebar, so hiding the sidebar closes it.
+    @Published public var isSidebarVisible = true {
+        didSet { if !isSidebarVisible { isDownloadsPopoverVisible = false } }
+    }
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     @Published public private(set) var isFindBarVisible = false
@@ -347,7 +350,11 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Downloads
 
-    public func toggleDownloadsPopover() { isDownloadsPopoverVisible.toggle() }
+    /// The popover hangs off the sidebar, so a hidden sidebar is shown first.
+    public func toggleDownloadsPopover() {
+        if !isSidebarVisible { isSidebarVisible = true }
+        isDownloadsPopoverVisible.toggle()
+    }
 
     public func removeDownload(_ entry: DownloadEntry) {
         entry.item.remove()
@@ -397,6 +404,8 @@ public final class BrowserSession: ObservableObject {
             }
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
+            // Loading a restored page is not a visit.
+            tab.recordedURL = record.url
             if index == snapshot.selectedTabIndex { selected = tab }
         }
         selectedTabID = selected?.id ?? tabs.first { $0.spaceID == currentSpaceID }?.id
@@ -442,13 +451,15 @@ extension BrowserSession: EngineDownloadsDelegate {
         self.downloads = items.map(DownloadEntry.init)
     }
 
-    /// A new download opens the list so the user sees it start.
+    /// A new download opens the list so the user sees it start. The list stays closed while the sidebar it hangs off is hidden.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         self.downloads.append(DownloadEntry(item: item))
-        isDownloadsPopoverVisible = true
+        if isSidebarVisible { isDownloadsPopoverVisible = true }
     }
 
+    /// The sidebar icon and the Clear button read entry state through the session, so the session announces the change as well.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
+        objectWillChange.send()
         self.downloads.first { $0.id == item.id }?.refresh()
     }
 

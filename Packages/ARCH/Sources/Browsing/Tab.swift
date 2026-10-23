@@ -22,8 +22,8 @@ public final class Tab: ObservableObject, Identifiable {
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
     var didClose: (() -> Void)?
-    /// The last page recorded in history, so a page counts once per navigation.
-    private var recordedURL: URL?
+    /// The last page recorded in history, so a page counts once per navigation. Restored tabs start with their saved page here.
+    var recordedURL: URL?
 
     init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
         self.webContents = webContents
