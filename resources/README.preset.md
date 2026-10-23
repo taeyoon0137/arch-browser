@@ -28,6 +28,10 @@
   <a href="https://www.chromium.org/"><img src="https://img.shields.io/badge/Chromium-%234285F4?logo=googlechrome&logoColor=%23FFFFFF" alt="Chromium" /></a>
 </p>
 
+Arch is inspired by [Arc](https://arc.net). We deeply regret that Arc's service ends on December 22, 2026. Arch started as an open-source home for the features we loved in Arc, so that the features we need can arrive quickly and anyone can customize the browser for themselves. Its defining features from the start are WebKit support alongside Chromium and the fullest possible use of Apple's native APIs.
+
+We also recommend [Dia](https://www.diabrowser.com), the new browser from the team behind Arc, and we are cheering them on.
+
 - [🧭 Role](#-role)
 - [🚀 Getting started](#-getting-started)
 - [📚 Docs](#-docs)
@@ -37,10 +41,6 @@
 <a id="role"></a>
 
 ## 🧭 Role
-
-Arch is inspired by [Arc](https://arc.net). We deeply regret that Arc's service ends on December 22, 2026. Arch started as an open-source home for the features we loved in Arc, so that the features we need can arrive quickly and anyone can customize the browser for themselves. Its defining features from the start are WebKit support alongside Chromium and the fullest possible use of Apple's native APIs.
-
-We also recommend [Dia](https://www.diabrowser.com), the new browser from the team behind Arc, and we are cheering them on.
 
 Arch is a sidebar-first macOS browser with its own implementation: spaces, pinned tabs, split view, a command bar, customizations for each site, notes, and media controls.
 
