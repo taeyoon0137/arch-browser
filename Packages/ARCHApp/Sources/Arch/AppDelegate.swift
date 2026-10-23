@@ -8,7 +8,7 @@ import History
 import Preferences
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var session: BrowserSession!
     private var window: NSWindow!
     /// URLs handed to the app before the session exists. They open once the window is up.
