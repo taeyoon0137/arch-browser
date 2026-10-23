@@ -317,6 +317,19 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         completion(EngineFindResult(activeMatchOrdinal: count == 0 ? 0 : lastActiveMatchOrdinal, numberOfMatches: count))
     }
+    /// Chromium's own pages, which it loads besides the web schemes.
+    private static let internalSchemes: Set<String> = ["chrome", "chrome-error", "chrome-extension", "chrome-untrusted", "devtools", "view-source"]
+
+    public func cefBrowserShouldOpenExternallyURL(_ url: String) -> Bool {
+        guard let url = URL(string: url), let scheme = url.scheme?.lowercased(),
+              !EngineURLSchemes.web.contains(scheme), !Self.internalSchemes.contains(scheme) else { return false }
+        // CEF asks while it decides on the navigation, so the question waits until that decision returns.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.uiDelegate?.webContents(self, openExternally: url)
+        }
+        return true
+    }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)

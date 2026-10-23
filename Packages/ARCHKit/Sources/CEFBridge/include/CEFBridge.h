@@ -79,6 +79,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks the last report for that request.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
+/// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app.
+- (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url;
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
 - (BOOL)cefBrowserShouldDownloadURL:(NSString *)url hasDocument:(BOOL)hasDocument;

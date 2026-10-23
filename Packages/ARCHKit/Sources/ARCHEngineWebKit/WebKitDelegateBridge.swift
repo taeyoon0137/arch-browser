@@ -38,6 +38,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) {
+            decisionHandler(.cancel)
+            owner.uiDelegate?.webContents(owner, openExternally: url)
+            return
+        }
         // A link marked for download starts one instead of a navigation once the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         guard let url = navigationAction.request.url, let delegate = owner.navigationDelegate else {

@@ -451,6 +451,7 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
+- (BOOL)handleShouldOpenExternally:(NSString *)url;
 - (void)handleBeforeClose;
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
 - (void)handleBeforeDownload:(ARCHCEFDownload *)download
@@ -623,6 +624,12 @@ public:
         return true;
     }
 
+    // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's.
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool user_gesture,
+                        bool is_redirect) override {
+        return owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL())];
+    }
+
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
                                    const CefString &error_string) override {
         [owner_ handleRenderProcessTerminated];
@@ -669,7 +676,10 @@ public:
                        bool user_gesture, const CefPopupFeatures &popupFeatures, CefWindowInfo &windowInfo,
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
-        [owner_ handlePopup:ToNSString(target_url)];
+        NSString *url = ToNSString(target_url);
+        if (![owner_ handleShouldOpenExternally:url]) {
+            [owner_ handlePopup:url];
+        }
         return true;
     }
 
@@ -851,6 +861,11 @@ private:
 
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate {
     [_delegate cefBrowserDidFindMatches:count activeMatchOrdinal:activeMatchOrdinal finalUpdate:finalUpdate];
+}
+
+- (BOOL)handleShouldOpenExternally:(NSString *)url {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url];
 }
 
 - (void)handlePopup:(NSString *)url {

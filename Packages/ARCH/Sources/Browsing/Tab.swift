@@ -166,6 +166,29 @@ extension Tab: EngineWebContentsUIDelegate {
         didCancelDialogs?()
     }
 
+    // MARK: Links for other apps
+
+    public func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool {
+        NSWorkspace.shared.urlForApplication(toOpen: url) != nil
+    }
+
+    /// Asks before a page hands a link to another app, then opens the link there.
+    public func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) {
+        guard let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return completion(false) }
+        let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
+        let alert = NSAlert()
+        alert.messageText = "Open \u{201C}\(appName)\u{201D}?"
+        alert.informativeText = "\(self.url?.host.map { "\u{201C}\($0)\u{201D}" } ?? "This page") wants to open a \(url.scheme ?? "") link in \(appName)."
+        alert.icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        showAlert(alert) { response in
+            let opens = response == .alertFirstButtonReturn
+            if opens { NSWorkspace.shared.open(url) }
+            completion(opens)
+        }
+    }
+
     // MARK: HTTP authentication
 
     /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved.

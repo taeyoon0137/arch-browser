@@ -148,3 +148,16 @@ public extension EngineWebContentsUIDelegate {
     func webContentsProcessDidTerminate(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, didConsumeKeyEvent event: NSEvent) -> Bool { false }
 }
+
+/// Schemes both engines load. A link with any other scheme, such as `mailto:`, belongs to another app.
+public enum EngineURLSchemes {
+    public static let web: Set<String> = ["http", "https", "file", "about", "data", "blob", "javascript"]
+}
+
+public extension EngineWebContentsUIDelegate {
+    /// Offers a link that belongs to another app. The engines call this instead of loading a scheme they do not handle.
+    func webContents(_ webContents: any EngineWebContents, openExternally url: URL) {
+        guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
+        self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
+    }
+}
