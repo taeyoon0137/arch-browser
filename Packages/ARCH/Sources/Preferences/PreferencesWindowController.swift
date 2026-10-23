@@ -1,9 +1,9 @@
-// The Settings window. Holds the default engine, the appearance, and the tab archive delay in UserDefaults.
+// Settings window for the default engine, appearance, and tab archive delay. Stores these choices in `UserDefaults`.
 import AppKit
 import ARCHEngine
 import SwiftUI
 
-/// Appearance choice stored under `ARCHAppearance`. The raw value is the stored string.
+/// An appearance choice stored under `ARCHAppearance` as its raw string value.
 public enum AppearanceSetting: String, CaseIterable {
     case system
     case light
@@ -11,12 +11,12 @@ public enum AppearanceSetting: String, CaseIterable {
 
     public static let defaultsKey = "ARCHAppearance"
 
-    /// The stored choice, or `system` when nothing is stored.
+    /// The stored appearance choice. Returns `system` when no choice is stored.
     public static var current: AppearanceSetting {
         UserDefaults.standard.string(forKey: defaultsKey).flatMap(AppearanceSetting.init(rawValue:)) ?? .system
     }
 
-    /// The appearance to assign to `NSApp.appearance`; `nil` follows the system.
+    /// The value for `NSApp.appearance`. A `nil` value follows the system appearance.
     public var appearance: NSAppearance? {
         switch self {
         case .system: return nil
@@ -34,7 +34,7 @@ public enum AppearanceSetting: String, CaseIterable {
     }
 }
 
-/// Owns the single Settings window. The window is fixed-size and survives closing.
+/// Owns the single Settings window. The window has a fixed size and stays in memory when closed.
 public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
     public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
@@ -54,7 +54,7 @@ public final class PreferencesWindowController: NSWindowController {
         fatalError("PreferencesWindowController is created through shared")
     }
 
-    /// Brings the Settings window to the front, centering it the first time.
+    /// Brings the Settings window to the front. Centers it if it was hidden before this call.
     public func show() {
         guard let window else { return }
         if !window.isVisible { window.center() }
