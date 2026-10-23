@@ -86,8 +86,9 @@ final class ChromiumDownloadItem: EngineDownloadItem {
         owner.delegate?.downloads(owner, didUpdate: self)
     }
 
+    /// A failed download can still resume, so its page stays open for it; cancelling it discards the partial file and lets that page close.
     func cancel() {
-        guard state == .inProgress || state == .paused else { return }
+        guard state == .inProgress || state == .paused || state == .failed else { return }
         isPaused = false
         state = .cancelled
         download.cancel()

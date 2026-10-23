@@ -40,7 +40,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) {
             decisionHandler(.cancel)
-            owner.uiDelegate?.webContents(owner, openExternally: url)
+            owner.uiDelegate?.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
             return
         }
         // A link marked for download starts one instead of a navigation once the page policy allows it.
@@ -106,8 +106,9 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodHTTPBasic
-                || challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodHTTPDigest,
+        // The same methods the Chromium engine asks about with a user name and password.
+        guard [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest, NSURLAuthenticationMethodNTLM]
+                .contains(challenge.protectionSpace.authenticationMethod),
               let delegate = owner.uiDelegate else {
             completionHandler(.performDefaultHandling, nil)
             return
@@ -127,6 +128,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let delegate = owner.uiDelegate else { return nil }
+        // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
+        if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) {
+            delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
+            return nil
+        }
         let child = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: configuration, context: owner.context)
         delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: .newForegroundTab)
         return child.webView

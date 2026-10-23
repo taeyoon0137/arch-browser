@@ -363,6 +363,8 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 @property (nonatomic, readwrite) int64_t receivedBytes;
 @property (nonatomic, readwrite) int64_t totalBytes;
 @property (nonatomic, readwrite) ARCHCEFDownloadState state;
+/// Set once the app cancels the download. CEF applies a cancel later, and never to an interrupted download, so the browser stops counting it at once.
+@property (nonatomic, readonly) BOOL isCancelledByApp;
 - (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url;
 - (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
 @end
@@ -395,6 +397,8 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
         self.state = ARCHCEFDownloadStateComplete;
     } else if (item->IsCanceled()) {
         self.state = ARCHCEFDownloadStateCanceled;
+    } else if (_isCancelledByApp) {
+        self.state = ARCHCEFDownloadStateCanceled;
     } else if (item->IsInterrupted()) {
         self.state = ARCHCEFDownloadStateInterrupted;
     } else {
@@ -426,6 +430,14 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 }
 
 - (void)cancel {
+    _isCancelledByApp = YES;
+    if (_state == ARCHCEFDownloadStateInterrupted) {
+        self.state = ARCHCEFDownloadStateCanceled;
+        // CEF keeps an interrupted download's partial file for resuming and does not cancel it, so the bridge removes the file as a cancel would.
+        if (_path) {
+            [[NSFileManager defaultManager] removeItemAtPath:_path error:nil];
+        }
+    }
     if (_callback) {
         _callback->Cancel();
     } else {
@@ -451,7 +463,7 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
-- (BOOL)handleShouldOpenExternally:(NSString *)url;
+- (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
 - (void)handleBeforeClose;
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
 - (void)handleBeforeDownload:(ARCHCEFDownload *)download
@@ -565,6 +577,7 @@ public:
         return true;
     }
 
+    // CEF also resets after every answered dialog and on every navigation, so the bridge passes the reset on only while a page dialog waits.
     void OnResetDialogState(CefRefPtr<CefBrowser> browser) override { [owner_ handleResetDialogs]; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
@@ -627,7 +640,7 @@ public:
     // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's.
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool user_gesture,
                         bool is_redirect) override {
-        return owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL())];
+        return owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL()) userGesture:user_gesture];
     }
 
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
@@ -677,7 +690,7 @@ public:
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
-        if (![owner_ handleShouldOpenExternally:url]) {
+        if (![owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             [owner_ handlePopup:url];
         }
         return true;
@@ -863,9 +876,9 @@ private:
     [_delegate cefBrowserDidFindMatches:count activeMatchOrdinal:activeMatchOrdinal finalUpdate:finalUpdate];
 }
 
-- (BOOL)handleShouldOpenExternally:(NSString *)url {
+- (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
-    return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url];
+    return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url userGesture:userGesture];
 }
 
 - (void)handlePopup:(NSString *)url {
@@ -939,6 +952,11 @@ private:
 }
 
 - (void)handleResetDialogs {
+    void (^answer)(BOOL, NSString *_Nullable) = _pendingDialog;
+    if (!answer) {
+        return;
+    }
+    answer(NO, nil);
     [_delegate cefBrowserDidResetDialogs];
 }
 
@@ -947,6 +965,13 @@ private:
     _browserView = nil;
     // `+shutdown` clears `gInitialized` before it closes every browser at quit. Those closes are not reported, so the session keeps the tabs and saves them.
     if (gInitialized) {
+        // CEF stops the browser's downloads with it, as when a page closes itself with `window.close()` during one, and reports nothing more about them.
+        for (ARCHCEFDownload *download in _downloads.allValues) {
+            if (download.state == ARCHCEFDownloadStateInProgress || download.state == ARCHCEFDownloadStateInterrupted) {
+                download.state = ARCHCEFDownloadStateCanceled;
+                [_delegate cefBrowserDidUpdateDownload:download];
+            }
+        }
         [_delegate cefBrowserDidClose];
     }
 }
@@ -963,8 +988,12 @@ private:
 }
 
 - (BOOL)hasDownloadsInProgress {
+    if (!_browser) {
+        return NO;
+    }
     for (ARCHCEFDownload *download in _downloads.allValues) {
-        if (download.state == ARCHCEFDownloadStateInProgress) {
+        // An interrupted download can still resume, but only through this browser.
+        if (!download.isCancelledByApp && (download.state == ARCHCEFDownloadStateInProgress || download.state == ARCHCEFDownloadStateInterrupted)) {
             return YES;
         }
     }
@@ -1047,6 +1076,10 @@ private:
 }
 
 - (void)goBack {
+    // Without an entry nothing loads, and the dialog would stay suppressed until another load ends.
+    if (!_browser || !_browser->CanGoBack()) {
+        return;
+    }
     [self dismissPendingDialog];
     if (_browser) {
         _browser->GoBack();
@@ -1054,6 +1087,9 @@ private:
 }
 
 - (void)goForward {
+    if (!_browser || !_browser->CanGoForward()) {
+        return;
+    }
     [self dismissPendingDialog];
     if (_browser) {
         _browser->GoForward();

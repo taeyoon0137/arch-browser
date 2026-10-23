@@ -87,11 +87,11 @@ public final class BrowserSession: ObservableObject {
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. They close once the engine creates the download.
     private var downloadOnlyTabIDs: Set<UUID> = []
-    /// Pages of closed tabs whose downloads would stop if the pages closed, as on Chromium. Each stays open without a tab, on a blank page, until no download is in progress or paused.
+    /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(engine: EngineKind, webContents: any EngineWebContents)] = []
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
-    private var visibleSheet: (tabID: UUID, alert: NSAlert)?
+    private var visibleSheet: (tabID: UUID, alert: NSAlert, isPageDialog: Bool)?
     /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
     public var isQuitting = false {
         didSet {
@@ -209,7 +209,9 @@ public final class BrowserSession: ObservableObject {
 
     public func addSpace() {
         let tint = SpaceTint.allCases[spaces.count % SpaceTint.allCases.count]
-        let space = Space(name: "Space \(spaces.count + 1)", tint: tint)
+        // The lowest number no space uses, so names do not repeat after a deletion.
+        let number = (1...).first { number in !spaces.contains { $0.name == "Space \(number)" } }!
+        let space = Space(name: "Space \(number)", tint: tint)
         spaces.append(space)
         switchToSpace(space.id)
     }
@@ -254,7 +256,12 @@ public final class BrowserSession: ObservableObject {
     public func deleteSpace(_ id: UUID) {
         guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let destination = spaces[index == 0 ? 1 : index - 1].id
-        for tab in tabs where tab.spaceID == id { tab.spaceID = destination }
+        // The moved tabs go after the destination's own tabs instead of among them.
+        let moved = tabs.filter { $0.spaceID == id }
+        let movedIDs = Set(moved.map(\.id))
+        moved.forEach { $0.spaceID = destination }
+        tabs.removeAll { movedIDs.contains($0.id) }
+        tabs.append(contentsOf: moved)
         if currentSpaceID == id { switchToSpace(destination) }
         spaces.remove(at: index)
     }
@@ -308,8 +315,9 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
+        // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
-            if let self, let tab { self.cancelSheets(for: tab) }
+            if let self, let tab { self.cancelSheets(for: tab, pageDialogsOnly: true) }
         }
         tab.requestSelection = { [weak self, weak tab] in
             if let self, let tab { self.selectedTabID = tab.id }
@@ -333,9 +341,9 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(false) }
             self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
         }
-        tab.presentAlert = { [weak self, weak tab] alert, completion in
+        tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
-            self.enqueueSheet(alert, for: tab, completion: completion)
+            self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
         }
         // The session republishes changes to the selected tab so views that read the tab through the session refresh.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
@@ -362,14 +370,14 @@ public final class BrowserSession: ObservableObject {
             self.cancelSheets(for: tab)
             if tab.id == self.selectedTabID, self.isFindBarVisible { self.hideFindBar() }
             tab.replaceWebContents(with: replacement)
-            self.runtimes[old.engineKind]?.browser.closeWebContents(old)
+            self.retire(old)
             self.scheduleSave()
         }
     }
 
     /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay.
     public func requestCloseTab(_ tab: Tab) {
-        // Chromium runs those handlers only by closing the page, which would stop its downloads, so such a tab closes at once and its page stays open without it.
+        // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
         guard !tab.webContents.closingStopsDownloads else { return closeTab(tab) }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
             guard closing, let self, let tab else { return }
@@ -383,12 +391,7 @@ public final class BrowserSession: ObservableObject {
         cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
-        if tab.webContents.closingStopsDownloads {
-            tab.webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
-            downloadPages.append((tab.engineKind, tab.webContents))
-        } else {
-            runtimes[tab.engineKind]?.browser.closeWebContents(tab.webContents)
-        }
+        retire(tab.webContents)
         if remember {
             closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
@@ -478,6 +481,7 @@ public final class BrowserSession: ObservableObject {
     public func navigate(to input: String) {
         guard let url = Self.destination(forInput: input) else { return }
         if let tab = selectedTab {
+            tab.forgetExternalAppDecline()
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
             openTab(url: url)
@@ -578,9 +582,13 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Downloads
 
-    /// Shows the sidebar first if hidden because the library opens in it.
+    /// Shows the sidebar first if hidden because the library opens in it. With the sidebar hidden, the library always opens.
     public func toggleLibrary() {
-        if !isSidebarVisible { isSidebarVisible = true }
+        guard isSidebarVisible else {
+            isSidebarVisible = true
+            isLibraryVisible = true
+            return
+        }
         isLibraryVisible.toggle()
     }
 
@@ -627,13 +635,15 @@ public final class BrowserSession: ObservableObject {
 
     private struct PendingSheet {
         let alert: NSAlert
+        /// An `alert`, `confirm`, or `prompt` from the page, which the engine can cancel.
+        let isPageDialog: Bool
         let completion: (NSApplication.ModalResponse) -> Void
     }
 
     /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is selected, so a background page cannot cover the page in front.
-    private func enqueueSheet(_ alert: NSAlert, for tab: Tab, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    private func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
-        pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, completion: completion))
+        pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, isPageDialog: isPageDialog, completion: completion))
         showNextSheet()
     }
 
@@ -643,7 +653,7 @@ public final class BrowserSession: ObservableObject {
               let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
         let sheet = queue.removeFirst()
         pendingSheets[tab.id] = queue.isEmpty ? nil : queue
-        visibleSheet = (tab.id, sheet.alert)
+        visibleSheet = (tab.id, sheet.alert, sheet.isPageDialog)
         sheet.alert.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return sheet.completion(response) }
             self.visibleSheet = nil
@@ -665,10 +675,14 @@ public final class BrowserSession: ObservableObject {
         window.endSheet(visibleSheet.alert.window, returnCode: Self.deferredSheetResponse)
     }
 
-    /// Gives a closing tab's sheets the safe answer, `.cancel`, including the one on screen. The queue empties first, so that ending the visible sheet does not show the next one.
-    private func cancelSheets(for tab: Tab) {
-        let waiting = pendingSheets.removeValue(forKey: tab.id) ?? []
-        if let visibleSheet, visibleSheet.tabID == tab.id, let window = visibleSheet.alert.window.sheetParent {
+    /// Gives a tab's sheets the safe answer, `.cancel`, including the one on screen: all of them when the tab closes, or only the page's dialogs when the engine cancels those. The queue changes first, so that ending the visible sheet does not show one that is going too.
+    private func cancelSheets(for tab: Tab, pageDialogsOnly: Bool = false) {
+        let queue = pendingSheets.removeValue(forKey: tab.id) ?? []
+        let waiting = pageDialogsOnly ? queue.filter(\.isPageDialog) : queue
+        let kept = pageDialogsOnly ? queue.filter { !$0.isPageDialog } : []
+        if !kept.isEmpty { pendingSheets[tab.id] = kept }
+        if let visibleSheet, visibleSheet.tabID == tab.id, !pageDialogsOnly || visibleSheet.isPageDialog,
+           let window = visibleSheet.alert.window.sheetParent {
             window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
         }
         waiting.forEach { $0.completion(.cancel) }
@@ -795,11 +809,24 @@ extension BrowserSession: EngineDownloadsDelegate {
         }
     }
 
+    /// Closes a page that no tab shows any more. A page whose downloads would stop with it stays open on a blank page until they finish.
+    private func retire(_ webContents: any EngineWebContents) {
+        if webContents.closingStopsDownloads {
+            // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers.
+            webContents.uiDelegate = nil
+            webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
+            downloadPages.append((webContents.engineKind, webContents))
+        } else {
+            runtimes[webContents.engineKind]?.browser.closeWebContents(webContents)
+        }
+    }
+
+    /// Each kept page closes once its own downloads no longer need it.
     private func closeDownloadPagesIfIdle() {
-        guard !downloadPages.isEmpty, !downloads.contains(where: { $0.state == .inProgress || $0.state == .paused }) else { return }
-        let pages = downloadPages
-        downloadPages.removeAll()
-        for page in pages { runtimes[page.engine]?.browser.closeWebContents(page.webContents) }
+        let idle = downloadPages.filter { !$0.webContents.closingStopsDownloads }
+        guard !idle.isEmpty else { return }
+        downloadPages.removeAll { page in idle.contains { $0.webContents === page.webContents } }
+        for page in idle { runtimes[page.engine]?.browser.closeWebContents(page.webContents) }
     }
 
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.

@@ -114,7 +114,6 @@ struct LibraryButton: View {
 /// A thin bar for the library button. Without a known size a short segment slides back and forth.
 struct DownloadProgressBar: View {
     let progress: Double?
-    @State private var isSliding = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -123,15 +122,25 @@ struct DownloadProgressBar: View {
                 if let progress {
                     Capsule().fill(Color.accentColor).frame(width: max(geometry.size.height, geometry.size.width * progress))
                 } else {
-                    Capsule().fill(Color.accentColor)
-                        .frame(width: geometry.size.width * 0.4)
-                        .offset(x: isSliding ? geometry.size.width * 0.6 : 0)
-                        .onAppear {
-                            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { isSliding = true }
-                        }
+                    SlidingSegment(width: geometry.size.width)
                 }
             }
         }
         .animation(.easeOut(duration: 0.2), value: progress)
+    }
+}
+
+/// Starts sliding each time it appears, so the motion returns when a download's size becomes unknown again.
+private struct SlidingSegment: View {
+    let width: CGFloat
+    @State private var isSliding = false
+
+    var body: some View {
+        Capsule().fill(Color.accentColor)
+            .frame(width: width * 0.4)
+            .offset(x: isSliding ? width * 0.6 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { isSliding = true }
+            }
     }
 }

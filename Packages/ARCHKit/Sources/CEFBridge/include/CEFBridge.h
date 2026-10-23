@@ -79,8 +79,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks the last report for that request.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
-/// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app.
-- (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url;
+/// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
+- (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
 - (BOOL)cefBrowserShouldDownloadURL:(NSString *)url hasDocument:(BOOL)hasDocument;
@@ -131,7 +131,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
                                url:(NSString *)url
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;
 @property (nonatomic, readonly, nullable) NSView *browserView;
-/// Whether a download this browser started is still in progress. CEF stops such downloads when the browser closes.
+/// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops such downloads when the browser closes, and only this browser can resume an interrupted one.
 @property (nonatomic, readonly) BOOL hasDownloadsInProgress;
 @property (nonatomic, readonly) BOOL isLoading;
 @property (nonatomic, readonly) BOOL canGoBack;

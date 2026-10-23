@@ -181,7 +181,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var didSelectFirstMatch = false
     /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
     private var lastCrashedURL: URL?
-    /// Authentication requests per protection space since the last page finished loading.
+    /// Credentials sent per protection space since the last page finished loading; a further request for that space means they failed.
     private var authenticationAttempts: [String: Int] = [:]
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
@@ -320,13 +320,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     /// Chromium's own pages, which it loads besides the web schemes.
     private static let internalSchemes: Set<String> = ["chrome", "chrome-error", "chrome-extension", "chrome-untrusted", "devtools", "view-source"]
 
-    public func cefBrowserShouldOpenExternallyURL(_ url: String) -> Bool {
+    public func cefBrowserShouldOpenExternallyURL(_ url: String, userGesture: Bool) -> Bool {
         guard let url = URL(string: url), let scheme = url.scheme?.lowercased(),
               !EngineURLSchemes.web.contains(scheme), !Self.internalSchemes.contains(scheme) else { return false }
         // CEF asks while it decides on the navigation, so the question waits until that decision returns.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.uiDelegate?.webContents(self, openExternally: url)
+            self.uiDelegate?.webContents(self, openExternally: url, isUserInitiated: userGesture)
         }
         return true
     }
@@ -389,8 +389,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             }
         }
     }
-    /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
-    /// Presents the request as a `URLAuthenticationChallenge`, the form WebKit uses, so the same sheet serves both engines. CEF does not count failed attempts, so the adapter counts repeated requests for the same space until a page finishes loading.
+    /// Presents the request as a `URLAuthenticationChallenge`, the form WebKit uses, so the same sheet serves both engines. CEF does not count failed attempts, so the adapter counts the credentials it sent for each space until a page finishes loading; a request after one of them means it failed.
     public func cefBrowserDidReceiveAuthenticationChallenge(forHost host: String, port: Int32, realm: String, scheme: String, originURL: String, isProxy: Bool,
                                                             completion: @escaping (String?, String?) -> Void) {
         guard let uiDelegate else { return completion(nil, nil) }
@@ -404,14 +403,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             ? URLProtectionSpace(proxyHost: host, port: Int(port), type: NSURLProtectionSpaceHTTPProxy, realm: realm, authenticationMethod: method)
             : URLProtectionSpace(host: host, port: Int(port), protocol: URL(string: originURL)?.scheme ?? "https", realm: realm, authenticationMethod: method)
         let key = "\(isProxy) \(host):\(port) \(realm)"
-        let failures = authenticationAttempts[key, default: 0]
-        authenticationAttempts[key] = failures + 1
-        let challenge = URLAuthenticationChallenge(protectionSpace: space, proposedCredential: nil, previousFailureCount: failures, failureResponse: nil, error: nil,
-                                                   sender: ChromiumAuthenticationSender.shared)
-        uiDelegate.webContents(self, didReceiveAuthenticationChallenge: challenge) { credential in
+        let challenge = URLAuthenticationChallenge(protectionSpace: space, proposedCredential: nil, previousFailureCount: authenticationAttempts[key, default: 0],
+                                                   failureResponse: nil, error: nil, sender: ChromiumAuthenticationSender.shared)
+        uiDelegate.webContents(self, didReceiveAuthenticationChallenge: challenge) { [weak self] credential in
+            if credential != nil { self?.authenticationAttempts[key, default: 0] += 1 }
             completion(credential?.user, credential?.password)
         }
     }
+    /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
     public func cefBrowserRenderProcessDidTerminate() {
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)

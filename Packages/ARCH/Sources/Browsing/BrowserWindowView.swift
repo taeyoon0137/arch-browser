@@ -219,7 +219,12 @@ struct SidebarView: View {
 
     /// Moves to the neighboring space when the swipe went far or fast enough, otherwise returns to the current one.
     private func swipeEnded(_ travel: CGFloat, velocity: CGFloat) {
-        guard !session.isLibraryVisible else { return }
+        // The library may have opened during the swipe; the pages go back to rest behind it.
+        guard !session.isLibraryVisible else {
+            swipeTranslation = 0
+            swipePassesHalfway = false
+            return
+        }
         let translation = pageTranslation(for: travel)
         let isFling = abs(velocity) > 300
         var target = currentIndex
@@ -237,40 +242,44 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let tab = session.selectedTab {
-                SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
-            } else {
-                // Without a tab the controls stay in place; the address pill opens a new tab.
-                SidebarTopRow(session: session, windowButtons: windowButtons)
-                AddressPillView(session: session, tab: nil)
-            }
-            // The library pushes the favorites and space pages out toward the page. Both reach the sidebar's edges so that they slide in from outside it.
-            ZStack {
-                if session.isLibraryVisible {
-                    LibraryView(session: session)
-                        .padding(.horizontal, Self.inset)
-                        .transition(.move(edge: .leading))
+            // Swipes over the bottom bar stay with it, so its symbols can scroll when there are many.
+            VStack(alignment: .leading, spacing: 8) {
+                if let tab = session.selectedTab {
+                    SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
                 } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !session.favorites.isEmpty {
-                            FavoritesGridView(session: session)
-                                .padding(.horizontal, Self.inset)
-                        }
-                        SpacePagesView(session: session, translation: swipeTranslation)
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .transition(.move(edge: .trailing))
+                    // Without a tab the controls stay in place; the address pill opens a new tab.
+                    SidebarTopRow(session: session, windowButtons: windowButtons)
+                    AddressPillView(session: session, tab: nil)
                 }
+                // The library pushes the favorites and space pages out toward the page. Both reach the sidebar's edges so that they slide in from outside it.
+                ZStack {
+                    if session.isLibraryVisible {
+                        LibraryView(session: session)
+                            .padding(.horizontal, Self.inset)
+                            .transition(.move(edge: .leading))
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if !session.favorites.isEmpty {
+                                FavoritesGridView(session: session)
+                                    .padding(.horizontal, Self.inset)
+                            }
+                            SpacePagesView(session: session, translation: swipeTranslation)
+                        }
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .transition(.move(edge: .trailing))
+                    }
+                }
+                .padding(.top, 6)
+                .padding(.horizontal, -Self.inset)
+                .clipped()
             }
-            .padding(.top, 6)
-            .padding(.horizontal, -Self.inset)
-            .clipped()
+            // The swipe area reaches the sidebar's edges and the gap above the bar.
+            .background(SpaceSwipeView(onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
             SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
         .animation(Self.pageSpring, value: session.isLibraryVisible)
-        .background(SpaceSwipeView(onChange: swipeChanged, onEnd: swipeEnded))
     }
 }
 
@@ -696,6 +705,10 @@ struct SpaceHeaderView: View {
                         draftName = space.name
                         DispatchQueue.main.async { isNameFocused = true }
                     }
+                    // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
+                    .onDisappear {
+                        if session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+                    }
             } else {
                 Text(space.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -721,6 +734,10 @@ struct SpaceHeaderView: View {
             .accessibilityLabel("Space Options")
         }
         .frame(height: 22)
+        // Another space's page takes over the keyboard, so the name in this one is kept.
+        .onChange(of: session.currentSpaceID) { id in
+            if id != space.id, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+        }
     }
 }
 
@@ -762,35 +779,52 @@ struct SpaceMenuItems: View {
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
 
+    /// The widest the symbols may grow while staying centered: each side keeps room for one 30-point button and its gap, the library button on the leading side and the new space button on the trailing side.
+    private static let symbolsWidth = SidebarView.width - 2 * SidebarView.inset - 2 * (30 + 4)
+
+    private var symbols: some View {
+        HStack(spacing: 4) {
+            ForEach(session.spaces) { space in
+                let isCurrent = space.id == session.currentSpaceID && !session.isLibraryVisible
+                Button(action: { session.switchToSpace(space.id) }) {
+                    Image(systemName: space.symbol)
+                        .font(.system(size: isCurrent ? 12 : 9))
+                        .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu { SpaceMenuItems(session: session, space: space) }
+                .help(space.name)
+                .accessibilityLabel(space.name)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                .id(space.id)
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             HStack {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
             }
-            HStack(spacing: 4) {
-                ForEach(session.spaces) { space in
-                    let isCurrent = space.id == session.currentSpaceID && !session.isLibraryVisible
-                    Button(action: { session.switchToSpace(space.id) }) {
-                        Image(systemName: space.symbol)
-                            .font(.system(size: isCurrent ? 12 : 9))
-                            .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
-                            .frame(width: 26, height: 26)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu { SpaceMenuItems(session: session, space: space) }
-                    .help(space.name)
-                    .accessibilityLabel(space.name)
-                    .accessibilityAddTraits(isCurrent ? .isSelected : [])
+            // Too many symbols to fit scroll sideways instead of covering the buttons or widening the sidebar.
+            ViewThatFits(in: .horizontal) {
+                symbols
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) { symbols }
+                        .onAppear { proxy.scrollTo(session.currentSpaceID) }
+                        .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id) } }
                 }
             }
-            // The new space button sits just after the last symbol without moving the symbols off center.
+            // The new space button sits just after the last symbol without moving the symbols off center. The overlay follows the symbols' own width, and the frame after it limits what they are offered.
             .overlay(alignment: .trailing) {
                 SidebarIconButton(symbol: "plus", label: "New Space", action: session.addSpace)
                     .fixedSize()
-                    .alignmentGuide(.trailing) { $0[.leading] }
+                    .alignmentGuide(.trailing) { $0[.leading] - 4 }
             }
+            .frame(maxWidth: Self.symbolsWidth)
         }
         .frame(height: 28)
     }

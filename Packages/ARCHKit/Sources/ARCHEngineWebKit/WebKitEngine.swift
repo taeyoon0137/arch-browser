@@ -385,11 +385,14 @@ public final class WebKitNavigationController: EngineNavigationController {
         webView.reloadFromOrigin()
     }
     public func stop() { webView.stopLoading() }
+    // Without an entry nothing loads, and the dialog would stay suppressed until another load ends.
     public func goBack() {
+        guard webView.canGoBack else { return }
         contents?.dismissDialogBeforeNavigation()
         webView.goBack()
     }
     public func goForward() {
+        guard webView.canGoForward else { return }
         contents?.dismissDialogBeforeNavigation()
         webView.goForward()
     }

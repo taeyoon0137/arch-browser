@@ -110,6 +110,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu)
     func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool
     func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void)
+    /// Offers a link that belongs to another app. The engines call this instead of loading a scheme they do not handle. `isUserInitiated` is true when the user clicked the link.
+    func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool)
     func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void)
     func webContents(_ webContents: any EngineWebContents, didChangeAudibleState isAudible: Bool)
     func webContents(_ webContents: any EngineWebContents, didChangeMuteState isMuted: Bool)
@@ -155,8 +157,7 @@ public enum EngineURLSchemes {
 }
 
 public extension EngineWebContentsUIDelegate {
-    /// Offers a link that belongs to another app. The engines call this instead of loading a scheme they do not handle.
-    func webContents(_ webContents: any EngineWebContents, openExternally url: URL) {
+    func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
         guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
         self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
     }

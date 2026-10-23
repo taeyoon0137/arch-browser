@@ -8,6 +8,12 @@ public final class WebKitDownloads: EngineDownloads {
     public weak var delegate: (any EngineDownloadsDelegate)?
     public private(set) var items: [any EngineDownloadItem] = []
     unowned let context: WebKitBrowserContext
+    /// Resumes a download whose web view has closed. `resumeDownload` needs a web view in the same data store, and the tab's may be gone.
+    lazy var resumingWebView: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = context.dataStore
+        return WKWebView(frame: .zero, configuration: configuration)
+    }()
 
     init(context: WebKitBrowserContext) {
         self.context = context
@@ -42,7 +48,7 @@ public final class WebKitDownloads: EngineDownloads {
     }
 }
 
-/// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. Pause keeps WebKit's resume data; resume restarts from it on the originating web view.
+/// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. Pause keeps WebKit's resume data; resume restarts from it on the originating web view, or on the list's own web view once that one has closed.
 final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate {
     let id = UUID().uuidString
     let sourceURL: URL
@@ -98,8 +104,8 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     }
 
     func resume() {
-        guard let resumeData, let webView else { return }
-        webView.resumeDownload(fromResumeData: resumeData) { [weak self] download in
+        guard let resumeData else { return }
+        (webView ?? owner.resumingWebView).resumeDownload(fromResumeData: resumeData) { [weak self] download in
             guard let self else { return }
             self.resumeData = nil
             self.attach(download)

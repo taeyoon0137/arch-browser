@@ -35,8 +35,12 @@ public final class Tab: ObservableObject, Identifiable {
     var requestSelection: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to show a page's dialog as a sheet, which waits until the tab is selected. Without it the handler receives `.cancel` and the page gets the dialog's safe answer.
-    var presentAlert: ((NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
+    /// The session sets this callback to show a sheet for the page, which waits until the tab is selected. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
+    var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
+    /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
+    private var isOfferingExternalApp = false
+    /// The site whose own request to open another app the user declined: its host, or its scheme for a page without one, such as a file. The page asks no more until the tab moves to another site, so changing its own address or reloading does not bring the question back. A link the user clicks or an address the user types still asks.
+    private var declinedExternalAppSite: String?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
     /// The session sets this for tabs it restores from the saved session.
@@ -70,7 +74,10 @@ public final class Tab: ObservableObject, Identifiable {
 
 extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
-    public func webContentsDidChangeURL(_ webContents: any EngineWebContents) { url = webContents.url }
+    public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
+        url = webContents.url
+        if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
+    }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
@@ -130,14 +137,14 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
-        showAlert(alert) { _ in completion() }
+        showAlert(alert, isPageDialog: true) { _ in completion() }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        showAlert(alert) { completion($0 == .alertFirstButtonReturn) }
+        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn) }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
@@ -148,7 +155,7 @@ extension Tab: EngineWebContentsUIDelegate {
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
-        showAlert(alert) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
     /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show.
@@ -168,13 +175,31 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Links for other apps
 
+    public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
+        if isUserInitiated { forgetExternalAppDecline() }
+        guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
+        self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
+    }
+
+    /// The user asked for the next page, as by typing its address, so a site's earlier decline no longer applies.
+    func forgetExternalAppDecline() {
+        declinedExternalAppSite = nil
+    }
+
+    private static func site(of url: URL?) -> String? {
+        guard let url else { return nil }
+        return url.host ?? "\(url.scheme ?? ""):"
+    }
+
     public func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool {
         NSWorkspace.shared.urlForApplication(toOpen: url) != nil
     }
 
-    /// Asks before a page hands a link to another app, then opens the link there.
+    /// Asks before a page hands a link to another app, then opens the link there. One question shows at a time, and a site the user said no to asks no more.
     public func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) {
-        guard let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return completion(false) }
+        guard !isOfferingExternalApp, declinedExternalAppSite == nil || declinedExternalAppSite != Self.site(of: self.url),
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return completion(false) }
+        isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
         let alert = NSAlert()
         alert.messageText = "Open \u{201C}\(appName)\u{201D}?"
@@ -182,9 +207,16 @@ extension Tab: EngineWebContentsUIDelegate {
         alert.icon = NSWorkspace.shared.icon(forFile: appURL.path)
         alert.addButton(withTitle: "Open")
         alert.addButton(withTitle: "Cancel")
-        showAlert(alert) { response in
+        let pageSite = Self.site(of: self.url)
+        showAlert(alert) { [weak self] response in
             let opens = response == .alertFirstButtonReturn
-            if opens { NSWorkspace.shared.open(url) }
+            self?.isOfferingExternalApp = false
+            if opens {
+                NSWorkspace.shared.open(url)
+            } else if response == .alertSecondButtonReturn, let self, Self.site(of: self.url) == pageSite {
+                // Only the Cancel button counts as an answer; a sheet the app ended, as for an engine switch, does not.
+                self.declinedExternalAppSite = pageSite
+            }
             completion(opens)
         }
     }
@@ -230,8 +262,8 @@ extension Tab: EngineWebContentsUIDelegate {
         return alert
     }
 
-    private func showAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard let presentAlert else { return completion(.cancel) }
-        presentAlert(alert, completion)
+        presentAlert(alert, isPageDialog, completion)
     }
 }
