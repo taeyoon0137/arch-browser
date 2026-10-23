@@ -1,0 +1,6 @@
+.DS_Store
+.build/
+Frameworks/
+.work/
+Packages/LegacyEngine/
+Packages/ARCHKit/Sources/ARCHEngineLegacy/
