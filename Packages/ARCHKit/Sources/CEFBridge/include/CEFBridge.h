@@ -7,6 +7,39 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ARCHCEFApplication : NSApplication
 @end
 
+typedef NS_ENUM(NSInteger, ARCHCEFDownloadState) {
+    ARCHCEFDownloadStateInProgress,
+    ARCHCEFDownloadStateComplete,
+    ARCHCEFDownloadStateCanceled,
+    ARCHCEFDownloadStateInterrupted,
+};
+
+/// Permissions a page can ask for. A request may combine several.
+typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
+    ARCHCEFPermissionCamera = 1 << 0,
+    ARCHCEFPermissionMicrophone = 1 << 1,
+    ARCHCEFPermissionScreenCapture = 1 << 2,
+    ARCHCEFPermissionGeolocation = 1 << 3,
+    ARCHCEFPermissionNotifications = 1 << 4,
+    ARCHCEFPermissionClipboard = 1 << 5,
+    ARCHCEFPermissionMidi = 1 << 6,
+};
+
+/// One download reported by the engine. The values are refreshed before each `cefBrowserDidUpdateDownload:` call.
+@interface ARCHCEFDownload : NSObject
+@property (nonatomic, readonly) uint32_t identifier;
+@property (nonatomic, readonly, copy) NSString *url;
+/// The destination once the engine has chosen it.
+@property (nonatomic, readonly, copy, nullable) NSString *path;
+@property (nonatomic, readonly) int64_t receivedBytes;
+@property (nonatomic, readonly) int64_t totalBytes;
+@property (nonatomic, readonly) ARCHCEFDownloadState state;
+/// A request made before the engine reports the first update is applied with that update.
+- (void)pause;
+- (void)resume;
+- (void)cancel;
+@end
+
 @protocol ARCHCEFBrowserDelegate <NSObject>
 - (void)cefBrowserDidCreateView;
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
@@ -17,6 +50,17 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
+/// Asks where to save a download. Call `decision` with the full destination path, or with `nil` and `showDialog` to let the engine show its Save As dialog.
+- (void)cefBrowserDidStartDownload:(ARCHCEFDownload *)download
+                     suggestedName:(NSString *)suggestedName
+                          decision:(void (^)(NSString *_Nullable path, BOOL showDialog))decision;
+- (void)cefBrowserDidUpdateDownload:(ARCHCEFDownload *)download;
+/// Asks whether `origin` may use `permissions`. The decision applies to every permission in the request.
+- (void)cefBrowserDidRequestPermissions:(ARCHCEFPermission)permissions
+                             fromOrigin:(NSString *)origin
+                               decision:(void (^)(BOOL allow))decision;
+/// The page's renderer process exited. The page is blank until it loads again.
+- (void)cefBrowserRenderProcessDidTerminate;
 @end
 
 @interface ARCHCEFRuntime : NSObject
@@ -43,6 +87,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy) NSString *title;
 /// Chromium's zoom level. 0 is the default size; each level scales the page by a factor of 1.2.
 @property (nonatomic) double zoomLevel;
+/// Whether the page may start downloads. Defaults to `YES`.
+@property (nonatomic) BOOL allowsDownloads;
 - (void)loadURL:(NSString *)url;
 - (void)reload;
 - (void)reloadIgnoringCache;

@@ -11,7 +11,10 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_devtools_message_observer.h"
+#include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
+#include "include/cef_permission_handler.h"
+#include "include/cef_request_handler.h"
 #include "include/cef_values.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -202,6 +205,85 @@ bool gInitialized = false;
 
 @end
 
+#pragma mark - Download
+
+@interface ARCHCEFDownload ()
+@property (nonatomic, readwrite, copy, nullable) NSString *path;
+@property (nonatomic, readwrite) int64_t receivedBytes;
+@property (nonatomic, readwrite) int64_t totalBytes;
+@property (nonatomic, readwrite) ARCHCEFDownloadState state;
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url;
+- (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
+@end
+
+@implementation ARCHCEFDownload {
+    CefRefPtr<CefDownloadItemCallback> _callback;
+    BOOL _pauseRequested;
+    BOOL _cancelRequested;
+}
+
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url {
+    self = [super init];
+    if (!self) {
+        return nil;
+    }
+    _identifier = identifier;
+    _url = [url copy];
+    _state = ARCHCEFDownloadStateInProgress;
+    return self;
+}
+
+// The callback from the latest update stays valid, so pause, resume, and cancel use it until the next update replaces it.
+- (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback {
+    _callback = callback;
+    CefString fullPath = item->GetFullPath();
+    self.path = fullPath.empty() ? nil : ToNSString(fullPath);
+    self.receivedBytes = item->GetReceivedBytes();
+    self.totalBytes = item->GetTotalBytes();
+    if (item->IsComplete()) {
+        self.state = ARCHCEFDownloadStateComplete;
+    } else if (item->IsCanceled()) {
+        self.state = ARCHCEFDownloadStateCanceled;
+    } else if (item->IsInterrupted()) {
+        self.state = ARCHCEFDownloadStateInterrupted;
+    } else {
+        self.state = ARCHCEFDownloadStateInProgress;
+    }
+    if (_cancelRequested) {
+        _cancelRequested = NO;
+        _pauseRequested = NO;
+        callback->Cancel();
+    } else if (_pauseRequested) {
+        _pauseRequested = NO;
+        callback->Pause();
+    }
+}
+
+- (void)pause {
+    if (_callback) {
+        _callback->Pause();
+    } else {
+        _pauseRequested = YES;
+    }
+}
+
+- (void)resume {
+    _pauseRequested = NO;
+    if (_callback) {
+        _callback->Resume();
+    }
+}
+
+- (void)cancel {
+    if (_callback) {
+        _callback->Cancel();
+    } else {
+        _cancelRequested = YES;
+    }
+}
+
+@end
+
 #pragma mark - Browser
 
 @interface ARCHCEFBrowser ()
@@ -213,12 +295,66 @@ bool gInitialized = false;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
 - (void)handleBeforeClose;
+- (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
+- (void)handleBeforeDownload:(ARCHCEFDownload *)download
+               suggestedName:(NSString *)suggestedName
+                    decision:(void (^)(NSString *_Nullable, BOOL))decision;
+- (void)handleDownloadUpdate:(ARCHCEFDownload *)download;
+- (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision;
+- (void)handleRenderProcessTerminated;
 @end
 
 namespace {
 
+// Translates a media access request into bridge permissions. Returns 0 when nothing in the request is recognized.
+ARCHCEFPermission PermissionsFromMediaAccess(uint32_t requested) {
+    ARCHCEFPermission permissions = 0;
+    if (requested & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) {
+        permissions |= ARCHCEFPermissionMicrophone;
+    }
+    if (requested & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) {
+        permissions |= ARCHCEFPermissionCamera;
+    }
+    if (requested & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) {
+        permissions |= ARCHCEFPermissionScreenCapture;
+    }
+    return permissions;
+}
+
+// Translates a permission prompt into bridge permissions. Returns 0 when the request includes a type the bridge does not handle.
+ARCHCEFPermission PermissionsFromPrompt(uint32_t requested) {
+    struct Mapping {
+        uint32_t cefType;
+        ARCHCEFPermission permission;
+    };
+    static const Mapping kMappings[] = {
+        {CEF_PERMISSION_TYPE_CAMERA_STREAM, ARCHCEFPermissionCamera},
+        {CEF_PERMISSION_TYPE_MIC_STREAM, ARCHCEFPermissionMicrophone},
+        {CEF_PERMISSION_TYPE_GEOLOCATION, ARCHCEFPermissionGeolocation},
+        {CEF_PERMISSION_TYPE_NOTIFICATIONS, ARCHCEFPermissionNotifications},
+        {CEF_PERMISSION_TYPE_CLIPBOARD, ARCHCEFPermissionClipboard},
+        {CEF_PERMISSION_TYPE_MIDI_SYSEX, ARCHCEFPermissionMidi},
+    };
+    ARCHCEFPermission permissions = 0;
+    uint32_t remaining = requested;
+    for (const Mapping &mapping : kMappings) {
+        if (requested & mapping.cefType) {
+            permissions |= mapping.permission;
+            remaining &= ~mapping.cefType;
+        }
+    }
+    return remaining == 0 ? permissions : 0;
+}
+
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.
-class BridgeClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler, public CefLoadHandler, public CefFindHandler {
+class BridgeClient : public CefClient,
+                     public CefDisplayHandler,
+                     public CefLifeSpanHandler,
+                     public CefLoadHandler,
+                     public CefFindHandler,
+                     public CefDownloadHandler,
+                     public CefPermissionHandler,
+                     public CefRequestHandler {
 public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
@@ -228,6 +364,70 @@ public:
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+    bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString &url, const CefString &request_method) override {
+        return owner_ != nil && owner_.allowsDownloads;
+    }
+
+    bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item, const CefString &suggested_name,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        if (!owner_) {
+            return false;
+        }
+        CefRefPtr<CefBeforeDownloadCallback> continuation = callback;
+        [owner_ handleBeforeDownload:[owner_ downloadForItem:download_item]
+                       suggestedName:ToNSString(suggested_name)
+                            decision:^(NSString *_Nullable path, BOOL showDialog) {
+                                continuation->Continue(CefString(path ? path.UTF8String : ""), showDialog);
+                            }];
+        return true;
+    }
+
+    void OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                           CefRefPtr<CefDownloadItemCallback> callback) override {
+        ARCHCEFDownload *download = [owner_ downloadForItem:download_item];
+        [download applyItem:download_item callback:callback];
+        [owner_ handleDownloadUpdate:download];
+    }
+
+    bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &requesting_origin,
+                                        uint32_t requested_permissions, CefRefPtr<CefMediaAccessCallback> callback) override {
+        ARCHCEFPermission permissions = PermissionsFromMediaAccess(requested_permissions);
+        if (!owner_ || permissions == 0) {
+            return false;
+        }
+        CefRefPtr<CefMediaAccessCallback> decision = callback;
+        [owner_ handlePermissionRequest:permissions
+                                 origin:ToNSString(requesting_origin)
+                               decision:^(BOOL allow) {
+                                   decision->Continue(allow ? requested_permissions : static_cast<uint32_t>(CEF_MEDIA_PERMISSION_NONE));
+                               }];
+        return true;
+    }
+
+    // Returning false leaves the request to CEF, which ignores it in Alloy style.
+    bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id, const CefString &requesting_origin,
+                                uint32_t requested_permissions, CefRefPtr<CefPermissionPromptCallback> callback) override {
+        ARCHCEFPermission permissions = PermissionsFromPrompt(requested_permissions);
+        if (!owner_ || permissions == 0) {
+            return false;
+        }
+        CefRefPtr<CefPermissionPromptCallback> decision = callback;
+        [owner_ handlePermissionRequest:permissions
+                                 origin:ToNSString(requesting_origin)
+                               decision:^(BOOL allow) {
+                                   decision->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+                               }];
+        return true;
+    }
+
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
+                                   const CefString &error_string) override {
+        [owner_ handleRenderProcessTerminated];
+    }
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         [owner_ handleAfterCreated:browser];
@@ -333,6 +533,7 @@ private:
     CefRefPtr<CefRegistration> _devToolsRegistration;
     __weak id<ARCHCEFBrowserDelegate> _delegate;
     NSView *_parentView;
+    NSMutableDictionary<NSNumber *, ARCHCEFDownload *> *_downloads;
 }
 
 @synthesize browserView = _browserView;
@@ -351,6 +552,8 @@ private:
     _delegate = delegate;
     _currentURL = [url copy];
     _title = @"";
+    _allowsDownloads = YES;
+    _downloads = [NSMutableDictionary dictionary];
     _client = new BridgeClient(self);
 
     CefWindowInfo windowInfo;
@@ -410,6 +613,45 @@ private:
     _browser = nullptr;
     _browserView = nil;
     [_delegate cefBrowserDidClose];
+}
+
+// Downloads are keyed by CEF's identifier and kept for the browser's lifetime so a finished one can still be resumed.
+- (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item {
+    NSNumber *key = @(item->GetId());
+    ARCHCEFDownload *download = _downloads[key];
+    if (!download) {
+        download = [[ARCHCEFDownload alloc] initWithIdentifier:item->GetId() url:ToNSString(item->GetURL())];
+        _downloads[key] = download;
+    }
+    return download;
+}
+
+- (void)handleBeforeDownload:(ARCHCEFDownload *)download
+               suggestedName:(NSString *)suggestedName
+                    decision:(void (^)(NSString *_Nullable, BOOL))decision {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (delegate) {
+        [delegate cefBrowserDidStartDownload:download suggestedName:suggestedName decision:decision];
+    } else {
+        decision(nil, YES);
+    }
+}
+
+- (void)handleDownloadUpdate:(ARCHCEFDownload *)download {
+    [_delegate cefBrowserDidUpdateDownload:download];
+}
+
+- (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (delegate) {
+        [delegate cefBrowserDidRequestPermissions:permissions fromOrigin:origin decision:decision];
+    } else {
+        decision(NO);
+    }
+}
+
+- (void)handleRenderProcessTerminated {
+    [_delegate cefBrowserRenderProcessDidTerminate];
 }
 
 - (void)loadURL:(NSString *)url {

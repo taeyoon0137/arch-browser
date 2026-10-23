@@ -1,6 +1,7 @@
 // Chromium is the primary engine. This adapter implements the `ARCHEngine` protocols using the Chromium Embedded Framework (CEF) through the Objective-C bridge.
 import AppKit
 import ARCHEngine
+import AVFoundation
 import CEFBridge
 import Foundation
 
@@ -41,8 +42,15 @@ public final class ChromiumApplication: EngineApplication {
     public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
     public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
         let context = ChromiumBrowserContext(attributes: attributes)
+        context.application = self
         contexts[attributes.id] = context
         completion(.success(context))
+    }
+    private var rendererCrashCount = 0
+    /// Counts renderer process exits across every tab and reports the running total.
+    func rendererDidCrash() {
+        rendererCrashCount += 1
+        delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
     }
     public func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { fatalError("not implemented") }
     public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
@@ -64,6 +72,8 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
     public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
+    weak var application: ChromiumApplication?
+    let chromiumDownloads = ChromiumDownloads()
 
     init(attributes: EngineBrowserContextAttributes) {
         self.attributes = attributes
@@ -73,7 +83,7 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
     public var type: EngineBrowserContextType { attributes.type }
     public var userVisibleName: String { attributes.userVisibleName }
     public var history: any EngineHistory { fatalError("not implemented") }
-    public var downloads: any EngineDownloads { fatalError("not implemented") }
+    public var downloads: any EngineDownloads { chromiumDownloads }
     public var extensions: (any EngineExtensions)? { nil }
 }
 
@@ -92,7 +102,7 @@ public final class ChromiumBrowser: EngineBrowser {
     }
 
     public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
-        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, configuration: configuration)
+        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, context: context as? ChromiumBrowserContext, configuration: configuration)
         ownedWebContents.append(webContents)
         return webContents
     }
@@ -135,19 +145,24 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var canGoBack = false
     public private(set) var canGoForward = false
     private var browser: ARCHCEFBrowser?
+    private weak var context: ChromiumBrowserContext?
     private var observers: [any EngineWebContentsNavigationObserver] = []
     private var pendingURL: URL?
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool)?
+    /// The page that last crashed. A second crash on the same page is not reloaded, so a crash loop cannot start.
+    private var lastCrashedURL: URL?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
-    init(sessionID: String, configuration: EngineWebContentsConfiguration) {
+    init(sessionID: String, context: ChromiumBrowserContext?, configuration: EngineWebContentsConfiguration) {
         self.sessionID = sessionID
+        self.context = context
         self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         self.view.wantsLayer = true
         self.url = configuration.initialURL
         super.init()
         browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", delegate: self)
+        browser?.allowsDownloads = !configuration.disallowDownloads
     }
 
     public enum PDFError: Error {
@@ -254,11 +269,54 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         completion(EngineFindResult(activeMatchOrdinal: activeMatchOrdinal, numberOfMatches: count))
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
-        let popup = ChromiumWebContents(sessionID: UUID().uuidString, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
+        let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
     }
     public func cefBrowserDidClose() {
         uiDelegate?.webContentsDidClose(self)
+    }
+    public func cefBrowserDidStartDownload(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
+        guard let downloads = context?.chromiumDownloads else { return decision(nil, true) }
+        downloads.begin(download, suggestedName: suggestedName, decision: decision)
+    }
+    public func cefBrowserDidUpdateDownload(_ download: ARCHCEFDownload) {
+        context?.chromiumDownloads.update(download)
+    }
+    /// The UI delegate decides for the site. Camera and microphone grants also need the system's permission for this app, which is requested before the page gets access.
+    public func cefBrowserDidRequestPermissions(_ permissions: ARCHCEFPermission, fromOrigin origin: String, decision: @escaping (Bool) -> Void) {
+        let mapping: [(ARCHCEFPermission, EnginePermissionType)] = [(.camera, .camera), (.microphone, .microphone), (.screenCapture, .screenCapture), (.geolocation, .geolocation),
+                                                                   (.notifications, .notifications), (.clipboard, .clipboard), (.midi, .midi)]
+        let types = mapping.filter { permissions.contains($0.0) }.map(\.1)
+        guard let uiDelegate, !types.isEmpty else { return decision(false) }
+        let request = EnginePermissionRequest(origin: URL(string: origin) ?? URL(string: "about:blank")!, types: types)
+        uiDelegate.webContents(self, requestPermission: request) { granted in
+            guard granted else { return decision(false) }
+            let mediaTypes: [AVMediaType] = types.compactMap { $0 == .camera ? .video : $0 == .microphone ? .audio : nil }
+            Self.requestCaptureAccess(for: mediaTypes) { decision($0) }
+        }
+    }
+    /// Asks the system for each media type in turn. Finishes on the main thread with `false` as soon as one is refused.
+    private static func requestCaptureAccess(for mediaTypes: [AVMediaType], completion: @escaping (Bool) -> Void) {
+        guard let mediaType = mediaTypes.first else { return completion(true) }
+        AVCaptureDevice.requestAccess(for: mediaType) { granted in
+            DispatchQueue.main.async {
+                if granted {
+                    Self.requestCaptureAccess(for: Array(mediaTypes.dropFirst()), completion: completion)
+                } else {
+                    completion(false)
+                }
+            }
+        }
+    }
+    /// Reports the crash, then loads the page again once. The page stays blank after a second crash on the same URL.
+    public func cefBrowserRenderProcessDidTerminate() {
+        isLoading = false
+        uiDelegate?.webContentsDidChangeLoadingState(self)
+        uiDelegate?.webContentsProcessDidTerminate(self)
+        context?.application?.rendererDidCrash()
+        guard let url, url != lastCrashedURL else { return }
+        lastCrashedURL = url
+        browser?.loadURL(url.absoluteString)
     }
 }
 
