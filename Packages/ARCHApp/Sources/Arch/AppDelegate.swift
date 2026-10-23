@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
         let appearanceMenu = NSMenu(title: "Appearance")
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
-            appearanceMenu.addItem(withTitle: title, action: #selector(setAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
+            appearanceMenu.addItem(withTitle: title, action: #selector(chooseAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
         }
         viewMenu.addItem(submenu(appearanceMenu, title: "Appearance"))
         mainMenu.addItem(submenu(viewMenu, title: "View"))
@@ -204,7 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Appearance
 
-    @objc private func setAppearance(_ sender: NSMenuItem) {
+    // Not named `setAppearance(_:)`: `NSApplication` answers that selector first in the responder chain and would take the menu item as its appearance.
+    @objc private func chooseAppearance(_ sender: NSMenuItem) {
         let setting = (sender.representedObject as? String).flatMap(AppearanceSetting.init(rawValue:)) ?? .system
         UserDefaults.standard.set(setting.rawValue, forKey: AppearanceSetting.defaultsKey)
         NSApp.appearance = setting.appearance
@@ -212,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if item.action == #selector(setAppearance(_:)) {
+        if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }
         if item.action == #selector(setAsDefaultBrowser) {
