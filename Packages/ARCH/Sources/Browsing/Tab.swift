@@ -24,7 +24,7 @@ public final class Tab: ObservableObject, Identifiable {
     var didClose: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to show a page's dialog as a sheet. Without it, or without a window, the handler receives `.cancel` and the page gets the dialog's safe answer.
+    /// The session sets this callback to show a page's dialog as a sheet, which waits until the tab is selected. Without it the handler receives `.cancel` and the page gets the dialog's safe answer.
     var presentAlert: ((NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?

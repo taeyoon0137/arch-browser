@@ -23,6 +23,7 @@ public final class BrowserSession: ObservableObject {
                 isFindBarVisible = false
                 findResult = nil
             }
+            showNextSheet()
         }
     }
     /// The downloads popover opens from the sidebar, so hiding the sidebar closes it.
@@ -53,6 +54,9 @@ public final class BrowserSession: ObservableObject {
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
+    /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
+    private var pendingSheets: [UUID: [PendingSheet]] = [:]
+    private var visibleSheet: (tabID: UUID, alert: NSAlert)?
 
     public init(engine: any Engine, userDataDirectory: URL) throws {
         let configuration = EngineApplicationConfiguration(userDataDirectory: userDataDirectory,
@@ -78,6 +82,10 @@ public final class BrowserSession: ObservableObject {
         restoreTabs(snapshot)
         observeChanges()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
+        // Tabs restored at launch can ask before the window exists; their sheets show once it does.
+        NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)
+            .sink { [weak self] _ in self?.showNextSheet() }
+            .store(in: &cancellables)
     }
 
     public enum SessionError: Error {
@@ -157,11 +165,13 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
-        tab.requestPermission = { [weak tab] request, completion in
-            Self.askPermission(request, on: tab?.webContents.view.window, completion: completion)
+        tab.requestPermission = { [weak self, weak tab] request, completion in
+            guard let self, let tab else { return completion(false) }
+            self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
         }
-        tab.presentAlert = { [weak tab] alert, completion in
-            Self.present(alert, on: tab?.webContents.view.window, completion: completion)
+        tab.presentAlert = { [weak self, weak tab] alert, completion in
+            guard let self, let tab else { return completion(.cancel) }
+            self.enqueueSheet(alert, for: tab, completion: completion)
         }
         // The session republishes changes to the selected tab so views that read the tab through the session refresh.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
@@ -176,6 +186,7 @@ public final class BrowserSession: ObservableObject {
 
     public func closeTab(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
         browser.closeWebContents(tab.webContents)
@@ -398,18 +409,47 @@ public final class BrowserSession: ObservableObject {
     // MARK: Site permissions
 
     /// Asks with a sheet on the page's window, or on the main window while the page is not on screen. The engine calls this from inside its own message loop, so the sheet never blocks and a request without any window is denied. The answer reaches the engine once.
-    private static func askPermission(_ request: EnginePermissionRequest, on window: NSWindow?, completion: @escaping (Bool) -> Void) {
+    private static func permissionAlert(for request: EnginePermissionRequest) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")
-        present(alert, on: window) { completion($0 == .alertFirstButtonReturn) }
+        return alert
     }
 
-    /// Shows a sheet on the tab's window. Without a window the handler receives `.cancel` at once; nothing runs an app-modal alert inside an engine callback.
-    private static func present(_ alert: NSAlert, on window: NSWindow?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        guard let window = window ?? NSApp.mainWindow ?? NSApp.keyWindow else { return completion(.cancel) }
-        alert.beginSheetModal(for: window, completionHandler: completion)
+    // MARK: Sheets
+
+    private struct PendingSheet {
+        let alert: NSAlert
+        let completion: (NSApplication.ModalResponse) -> Void
+    }
+
+    /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is selected, so a background page cannot cover the page in front.
+    private func enqueueSheet(_ alert: NSAlert, for tab: Tab, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, completion: completion))
+        showNextSheet()
+    }
+
+    /// Shows the selected tab's oldest waiting sheet when no sheet is on screen. Nothing runs an app-modal alert inside an engine callback.
+    private func showNextSheet() {
+        guard visibleSheet == nil, let tab = selectedTab, var queue = pendingSheets[tab.id], !queue.isEmpty,
+              let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
+        let sheet = queue.removeFirst()
+        pendingSheets[tab.id] = queue.isEmpty ? nil : queue
+        visibleSheet = (tab.id, sheet.alert)
+        sheet.alert.beginSheetModal(for: window) { [weak self] response in
+            self?.visibleSheet = nil
+            sheet.completion(response)
+            self?.showNextSheet()
+        }
+    }
+
+    /// Gives a closing tab's sheets the safe answer, `.cancel`, including the one on screen.
+    private func cancelSheets(for tab: Tab) {
+        if let visibleSheet, visibleSheet.tabID == tab.id, let window = visibleSheet.alert.window.sheetParent {
+            window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
+        }
+        pendingSheets.removeValue(forKey: tab.id)?.forEach { $0.completion(.cancel) }
     }
 
     private static func permissionDescription(for types: [EnginePermissionType]) -> String {
