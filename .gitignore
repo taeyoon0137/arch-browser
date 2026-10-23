@@ -4,3 +4,6 @@ Frameworks/
 .work/
 Packages/LegacyEngine/
 Packages/ARCHKit/Sources/ARCHEngineLegacy/
+Packages/ARCHKit/Sources/CEFBridge/cefroot/
+build/
+Packages/ARCHKit/Sources/CEFBridge/wrapper_src/

@@ -1,6 +1,7 @@
 // Registers the engines, opens the main window, and connects the menu bar to the browser session.
 import AppKit
 import ARCHEngine
+import ARCHEngineChromium
 import ARCHEngineWebKit
 import Browsing
 import SwiftUI
@@ -12,14 +13,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let registry = EngineRegistry.shared
         registry.register(WebKitEngine())
-        guard let engine = registry.engine(for: registry.defaultKind) else { fatalError("No engine registered") }
-        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
-        do {
-            session = try BrowserSession(engine: engine, userDataDirectory: supportDirectory)
-        } catch {
-            fatalError("Browser session failed to start: \(error)")
+        if let chromium = ChromiumEngine(frameworkPath: Self.cefFrameworkPath, helperPath: Self.cefHelperPath) {
+            registry.register(chromium)
         }
-        session.openTab()
+        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
+        // Try the default engine first and fall back to the others when it fails to start.
+        for kind in [registry.defaultKind] + registry.registeredKinds.filter({ $0 != registry.defaultKind }) where session == nil {
+            guard let engine = registry.engine(for: kind) else { continue }
+            session = try? BrowserSession(engine: engine, userDataDirectory: supportDirectory)
+        }
+        guard session != nil else { fatalError("No engine could start") }
+        session.openTab(url: ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)))
         NSApp.mainMenu = makeMainMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -39,6 +43,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.
+    private static var cefFrameworkPath: String {
+        let environment = ProcessInfo.processInfo.environment
+        if let path = environment["ARCH_CEF_FRAMEWORK_PATH"] { return path }
+        return Bundle.main.bundleURL.appendingPathComponent("Contents/Frameworks/Chromium Embedded Framework.framework").path
+    }
+
+    private static var cefHelperPath: String? {
+        let environment = ProcessInfo.processInfo.environment
+        if let path = environment["ARCH_CEF_HELPER_PATH"] { return path }
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Frameworks/Arch Helper.app/Contents/MacOS/Arch Helper").path
+        return FileManager.default.fileExists(atPath: bundled) ? bundled : nil
+    }
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()

@@ -1,0 +1,229 @@
+// Chromium is the primary engine. This adapter implements the `ARCHEngine` protocols using the Chromium Embedded Framework (CEF) through the Objective-C bridge.
+import AppKit
+import ARCHEngine
+import CEFBridge
+import Foundation
+
+public final class ChromiumEngine: Engine {
+    public let kind: EngineKind = .chromium
+    public let capabilities: Set<EngineCapability> = [.devTools, .pdfController, .sessionRestore, .cookies]
+    let frameworkPath: String
+    let helperPath: String?
+
+    /// Returns `nil` if the framework directory is missing, allowing the app to fall back to WebKit.
+    public init?(frameworkPath: String, helperPath: String?) {
+        guard FileManager.default.fileExists(atPath: frameworkPath) else { return nil }
+        self.frameworkPath = frameworkPath
+        self.helperPath = helperPath
+    }
+
+    public enum StartError: Error {
+        case initializationFailed
+    }
+
+    public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
+        let cachePath = configuration.cacheDirectory.appendingPathComponent("Chromium").path
+        guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: cachePath) else {
+            throw StartError.initializationFailed
+        }
+        return ChromiumApplication()
+    }
+}
+
+public final class ChromiumApplication: EngineApplication {
+    public let engineKind: EngineKind = .chromium
+    public weak var delegate: (any EngineApplicationDelegate)?
+    var contexts: [EngineBrowserContextID: ChromiumBrowserContext] = [:]
+
+    public var version: String { "Chromium (CEF)" }
+    public func run() { delegate?.applicationDidInitialize(self) }
+    public func tryToTerminate(completion: @escaping (Bool) -> Void) { completion(true) }
+    public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
+    public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+        let context = ChromiumBrowserContext(attributes: attributes)
+        contexts[attributes.id] = context
+        completion(.success(context))
+    }
+    public func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { fatalError("not implemented") }
+    public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
+    public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
+    public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
+        let browser = ChromiumBrowser(sessionID: UUID().uuidString, context: context, delegate: delegate, window: window)
+        self.delegate?.application(self, didCreateBrowser: browser)
+        return browser
+    }
+    public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) {
+        completion(ChromiumBrowser(sessionID: sessionID, context: context, delegate: delegate, window: nil))
+    }
+    public func setBlockLists(_ lists: [URL]) { fatalError("not implemented") }
+    public func setExcludedDomains(_ domains: [String]) { fatalError("not implemented") }
+}
+
+/// All regular contexts share a single CEF cache directory until per-profile request contexts are added.
+public final class ChromiumBrowserContext: EngineBrowserContext {
+    public let attributes: EngineBrowserContextAttributes
+    public weak var delegate: (any EngineBrowserContextDelegate)?
+    public var preferences = EnginePreferences()
+
+    init(attributes: EngineBrowserContextAttributes) {
+        self.attributes = attributes
+    }
+
+    public var id: EngineBrowserContextID { attributes.id }
+    public var type: EngineBrowserContextType { attributes.type }
+    public var userVisibleName: String { attributes.userVisibleName }
+    public var history: any EngineHistory { fatalError("not implemented") }
+    public var downloads: any EngineDownloads { fatalError("not implemented") }
+    public var extensions: (any EngineExtensions)? { nil }
+}
+
+public final class ChromiumBrowser: EngineBrowser {
+    public let sessionID: String
+    public let context: any EngineBrowserContext
+    public weak var window: NSWindow?
+    public weak var delegate: (any EngineBrowserDelegate)?
+    private var ownedWebContents: [ChromiumWebContents] = []
+
+    init(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
+        self.sessionID = sessionID
+        self.context = context
+        self.delegate = delegate
+        self.window = window
+    }
+
+    public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
+        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, configuration: configuration)
+        ownedWebContents.append(webContents)
+        return webContents
+    }
+    public func canRestoreWebContents(sessionID: String) -> Bool { false }
+    public func restoreWebContents(sessionID: String) -> (any EngineWebContents)? { nil }
+    public func takeOwnership(of webContents: any EngineWebContents) {
+        guard let webContents = webContents as? ChromiumWebContents, !ownedWebContents.contains(where: { $0 === webContents }) else { return }
+        ownedWebContents.append(webContents)
+    }
+    public func closeWebContents(_ webContents: any EngineWebContents) {
+        guard let index = ownedWebContents.firstIndex(where: { $0 === (webContents as AnyObject) }) else { return }
+        ownedWebContents.remove(at: index).discard()
+    }
+    public func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) {
+        ownedWebContents.forEach { $0.discard() }
+        ownedWebContents.removeAll()
+        completion(true)
+    }
+    public func allCookies(completion: @escaping ([EngineCookie]) -> Void) { completion([]) }
+    public func setCookie(_ cookie: EngineCookie, for url: URL) {}
+    public func removeCookie(named name: String, for url: URL) {}
+}
+
+/// A single CEF browser embedded in a container view hosted by the user interface.
+public final class ChromiumWebContents: NSObject, EngineWebContents {
+    public let engineKind: EngineKind = .chromium
+    public let sessionID: String
+    public let view: NSView
+    public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
+    public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
+    public var visibility: EngineWebContentsVisibility = .visible
+    public var zoomFactor: Double = 1
+    public private(set) var url: URL?
+    public private(set) var title = ""
+    public private(set) var isLoading = false
+    public private(set) var canGoBack = false
+    public private(set) var canGoForward = false
+    private var browser: ARCHCEFBrowser?
+    private var observers: [any EngineWebContentsNavigationObserver] = []
+    private var pendingURL: URL?
+    public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
+
+    init(sessionID: String, configuration: EngineWebContentsConfiguration) {
+        self.sessionID = sessionID
+        self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        self.view.wantsLayer = true
+        self.url = configuration.initialURL
+        super.init()
+        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", delegate: self)
+    }
+
+    public var favicon: NSImage? { nil }
+    public var loadProgress: Double { isLoading ? 0.5 : 1 }
+    public var themeColor: NSColor? { nil }
+    public var selectedText: String? { nil }
+    public var isFullscreen: Bool { false }
+    public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
+    public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.append(observer) }
+    public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.removeAll { $0 === observer } }
+    public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) { fatalError("not implemented") }
+    public func stopFind() {}
+    public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
+        browser?.executeJavaScript(script)
+        completion(.success(nil))
+    }
+    public func insertStylesheet(_ css: String, identifier: String) {
+        let escaped = css.replacingOccurrences(of: "`", with: "\\`")
+        browser?.executeJavaScript("(function(){var s=document.getElementById('arch-style-\(identifier)');if(!s){s=document.createElement('style');s.id='arch-style-\(identifier)';document.documentElement.appendChild(s);}s.textContent=`\(escaped)`;})();")
+    }
+    public func removeStylesheet(identifier: String) {
+        browser?.executeJavaScript("document.getElementById('arch-style-\(identifier)')?.remove();")
+    }
+    public func captureViewport(completion: @escaping (NSImage?) -> Void) { completion(nil) }
+    public func captureFullPage(completion: @escaping (NSImage?) -> Void) { completion(nil) }
+    public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) { fatalError("not implemented") }
+    public func print() { fatalError("not implemented") }
+    public func exitFullscreen() {}
+    public func discard() { browser?.close() }
+    public func clearSiteDataAndReload() { browser?.reloadIgnoringCache() }
+    public var devTools: (any EngineDevTools)? { nil }
+    public var thumbnails: (any EngineThumbnails)? { nil }
+
+    fileprivate func load(_ request: URLRequest) {
+        guard let target = request.url else { return }
+        browser?.loadURL(target.absoluteString)
+    }
+    fileprivate func reload() { browser?.reload() }
+    fileprivate func reloadWithoutCache() { browser?.reloadIgnoringCache() }
+    fileprivate func stop() { browser?.stopLoading() }
+    fileprivate func goBack() { browser?.goBack() }
+    fileprivate func goForward() { browser?.goForward() }
+}
+
+extension ChromiumWebContents: ARCHCEFBrowserDelegate {
+    public func cefBrowserDidCreateView() {}
+    public func cefBrowserDidChangeTitle(_ title: String) {
+        self.title = title
+        uiDelegate?.webContentsDidChangeTitle(self)
+    }
+    public func cefBrowserDidChangeURL(_ url: String) {
+        self.url = URL(string: url)
+        uiDelegate?.webContentsDidChangeURL(self)
+    }
+    public func cefBrowserDidChangeLoadingState(_ isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
+        self.isLoading = isLoading
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
+        uiDelegate?.webContentsDidChangeLoadingState(self)
+    }
+    public func cefBrowserDidRequestPopup(withURL url: String) {
+        let popup = ChromiumWebContents(sessionID: UUID().uuidString, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
+        uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
+    }
+    public func cefBrowserDidClose() {
+        uiDelegate?.webContentsDidClose(self)
+    }
+}
+
+public final class ChromiumNavigationController: EngineNavigationController {
+    unowned let webContents: ChromiumWebContents
+
+    init(webContents: ChromiumWebContents) {
+        self.webContents = webContents
+    }
+
+    public var backForwardList: any EngineBackForwardList { fatalError("not implemented") }
+    public func load(_ request: URLRequest) { webContents.load(request) }
+    public func reload() { webContents.reload() }
+    public func reloadWithoutCache() { webContents.reloadWithoutCache() }
+    public func stop() { webContents.stop() }
+    public func goBack() { webContents.goBack() }
+    public func goForward() { webContents.goForward() }
+    public func go(to item: any EngineBackForwardListItem) { fatalError("not implemented") }
+}
