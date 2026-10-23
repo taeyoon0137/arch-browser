@@ -102,6 +102,8 @@ public protocol EngineWebContents: AnyObject {
     func print()
     func exitFullscreen()
     func discard()
+    /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.
+    var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
     func tryToClose(completion: @escaping (Bool) -> Void)
     func clearSiteDataAndReload()

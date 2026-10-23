@@ -302,6 +302,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
     public func exitFullscreen() { webView.closeAllMediaPresentations() }
     public func discard() { webView.stopLoading() }
+    /// A `WKDownload` continues after its web view closes.
+    public var closingStopsDownloads: Bool { false }
     /// WebKit has no public way to run `beforeunload` handlers.
     public func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
     public func clearSiteDataAndReload() { fatalError("skeleton") }

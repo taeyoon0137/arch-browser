@@ -81,6 +81,8 @@ public final class BrowserSession: ObservableObject {
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. They close once the engine creates the download.
     private var downloadOnlyTabIDs: Set<UUID> = []
+    /// Pages of closed tabs whose downloads would stop if the pages closed, as on Chromium. Each stays open without a tab, on a blank page, until no download is in progress or paused.
+    private var downloadPages: [(engine: EngineKind, webContents: any EngineWebContents)] = []
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert)?
@@ -325,6 +327,8 @@ public final class BrowserSession: ObservableObject {
 
     /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay.
     public func requestCloseTab(_ tab: Tab) {
+        // Chromium runs those handlers only by closing the page, which would stop its downloads, so such a tab closes at once and its page stays open without it.
+        guard !tab.webContents.closingStopsDownloads else { return closeTab(tab) }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
             guard closing, let self, let tab else { return }
             self.closeTab(tab)
@@ -337,7 +341,12 @@ public final class BrowserSession: ObservableObject {
         cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
-        runtimes[tab.engineKind]?.browser.closeWebContents(tab.webContents)
+        if tab.webContents.closingStopsDownloads {
+            tab.webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
+            downloadPages.append((tab.engineKind, tab.webContents))
+        } else {
+            runtimes[tab.engineKind]?.browser.closeWebContents(tab.webContents)
+        }
         if remember {
             closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
@@ -743,14 +752,23 @@ extension BrowserSession: EngineDownloadsDelegate {
         }
     }
 
+    private func closeDownloadPagesIfIdle() {
+        guard !downloadPages.isEmpty, !downloads.contains(where: { $0.state == .inProgress || $0.state == .paused }) else { return }
+        let pages = downloadPages
+        downloadPages.removeAll()
+        for page in pages { runtimes[page.engine]?.browser.closeWebContents(page.webContents) }
+    }
+
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
         objectWillChange.send()
         self.downloads.first { $0.id == item.id }?.refresh()
+        closeDownloadPagesIfIdle()
     }
 
     public func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem) {
         self.downloads.removeAll { $0.id == item.id }
+        closeDownloadPagesIfIdle()
     }
 
     /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask.

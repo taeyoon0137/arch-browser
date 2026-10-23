@@ -906,6 +906,15 @@ private:
     return download;
 }
 
+- (BOOL)hasDownloadsInProgress {
+    for (ARCHCEFDownload *download in _downloads.allValues) {
+        if (download.state == ARCHCEFDownloadStateInProgress) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (void)handleBeforeDownload:(ARCHCEFDownload *)download
                suggestedName:(NSString *)suggestedName
                     decision:(void (^)(NSString *_Nullable, BOOL))decision {

@@ -121,6 +121,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
                                url:(NSString *)url
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;
 @property (nonatomic, readonly, nullable) NSView *browserView;
+/// Whether a download this browser started is still in progress. CEF stops such downloads when the browser closes.
+@property (nonatomic, readonly) BOOL hasDownloadsInProgress;
 @property (nonatomic, readonly) BOOL isLoading;
 @property (nonatomic, readonly) BOOL canGoBack;
 @property (nonatomic, readonly) BOOL canGoForward;

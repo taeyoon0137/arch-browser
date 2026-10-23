@@ -253,6 +253,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func print() { browser?.print() }
     public func exitFullscreen() {}
     public func discard() { browser?.close() }
+    public var closingStopsDownloads: Bool { browser?.hasDownloadsInProgress == true }
     public func tryToClose(completion: @escaping (Bool) -> Void) {
         guard let browser else { return completion(true) }
         browser.tryClose(completion: completion)
