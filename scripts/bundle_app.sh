@@ -62,15 +62,17 @@ write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
-# Build the icon set from the 1024-pixel symbol. Each size appears at 1x and 2x, as `iconutil` requires.
+# Build the icon set from the 1024-pixel symbol. `opaque_icon.swift` fills its transparent corners so that macOS clips it to the system shape instead of placing it on a gray plate. Each size appears at 1x and 2x, as `iconutil` requires.
 ICON_TEMP="$(mktemp -d)"
 trap 'rm -rf "$ICON_TEMP"' EXIT
+ICON_OPAQUE="$ICON_TEMP/icon.png"
+swift "$ROOT/scripts/opaque_icon.swift" "$ICON_SOURCE" "$ICON_OPAQUE"
 ICONSET="$ICON_TEMP/Arch.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
-  sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z "$size" "$size" "$ICON_OPAQUE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
-  sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  sips -z "$double" "$double" "$ICON_OPAQUE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Arch.icns"
 

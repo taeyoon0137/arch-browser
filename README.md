@@ -95,7 +95,7 @@ git config core.hooksPath .githooks
 | Command | Description |
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. |
-| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, and the app icon. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, and the app icon. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 
 <a id="repository-structure"></a>
@@ -125,6 +125,7 @@ arch-browser
 │   └── readme-hero.svg             # Generated hero SVG
 ├── scripts/
 │   ├── bundle_app.sh               # Assembles build/Arch.app
+│   ├── opaque_icon.swift           # Fills the icon's corners for the system icon shape
 │   ├── readme_update.sh            # README generator
 │   └── setup_cef.sh                # Downloads the pinned CEF distribution
 ├── .gitattributes                  # Line ending and attribute rules
