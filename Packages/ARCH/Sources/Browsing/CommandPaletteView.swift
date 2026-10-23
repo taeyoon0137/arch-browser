@@ -17,8 +17,10 @@ struct CommandPaletteView: View {
         }.prefix(5))
     }
 
+    /// Pages that share a title and host, such as the steps of a sign-in flow, appear once.
     private var historySuggestions: [HistoryEntry] {
-        HistoryStore.shared.suggestions(for: text, limit: 5)
+        var seen = Set<String>()
+        return Array(HistoryStore.shared.suggestions(for: text, limit: 15).filter { seen.insert("\($0.title)\u{1F}\($0.url.host ?? "")").inserted }.prefix(5))
     }
 
     private var actionLabel: String {
@@ -94,6 +96,7 @@ struct PaletteRow: View {
         .padding(.horizontal, 16)
         .frame(height: 36)
         .contentShape(Rectangle())
+        .modifier(PaletteRowHighlight(isPrimary: isPrimary))
     }
 }
 
@@ -115,5 +118,20 @@ struct PaletteTabRow: View {
         .padding(.horizontal, 16)
         .frame(height: 36)
         .contentShape(Rectangle())
+        .modifier(PaletteRowHighlight())
+    }
+}
+
+/// Highlights a row under the pointer. The primary row, which Return opens, keeps an accent highlight.
+struct PaletteRowHighlight: ViewModifier {
+    var isPrimary = false
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isPrimary ? Color.accentColor.opacity(isHovering ? 0.24 : 0.16) : Color.primary.opacity(isHovering ? 0.07 : 0))
+                .padding(.horizontal, 6))
+            .onHover { isHovering = $0 }
     }
 }

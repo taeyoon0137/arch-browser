@@ -1,4 +1,5 @@
-// Main window content. The current space's tint fills the window. The sidebar sits over the tint and contains navigation, the address field, favorites, the current space's tabs, and the space switcher. The page fills the remaining space with nothing above it.
+// Main window content. The system's translucent window material fills the window with a faint wash of the current space's tint. The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs, and the space switcher. The page fills the remaining space with nothing above it.
+import AppKit
 import ARCHEngine
 import SwiftUI
 
@@ -18,6 +19,8 @@ public struct BrowserWindowView: View {
                 }
                 // When the sidebar is hidden, the page starts below the window buttons.
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
+                    .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.12), radius: 2, y: 1))
+                    .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
                     .padding(EdgeInsets(top: session.isSidebarVisible ? 8 : 38, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
             }
             if session.isFindBarVisible {
@@ -38,16 +41,61 @@ public struct BrowserWindowView: View {
     }
 }
 
-/// Uses a soft gradient of the space's tint over the window background to keep the interface legible in light and dark appearances.
+/// The rounded frame of the page. `WebContentsHostView` clips the engine's view with the same radius.
+struct PageFrameShape: InsettableShape {
+    static let cornerRadius: CGFloat = 8
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: Self.cornerRadius - insetAmount, style: .continuous).path(in: rect.insetBy(dx: insetAmount, dy: insetAmount))
+    }
+
+    func inset(by amount: CGFloat) -> PageFrameShape {
+        var shape = self
+        shape.insetAmount += amount
+        return shape
+    }
+}
+
+/// Shows the system's translucent window material, the one Apple's own sidebars use, under a faint wash of the space's tint.
 struct SpaceBackgroundView: View {
     let tint: Color
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            LinearGradient(colors: [tint.opacity(0.5), tint.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            WindowMaterialView()
+            LinearGradient(colors: [tint.opacity(0.08), tint.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         .animation(.easeInOut(duration: 0.25), value: tint)
+    }
+}
+
+/// Blends with what lies behind the window and turns opaque while the window is inactive, as the system's sidebars do.
+struct WindowMaterialView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color.
+enum SidebarFill {
+    case field, hover, selected
+
+    func color(in scheme: ColorScheme) -> Color {
+        switch (self, scheme) {
+        case (.field, .dark): return .white.opacity(0.07)
+        case (.field, _): return .black.opacity(0.05)
+        case (.hover, .dark): return .white.opacity(0.05)
+        case (.hover, _): return .black.opacity(0.04)
+        case (.selected, .dark): return .white.opacity(0.13)
+        case (.selected, _): return .white.opacity(0.8)
+        }
     }
 }
 
@@ -75,7 +123,7 @@ struct SidebarView: View {
             if let tab = session.selectedTab {
                 SelectedTabHeaderView(session: session, tab: tab)
             } else {
-                SidebarIconButton(symbol: "sidebar.left", action: session.toggleSidebar)
+                SidebarIconButton(symbol: "sidebar.left", label: "Hide Sidebar", action: session.toggleSidebar)
             }
             if !session.favorites.isEmpty {
                 FavoritesGridView(session: session)
@@ -98,29 +146,41 @@ struct SelectedTabHeaderView: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SidebarIconButton(symbol: "sidebar.left", action: session.toggleSidebar)
+            SidebarIconButton(symbol: "sidebar.left", label: "Hide Sidebar", action: session.toggleSidebar)
             Spacer()
-            SidebarIconButton(symbol: "chevron.left", action: session.goBack).disabled(!tab.canGoBack)
-            SidebarIconButton(symbol: "chevron.right", action: session.goForward).disabled(!tab.canGoForward)
-            SidebarIconButton(symbol: "arrow.clockwise", action: session.reload)
+            SidebarIconButton(symbol: "chevron.left", label: "Back", action: session.goBack).disabled(!tab.canGoBack)
+            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: session.goForward).disabled(!tab.canGoForward)
+            if tab.isLoading {
+                SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: session.stopLoading)
+            } else {
+                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: session.reload)
+            }
         }
         AddressPillView(session: session, tab: tab)
     }
 }
 
+/// A borderless symbol button that shows a soft highlight under the pointer. `label` names it in its tooltip and for VoiceOver.
 struct SidebarIconButton: View {
     let symbol: String
+    let label: String
     let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
                 .frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .onHover { isHovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -128,27 +188,33 @@ struct SidebarIconButton: View {
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
+    @Environment(\.colorScheme) private var colorScheme
 
     private var host: String {
-        tab.url?.host?.replacingOccurrences(of: "www.", with: "") ?? "Search or enter address"
+        guard let host = tab.url?.host else { return "Search or enter address" }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: tab.isLoading ? "arrow.triangle.2.circlepath" : (tab.url?.scheme == "https" ? "lock.fill" : "globe"))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Image(systemName: tab.url?.scheme == "https" ? "lock.fill" : "globe")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
             Text(host)
                 .lineLimit(1)
+                .truncationMode(.middle)
                 .foregroundStyle(tab.url == nil ? .secondary : .primary)
             Spacer(minLength: 0)
         }
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(nsColor: .controlBackgroundColor).opacity(0.45)))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
         .contentShape(Rectangle())
         .onTapGesture { session.showCommandPalette(.editCurrent) }
+        .help(tab.url?.absoluteString ?? "")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -173,11 +239,14 @@ struct FavoritesGridView: View {
 struct FavoriteTileView: View {
     let favorite: Favorite
     let isActive: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
+    @State private var isHovering = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor).opacity(isActive ? 0.85 : 0.45))
+            .fill((isActive ? SidebarFill.selected : SidebarFill.field).color(in: colorScheme))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
             .aspectRatio(1.5, contentMode: .fit)
             .overlay {
                 if let icon {
@@ -193,7 +262,11 @@ struct FavoriteTileView: View {
                 }
             }
             .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
             .help(favorite.title)
+            .accessibilityElement()
+            .accessibilityLabel(favorite.title)
+            .accessibilityAddTraits(.isButton)
             .onAppear {
                 guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
                 FaviconLoader.load(url) { icon = $0 }
@@ -234,15 +307,22 @@ struct SpaceTabsView: View {
                 }
             }
         }
+        .scrollIndicators(.never)
     }
 }
 
 struct TabRowView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     private var isSelected: Bool { tab.id == session.selectedTabID }
+
+    private var fill: Color {
+        if isSelected { return SidebarFill.selected.color(in: colorScheme) }
+        return isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -253,20 +333,15 @@ struct TabRowView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if isHovering {
-                Button(action: { session.closeTab(tab) }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                TabCloseButton { session.closeTab(tab) }
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.85) : (isHovering ? Color(nsColor: .controlBackgroundColor).opacity(0.3) : Color.clear)))
-        .shadow(color: .black.opacity(isSelected ? 0.06 : 0), radius: 2, y: 1)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(fill))
+        // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
+        .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
         .onTapGesture { session.selectedTabID = tab.id }
         .onHover { isHovering = $0 }
@@ -276,6 +351,28 @@ struct TabRowView: View {
             Divider()
             Button("Close Tab") { session.closeTab(tab) }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+struct TabCloseButton: View {
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.primary.opacity(isHovering ? 0.1 : 0)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .onHover { isHovering = $0 }
+        .help("Close Tab")
+        .accessibilityLabel("Close Tab")
     }
 }
 
@@ -284,9 +381,9 @@ struct TabIconView: View {
 
     var body: some View {
         if tab.isLoading {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
         } else if let favicon = tab.favicon {
             Image(nsImage: favicon)
                 .resizable()
@@ -302,6 +399,8 @@ struct TabIconView: View {
 
 struct NewTabButton: View {
     let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
@@ -315,10 +414,12 @@ struct NewTabButton: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -339,15 +440,16 @@ struct SpaceSwitcherView: View {
                 }
                 .buttonStyle(.plain)
                 .help(space.name)
+                .accessibilityLabel(space.name)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
             }
             Spacer(minLength: 0)
-            SidebarIconButton(symbol: session.downloads.contains(where: { $0.state == .inProgress }) ? "arrow.down.circle.fill" : "arrow.down.circle", action: session.toggleDownloadsPopover)
-                .help("Downloads")
+            SidebarIconButton(symbol: session.downloads.contains(where: { $0.state == .inProgress }) ? "arrow.down.circle.fill" : "arrow.down.circle",
+                              label: "Downloads", action: session.toggleDownloadsPopover)
                 .popover(isPresented: $session.isDownloadsPopoverVisible, arrowEdge: .top) {
                     DownloadsListView(session: session)
                 }
-            SidebarIconButton(symbol: "plus", action: session.addSpace)
-                .help("New Space")
+            SidebarIconButton(symbol: "plus", label: "New Space", action: session.addSpace)
         }
     }
 }

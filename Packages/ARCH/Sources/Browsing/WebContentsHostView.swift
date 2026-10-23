@@ -8,7 +8,7 @@ struct WebContentsHostView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.cornerRadius = 8
+        container.layer?.cornerRadius = PageFrameShape.cornerRadius
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = true
         return container

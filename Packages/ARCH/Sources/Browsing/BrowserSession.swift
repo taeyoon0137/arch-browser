@@ -422,6 +422,7 @@ public final class BrowserSession: ObservableObject {
     public func goBack() { selectedTab?.webContents.navigationController.goBack() }
     public func goForward() { selectedTab?.webContents.navigationController.goForward() }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
+    public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
     public func focusCommandBar() { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
 

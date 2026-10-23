@@ -117,13 +117,13 @@ struct DownloadRowView: View {
             }
             Spacer(minLength: 0)
             if entry.state == .inProgress {
-                SidebarIconButton(symbol: "pause.circle", action: entry.item.pause)
-                SidebarIconButton(symbol: "xmark.circle", action: entry.item.cancel)
+                SidebarIconButton(symbol: "pause.circle", label: "Pause", action: entry.item.pause)
+                SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
             } else if entry.state == .paused || entry.state == .failed {
-                SidebarIconButton(symbol: "play.circle", action: entry.item.resume)
-                SidebarIconButton(symbol: "xmark.circle", action: entry.item.cancel)
+                SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
+                SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
             } else if entry.state == .completed, let path = entry.targetPath {
-                SidebarIconButton(symbol: "magnifyingglass.circle") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+                SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
             }
         }
         .padding(6)
