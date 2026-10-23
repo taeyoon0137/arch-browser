@@ -5,23 +5,29 @@ import SwiftUI
 
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
+    @State private var windowButtons = WindowButtonMetrics()
 
     public init(session: BrowserSession) {
         self.session = session
+    }
+
+    /// When the sidebar is hidden, the page starts below the window buttons, or at the margin in full screen.
+    private var pageTopInset: CGFloat {
+        guard !session.isSidebarVisible, windowButtons.trailingEdge != nil else { return SidebarView.inset }
+        return windowButtons.centerY + SidebarTopRow.height / 2 + SidebarView.inset
     }
 
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
                 if session.isSidebarVisible {
-                    SidebarView(session: session)
-                        .frame(width: 250)
+                    SidebarView(session: session, windowButtons: windowButtons)
+                        .frame(width: SidebarView.width)
                 }
-                // When the sidebar is hidden, the page starts below the window buttons.
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
-                    .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.12), radius: 2, y: 1))
+                    .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
-                    .padding(EdgeInsets(top: session.isSidebarVisible ? 8 : 38, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
+                    .padding(EdgeInsets(top: pageTopInset, leading: session.isSidebarVisible ? 0 : SidebarView.inset, bottom: SidebarView.inset, trailing: SidebarView.inset))
             }
             if session.isFindBarVisible {
                 FindBarView(session: session)
@@ -36,14 +42,15 @@ public struct BrowserWindowView: View {
             }
         }
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
+        .background(WindowButtonsReader { windowButtons = $0 })
         .ignoresSafeArea()
         .frame(minWidth: 800, minHeight: 500)
     }
 }
 
-/// The rounded frame of the page. `WebContentsHostView` clips the engine's view with the same radius.
+/// The rounded frame of the page, concentric with the window corner 6 points away. `WebContentsHostView` clips the engine's view with the same radius.
 struct PageFrameShape: InsettableShape {
-    static let cornerRadius: CGFloat = 8
+    static let cornerRadius: CGFloat = 10
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
@@ -72,15 +79,37 @@ struct SpaceBackgroundView: View {
 
 /// Blends with what lies behind the window and turns opaque while the window is inactive, as the system's sidebars do.
 struct WindowMaterialView: NSViewRepresentable {
+    var material = NSVisualEffectView.Material.sidebar
+    var cornerRadius: CGFloat = 0
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .sidebar
         view.blendingMode = .behindWindow
         view.state = .followsWindowActiveState
+        view.wantsLayer = true
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = true
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.layer?.cornerRadius = cornerRadius
+    }
+}
+
+/// Fills the page frame: the window background under a page, or a blurred view of what lies behind the window when no tab is open.
+struct PageBackgroundView: View {
+    let isEmpty: Bool
+
+    var body: some View {
+        if isEmpty {
+            WindowMaterialView(material: .popover, cornerRadius: PageFrameShape.cornerRadius)
+        } else {
+            PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+        }
+    }
 }
 
 /// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color.
@@ -114,28 +143,77 @@ extension SpaceTint {
 }
 
 struct SidebarView: View {
+    static let width: CGFloat = 250
+    /// The margin between the sidebar's edges and its controls.
+    static let inset: CGFloat = 6
+    /// Spring that settles the space pages after a swipe or a change of space.
+    static let pageSpring = Animation.spring(response: 0.35, dampingFraction: 0.88)
+
     @ObservedObject var session: BrowserSession
+    let windowButtons: WindowButtonMetrics
+    /// How far the space pages follow the fingers during a swipe, in points.
+    @State private var swipeTranslation: CGFloat = 0
+    @State private var swipePassesHalfway = false
+
+    private var currentIndex: Int {
+        session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+    }
+
+    /// Limits a swipe to one page and resists past the first and last spaces.
+    private func pageTranslation(for travel: CGFloat) -> CGFloat {
+        let hasPage = travel > 0 ? currentIndex > 0 : currentIndex < session.spaces.count - 1
+        return hasPage ? max(-Self.width, min(Self.width, travel)) : travel / 4
+    }
+
+    private func swipeChanged(_ travel: CGFloat) {
+        swipeTranslation = pageTranslation(for: travel)
+        let passesHalfway = abs(swipeTranslation) > Self.width / 2
+        if passesHalfway != swipePassesHalfway {
+            swipePassesHalfway = passesHalfway
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
+    }
+
+    /// Moves to the neighboring space when the swipe went far or fast enough, otherwise returns to the current one.
+    private func swipeEnded(_ travel: CGFloat, velocity: CGFloat) {
+        let translation = pageTranslation(for: travel)
+        let isFling = abs(velocity) > 300
+        var target = currentIndex
+        if translation < 0, translation < -Self.width * 0.3 || (isFling && velocity < 0), currentIndex < session.spaces.count - 1 {
+            target += 1
+        } else if translation > 0, translation > Self.width * 0.3 || (isFling && velocity > 0), currentIndex > 0 {
+            target -= 1
+        }
+        swipePassesHalfway = false
+        withAnimation(Self.pageSpring) {
+            swipeTranslation = 0
+            if target != currentIndex { session.switchToSpace(session.spaces[target].id) }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Leave space for the window buttons because the sidebar extends under the title bar.
-            Color.clear.frame(height: 30)
             if let tab = session.selectedTab {
-                SelectedTabHeaderView(session: session, tab: tab)
+                SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
             } else {
-                SidebarIconButton(symbol: "sidebar.left", label: "Hide Sidebar", action: session.toggleSidebar)
+                // Without a tab the controls stay in place; the address pill opens a new tab.
+                SidebarTopRow(session: session, windowButtons: windowButtons)
+                AddressPillView(session: session, url: nil)
             }
             if !session.favorites.isEmpty {
                 FavoritesGridView(session: session)
                     .padding(.top, 6)
             }
-            SpaceTabsView(session: session)
+            // The pages reach the sidebar's edges so that they slide in from outside it.
+            SpacePagesView(session: session, translation: swipeTranslation)
+                .padding(.horizontal, -Self.inset)
                 .padding(.top, 6)
             Spacer(minLength: 0)
             SpaceSwitcherView(session: session)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
+        .background(SpaceSwipeView(onChange: swipeChanged, onEnd: swipeEnded))
     }
 }
 
@@ -143,20 +221,38 @@ struct SidebarView: View {
 struct SelectedTabHeaderView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
+    let windowButtons: WindowButtonMetrics
+
+    var body: some View {
+        SidebarTopRow(session: session, windowButtons: windowButtons, tab: tab)
+        AddressPillView(session: session, url: tab.url)
+    }
+}
+
+/// The sidebar button and the navigation buttons, on the line of the window's traffic light buttons. In full screen, where those buttons hide, the sidebar button takes their place.
+struct SidebarTopRow: View {
+    static let height: CGFloat = 28
+
+    @ObservedObject var session: BrowserSession
+    let windowButtons: WindowButtonMetrics
+    var tab: Tab?
 
     var body: some View {
         HStack(spacing: 4) {
             SidebarIconButton(symbol: "sidebar.left", label: "Hide Sidebar", action: session.toggleSidebar)
             Spacer()
-            SidebarIconButton(symbol: "chevron.left", label: "Back", action: session.goBack).disabled(!tab.canGoBack)
-            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: session.goForward).disabled(!tab.canGoForward)
-            if tab.isLoading {
+            SidebarIconButton(symbol: "chevron.left", label: "Back", action: session.goBack).disabled(tab?.canGoBack != true)
+            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: session.goForward).disabled(tab?.canGoForward != true)
+            if tab?.isLoading == true {
                 SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: session.stopLoading)
             } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: session.reload)
+                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: session.reload).disabled(tab == nil)
             }
         }
-        AddressPillView(session: session, tab: tab)
+        .frame(height: Self.height)
+        // The sidebar's margin comes on top of this, so the row starts one margin past the last traffic light.
+        .padding(.leading, windowButtons.trailingEdge ?? 0)
+        .padding(.top, max(0, windowButtons.centerY - Self.height / 2))
     }
 }
 
@@ -184,37 +280,43 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host. Clicking it opens the command palette with the full address.
+/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
-    @ObservedObject var tab: Tab
+    let url: URL?
     @Environment(\.colorScheme) private var colorScheme
 
     private var host: String {
-        guard let host = tab.url?.host else { return "Search or enter address" }
+        guard let host = url?.host else { return "Search or enter address" }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
+    private var symbol: String {
+        guard let url else { return "magnifyingglass" }
+        return url.scheme == "https" ? "lock.fill" : "globe"
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: tab.url?.scheme == "https" ? "lock.fill" : "globe")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text(host)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(tab.url == nil ? .secondary : .primary)
-            Spacer(minLength: 0)
+        Button(action: session.focusCommandBar) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                Text(host)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(url == nil ? .secondary : .primary)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+            .contentShape(Rectangle())
         }
-        .font(.system(size: 13))
-        .padding(.horizontal, 10)
-        .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
-        .contentShape(Rectangle())
-        .onTapGesture { session.showCommandPalette(.editCurrent) }
-        .help(tab.url?.absoluteString ?? "")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .buttonStyle(.plain)
+        .help(url?.absoluteString ?? "")
+        .accessibilityLabel(host)
     }
 }
 
@@ -274,12 +376,37 @@ struct FavoriteTileView: View {
     }
 }
 
-/// Shows the current space's pinned tabs first, followed by the new tab row and the remaining tabs.
-struct SpaceTabsView: View {
+/// Lays out one page per space side by side and shows the current space's page. During a swipe the pages follow the fingers; a change of space slides them into place.
+struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
+    let translation: CGFloat
 
     var body: some View {
-        let space = session.currentSpace
+        let index = session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+        HStack(spacing: 0) {
+            ForEach(session.spaces) { space in
+                let isCurrent = space.id == session.currentSpaceID
+                SpaceTabsView(session: session, space: space)
+                    .padding(.horizontal, SidebarView.inset)
+                    .frame(width: SidebarView.width)
+                    // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar.
+                    .allowsHitTesting(isCurrent)
+                    .accessibilityHidden(!isCurrent)
+            }
+        }
+        .offset(x: -CGFloat(index) * SidebarView.width + translation)
+        .frame(width: SidebarView.width, alignment: .leading)
+        .clipped()
+        .animation(SidebarView.pageSpring, value: session.currentSpaceID)
+    }
+}
+
+/// Shows a space's pinned tabs first, followed by the new tab row and the remaining tabs.
+struct SpaceTabsView: View {
+    @ObservedObject var session: BrowserSession
+    let space: Space
+
+    var body: some View {
         let pinned = session.tabs(in: space.id, pinned: true)
         let open = session.tabs(in: space.id, pinned: false)
         ScrollView {

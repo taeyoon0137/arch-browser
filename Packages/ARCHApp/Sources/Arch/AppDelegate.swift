@@ -44,6 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         window.title = "Arch"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        // An empty compact toolbar makes the title bar taller, which lowers the traffic light buttons onto the sidebar's top row.
+        window.toolbar = NSToolbar(identifier: "Main")
+        window.toolbarStyle = .unifiedCompact
+        window.titlebarSeparatorStyle = .none
+        // Full screen hides the traffic lights, so the toolbar would only cover the sidebar's top row there.
+        NotificationCenter.default.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+            self?.window.toolbar?.isVisible = false
+        }
+        // AppKit restores the toolbar's full screen state while it exits, so the toolbar returns once the window is back.
+        NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+            self?.window.toolbar?.isVisible = true
+        }
         window.isMovableByWindowBackground = true
         let hostingController = NSHostingController(rootView: BrowserWindowView(session: session))
         hostingController.sizingOptions = []
