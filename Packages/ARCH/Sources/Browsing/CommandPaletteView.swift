@@ -66,7 +66,7 @@ struct CommandPaletteView: View {
             }
             .padding(.bottom, 6)
             .frame(width: 560)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
             .padding(.top, 120)
             .onAppear {
@@ -129,7 +129,7 @@ struct PaletteRowHighlight: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(isPrimary ? Color.accentColor.opacity(isHovering ? 0.24 : 0.16) : Color.primary.opacity(isHovering ? 0.07 : 0))
                 .padding(.horizontal, 6))
             .onHover { isHovering = $0 }

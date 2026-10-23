@@ -173,7 +173,7 @@ struct SidebarIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
                 .frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -209,7 +209,7 @@ struct AddressPillView: View {
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
         .contentShape(Rectangle())
         .onTapGesture { session.showCommandPalette(.editCurrent) }
         .help(tab.url?.absoluteString ?? "")
@@ -244,9 +244,9 @@ struct FavoriteTileView: View {
     @State private var isHovering = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: 13, style: .continuous)
             .fill((isActive ? SidebarFill.selected : SidebarFill.field).color(in: colorScheme))
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
             .aspectRatio(1.5, contentMode: .fit)
             .overlay {
                 if let icon {
@@ -339,7 +339,7 @@ struct TabRowView: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(fill))
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(fill))
         // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
@@ -414,7 +414,7 @@ struct NewTabButton: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+            .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

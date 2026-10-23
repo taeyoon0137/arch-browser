@@ -38,8 +38,8 @@ struct FindBarView: View {
         .padding(.horizontal, 12)
         .frame(width: 380, height: 40)
         // A solid background: a material over the engine's view cannot sample it, which leaves the label and buttons nearly invisible.
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFocused = true } }
         .onChange(of: session.findBarFocusRequests) { _ in isFocused = true }
