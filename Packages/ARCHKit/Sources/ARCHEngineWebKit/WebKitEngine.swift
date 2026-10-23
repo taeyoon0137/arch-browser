@@ -232,11 +232,29 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         webView.takeSnapshot(with: nil) { image, _ in completion(image) }
     }
-    public func captureFullPage(completion: @escaping (NSImage?) -> Void) { fatalError("skeleton") }
+    /// Measures the document, then snapshots that whole area from its top-left corner instead of the current scroll position.
+    public func captureFullPage(completion: @escaping (NSImage?) -> Void) {
+        let script = "[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.scrollX, window.scrollY]"
+        webView.evaluateJavaScript(script) { [weak self] value, _ in
+            guard let self, let metrics = value as? [Double], metrics.count == 4 else { return completion(nil) }
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = CGRect(x: -metrics[2], y: -metrics[3], width: metrics[0], height: metrics[1])
+            self.webView.takeSnapshot(with: configuration) { image, _ in completion(image) }
+        }
+    }
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         webView.createPDF { completion($0) }
     }
-    public func print() { fatalError("skeleton") }
+    /// Runs the system print panel. The operation's view starts without a size, so it takes the page's bounds first.
+    public func print() {
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.view?.frame = webView.bounds
+        if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+    }
     public func exitFullscreen() { webView.closeAllMediaPresentations() }
     public func discard() { webView.stopLoading() }
     public func clearSiteDataAndReload() { fatalError("skeleton") }
@@ -272,12 +290,40 @@ public final class WebKitNavigationController: EngineNavigationController {
         self.webView = webView
     }
 
-    public var backForwardList: any EngineBackForwardList { fatalError("skeleton") }
+    public lazy var backForwardList: any EngineBackForwardList = WebKitBackForwardList(webView: webView)
     public func load(_ request: URLRequest) { webView.load(request) }
     public func reload() { webView.reload() }
     public func reloadWithoutCache() { webView.reloadFromOrigin() }
     public func stop() { webView.stopLoading() }
     public func goBack() { webView.goBack() }
     public func goForward() { webView.goForward() }
-    public func go(to item: any EngineBackForwardListItem) { fatalError("skeleton") }
+    public func go(to item: any EngineBackForwardListItem) {
+        guard let item = item as? WebKitBackForwardListItem else { return }
+        webView.go(to: item.item)
+    }
+}
+
+/// Reads the live `WKBackForwardList` on every access.
+final class WebKitBackForwardList: EngineBackForwardList {
+    let webView: WKWebView
+
+    init(webView: WKWebView) {
+        self.webView = webView
+    }
+
+    var backList: [any EngineBackForwardListItem] { webView.backForwardList.backList.map(WebKitBackForwardListItem.init) }
+    var forwardList: [any EngineBackForwardListItem] { webView.backForwardList.forwardList.map(WebKitBackForwardListItem.init) }
+    var currentItem: (any EngineBackForwardListItem)? { webView.backForwardList.currentItem.map(WebKitBackForwardListItem.init) }
+}
+
+/// A `WKBackForwardListItem` behind the engine item protocol. `go(to:)` unwraps it.
+final class WebKitBackForwardListItem: EngineBackForwardListItem {
+    let item: WKBackForwardListItem
+
+    init(_ item: WKBackForwardListItem) {
+        self.item = item
+    }
+
+    var url: URL { item.url }
+    var title: String { item.title ?? "" }
 }
