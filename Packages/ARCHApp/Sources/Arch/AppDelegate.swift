@@ -105,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
+        let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
+        downloadsItem.keyEquivalentModifierMask = [.command, .shift]
         let appearanceMenu = NSMenu(title: "Appearance")
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
             appearanceMenu.addItem(withTitle: title, action: #selector(setAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
@@ -168,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectLastTab() { session.selectLastTab() }
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
+    @objc private func toggleDownloads() { session.toggleDownloadsPopover() }
     @objc private func reload() { session.reload() }
     @objc private func showFindBar() { session.showFindBar() }
     @objc private func findNext() { session.findNext() }

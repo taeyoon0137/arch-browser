@@ -35,6 +35,9 @@ public final class BrowserSession: ObservableObject {
     }
     /// The last result for `findText`. `nil` while no search has finished.
     @Published public private(set) var findResult: EngineFindResult?
+    /// Every download the engine has reported, oldest first.
+    @Published public private(set) var downloads: [DownloadEntry] = []
+    @Published public var isDownloadsPopoverVisible = false
     /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
@@ -65,6 +68,8 @@ public final class BrowserSession: ObservableObject {
         closedTabs = snapshot?.closedTabs ?? []
         application.run()
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
+        context.downloads.delegate = self
+        downloads = context.downloads.items.map(DownloadEntry.init)
         restoreTabs(snapshot)
         observeChanges()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
@@ -340,6 +345,38 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    // MARK: Downloads
+
+    public func toggleDownloadsPopover() { isDownloadsPopoverVisible.toggle() }
+
+    public func removeDownload(_ entry: DownloadEntry) {
+        entry.item.remove()
+    }
+
+    public func clearFinishedDownloads() {
+        downloads.filter(\.isFinished).forEach { $0.item.remove() }
+    }
+
+    /// The folder from the profile preferences, or the user's Downloads folder.
+    private var downloadsDirectory: URL {
+        context.preferences.downloadFilePath
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+    }
+
+    /// Adds a counter to `filename` until no file in `directory` has that name.
+    static func uniqueDestination(for filename: String, in directory: URL) -> URL {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            counter += 1
+            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+        }
+        return candidate
+    }
+
     public func goBack() { selectedTab?.webContents.navigationController.goBack() }
     public func goForward() { selectedTab?.webContents.navigationController.goForward() }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
@@ -397,5 +434,41 @@ public enum CommandPaletteMode {
 extension BrowserSession: EngineBrowserDelegate {
     public func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool) {
         _ = adopt(webContents, spaceID: currentSpaceID, pinned: false, select: isActive)
+    }
+}
+
+extension BrowserSession: EngineDownloadsDelegate {
+    public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
+        self.downloads = items.map(DownloadEntry.init)
+    }
+
+    /// A new download opens the list so the user sees it start.
+    public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
+        self.downloads.append(DownloadEntry(item: item))
+        isDownloadsPopoverVisible = true
+    }
+
+    public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
+        self.downloads.first { $0.id == item.id }?.refresh()
+    }
+
+    public func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem) {
+        self.downloads.removeAll { $0.id == item.id }
+    }
+
+    /// Saves into the downloads folder under a free name, or asks with a save panel when the profile prefers that.
+    public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+        guard context.preferences.promptForDownloadPath else {
+            return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = defaultFilename
+        panel.directoryURL = downloadsDirectory
+        let finish = { (response: NSApplication.ModalResponse) in completion(response == .OK ? panel.url : nil) }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            panel.begin(completionHandler: finish)
+        }
     }
 }

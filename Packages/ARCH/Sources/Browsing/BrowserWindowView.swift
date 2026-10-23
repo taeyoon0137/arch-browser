@@ -322,7 +322,7 @@ struct NewTabButton: View {
     }
 }
 
-/// Shows one symbol per space at the bottom of the sidebar, with a button to add a space.
+/// Shows one symbol per space at the bottom of the sidebar, with buttons for the downloads list and for adding a space.
 struct SpaceSwitcherView: View {
     @ObservedObject var session: BrowserSession
 
@@ -341,6 +341,11 @@ struct SpaceSwitcherView: View {
                 .help(space.name)
             }
             Spacer(minLength: 0)
+            SidebarIconButton(symbol: session.downloads.contains(where: { $0.state == .inProgress }) ? "arrow.down.circle.fill" : "arrow.down.circle", action: session.toggleDownloadsPopover)
+                .help("Downloads")
+                .popover(isPresented: $session.isDownloadsPopoverVisible, arrowEdge: .top) {
+                    DownloadsListView(session: session)
+                }
             SidebarIconButton(symbol: "plus", action: session.addSpace)
                 .help("New Space")
         }
