@@ -1,10 +1,10 @@
-// The downloads list shows in a popover from the sidebar. Each row mirrors one engine download item and offers open, reveal, pause, resume, cancel, and remove.
+// The downloads list appears in a sidebar popover. Each row reflects one engine download item and offers open, reveal, pause, resume, cancel, and remove actions.
 import AppKit
 import ARCHEngine
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Publishes one engine download item's state for the list. The session refreshes it on each engine update.
+/// Publishes an engine download item's state for the downloads list. The session refreshes it with each engine update.
 public final class DownloadEntry: ObservableObject, Identifiable {
     public let id: String
     let item: any EngineDownloadItem

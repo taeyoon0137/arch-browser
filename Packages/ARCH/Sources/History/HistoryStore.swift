@@ -1,4 +1,4 @@
-// Records page visits in `history.sqlite` and answers address suggestions from them. The store uses the system SQLite library and serializes every access on one queue.
+// Records page visits in `history.sqlite` and uses them for address suggestions. The store uses the system SQLite library and runs every query serially on one queue.
 import Foundation
 import SQLite3
 
@@ -18,13 +18,13 @@ public struct HistoryEntry: Hashable, Identifiable {
 }
 
 public final class HistoryStore {
-    /// The store in the app's Application Support folder.
+    /// The history store in the app's Application Support folder.
     public static let shared = HistoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
 
     private let queue = DispatchQueue(label: "local.arch.history")
     private var database: OpaquePointer?
 
-    /// Opens or creates `history.sqlite` in `directory`. Every call is a no-op when the file cannot be opened.
+    /// Opens or creates `history.sqlite` in `directory`. All store operations are no-ops if the file cannot be opened.
     public init(directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = directory.appendingPathComponent("history.sqlite").path
@@ -42,7 +42,7 @@ public final class HistoryStore {
         sqlite3_close(database)
     }
 
-    /// Counts one visit. An empty title keeps the stored title.
+    /// Counts one visit and preserves the stored title if the supplied title is empty.
     public func record(_ url: URL, title: String) {
         queue.async {
             self.execute("INSERT INTO visits (url, title, visit_count, last_visit) VALUES (?1, ?2, 1, ?3) ON CONFLICT(url) DO UPDATE SET visit_count = visit_count + 1, last_visit = excluded.last_visit, title = CASE WHEN excluded.title = '' THEN visits.title ELSE excluded.title END",
@@ -50,7 +50,7 @@ public final class HistoryStore {
         }
     }
 
-    /// Entries whose URL or title contains `query`, most visited first. Returns nothing for an empty query.
+    /// Returns entries whose URL or title contains `query`, most visited first. Returns no entries for an empty query.
     public func suggestions(for query: String, limit: Int) -> [HistoryEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -61,7 +61,7 @@ public final class HistoryStore {
         }
     }
 
-    /// Entries visited at or after `date`, newest first.
+    /// Returns entries visited at or after `date`, newest first.
     public func entries(since date: Date) -> [HistoryEntry] {
         queue.sync {
             entries("SELECT url, title, visit_count, last_visit FROM visits WHERE last_visit >= ?1 ORDER BY last_visit DESC", bindings: [.double(date.timeIntervalSince1970)])

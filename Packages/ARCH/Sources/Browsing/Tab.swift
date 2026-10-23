@@ -22,7 +22,7 @@ public final class Tab: ObservableObject, Identifiable {
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
     var didClose: (() -> Void)?
-    /// The last page recorded in history, so a page counts once per navigation. Restored tabs start with their saved page here.
+    /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
 
     init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
@@ -53,7 +53,7 @@ extension Tab: EngineWebContentsUIDelegate {
         isLoading = webContents.isLoading
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
-        // A web page is recorded when its load finishes, when the title is usually known.
+        // Record a page when it finishes loading, when its title is usually known.
         if !isLoading, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             HistoryStore.shared.record(url, title: webContents.title)

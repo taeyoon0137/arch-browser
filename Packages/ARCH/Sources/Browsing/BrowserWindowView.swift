@@ -322,7 +322,7 @@ struct NewTabButton: View {
     }
 }
 
-/// Shows one symbol per space at the bottom of the sidebar, with buttons for the downloads list and for adding a space.
+/// Shows one symbol per space at the bottom of the sidebar, plus buttons to open the downloads list and add a space.
 struct SpaceSwitcherView: View {
     @ObservedObject var session: BrowserSession
 

@@ -17,7 +17,7 @@ public final class BrowserSession: ObservableObject {
         didSet {
             selectedTab?.lastActivatedAt = Date()
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
-            // A search belongs to one page, so switching tabs ends it.
+            // Switching tabs ends the search because it belongs to one page.
             if isFindBarVisible, oldValue != selectedTabID {
                 tabs.first { $0.id == oldValue }?.webContents.stopFind()
                 isFindBarVisible = false
@@ -25,20 +25,20 @@ public final class BrowserSession: ObservableObject {
             }
         }
     }
-    /// The downloads popover hangs off the sidebar, so hiding the sidebar closes it.
+    /// The downloads popover opens from the sidebar, so hiding the sidebar closes it.
     @Published public var isSidebarVisible = true {
         didSet { if !isSidebarVisible { isDownloadsPopoverVisible = false } }
     }
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     @Published public private(set) var isFindBarVisible = false
-    /// The text in the find bar. Each change searches the selected tab from its current match.
+    /// The text in the find bar. Each change searches the selected tab while the bar is visible.
     @Published public var findText = "" {
         didSet { if findText != oldValue { runFind(forward: true) } }
     }
     /// The last result for `findText`. `nil` while no search has finished.
     @Published public private(set) var findResult: EngineFindResult?
-    /// Every download the engine has reported, oldest first.
+    /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
     @Published public var isDownloadsPopoverVisible = false
     /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
@@ -324,7 +324,7 @@ public final class BrowserSession: ObservableObject {
         focusPage()
     }
 
-    /// Steps to the next match. Shows the bar when it is hidden so the user can see what is being found.
+    /// Moves to the next match and shows the find bar if hidden so the user can see the search.
     public func findNext() {
         if !isFindBarVisible { showFindBar() } else { runFind(forward: true) }
     }
@@ -342,7 +342,7 @@ public final class BrowserSession: ObservableObject {
             return
         }
         tab.webContents.find(text, forward: forward, matchCase: false) { [weak self] result in
-            // A result for text the user has already changed is dropped.
+            // Ignore results for text the user has since changed.
             guard let self, self.isFindBarVisible, self.findText == text else { return }
             self.findResult = result
         }
@@ -350,7 +350,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Downloads
 
-    /// The popover hangs off the sidebar, so a hidden sidebar is shown first.
+    /// Shows the sidebar first if hidden because the downloads popover opens from it.
     public func toggleDownloadsPopover() {
         if !isSidebarVisible { isSidebarVisible = true }
         isDownloadsPopoverVisible.toggle()
@@ -364,14 +364,14 @@ public final class BrowserSession: ObservableObject {
         downloads.filter(\.isFinished).forEach { $0.item.remove() }
     }
 
-    /// The folder from the profile preferences, or the user's Downloads folder.
+    /// The folder set in the profile preferences, falling back to the user's Downloads folder, then the temporary folder.
     private var downloadsDirectory: URL {
         context.preferences.downloadFilePath
             ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
     }
 
-    /// Adds a counter to `filename` until no file in `directory` has that name.
+    /// Adds a counter to `filename` until the name is unused in `directory`.
     static func uniqueDestination(for filename: String, in directory: URL) -> URL {
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
@@ -404,7 +404,7 @@ public final class BrowserSession: ObservableObject {
             }
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
-            // Loading a restored page is not a visit.
+            // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
             if index == snapshot.selectedTabIndex { selected = tab }
         }
@@ -451,13 +451,13 @@ extension BrowserSession: EngineDownloadsDelegate {
         self.downloads = items.map(DownloadEntry.init)
     }
 
-    /// A new download opens the list so the user sees it start. The list stays closed while the sidebar it hangs off is hidden.
+    /// A new download opens the downloads list so the user can see it start. The list stays closed when the sidebar it opens from is hidden.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         self.downloads.append(DownloadEntry(item: item))
         if isSidebarVisible { isDownloadsPopoverVisible = true }
     }
 
-    /// The sidebar icon and the Clear button read entry state through the session, so the session announces the change as well.
+    /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
         objectWillChange.send()
         self.downloads.first { $0.id == item.id }?.refresh()
@@ -467,7 +467,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         self.downloads.removeAll { $0.id == item.id }
     }
 
-    /// Saves into the downloads folder under a free name, or asks with a save panel when the profile prefers that.
+    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         guard context.preferences.promptForDownloadPath else {
             return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))

@@ -11,7 +11,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var session: BrowserSession!
     private var window: NSWindow!
-    /// URLs handed to the app before the session exists. They open once the window is up.
+    /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
 
@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Links from other apps open as new tabs. Before launch finishes they wait for the session.
+    /// Opens links from other apps in new tabs. Links received before launch finishes wait for the session.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let session else {
             pendingURLs += urls
@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark follows the stored value, which the Settings window can also change. Only an app bundle can become the default browser.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(setAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
@@ -225,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Default browser
 
-    /// A bare build product has no bundle, so the system cannot register it for URLs.
+    /// A bare build product has no app bundle, so the system cannot register it to handle URLs.
     private static var isRunningFromBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
     private static var isDefaultBrowser: Bool {
@@ -239,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "http") { _ in }
     }
 
-    /// Asks once per user, after the window is up. Skipped outside a bundle and when the app is already the default.
+    /// Prompts once per user after the window opens. Skips the prompt outside an app bundle or when the app is already the default browser.
     private func promptForDefaultBrowserIfNeeded() {
         let defaults = UserDefaults.standard
         guard Self.isRunningFromBundle, !defaults.bool(forKey: Self.askedDefaultBrowserKey), !Self.isDefaultBrowser else { return }

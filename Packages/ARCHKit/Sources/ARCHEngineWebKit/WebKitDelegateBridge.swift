@@ -139,12 +139,12 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: completionHandler)
     }
 
-    /// The UI delegate decides for the site. A grant also needs the system's camera or microphone permission for this app, which is requested before the page gets access. Geolocation has no public delegate callback on macOS; WebKit resolves it through the app's location authorization.
+    /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. WebKit handles geolocation through the app's location authorization.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         guard let delegate = owner.uiDelegate else { return decisionHandler(.prompt) }
         let types: [EnginePermissionType] = type == .camera ? [.camera] : type == .microphone ? [.microphone] : [.camera, .microphone]
         let mediaTypes: [AVMediaType] = types.map { $0 == .camera ? .video : .audio }
-        // A site is not asked when the system already refuses this app the device.
+        // Skip the site's permission request if the system already denies this app access to the device.
         let isRefusedBySystem = mediaTypes.contains { mediaType in
             let status = AVCaptureDevice.authorizationStatus(for: mediaType)
             return status == .denied || status == .restricted
@@ -157,7 +157,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    /// Asks the system for each media type in turn. Finishes on the main thread with `false` as soon as one is refused.
+    /// Requests system permission for each media type in turn. Completes on the main thread with `false` as soon as one is denied.
     private static func requestCaptureAccess(for mediaTypes: [AVMediaType], completion: @escaping (Bool) -> Void) {
         guard let mediaType = mediaTypes.first else { return completion(true) }
         AVCaptureDevice.requestAccess(for: mediaType) { granted in

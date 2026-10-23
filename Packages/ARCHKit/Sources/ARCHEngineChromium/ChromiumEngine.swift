@@ -47,7 +47,7 @@ public final class ChromiumApplication: EngineApplication {
         completion(.success(context))
     }
     private var rendererCrashCount = 0
-    /// Counts renderer process exits across every tab and reports the running total.
+    /// Counts renderer process exits across all tabs and reports the running total.
     func rendererDidCrash() {
         rendererCrashCount += 1
         delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
@@ -150,7 +150,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var pendingURL: URL?
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool)?
-    /// The page that last crashed. A second crash on the same page is not reloaded, so a crash loop cannot start.
+    /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
     private var lastCrashedURL: URL?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
@@ -282,7 +282,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidUpdate(_ download: ARCHCEFDownload) {
         context?.chromiumDownloads.update(download)
     }
-    /// The UI delegate decides for the site. Camera and microphone grants also need the system's permission for this app, which is requested before the page gets access.
+    /// The UI delegate decides whether to grant the site's request. Camera and microphone access also require the system's permission for this app, requested before the page gets access.
     public func cefBrowserDidRequestPermissions(_ permissions: ARCHCEFPermission, fromOrigin origin: String, decision: @escaping (Bool) -> Void) {
         let mapping: [(ARCHCEFPermission, EnginePermissionType)] = [(.camera, .camera), (.microphone, .microphone), (.screenCapture, .screenCapture), (.geolocation, .geolocation),
                                                                    (.notifications, .notifications), (.clipboard, .clipboard), (.midi, .midi)]
@@ -295,7 +295,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             Self.requestCaptureAccess(for: mediaTypes) { decision($0) }
         }
     }
-    /// Asks the system for each media type in turn. Finishes on the main thread with `false` as soon as one is refused.
+    /// Requests system permission for each media type in turn. Completes on the main thread with `false` as soon as one is denied.
     private static func requestCaptureAccess(for mediaTypes: [AVMediaType], completion: @escaping (Bool) -> Void) {
         guard let mediaType = mediaTypes.first else { return completion(true) }
         AVCaptureDevice.requestAccess(for: mediaType) { granted in
@@ -308,7 +308,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             }
         }
     }
-    /// Reports the crash, then loads the page again once. The page stays blank after a second crash on the same URL.
+    /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
     public func cefBrowserRenderProcessDidTerminate() {
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)

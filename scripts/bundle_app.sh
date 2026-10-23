@@ -14,7 +14,7 @@ VERSION="0.1.0"
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 
 write_plist() {
-  # `$1` is the output path. `$2` is the executable name. `$3` is the bundle identifier. `$4` is the user interface element flag (0/1). `$5` holds extra keys for the main app.
+  # Arguments: `$1` is the output path, `$2` the executable name, `$3` the bundle identifier, and `$4` the user interface element flag (0/1). `$5` holds extra keys for the main app.
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,7 +39,7 @@ ${5:-}
 PLIST
 }
 
-# The main app registers for web links so the system can offer it as the default browser. The usage descriptions are required before the system asks for the camera, microphone, or location on a page's behalf.
+# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, or location access on a page's behalf.
 APP_KEYS='	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Web pages can use the microphone after you allow them.</string>
 	<key>NSLocationUsageDescription</key><string>Web pages can use your location after you allow them.</string>

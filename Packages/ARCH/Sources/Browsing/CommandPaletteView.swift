@@ -1,4 +1,4 @@
-// The command palette floats over the window. Its mode determines whether it edits the current tab's address or opens a new tab. As the user types, it lists matching open tabs they can switch to and matching pages from history.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching open tabs to switch to and matching pages from history.
 import History
 import SwiftUI
 

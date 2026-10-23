@@ -1,4 +1,4 @@
-// The find bar floats over the top-right corner of the page. Typing searches the selected tab; Return and the arrows step through matches; Escape closes it.
+// The find bar floats over the page's top-right corner. Typing searches the selected tab, Return and the arrows move through matches, and Escape closes the bar.
 import SwiftUI
 
 struct FindBarView: View {

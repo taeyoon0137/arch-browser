@@ -14,7 +14,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFDownloadState) {
     ARCHCEFDownloadStateInterrupted,
 };
 
-/// Permissions a page can ask for. A request may combine several.
+/// Permissions a page can request. One request may combine several permissions.
 typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
     ARCHCEFPermissionCamera = 1 << 0,
     ARCHCEFPermissionMicrophone = 1 << 1,
@@ -25,16 +25,16 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
     ARCHCEFPermissionMidi = 1 << 6,
 };
 
-/// One download reported by the engine. The values are refreshed before each `cefBrowserDidUpdateDownload:` call.
+/// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;
 @property (nonatomic, readonly, copy) NSString *url;
-/// The destination once the engine has chosen it.
+/// The destination after the engine chooses it.
 @property (nonatomic, readonly, copy, nullable) NSString *path;
 @property (nonatomic, readonly) int64_t receivedBytes;
 @property (nonatomic, readonly) int64_t totalBytes;
 @property (nonatomic, readonly) ARCHCEFDownloadState state;
-/// A request made before the engine reports the first update is applied with that update.
+/// A request made before the engine's first update takes effect with that update.
 - (void)pause;
 - (void)resume;
 - (void)cancel;
@@ -50,16 +50,16 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
-/// Asks where to save a download. Call `decision` with the full destination path, or with `nil` and `showDialog` to let the engine show its Save As dialog.
+/// Asks for a download destination. Call `decision` with the full destination path, or with `nil` and `showDialog` to open the engine's Save As dialog.
 - (void)cefBrowserDidStartDownload:(ARCHCEFDownload *)download
                      suggestedName:(NSString *)suggestedName
                           decision:(void (^)(NSString *_Nullable path, BOOL showDialog))decision;
 - (void)cefBrowserDidUpdateDownload:(ARCHCEFDownload *)download;
-/// Asks whether `origin` may use `permissions`. The decision applies to every permission in the request.
+/// Asks whether `origin` may use `permissions`. One decision applies to every permission in the request.
 - (void)cefBrowserDidRequestPermissions:(ARCHCEFPermission)permissions
                              fromOrigin:(NSString *)origin
                                decision:(void (^)(BOOL allow))decision;
-/// The page's renderer process exited. The page is blank until it loads again.
+/// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
 @end
 

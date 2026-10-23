@@ -233,7 +233,7 @@ bool gInitialized = false;
     return self;
 }
 
-// The callback from the latest update stays valid, so pause, resume, and cancel use it until the next update replaces it.
+// The latest update's callback stays valid. Pause, resume, and cancel use it until the next update replaces it.
 - (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback {
     _callback = callback;
     CefString fullPath = item->GetFullPath();
@@ -306,7 +306,7 @@ bool gInitialized = false;
 
 namespace {
 
-// Translates a media access request into bridge permissions. Returns 0 when nothing in the request is recognized.
+// Maps a media access request to bridge permissions. Returns `0` if no requested permission is recognized.
 ARCHCEFPermission PermissionsFromMediaAccess(uint32_t requested) {
     ARCHCEFPermission permissions = 0;
     if (requested & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) {
@@ -321,7 +321,7 @@ ARCHCEFPermission PermissionsFromMediaAccess(uint32_t requested) {
     return permissions;
 }
 
-// Translates a permission prompt into bridge permissions. Returns 0 when the request includes a type the bridge does not handle.
+// Maps a permission prompt to bridge permissions. Returns `0` if any requested type is unsupported by the bridge.
 ARCHCEFPermission PermissionsFromPrompt(uint32_t requested) {
     struct Mapping {
         uint32_t cefType;
@@ -408,7 +408,7 @@ public:
         return true;
     }
 
-    // Returning false leaves the request to CEF, which ignores it in Alloy style.
+    // Returning `false` lets CEF handle the request; CEF ignores it in Alloy style.
     bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id, const CefString &requesting_origin,
                                 uint32_t requested_permissions, CefRefPtr<CefPermissionPromptCallback> callback) override {
         ARCHCEFPermission permissions = PermissionsFromPrompt(requested_permissions);
@@ -615,7 +615,7 @@ private:
     [_delegate cefBrowserDidClose];
 }
 
-// Downloads are keyed by CEF's identifier and kept for the browser's lifetime so a finished one can still be resumed.
+// Downloads are keyed by their CEF identifiers and retained for the browser's lifetime so interrupted downloads can still be resumed.
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item {
     NSNumber *key = @(item->GetId());
     ARCHCEFDownload *download = _downloads[key];
