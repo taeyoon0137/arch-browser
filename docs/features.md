@@ -2,7 +2,7 @@
 
 This document lists the features Arch plans to provide and tracks the status of each. Arch uses macOS system frameworks wherever macOS provides the user experience.
 
-Status values are not started, in progress, and complete. The Implementation column describes the intended approach. Code is written anew for each feature.
+Status values are not started, in progress, and complete. The Implementation column describes the intended approach. Code is written anew for each feature. Every feature behaves the same on both engines and uses the app's own interface on each; a row notes any engine that cannot support it and why.
 
 ## Platform integration
 
@@ -15,7 +15,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | Sharing | AppKit `NSSharingServicePicker` |
 | Notifications | UserNotifications |
 | Translation | Translation framework (macOS 15+, needs verification) |
-| Passwords and passkeys | Apple Passwords through AuthenticationServices; no browser-side store |
+| Passwords and passkeys | Apple Passwords and 1Password through their official browser extensions; passkeys through AuthenticationServices; no browser-side store |
 | Printing and PDF | AppKit `NSPrintOperation`, PDFKit |
 | File dialogs and downloads | AppKit `NSOpenPanel` and `NSSavePanel`; Quick Look previews |
 | Handoff | `NSUserActivity` for the current page |
@@ -62,7 +62,6 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 20 | Media controls and picture-in-picture (PiP) | Both engines use system PiP. WebKit has it built in. The Chromium engine routes PiP to AVKit through a patched CEF build so it matches the macOS experience (needs verification). `MPNowPlayingInfoCenter` for media controls (needs verification) | Media sessions | not started |
 | 21 | Download management | `WKDownload`, `NSSavePanel` | Downloads | in progress |
 | 22 | Capture (region, full page) and screenshot storage | `WKWebView.takeSnapshot`, `createPDF`, ScreenCaptureKit | Capture | in progress |
-| 23 | Ad and tracker blocking | `WKContentRuleList` with converted EasyList rules, CSS injection to hide elements | Content blocking | not started |
 | 24 | Translation | Translation framework (macOS 15+, needs verification) | Translation | not started |
 | 25 | PDF viewing and printing | Built-in WebKit PDF support, `NSPrintOperation` | PDF | in progress |
 | 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | in progress |
@@ -88,17 +87,23 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 36 | Preferences window | Custom implementation using the `Settings` package | None | in progress |
 | 37 | Automatic updates | Omitted. Builds are manual. Reconsider later | None | not started |
 | 38 | Accounts | None. Arch needs no account | None | not started |
-| 39 | Autofill (passwords, cards, addresses) | No browser implementation. Delegate to Apple Passwords (iCloud Keychain, passkeys) and the 1Password extension. WKWebView support needs verification | None | not started |
+| 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines; each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). 1Password's Universal Autofill needs the page's accessibility tree on Chromium (II.13). Whether a WebKit tab gets Apple Passwords AutoFill without an extension needs verification (IV.15) | Extensions, accessibility | not started |
 | 40 | Web notifications and push | `UserNotifications` for local notifications only. Remote push is omitted | None | not started |
 | 41 | AppleScript | Custom `NSScriptCommand` implementation | None | not started |
 | 42 | App icon changes and sound effects | `NSApplication.applicationIconImage`, `NSSound` | None | not started |
 
-## 6. Exclusions
+## 6. Extensions and Developer Tools
+
+| # | Feature | Implementation | Engine dependency | Status |
+|---|---|---|---|---|
+| 44 | Extensions | The same Chrome-format (Manifest V3) extensions on both engines, installed once: `WKWebExtensionController` on WebKit (macOS 15.4+), CEF Chrome style on Chromium. On macOS, CEF uses Alloy style whenever the browser has a parent view, so Chrome style needs CEF-owned windows or a patched build (VI.1) | Extensions | not started |
+| 45 | DevTools | Chromium DevTools in their own window on the Chromium engine, Web Inspector (`isInspectable`) on WebKit, behind one menu item and shortcut | DevTools | not started |
+
+## 7. Exclusions
 
 | # | Feature | Handling |
 |---|---|---|
+| 23 | Ad and tracker blocking | Excluded. An extension (row 44) can provide it |
 | 43 | AI features | Excluded entirely from this implementation. No AI code or extension point for AI |
-| 44 | Chrome extensions | Available through the Chromium engine (CEF Chrome style, needs verification). Unavailable on the WebKit engine |
-| 45 | DevTools | Use DevTools directly from the Chromium engine. The secondary WebKit engine uses Web Inspector (`isInspectable`) |
 | 46 | Telemetry, crash reports, feature flags | None. Arch collects no usage data and has no remote flags |
 | 47 | Prompts to switch browsers | None. Import (row 33) covers moving from another browser |

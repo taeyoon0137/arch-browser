@@ -5,7 +5,8 @@ This plan gives the context needed to continue work in another session, on anoth
 ## Goals
 
 - Build a sidebar-first macOS browser with its own implementation. `docs/features.md` lists every planned feature and its status.
-- Run no servers of our own. Use alternatives such as iCloud for features that need servers, including sync (`docs/features.md`, sections 5 and 6).
+- Run no servers of our own. Use alternatives such as iCloud for features that need servers, including sync (`docs/features.md`, sections 5 and 7).
+- Give both engines the same experience. Context menus, dialogs, sheets, find, downloads, extensions, and tools use the app's own interface and work alike whatever a tab's engine; only engine-drawn surfaces such as popups may differ. `docs/features.md` notes any feature an engine cannot support and why.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. On both engines, use macOS system frameworks for every feature that is part of the platform user experience. Follow the Platform integration table in `docs/features.md`.
 - Exclude all AI features. This implementation contains no AI code or extension point for AI.
 - Use ARCH prefixes throughout: `ARCH*` for packages, `Arch` for the app module, and `ARCHKit` for the core layer.
@@ -99,7 +100,7 @@ Regression checklist, run from the bundle on the Chromium engine with a fresh Ap
 
 | Engine | Role | Work location |
 |---|---|---|
-| Chromium through CEF (`ARCHEngineChromium`) | Primary engine, embedded beside the sidebar in Alloy style. Chrome style is needed for Chrome extensions and requires a CEF Views window; it is evaluated separately. Prebuilt macOS arm64 binaries track current Chromium (156.0.7 on Chromium 156.0.8078.17). Engine patches required by macOS integration need a source build. | This Mac for the prebuilt framework; another Mac with enough free disk space for the patched source build |
+| Chromium through CEF (`ARCHEngineChromium`) | Primary engine, embedded beside the sidebar in Alloy style. Chrome style is needed for Chrome extensions and requires a CEF Views window; on macOS, CEF uses Alloy style whenever the browser has a parent view, so Chrome style cannot live inside the app's own view. It is evaluated separately (VI.1). Prebuilt macOS arm64 binaries track current Chromium (156.0.7 on Chromium 156.0.8078.17). Engine patches required by macOS integration need a source build. | This Mac for the prebuilt framework; another Mac with enough free disk space for the patched source build |
 | WebKit (`ARCHEngineWebKit`) | Secondary and debugging engine. It uses the system framework and needs no source download. | This Mac |
 
 - Remaining engine gaps are queued in Phase II. Gaps that need engine changes, such as picture-in-picture through AVKit for the Chromium engine, are queued in Phase VI: build CEF from source on a Mac with at least 150GB of free disk space and a full Xcode installation (32GB of memory recommended; the first build takes several hours on an M-series Mac, needs verification), apply the patches there, and replace the prebuilt framework with the patched build.
@@ -148,6 +149,7 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 | II.10 | Theme color on Chromium: no CEF API, and `executeJavaScript` returns no value on this engine. Evaluate the `meta[name=theme-color]` content through the DevTools `Runtime.evaluate` method with the message observer the bridge already uses for screenshots, then publish through `webContentsDidChangeThemeColor`. | medium | bridge, `ChromiumEngine.swift` | `themeColor` is set for a page that declares one |
 | II.11 | Page state restore: store `WKWebView.interactionState` per tab in `session.json` and restore it; on Chromium store the navigation entry URLs and index from II.5 and restore by loading the current entry (CEF has no history injection). Version the snapshot. | high | `SessionStore.swift`, `Tab.swift`, `WebKitEngine.swift`, `ChromiumEngine.swift` | A restored WebKit tab keeps its back list; a restored Chromium tab opens its last URL |
 | II.12 | Audible state: evaluate `CefAudioHandler` (it captures the stream, which is too heavy) against a Media Session script that reports `playing` through `CefMessageRouter`; WebKit has no public API. Record the outcome and implement the script route if it works. | high | bridge, `ChromiumEngine.swift` | The sidebar can show a speaker icon on a playing tab, or the row documents why not |
+| II.13 | Accessibility tree on Chromium: call `CefBrowserHost::SetAccessibilityState` with `STATE_ENABLED` when an assistive app attaches, detected in `ARCHCEFApplication` the way CEF's sample and Chrome do (`AXEnhancedUserInterface`, reads of `accessibilityRole`), so that VoiceOver and 1Password's Universal Autofill (⌘\\) can read Chromium pages as they read WebKit ones. | high | bridge, `ChromiumEngine.swift` | VoiceOver reads a Chromium page; ⌘\\ fills a login form on both engines (user check) |
 
 ### Phase III: Sidebar and windows
 
@@ -178,8 +180,11 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 | IV.7 | History window (⌘Y): visits grouped by day with search, row deletion, and range clearing on top of `HistoryStore.entries(since:)`. | medium | `History`, `Arch` | Row 29 history part complete |
 | IV.8 | Site data: Clear Site Data for the current site on both engines (`WKWebsiteDataStore.removeData`; Chromium through cookie deletion plus the DevTools `Storage.clearDataForOrigin` method). | medium | engines, `AppDelegate.swift` | Row 29 complete |
 | IV.9 | Translation: on macOS 15, `TranslationSession` over the page's visible text, written back through an injected script that replaces text nodes; needs verification of the framework from AppKit. | high | `Browsing`, engines | Row 24 complete or documented as unsupported |
-| IV.10 | Ad and tracker blocking: WebKit compiles a converted EasyList subset into `WKContentRuleList`; Chromium matches requests in `CefResourceRequestHandler::OnBeforeResourceLoad` with a domain and path-prefix matcher written in the bridge (no third-party library); a per-site toggle. | high | engines, bridge, `Preferences` | Row 23 complete |
 | IV.11 | Media controls: Now Playing through `MPNowPlayingInfoCenter` fed by an injected Media Session script, media keys through `MPRemoteCommandCenter` that call play and pause in the page; picture-in-picture is built into WebKit and waits for Phase VI on Chromium. | high | engines, `Browsing` | Row 20 complete except Chromium PiP |
+| IV.12 | Extensions on WebKit: host Chrome-format (Manifest V3) extensions with `WKWebExtensionController` and `WKWebExtensionContext` (macOS 15.4+). Install from an unpacked folder or a `.zip`, list them in a Settings section, show their actions in the site settings popover, show popups and permission requests as the app's own popovers and sheets, and route native messaging through `webExtensionController(_:sendMessage:toApplicationWithIdentifier:for:)`. Keep the installed list engine-independent so that VI.1 runs the same extensions on Chromium. | high | new `Extensions` module, `WebKitEngine.swift`, `Preferences` | An unpacked test extension runs its content script and popup on a WebKit tab |
+| IV.13 | Password manager extensions: run the 1Password and iCloud Passwords extensions on both engines. 1Password's desktop app checks a connecting browser's code signature and adds an unlisted browser only when it is signed and installed in /Applications. Since macOS 15.5 the iCloud Passwords helper starts only for browsers on Apple's `apple/password-manager-resources` list, which needs a pull request with Arch's bundle identifier and team. Blocked until the bundle has a stable signing identity (I.7) and Chromium has extensions (VI.1). | high | `Extensions`, docs | Both extensions fill a login on both engines |
+| IV.14 | Passkeys: Apple's restricted `com.apple.developer.web-browser.public-key-credential` entitlement covers both engines. WKWebView offers passkeys only for the app's associated domains without it, and Chromium turns on its iCloud Keychain authenticator only when the process has it. Only an organization's Account Holder can request it, and an embedded provisioning profile must grant it. Then add an entitlements file and the profile to the app target in `bundle_app.sh` and check a passkey sign-in on both engines, including 1Password passkeys, which reach browsers through the same system API. Blocked on the entitlement. | high | `scripts/bundle_app.sh`, entitlements | A passkey sign-in works on both engines |
+| IV.15 | Check whether a WebKit tab shows Apple Passwords AutoFill for a login form on macOS 27 (user check, no code). If it does, document signing in on WebKit and switching back as the interim route for Chromium tabs; cookies already copy between the engines, site storage does not. | low | `docs/features.md` | Row 39 records the outcome |
 
 ### Phase V: Creation, sharing, and settings
 
@@ -194,13 +199,13 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 | V.7 | App icon and sounds: Settings ▸ Appearance icon choice from `resources/assets` alternatives through `NSApplication.applicationIconImage`; a sound on download completion through `NSSound`. | low | `Preferences`, `AppDelegate.swift` | Row 42 complete |
 | V.8 | Preferences sections: General (default browser, search engine, downloads folder, ask where to save), Sidebar (archive delay), Shortcuts, Appearance, Websites. | medium | `Preferences` | Row 36 complete |
 | V.9 | Sync: write a design note first (CloudKit private database, one record type each for spaces, favorites, tabs, and settings, last-writer-wins per record), then implement behind a toggle. | high | docs, new `Sync` module | Row 35 complete |
-| V.10 | Document the omitted rows (37, 38, 43, 46, 47) as complete by omission and record the outcome for extensions (44) and DevTools (45). | low | `docs/features.md` | Rows updated |
+| V.10 | Document the omitted rows (23, 37, 38, 43, 46, 47) as complete by omission. | low | `docs/features.md` | Rows updated |
 
 ### Phase VI: Engine source build
 
 | ID | Task | Reasoning | Files | Done when |
 |---|---|---|---|---|
-| VI.1 | Build CEF from source on a Mac with enough disk space and evaluate Chrome style for extensions. | high | outside this repository | A patched framework builds and runs the app |
+| VI.1 | Build CEF from source on a Mac with enough disk space and evaluate Chrome style for extensions: either CEF-owned windows that host the sidebar, or a patch that allows Chrome style under a parent view. Extensions must match the WebKit ones from IV.12. | high | outside this repository | A patched framework builds and runs the app |
 | VI.2 | Picture-in-picture through AVKit for the Chromium engine (`AVPictureInPictureController` fed from decoded video frames) in the patched build. | high | bridge, `ChromiumEngine.swift` | Row 20 complete |
 
 ## Decisions
