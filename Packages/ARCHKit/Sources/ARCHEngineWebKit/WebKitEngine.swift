@@ -25,12 +25,15 @@ public final class WebKitApplication: EngineApplication {
         self.configuration = configuration
     }
 
+    private var rendererCrashCount = 0
+
     public var version: String { "WebKit \(ProcessInfo.processInfo.operatingSystemVersionString)" }
     public func run() { delegate?.applicationDidInitialize(self) }
     public func tryToTerminate(completion: @escaping (Bool) -> Void) { completion(true) }
     public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
     public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
         let context = WebKitBrowserContext(attributes: attributes)
+        context.application = self
         contexts[attributes.id] = context
         completion(.success(context))
     }
@@ -52,6 +55,11 @@ public final class WebKitApplication: EngineApplication {
         self.delegate?.application(self, didCreateBrowser: browser)
         return browser
     }
+    /// Counts web content process terminations across every tab and reports the running total.
+    func rendererDidCrash() {
+        rendererCrashCount += 1
+        delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
+    }
     /// Conversion from EasyList-format lists to `WKContentRuleList` is not implemented.
     public func setBlockLists(_ lists: [URL]) { fatalError("skeleton") }
     public func setExcludedDomains(_ domains: [String]) { fatalError("skeleton") }
@@ -63,6 +71,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     public let dataStore: WKWebsiteDataStore
+    weak var application: WebKitApplication?
     lazy var webKitDownloads = WebKitDownloads(context: self)
 
     init(attributes: EngineBrowserContextAttributes) {

@@ -104,8 +104,10 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// The tab goes blank until a reload relaunches the process. The application tallies the crash.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         owner.uiDelegate?.webContentsProcessDidTerminate(owner)
+        owner.context.application?.rendererDidCrash()
     }
 
     // MARK: WKUIDelegate
