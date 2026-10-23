@@ -1,15 +1,15 @@
-// Download list for one Chromium browser context. Each embedded browser reports its downloads here through the bridge.
+// The downloads list for one Chromium browser context. Each embedded browser reports downloads here through the bridge.
 import ARCHEngine
 import CEFBridge
 import Foundation
 
-/// Every download started from the context's tabs. An item stays listed until `remove()`.
+/// Lists every download started from the context's tabs. Items remain listed until `remove()` is called.
 public final class ChromiumDownloads: EngineDownloads {
     public weak var delegate: (any EngineDownloadsDelegate)?
     public private(set) var items: [any EngineDownloadItem] = []
     private var itemsByIdentifier: [UInt32: ChromiumDownloadItem] = [:]
 
-    /// Announces a new download and asks the delegate where to save it. Without a delegate the engine shows its Save As dialog.
+    /// Announces a new download and asks the delegate for its destination. The engine shows its Save As dialog if no delegate is set.
     func begin(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
         let item = ChromiumDownloadItem(download: download, owner: self)
         itemsByIdentifier[download.identifier] = item
@@ -17,9 +17,9 @@ public final class ChromiumDownloads: EngineDownloads {
         delegate?.downloads(self, didCreate: item)
         guard let delegate else { return decision(nil, true) }
         delegate.downloads(self, determineFilenameFor: item, defaultFilename: suggestedName) { url in
-            // The engine has no way to refuse at this point, so a refused download starts and is cancelled on its first update.
-            if url == nil { download.cancel() }
-            decision(url?.path, false)
+            // A `nil` destination cancels the download by leaving the callback unexecuted.
+            guard let url else { return }
+            decision(url.path, false)
         }
     }
 
@@ -36,7 +36,7 @@ public final class ChromiumDownloads: EngineDownloads {
     }
 }
 
-/// One Chromium download. CEF reports no paused state, so the item tracks its own pause requests.
+/// One Chromium download. The item tracks its own pause requests because the bridge does not expose CEF's paused state.
 final class ChromiumDownloadItem: EngineDownloadItem {
     let id: String
     let sourceURL: URL
@@ -77,7 +77,7 @@ final class ChromiumDownloadItem: EngineDownloadItem {
         owner.delegate?.downloads(owner, didUpdate: self)
     }
 
-    /// A paused download is still in progress for the engine. A failed one changes state only when the engine reports the resumed download.
+    /// The engine still considers a paused download in progress. A failed download changes state only when the engine reports that it has resumed.
     func resume() {
         guard state == .paused || state == .failed else { return }
         isPaused = false
