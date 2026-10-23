@@ -275,6 +275,23 @@ private:
     IMPLEMENT_REFCOUNTING(BridgeClient);
 };
 
+// Reads the finished PDF into memory and removes the temporary file CEF wrote.
+class BridgePdfCallback : public CefPdfPrintCallback {
+public:
+    explicit BridgePdfCallback(void (^completion)(NSData *_Nullable)) : completion_(completion) {}
+
+    void OnPdfPrintFinished(const CefString &path, bool ok) override {
+        NSString *file = ToNSString(path);
+        NSData *data = ok ? [NSData dataWithContentsOfFile:file] : nil;
+        [[NSFileManager defaultManager] removeItemAtPath:file error:nil];
+        completion_(data);
+    }
+
+private:
+    void (^completion_)(NSData *_Nullable);
+    IMPLEMENT_REFCOUNTING(BridgePdfCallback);
+};
+
 }  // namespace
 
 @implementation ARCHCEFBrowser {
@@ -423,6 +440,22 @@ private:
     if (_browser) {
         _browser->GetHost()->StopFinding(false);
     }
+}
+
+- (void)print {
+    if (_browser) {
+        _browser->GetHost()->Print();
+    }
+}
+
+- (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable))completion {
+    if (!_browser) {
+        completion(nil);
+        return;
+    }
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"arch-%@.pdf", NSUUID.UUID.UUIDString]];
+    CefPdfPrintSettings settings;
+    _browser->GetHost()->PrintToPDF(CefString(path.UTF8String), settings, new BridgePdfCallback(completion));
 }
 
 - (void)close {

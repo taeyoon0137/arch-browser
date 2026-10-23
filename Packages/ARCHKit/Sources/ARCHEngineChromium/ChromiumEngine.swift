@@ -150,6 +150,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", delegate: self)
     }
 
+    public enum PDFError: Error {
+        case exportFailed
+    }
+
     public private(set) var favicon: NSImage?
     public var loadProgress: Double { isLoading ? 0.5 : 1 }
     public var themeColor: NSColor? { nil }
@@ -189,8 +193,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     }
     public func captureViewport(completion: @escaping (NSImage?) -> Void) { completion(nil) }
     public func captureFullPage(completion: @escaping (NSImage?) -> Void) { completion(nil) }
-    public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) { fatalError("not implemented") }
-    public func print() { fatalError("not implemented") }
+    public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
+        browser?.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
+    }
+    public func print() { browser?.print() }
     public func exitFullscreen() {}
     public func discard() { browser?.close() }
     public func clearSiteDataAndReload() { browser?.reloadIgnoringCache() }

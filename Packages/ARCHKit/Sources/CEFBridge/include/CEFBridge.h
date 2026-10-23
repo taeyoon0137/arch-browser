@@ -53,6 +53,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the current search and keeps the active match selected.
 - (void)stopFinding;
+/// Opens the system print dialog for the current page.
+- (void)print;
+/// Renders the current page to PDF data. Passes `nil` when printing fails or no browser exists.
+- (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
 - (void)close;
 @end
 
