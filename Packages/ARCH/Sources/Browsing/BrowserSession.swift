@@ -1,4 +1,4 @@
-// Owns the engine application, one profile, and one browser for the window. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list.
+// Owns the engine application, one profile, and one browser for the window. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
@@ -14,13 +14,17 @@ public final class BrowserSession: ObservableObject {
     @Published public var currentSpaceID: UUID
     /// Selecting a tab also switches to its space so the sidebar and page show the same space.
     @Published public var selectedTabID: UUID? {
-        didSet { if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID } }
+        didSet {
+            selectedTab?.lastActivatedAt = Date()
+            if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
+        }
     }
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// The last 10 closed tabs, oldest first. Reopening takes the newest.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
+    private var archiveTimer: Timer?
 
     public static let searchURL = URL(string: "https://www.google.com/search")!
     public static let newTabURL = URL(string: "https://www.google.com")!
@@ -50,6 +54,8 @@ public final class BrowserSession: ObservableObject {
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
         restoreTabs(snapshot)
         observeChanges()
+        archiveInactiveTabs()
+        archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
     }
 
     public enum SessionError: Error {
@@ -203,6 +209,19 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
+    /// Closes unpinned tabs not activated within `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
+    public func archiveInactiveTabs() {
+        let defaults = UserDefaults.standard
+        let hours = defaults.object(forKey: "ARCHArchiveAfterHours") == nil ? 12 : defaults.integer(forKey: "ARCHArchiveAfterHours")
+        guard hours > 0 else { return }
+        let now = Date()
+        selectedTab?.lastActivatedAt = now
+        let cutoff = now.addingTimeInterval(-TimeInterval(hours) * 3600)
+        for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
+            closeTab(tab)
+        }
+    }
+
     /// The tab stores the pinned flag. The session republishes the change for views that group tabs by this flag.
     public func togglePinned(_ tab: Tab) {
         objectWillChange.send()
@@ -276,7 +295,7 @@ public final class BrowserSession: ObservableObject {
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
         guard let snapshot else { return }
         for record in snapshot.tabs where spaces.contains(where: { $0.id == record.spaceID }) {
-            openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
+            openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false).lastActivatedAt = record.lastActivatedAt ?? Date()
         }
         if let index = snapshot.selectedTabIndex, tabs.indices.contains(index) {
             selectedTabID = tabs[index].id
@@ -304,7 +323,7 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned) },
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt) },
                         selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
     }
 }

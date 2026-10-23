@@ -7,6 +7,8 @@ struct SessionSnapshot: Codable {
         var url: URL?
         var title: String
         var isPinned: Bool
+        /// `nil` in closed-tab records and in files written before activation tracking.
+        var lastActivatedAt: Date?
     }
 
     var spaces: [Space]

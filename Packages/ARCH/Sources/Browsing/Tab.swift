@@ -9,6 +9,8 @@ public final class Tab: ObservableObject, Identifiable {
     public let webContents: any EngineWebContents
     @Published public var spaceID: UUID
     @Published public var isPinned: Bool
+    /// The session updates this when the tab is selected. Archiving closes unpinned tabs whose date is too old.
+    var lastActivatedAt = Date()
     @Published public private(set) var title: String
     @Published public private(set) var url: URL?
     @Published public private(set) var isLoading: Bool
