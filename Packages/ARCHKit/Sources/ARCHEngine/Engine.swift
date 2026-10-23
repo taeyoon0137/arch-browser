@@ -7,6 +7,15 @@ public enum EngineKind: String, CaseIterable, Codable, Sendable {
     case legacy
     case webKit
     case chromium
+
+    /// The engine's name as the interface shows it.
+    public var displayName: String {
+        switch self {
+        case .legacy: return "Legacy"
+        case .webKit: return "WebKit"
+        case .chromium: return "Chromium"
+        }
+    }
 }
 
 /// Optional capabilities that differ per engine. The UI hides features that are missing from this set.

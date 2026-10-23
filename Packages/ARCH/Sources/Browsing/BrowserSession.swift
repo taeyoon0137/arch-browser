@@ -280,6 +280,21 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
+    /// Moves a tab to another engine: a web contents from `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
+    public func switchEngine(of tab: Tab, to kind: EngineKind) {
+        guard tab.engineKind != kind, tabs.contains(where: { $0.id == tab.id }) else { return }
+        let target = runtime(for: kind)
+        guard target.kind == kind else { return }
+        let old = tab.webContents
+        let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
+        // Sheets and searches belong to the old page.
+        cancelSheets(for: tab)
+        if tab.id == selectedTabID, isFindBarVisible { hideFindBar() }
+        tab.replaceWebContents(with: replacement)
+        runtimes[old.engineKind]?.browser.closeWebContents(old)
+        scheduleSave()
+    }
+
     /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
     public func closeTab(_ tab: Tab, remember: Bool = true) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }

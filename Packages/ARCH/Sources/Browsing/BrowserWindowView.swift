@@ -240,7 +240,7 @@ struct SidebarView: View {
             } else {
                 // Without a tab the controls stay in place; the address pill opens a new tab.
                 SidebarTopRow(session: session, windowButtons: windowButtons)
-                AddressPillView(session: session, url: nil)
+                AddressPillView(session: session, tab: nil)
             }
             if !session.favorites.isEmpty {
                 FavoritesGridView(session: session)
@@ -267,7 +267,7 @@ struct SelectedTabHeaderView: View {
 
     var body: some View {
         SidebarTopRow(session: session, windowButtons: windowButtons, tab: tab)
-        AddressPillView(session: session, url: tab.url)
+        AddressPillView(session: session, tab: tab)
     }
 }
 
@@ -322,11 +322,15 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open.
+/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The button at its end opens the site settings.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
-    let url: URL?
+    /// `nil` when no tab is open.
+    let tab: Tab?
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isShowingSiteSettings = false
+
+    private var url: URL? { tab?.url }
 
     private var host: String {
         guard let host = url?.host else { return "Search or enter address" }
@@ -339,26 +343,89 @@ struct AddressPillView: View {
     }
 
     var body: some View {
-        Button(action: { session.focusCommandBar(from: .sidebar) }) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                Text(host)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(url == nil ? .secondary : .primary)
-                Spacer(minLength: 0)
+        HStack(spacing: 0) {
+            Button(action: { session.focusCommandBar(from: .sidebar) }) {
+                HStack(spacing: 6) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Text(host)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(url == nil ? .secondary : .primary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 10)
+                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+                .contentShape(Rectangle())
             }
-            .font(.system(size: 14))
-            .padding(.horizontal, 10)
-            .frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help(url?.absoluteString ?? "")
+            .accessibilityLabel(host)
+            SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
+                .padding(.trailing, 4)
+                .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
+                    SiteSettingsView(session: session, tab: tab)
+                }
         }
-        .buttonStyle(.plain)
-        .help(url?.absoluteString ?? "")
-        .accessibilityLabel(host)
+        .font(.system(size: 14))
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+    }
+}
+
+/// The site settings popover: the engine of the current tab and the engine for new tabs.
+struct SiteSettingsView: View {
+    @ObservedObject var session: BrowserSession
+    let tab: Tab?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let tab {
+                TabEngineSection(session: session, tab: tab)
+            }
+            SiteSettingsSection(title: "New tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
+                Picker("New tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+                    ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+    }
+}
+
+// Observes the tab so the picker follows the switch.
+struct TabEngineSection: View {
+    @ObservedObject var session: BrowserSession
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        SiteSettingsSection(title: "This tab", note: "Switching loads the page again in the other engine.") {
+            Picker("This tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+                ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+            }
+        }
+    }
+}
+
+struct SiteSettingsSection<Content: View>: View {
+    let title: String
+    let note: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            content
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            Text(note)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

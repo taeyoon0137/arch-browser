@@ -7,7 +7,8 @@ import History
 
 public final class Tab: ObservableObject, Identifiable {
     public let id = UUID()
-    public let webContents: any EngineWebContents
+    /// Replaced when the tab switches engines.
+    @Published public private(set) var webContents: any EngineWebContents
     @Published public var spaceID: UUID
     @Published public var isPinned: Bool
     /// The session updates this when the tab is selected. Archiving closes unpinned tabs whose date is too old.
@@ -97,6 +98,18 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsProcessDidTerminate(_ webContents: any EngineWebContents) {
         crashCount += 1
         hasCrashed = true
+    }
+
+    /// Swaps in a web contents from another engine. The old one stops reporting to the tab before the session closes it, and the tab keeps its title, address, and icon until the new page reports its own.
+    func replaceWebContents(with replacement: any EngineWebContents) {
+        webContents.uiDelegate = nil
+        webContents = replacement
+        replacement.uiDelegate = self
+        isLoading = replacement.isLoading
+        canGoBack = replacement.canGoBack
+        canGoForward = replacement.canGoForward
+        hasCrashed = false
+        isDownloadOnly = false
     }
 
     /// Loads the crashed page's address again, which starts a new page process.

@@ -72,7 +72,7 @@ private struct PreferencesForm: View {
         Form {
             Picker("Default engine:", selection: $defaultEngine) {
                 ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
-                    Text(kind.title)
+                    Text(kind.displayName)
                 }
             }
             .onChange(of: defaultEngine) { EngineRegistry.shared.defaultKind = $0 }
@@ -90,15 +90,5 @@ private struct PreferencesForm: View {
         }
         .formStyle(.grouped)
         .frame(width: 420)
-    }
-}
-
-private extension EngineKind {
-    var title: String {
-        switch self {
-        case .legacy: return "Legacy"
-        case .webKit: return "WebKit"
-        case .chromium: return "Chromium"
-        }
     }
 }
