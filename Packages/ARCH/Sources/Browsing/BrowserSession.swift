@@ -56,6 +56,8 @@ public final class BrowserSession: ObservableObject {
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
+    /// The engine's running total of page process crashes, kept for the tab close log (III.8).
+    public private(set) var rendererCrashCount = 0
     /// Tabs that only ever pointed at a file. They close once the engine creates the download.
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
@@ -79,6 +81,7 @@ public final class BrowserSession: ObservableObject {
         currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
         favorites = snapshot?.favorites ?? []
         closedTabs = snapshot?.closedTabs ?? []
+        application.delegate = self
         application.run()
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
         context.downloads.delegate = self
@@ -551,6 +554,15 @@ public enum CommandPaletteOrigin {
     case keyboard
     /// A control in the sidebar: the palette comes in from the sidebar's side.
     case sidebar
+}
+
+extension BrowserSession: EngineApplicationDelegate {
+    public func applicationDidInitialize(_ application: any EngineApplication) {}
+    public func applicationDidQuitRunLoop(_ application: any EngineApplication) {}
+    public func application(_ application: any EngineApplication, didCreateBrowser browser: any EngineBrowser) {}
+    public func application(_ application: any EngineApplication, didCloseBrowser browser: any EngineBrowser) {}
+    public func application(_ application: any EngineApplication, didChangeBrowserContextAttributes attributes: [EngineBrowserContextAttributes]) {}
+    public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { rendererCrashCount = count }
 }
 
 extension BrowserSession: EngineBrowserDelegate {

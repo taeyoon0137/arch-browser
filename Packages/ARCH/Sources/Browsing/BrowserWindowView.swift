@@ -31,6 +31,7 @@ public struct BrowserWindowView: View {
                 }
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
+                    .overlay { if let tab = session.selectedTab { PageCrashNoticeView(tab: tab) } }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
                     // The sidebar's own margin is part of the gap beside it.
                     .padding(EdgeInsets(top: pageTopInset, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
@@ -111,6 +112,32 @@ struct WindowMaterialView: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
         view.layer?.cornerRadius = cornerRadius
+    }
+}
+
+/// Covers a page whose process quit and did not come back, with a way to load it again.
+struct PageCrashNoticeView: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        if tab.hasCrashed {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.secondary)
+                Text("This page stopped working")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Reload to open it again.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Button("Reload", action: tab.reloadAfterCrash)
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+                    .padding(.top, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)))
+        }
     }
 }
 

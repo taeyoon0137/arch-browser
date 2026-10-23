@@ -18,6 +18,10 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var canGoBack: Bool
     @Published public private(set) var canGoForward: Bool
     @Published public private(set) var favicon: NSImage?
+    /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
+    @Published public private(set) var hasCrashed = false
+    /// How many times this tab's page process quit, kept for the tab close log (III.8).
+    public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
@@ -61,6 +65,8 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         isLoading = webContents.isLoading
+        // The Chromium engine reloads a page once after its first crash; any new load clears the notice.
+        if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         // Record a page when it finishes loading, when its title is usually known.
@@ -83,6 +89,17 @@ extension Tab: EngineWebContentsUIDelegate {
         isDownloadOnly = true
         didOpenOnlyDownload?(!isRestored)
         return !isRestored
+    }
+
+    public func webContentsProcessDidTerminate(_ webContents: any EngineWebContents) {
+        crashCount += 1
+        hasCrashed = true
+    }
+
+    /// Loads the crashed page's address again, which starts a new page process.
+    public func reloadAfterCrash() {
+        guard let url else { return webContents.navigationController.reload() }
+        webContents.navigationController.load(URLRequest(url: url))
     }
 
     // MARK: JavaScript dialogs
