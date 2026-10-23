@@ -96,7 +96,7 @@ extension Animation {
 extension AnyTransition {
     static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
         // The sidebar sits on the leading side.
-        let offset = origin == .sidebar ? CGSize(width: -64, height: 0) : CGSize(width: 0, height: 16)
+        let offset = origin == .sidebar ? CGSize(width: -32, height: 0) : CGSize(width: 0, height: 16)
         let appearance = AnyTransition.modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
         return .asymmetric(insertion: appearance.animation(.paletteIn), removal: appearance.animation(.paletteOut))
     }
