@@ -150,6 +150,8 @@ public:
     void OnBeforeCommandLineProcessing(const CefString &process_type, CefRefPtr<CefCommandLine> command_line) override {
         if (process_type.empty()) {
             command_line->AppendSwitch("use-mock-keychain");
+            // Without it Chromium shows its own sign-in window and never asks GetAuthCredentials.
+            command_line->AppendSwitch("disable-chrome-login-prompt");
         }
     }
 
@@ -458,6 +460,13 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 - (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision;
 - (BOOL)handleShouldDownload:(NSString *)url hasDocument:(BOOL)hasDocument;
 - (void)handleRenderProcessTerminated;
+- (void)handleAuthenticationForHost:(NSString *)host
+                               port:(int)port
+                              realm:(NSString *)realm
+                             scheme:(NSString *)scheme
+                          originURL:(NSString *)originURL
+                            isProxy:(BOOL)isProxy
+                         completion:(void (^)(NSString *_Nullable, NSString *_Nullable))completion;
 @end
 
 namespace {
@@ -617,6 +626,38 @@ public:
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
                                    const CefString &error_string) override {
         [owner_ handleRenderProcessTerminated];
+    }
+
+    // CEF asks on the IO thread. The app asks with its own sheet on the main thread and answers through the callback, which stays alive in the block until then.
+    bool GetAuthCredentials(CefRefPtr<CefBrowser> browser, const CefString &origin_url, bool isProxy, const CefString &host, int port,
+                            const CefString &realm, const CefString &scheme, CefRefPtr<CefAuthCallback> callback) override {
+        CefRefPtr<BridgeClient> client = this;
+        CefRefPtr<CefAuthCallback> continuation = callback;
+        NSString *hostName = ToNSString(host);
+        NSString *realmName = ToNSString(realm);
+        NSString *schemeName = ToNSString(scheme).lowercaseString;
+        NSString *origin = ToNSString(origin_url);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ARCHCEFBrowser *owner = client->owner_;
+            if (!owner) {
+                continuation->Cancel();
+                return;
+            }
+            [owner handleAuthenticationForHost:hostName
+                                          port:port
+                                         realm:realmName
+                                        scheme:schemeName
+                                     originURL:origin
+                                       isProxy:isProxy
+                                    completion:^(NSString *user, NSString *password) {
+                                        if (user) {
+                                            continuation->Continue(CefString(user.UTF8String), CefString(password ? password.UTF8String : ""));
+                                        } else {
+                                            continuation->Cancel();
+                                        }
+                                    }];
+        });
+        return true;
     }
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
@@ -946,6 +987,21 @@ private:
 
 - (void)handleRenderProcessTerminated {
     [_delegate cefBrowserRenderProcessDidTerminate];
+}
+
+- (void)handleAuthenticationForHost:(NSString *)host
+                               port:(int)port
+                              realm:(NSString *)realm
+                             scheme:(NSString *)scheme
+                          originURL:(NSString *)originURL
+                            isProxy:(BOOL)isProxy
+                         completion:(void (^)(NSString *_Nullable, NSString *_Nullable))completion {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (delegate) {
+        [delegate cefBrowserDidReceiveAuthenticationChallengeForHost:host port:port realm:realm scheme:scheme originURL:originURL isProxy:isProxy completion:completion];
+    } else {
+        completion(nil, nil);
+    }
 }
 
 - (void)loadURL:(NSString *)url {

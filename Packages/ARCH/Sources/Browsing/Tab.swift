@@ -166,6 +166,39 @@ extension Tab: EngineWebContentsUIDelegate {
         didCancelDialogs?()
     }
 
+    // MARK: HTTP authentication
+
+    /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved.
+    public func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        let alert = NSAlert()
+        alert.messageText = space.isProxy() ? "Log In to the Proxy \u{201C}\(space.host)\u{201D}" : "Log In to \u{201C}\(space.host)\u{201D}"
+        var details: [String] = []
+        if challenge.previousFailureCount > 0 { details.append("The user name or password was incorrect.") }
+        if let realm = space.realm, !realm.isEmpty { details.append("The site says: \u{201C}\(realm)\u{201D}") }
+        if !space.receivesCredentialSecurely { details.append("Your login information will be sent without encryption.") }
+        alert.informativeText = details.joined(separator: "\n")
+        alert.addButton(withTitle: "Log In")
+        alert.addButton(withTitle: "Cancel")
+        let userField = NSTextField(string: challenge.proposedCredential?.user ?? "")
+        userField.placeholderString = "User Name"
+        let passwordField = NSSecureTextField(string: "")
+        passwordField.placeholderString = "Password"
+        let fields = NSStackView(views: [userField, passwordField])
+        fields.orientation = .vertical
+        fields.spacing = 8
+        fields.frame = NSRect(x: 0, y: 0, width: 280, height: 56)
+        userField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        passwordField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        alert.accessoryView = fields
+        alert.window.initialFirstResponder = userField
+        userField.nextKeyView = passwordField
+        showAlert(alert) { response in
+            guard response == .alertFirstButtonReturn else { return completion(nil) }
+            completion(URLCredential(user: userField.stringValue, password: passwordField.stringValue, persistence: .forSession))
+        }
+    }
+
     /// Names the site in the title so that a page cannot pass its dialog off as one from the app.
     private func pageAlert(_ message: String) -> NSAlert {
         let alert = NSAlert()

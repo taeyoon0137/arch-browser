@@ -181,6 +181,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var didSelectFirstMatch = false
     /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
     private var lastCrashedURL: URL?
+    /// Authentication requests per protection space since the last page finished loading.
+    private var authenticationAttempts: [String: Int] = [:]
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     init(sessionID: String, context: ChromiumBrowserContext?, configuration: EngineWebContentsConfiguration) {
@@ -288,6 +290,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
     }
     public func cefBrowserDidChangeLoadingState(_ isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
+        if !isLoading { authenticationAttempts.removeAll() }
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
@@ -374,6 +377,28 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
     }
     /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
+    /// Presents the request as a `URLAuthenticationChallenge`, the form WebKit uses, so the same sheet serves both engines. CEF does not count failed attempts, so the adapter counts repeated requests for the same space until a page finishes loading.
+    public func cefBrowserDidReceiveAuthenticationChallenge(forHost host: String, port: Int32, realm: String, scheme: String, originURL: String, isProxy: Bool,
+                                                            completion: @escaping (String?, String?) -> Void) {
+        guard let uiDelegate else { return completion(nil, nil) }
+        let method = switch scheme {
+        case "digest": NSURLAuthenticationMethodHTTPDigest
+        case "ntlm": NSURLAuthenticationMethodNTLM
+        case "negotiate": NSURLAuthenticationMethodNegotiate
+        default: NSURLAuthenticationMethodHTTPBasic
+        }
+        let space = isProxy
+            ? URLProtectionSpace(proxyHost: host, port: Int(port), type: NSURLProtectionSpaceHTTPProxy, realm: realm, authenticationMethod: method)
+            : URLProtectionSpace(host: host, port: Int(port), protocol: URL(string: originURL)?.scheme ?? "https", realm: realm, authenticationMethod: method)
+        let key = "\(isProxy) \(host):\(port) \(realm)"
+        let failures = authenticationAttempts[key, default: 0]
+        authenticationAttempts[key] = failures + 1
+        let challenge = URLAuthenticationChallenge(protectionSpace: space, proposedCredential: nil, previousFailureCount: failures, failureResponse: nil, error: nil,
+                                                   sender: ChromiumAuthenticationSender.shared)
+        uiDelegate.webContents(self, didReceiveAuthenticationChallenge: challenge) { credential in
+            completion(credential?.user, credential?.password)
+        }
+    }
     public func cefBrowserRenderProcessDidTerminate() {
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)
@@ -400,4 +425,12 @@ public final class ChromiumNavigationController: EngineNavigationController {
     public func goBack() { webContents.goBack() }
     public func goForward() { webContents.goForward() }
     public func go(to item: any EngineBackForwardListItem) { fatalError("not implemented") }
+}
+
+/// `URLAuthenticationChallenge` needs a sender. The Chromium adapter answers through the CEF callback instead, so these calls do nothing.
+private final class ChromiumAuthenticationSender: NSObject, URLAuthenticationChallengeSender {
+    static let shared = ChromiumAuthenticationSender()
+    func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+    func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+    func cancel(_ challenge: URLAuthenticationChallenge) {}
 }

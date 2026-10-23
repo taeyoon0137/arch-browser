@@ -102,6 +102,14 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
 - (void)cefBrowserDidResetDialogs;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
+/// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
+- (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
+                                                       port:(int)port
+                                                      realm:(NSString *)realm
+                                                     scheme:(NSString *)scheme
+                                                  originURL:(NSString *)originURL
+                                                    isProxy:(BOOL)isProxy
+                                                 completion:(void (^)(NSString *_Nullable user, NSString *_Nullable password))completion;
 @end
 
 @interface ARCHCEFRuntime : NSObject
