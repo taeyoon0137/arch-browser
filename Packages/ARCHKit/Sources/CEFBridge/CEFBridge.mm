@@ -612,7 +612,10 @@ private:
 - (void)handleBeforeClose {
     _browser = nullptr;
     _browserView = nil;
-    [_delegate cefBrowserDidClose];
+    // `+shutdown` clears `gInitialized` before it closes every browser at quit. Those closes are not reported, so the session keeps the tabs and saves them.
+    if (gInitialized) {
+        [_delegate cefBrowserDidClose];
+    }
 }
 
 // Downloads are keyed by their CEF identifiers and retained for the browser's lifetime so interrupted downloads can still be resumed.
