@@ -63,7 +63,9 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
 # Build the icon set from the 1024-pixel symbol. Each size appears at 1x and 2x, as `iconutil` requires.
-ICONSET="$(mktemp -d)/Arch.iconset"
+ICON_TEMP="$(mktemp -d)"
+trap 'rm -rf "$ICON_TEMP"' EXIT
+ICONSET="$ICON_TEMP/Arch.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
   sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
@@ -71,7 +73,6 @@ for size in 16 32 128 256 512; do
   sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Arch.icns"
-rm -rf "$(dirname "$ICONSET")"
 
 for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   name="Arch Helper$suffix"
