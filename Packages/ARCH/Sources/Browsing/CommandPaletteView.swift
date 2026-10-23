@@ -47,17 +47,17 @@ struct CommandPaletteView: View {
             .frame(height: 52)
             Divider()
             PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
-                .onTapGesture { session.submitCommandPalette(text) }
+                .paletteAction { session.submitCommandPalette(text) }
             ForEach(matchingTabs) { tab in
                 PaletteTabRow(tab: tab)
-                    .onTapGesture {
+                    .paletteAction {
                         session.selectedTabID = tab.id
                         session.dismissCommandPalette()
                     }
             }
             ForEach(historySuggestions) { entry in
                 PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
-                    .onTapGesture { session.submitCommandPalette(entry.url.absoluteString) }
+                    .paletteAction { session.submitCommandPalette(entry.url.absoluteString) }
             }
         }
         .padding(.bottom, 6)
@@ -147,6 +147,16 @@ struct PaletteTabRow: View {
         .frame(height: 36)
         .contentShape(Rectangle())
         .modifier(PaletteRowHighlight())
+    }
+}
+
+extension View {
+    /// Runs `action` on a click and on the accessibility press, which a tap gesture alone does not answer.
+    func paletteAction(_ action: @escaping () -> Void) -> some View {
+        onTapGesture(perform: action)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
     }
 }
 

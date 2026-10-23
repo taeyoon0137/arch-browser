@@ -439,6 +439,7 @@ struct FavoritesGridView: View {
             ForEach(session.favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: session.selectedTab?.url?.host == favorite.url.host)
                     .onTapGesture { session.openFavorite(favorite) }
+                    .accessibilityAction { session.openFavorite(favorite) }
                     .contextMenu {
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
@@ -589,6 +590,8 @@ struct TabRowView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
+        .accessibilityAction { session.selectedTabID = tab.id }
     }
 }
 
