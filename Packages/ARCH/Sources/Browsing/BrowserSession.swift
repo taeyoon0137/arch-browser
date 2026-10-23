@@ -32,6 +32,8 @@ public final class BrowserSession: ObservableObject {
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     @Published public private(set) var isFindBarVisible = false
+    /// Counts the requests to focus the find bar's field, such as ⌘F while the bar is already open.
+    @Published public private(set) var findBarFocusRequests = 0
     /// The text in the find bar. Each change searches the selected tab while the bar is visible.
     @Published public var findText = "" {
         didSet { if findText != oldValue { runFind(forward: true) } }
@@ -313,8 +315,11 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Find in page
 
+    /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match.
     public func showFindBar() {
         guard selectedTab != nil else { return }
+        findBarFocusRequests += 1
+        guard !isFindBarVisible else { return }
         isFindBarVisible = true
         runFind(forward: true)
     }
@@ -389,18 +394,14 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site permissions
 
-    /// Asks with a sheet on the page's window, or an app-modal alert when the page has no window yet. The answer reaches the engine once.
+    /// Asks with a sheet on the page's window, or on the main window while the page is not on screen. The engine calls this from inside its own message loop, so the sheet never blocks and a request without any window is denied. The answer reaches the engine once.
     private static func askPermission(_ request: EnginePermissionRequest, on window: NSWindow?, completion: @escaping (Bool) -> Void) {
+        guard let window = window ?? NSApp.mainWindow ?? NSApp.keyWindow else { return completion(false) }
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")
-        let finish = { (response: NSApplication.ModalResponse) in completion(response == .alertFirstButtonReturn) }
-        if let window = window ?? NSApp.keyWindow {
-            alert.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            finish(alert.runModal())
-        }
+        alert.beginSheetModal(for: window) { completion($0 == .alertFirstButtonReturn) }
     }
 
     private static func permissionDescription(for types: [EnginePermissionType]) -> String {
