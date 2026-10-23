@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assembles `build/Arch.app` from Swift Package Manager (SwiftPM) build products and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`.
+# Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`.
 # Usage: scripts/bundle_app.sh [debug|release]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,7 +14,7 @@ VERSION="0.1.0"
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 
 write_plist() {
-  # `$1`: path; `$2`: executable name; `$3`: bundle identifier; `$4`: user interface element flag (0/1).
+  # `$1` is the output path. `$2` is the executable name. `$3` is the bundle identifier. `$4` is the user interface element flag (0/1).
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -55,5 +55,7 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   printf 'APPL????' > "$helper/Contents/PkgInfo"
 done
 
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "ad-hoc signing failed; the app may still run locally" >&2
+# A stable signing identity keeps the Keychain items Chromium creates readable across builds. Set `ARCH_SIGN_IDENTITY` to override the automatic choice. Otherwise, use the first Apple Development identity on this Mac, or ad-hoc signing if none exists.
+IDENTITY="${ARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
+codesign --force --deep --sign "${IDENTITY:--}" "$APP" >/dev/null 2>&1 || echo "signing with '${IDENTITY:-ad-hoc}' failed; the app may still run locally" >&2
 echo "$APP"
