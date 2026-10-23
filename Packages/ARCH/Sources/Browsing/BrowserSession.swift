@@ -1,4 +1,4 @@
-// Owns the engine application, one profile, and one browser for the window. Also owns sidebar state: spaces, favorites, and tabs.
+// Owns the engine application, one profile, and one browser for the window. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list.
 import AppKit
 import ARCHEngine
 import Combine
@@ -19,6 +19,8 @@ public final class BrowserSession: ObservableObject {
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
+    /// The last 10 closed tabs, oldest first. Reopening takes the newest.
+    @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
 
     public static let searchURL = URL(string: "https://www.google.com/search")!
     public static let newTabURL = URL(string: "https://www.google.com")!
@@ -43,6 +45,7 @@ public final class BrowserSession: ObservableObject {
         spaces = initialSpaces
         currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
         favorites = snapshot?.favorites ?? []
+        closedTabs = snapshot?.closedTabs ?? []
         application.run()
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
         restoreTabs(snapshot)
@@ -142,6 +145,8 @@ public final class BrowserSession: ObservableObject {
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
         browser.closeWebContents(tab.webContents)
+        closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned))
+        if closedTabs.count > 10 { closedTabs.removeFirst() }
         if selectedTabID == tab.id {
             let siblings = tabs.filter { $0.spaceID == tab.spaceID }
             selectedTabID = (siblings.first { !$0.isPinned } ?? siblings.first)?.id
@@ -150,6 +155,52 @@ public final class BrowserSession: ObservableObject {
 
     public func closeSelectedTab() {
         selectedTab.map(closeTab)
+    }
+
+    /// Keeps pinned tabs and the selected tab; closes the rest of the selected tab's space.
+    public func closeOtherTabs() {
+        guard let selected = selectedTab else { return }
+        for tab in tabs where tab.spaceID == selected.spaceID && !tab.isPinned && tab.id != selected.id {
+            closeTab(tab)
+        }
+    }
+
+    /// Restores the newest closed tab into its space, or the current space when that space is gone.
+    public func reopenLastClosedTab() {
+        guard let record = closedTabs.popLast() else { return }
+        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
+        openTab(url: record.url, in: spaceID, pinned: record.isPinned)
+    }
+
+    /// The current space's tabs in sidebar order: pinned first, then open.
+    private var orderedTabs: [Tab] {
+        tabs(in: currentSpaceID, pinned: true) + tabs(in: currentSpaceID, pinned: false)
+    }
+
+    public func selectTab(at index: Int) {
+        let ordered = orderedTabs
+        guard ordered.indices.contains(index) else { return }
+        selectedTabID = ordered[index].id
+    }
+
+    public func selectLastTab() {
+        if let last = orderedTabs.last { selectedTabID = last.id }
+    }
+
+    public func selectAdjacentTab(forward: Bool) {
+        let ordered = orderedTabs
+        guard let index = ordered.firstIndex(where: { $0.id == selectedTabID }) else { return }
+        selectedTabID = ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count].id
+    }
+
+    /// Swaps the selected tab with its neighbor in its own list, pinned or open, within its space.
+    public func moveSelectedTab(up: Bool) {
+        guard let selected = selectedTab, let index = tabs.firstIndex(where: { $0.id == selected.id }) else { return }
+        let siblings = tabs(in: selected.spaceID, pinned: selected.isPinned)
+        guard let position = siblings.firstIndex(where: { $0.id == selected.id }) else { return }
+        let target = up ? position - 1 : position + 1
+        guard siblings.indices.contains(target), let neighborIndex = tabs.firstIndex(where: { $0.id == siblings[target].id }) else { return }
+        tabs.swapAt(index, neighborIndex)
     }
 
     /// The tab stores the pinned flag. The session republishes the change for views that group tabs by this flag.
@@ -237,6 +288,7 @@ public final class BrowserSession: ObservableObject {
     private func observeChanges() {
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, $currentSpaceID.map { _ in () })
             .merge(with: $selectedTabID.map { _ in () })
+            .merge(with: $closedTabs.map { _ in () })
             .dropFirst()
             .sink { [weak self] in self?.scheduleSave() }
             .store(in: &cancellables)
@@ -253,7 +305,7 @@ public final class BrowserSession: ObservableObject {
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
                         tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned) },
-                        selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID })
+                        selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
     }
 }
 

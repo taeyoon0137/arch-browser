@@ -1,4 +1,4 @@
-// Saves and restores sidebar state (spaces, favorites, tabs, and selection) in one JSON file, `session.json`. The session supplies the directory: the app's Application Support folder.
+// Saves and restores sidebar state (spaces, favorites, tabs, closed tabs, and selection) in one JSON file, `session.json`. The session supplies the directory: the app's Application Support folder.
 import Foundation
 
 struct SessionSnapshot: Codable {
@@ -14,6 +14,8 @@ struct SessionSnapshot: Codable {
     var favorites: [Favorite]
     var tabs: [TabRecord]
     var selectedTabIndex: Int?
+    /// The most recently closed tabs, oldest first. Optional so files written before this field decode.
+    var closedTabs: [TabRecord]?
 }
 
 final class SessionStore {

@@ -75,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(newTab), keyEquivalent: "t")
         fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
+        let closeOthersItem = fileMenu.addItem(withTitle: "Close Other Tabs", action: #selector(closeOtherTabs), keyEquivalent: "w")
+        closeOthersItem.keyEquivalentModifierMask = [.command, .option]
+        let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
+        reopenItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
 
@@ -97,6 +101,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabMenu.addItem(withTitle: "Pin or Unpin Tab", action: #selector(togglePinned), keyEquivalent: "d")
         let favoriteItem = tabMenu.addItem(withTitle: "Add to Favorites", action: #selector(addFavorite), keyEquivalent: "D")
         favoriteItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(.separator())
+        let nextTabItem = tabMenu.addItem(withTitle: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        let previousTabItem = tabMenu.addItem(withTitle: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
+        previousTabItem.keyEquivalentModifierMask = [.command, .shift]
+        let moveUpItem = tabMenu.addItem(withTitle: "Move Tab Up", action: #selector(moveTabUp), keyEquivalent: String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)))
+        moveUpItem.keyEquivalentModifierMask = [.command, .option]
+        let moveDownItem = tabMenu.addItem(withTitle: "Move Tab Down", action: #selector(moveTabDown), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))
+        moveDownItem.keyEquivalentModifierMask = [.command, .option]
+        tabMenu.addItem(.separator())
+        for number in 1...8 {
+            tabMenu.addItem(withTitle: "Select Tab \(number)", action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number
+        }
+        tabMenu.addItem(withTitle: "Select Last Tab", action: #selector(selectLastTab), keyEquivalent: "9")
         mainMenu.addItem(submenu(tabMenu, title: "Tab"))
 
         let spacesMenu = NSMenu(title: "Spaces")
@@ -123,6 +141,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newTab() { session.showCommandPalette(.newTab) }
     @objc private func closeTab() { session.closeSelectedTab() }
+    @objc private func closeOtherTabs() { session.closeOtherTabs() }
+    @objc private func reopenClosedTab() { session.reopenLastClosedTab() }
+    @objc private func nextTab() { session.selectAdjacentTab(forward: true) }
+    @objc private func previousTab() { session.selectAdjacentTab(forward: false) }
+    @objc private func moveTabUp() { session.moveSelectedTab(up: true) }
+    @objc private func moveTabDown() { session.moveSelectedTab(up: false) }
+    @objc private func selectTab(_ sender: NSMenuItem) { session.selectTab(at: sender.tag - 1) }
+    @objc private func selectLastTab() { session.selectLastTab() }
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
     @objc private func reload() { session.reload() }
