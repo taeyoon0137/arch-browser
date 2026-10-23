@@ -44,9 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         window.title = "Arch"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        // An empty compact toolbar makes the title bar taller, which lowers the traffic light buttons onto the sidebar's top row.
+        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the sidebar's top row.
         window.toolbar = NSToolbar(identifier: "Main")
-        window.toolbarStyle = .unifiedCompact
+        window.toolbarStyle = .unified
         window.titlebarSeparatorStyle = .none
         // Full screen hides the traffic lights, so the toolbar would only cover the sidebar's top row there.
         NotificationCenter.default.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in

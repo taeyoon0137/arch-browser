@@ -48,9 +48,9 @@ public struct BrowserWindowView: View {
     }
 }
 
-/// The rounded frame of the page, concentric with the window corner 6 points away. `WebContentsHostView` clips the engine's view with the same radius.
+/// The rounded frame of the page, concentric with the window's corner (about 17 points with the unified toolbar) 6 points away. `WebContentsHostView` clips the engine's view with the same radius.
 struct PageFrameShape: InsettableShape {
-    static let cornerRadius: CGFloat = 10
+    static let cornerRadius: CGFloat = 11
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
