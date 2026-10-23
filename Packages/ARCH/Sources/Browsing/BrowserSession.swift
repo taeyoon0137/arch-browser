@@ -160,6 +160,9 @@ public final class BrowserSession: ObservableObject {
         tab.requestPermission = { [weak tab] request, completion in
             Self.askPermission(request, on: tab?.webContents.view.window, completion: completion)
         }
+        tab.presentAlert = { [weak tab] alert, completion in
+            Self.present(alert, on: tab?.webContents.view.window, completion: completion)
+        }
         // The session republishes changes to the selected tab so views that read the tab through the session refresh.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
             guard let self else { return }
@@ -396,12 +399,17 @@ public final class BrowserSession: ObservableObject {
 
     /// Asks with a sheet on the page's window, or on the main window while the page is not on screen. The engine calls this from inside its own message loop, so the sheet never blocks and a request without any window is denied. The answer reaches the engine once.
     private static func askPermission(_ request: EnginePermissionRequest, on window: NSWindow?, completion: @escaping (Bool) -> Void) {
-        guard let window = window ?? NSApp.mainWindow ?? NSApp.keyWindow else { return completion(false) }
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")
-        alert.beginSheetModal(for: window) { completion($0 == .alertFirstButtonReturn) }
+        present(alert, on: window) { completion($0 == .alertFirstButtonReturn) }
+    }
+
+    /// Shows a sheet on the tab's window. Without a window the handler receives `.cancel` at once; nothing runs an app-modal alert inside an engine callback.
+    private static func present(_ alert: NSAlert, on window: NSWindow?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard let window = window ?? NSApp.mainWindow ?? NSApp.keyWindow else { return completion(.cancel) }
+        alert.beginSheetModal(for: window, completionHandler: completion)
     }
 
     private static func permissionDescription(for types: [EnginePermissionType]) -> String {

@@ -24,6 +24,8 @@ public final class Tab: ObservableObject, Identifiable {
     var didClose: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// The session sets this callback to show a page's dialog as a sheet. Without it, or without a window, the handler receives `.cancel` and the page gets the dialog's safe answer.
+    var presentAlert: ((NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
 
@@ -67,5 +69,54 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
+    }
+
+    // MARK: JavaScript dialogs
+
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
+        let alert = pageAlert(message)
+        alert.addButton(withTitle: "OK")
+        showAlert(alert) { _ in completion() }
+    }
+
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
+        let alert = pageAlert(message)
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        showAlert(alert) { completion($0 == .alertFirstButtonReturn) }
+    }
+
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
+        let alert = pageAlert(message)
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: defaultText ?? "")
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        showAlert(alert) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+    }
+
+    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers.
+    public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Leave this page?"
+        alert.informativeText = "Changes you made may not be saved."
+        alert.addButton(withTitle: "Leave")
+        alert.addButton(withTitle: "Stay")
+        showAlert(alert) { completion($0 != .alertSecondButtonReturn) }
+    }
+
+    /// Names the site in the title so that a page cannot pass its dialog off as one from the app.
+    private func pageAlert(_ message: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = url?.host.map { "\u{201C}\($0)\u{201D} says" } ?? "This page says"
+        alert.informativeText = message
+        return alert
+    }
+
+    private func showAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard let presentAlert else { return completion(.cancel) }
+        presentAlert(alert, completion)
     }
 }
