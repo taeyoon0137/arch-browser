@@ -1,4 +1,5 @@
-// The command palette floats over the window. Its mode determines whether it edits the current tab's address or opens a new tab. As the user types, it lists matching open tabs they can switch to.
+// The command palette floats over the window. Its mode determines whether it edits the current tab's address or opens a new tab. As the user types, it lists matching open tabs they can switch to and matching pages from history.
+import History
 import SwiftUI
 
 struct CommandPaletteView: View {
@@ -14,6 +15,10 @@ struct CommandPaletteView: View {
             tab.id != session.selectedTabID &&
                 (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
+    }
+
+    private var historySuggestions: [HistoryEntry] {
+        HistoryStore.shared.suggestions(for: text, limit: 5)
     }
 
     private var actionLabel: String {
@@ -51,6 +56,10 @@ struct CommandPaletteView: View {
                             session.selectedTabID = tab.id
                             session.dismissCommandPalette()
                         }
+                }
+                ForEach(historySuggestions) { entry in
+                    PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
+                        .onTapGesture { session.submitCommandPalette(entry.url.absoluteString) }
                 }
             }
             .padding(.bottom, 6)

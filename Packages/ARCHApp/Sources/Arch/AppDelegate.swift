@@ -4,6 +4,7 @@ import ARCHEngine
 import ARCHEngineChromium
 import ARCHEngineWebKit
 import Browsing
+import History
 import Preferences
 import SwiftUI
 
@@ -138,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let historyMenu = NSMenu(title: "History")
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
+        historyMenu.addItem(.separator())
+        historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
         mainMenu.addItem(submenu(historyMenu, title: "History"))
         return mainMenu
     }
@@ -163,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reload() { session.reload() }
     @objc private func goBack() { session.goBack() }
     @objc private func goForward() { session.goForward() }
+    @objc private func clearHistory() { HistoryStore.shared.clear() }
     @objc private func togglePinned() { session.selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.selectedTab.map(session.addFavorite) }
     @objc private func newSpace() { session.addSpace() }

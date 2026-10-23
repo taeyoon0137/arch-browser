@@ -35,6 +35,7 @@ let package = Package(
         .library(name: "ARCHEngineChromium", targets: ["ARCHEngineChromium"]),
         .library(name: "Browsing", targets: ["Browsing"]),
         .library(name: "Preferences", targets: ["Preferences"]),
+        .library(name: "History", targets: ["History"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
     ],
@@ -54,9 +55,10 @@ let package = Package(
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOSurface")]
         ),
         .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
-        .target(name: "Browsing", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Browsing"),
+        .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "History"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "Preferences", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Preferences"),
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
     ],
     cxxLanguageStandard: .cxx20

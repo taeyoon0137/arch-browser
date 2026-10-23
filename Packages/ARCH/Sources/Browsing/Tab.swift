@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
+import History
 
 public final class Tab: ObservableObject, Identifiable {
     public let id = UUID()
@@ -21,6 +22,8 @@ public final class Tab: ObservableObject, Identifiable {
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
     var didClose: (() -> Void)?
+    /// The last page recorded in history, so a page counts once per navigation.
+    private var recordedURL: URL?
 
     init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
         self.webContents = webContents
@@ -50,6 +53,11 @@ extension Tab: EngineWebContentsUIDelegate {
         isLoading = webContents.isLoading
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
+        // A web page is recorded when its load finishes, when the title is usually known.
+        if !isLoading, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+            recordedURL = url
+            HistoryStore.shared.record(url, title: webContents.title)
+        }
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
