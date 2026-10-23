@@ -34,6 +34,7 @@ let package = Package(
         .library(name: "ARCHEngineWebKit", targets: ["ARCHEngineWebKit"]),
         .library(name: "ARCHEngineChromium", targets: ["ARCHEngineChromium"]),
         .library(name: "Browsing", targets: ["Browsing"]),
+        .library(name: "Preferences", targets: ["Preferences"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
     ],
@@ -54,7 +55,8 @@ let package = Package(
         ),
         .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
         .target(name: "Browsing", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Browsing"),
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
+        .target(name: "Preferences", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Preferences"),
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
     ],
     cxxLanguageStandard: .cxx20
