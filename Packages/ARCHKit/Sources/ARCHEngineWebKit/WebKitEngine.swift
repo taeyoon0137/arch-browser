@@ -239,16 +239,21 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var devTools: (any EngineDevTools)? { nil }
     public var thumbnails: (any EngineThumbnails)? { nil }
 
-    /// Reads the page's declared icon, falls back to `/favicon.ico`, and publishes the result through the UI delegate.
+    /// Clears the previous icon first. Reads the page's declared icon, falls back to `/favicon.ico`, and publishes the result through the UI delegate.
     func refreshFavicon() {
         guard let pageURL = webView.url else { return }
+        if favicon != nil {
+            favicon = nil
+            uiDelegate?.webContentsDidChangeFavicon(self)
+        }
         let script = "(function(){var l=document.querySelector('link[rel~=\"icon\"],link[rel=\"shortcut icon\"],link[rel=\"apple-touch-icon\"]');return l?l.href:null;})()"
         webView.evaluateJavaScript(script) { [weak self] value, _ in
             guard let self else { return }
             let declared = (value as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
             guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
             FaviconLoader.load(iconURL) { [weak self] image in
-                guard let self, let image else { return }
+                // Ignore icons that arrive after the tab navigates to another page.
+                guard let self, let image, self.webView.url == pageURL else { return }
                 self.favicon = image
                 self.uiDelegate?.webContentsDidChangeFavicon(self)
             }

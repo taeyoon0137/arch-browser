@@ -195,6 +195,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidChangeURL(_ url: String) {
         self.url = URL(string: url)
         uiDelegate?.webContentsDidChangeURL(self)
+        if favicon != nil {
+            favicon = nil
+            uiDelegate?.webContentsDidChangeFavicon(self)
+        }
     }
     public func cefBrowserDidChangeLoadingState(_ isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
         self.isLoading = isLoading
@@ -204,8 +208,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
+        let pageURL = url
         FaviconLoader.load(iconURL) { [weak self] image in
-            guard let self, let image else { return }
+            // Ignore icons that finish loading after the tab navigates to another page.
+            guard let self, let image, self.url == pageURL else { return }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }
