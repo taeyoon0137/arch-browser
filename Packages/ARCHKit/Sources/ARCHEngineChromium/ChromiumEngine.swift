@@ -150,6 +150,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var pendingURL: URL?
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool)?
+    private var lastActiveMatchOrdinal = 0
+    private var didSelectFirstMatch = false
     /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
     private var lastCrashedURL: URL?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
@@ -186,6 +188,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         // CEF restarts the search when the text or case sensitivity changes; a repeated request only advances the active match.
         let findNext = lastFind?.text == text && lastFind?.matchCase == matchCase
         lastFind = (text, matchCase)
+        if !findNext {
+            lastActiveMatchOrdinal = 0
+            didSelectFirstMatch = false
+        }
         // A request that arrives before the previous final result replaces it, because Chromium cancels the superseded search.
         findCompletion = completion
         browser?.findText(text, forward: forward, matchCase: matchCase, findNext: findNext)
@@ -193,6 +199,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func stopFind() {
         findCompletion = nil
         lastFind = nil
+        lastActiveMatchOrdinal = 0
+        didSelectFirstMatch = false
         browser?.stopFinding()
     }
     public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
@@ -263,10 +271,16 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }
     }
+    /// Chromium reports the active match and the match count in separate updates, so the last reported ordinal accompanies each final count. A new search can finish with matches but no active match; one follow-up request then selects the first match. Every final update reaches the completion until the next search replaces it.
     public func cefBrowserDidFindMatches(_ count: Int, activeMatchOrdinal: Int, finalUpdate: Bool) {
+        if activeMatchOrdinal > 0 { lastActiveMatchOrdinal = activeMatchOrdinal }
         guard finalUpdate, let completion = findCompletion else { return }
-        findCompletion = nil
-        completion(EngineFindResult(activeMatchOrdinal: activeMatchOrdinal, numberOfMatches: count))
+        if count > 0, lastActiveMatchOrdinal == 0, let lastFind, !didSelectFirstMatch {
+            didSelectFirstMatch = true
+            browser?.findText(lastFind.text, forward: true, matchCase: lastFind.matchCase, findNext: true)
+            return
+        }
+        completion(EngineFindResult(activeMatchOrdinal: count == 0 ? 0 : lastActiveMatchOrdinal, numberOfMatches: count))
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
