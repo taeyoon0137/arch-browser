@@ -57,6 +57,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)print;
 /// Renders the current page to PDF data. Passes `nil` when printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
+/// Captures the page as PNG data through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
+- (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
+                             completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
 - (void)close;
 @end
 

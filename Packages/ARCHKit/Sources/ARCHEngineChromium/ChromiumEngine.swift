@@ -191,8 +191,12 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func removeStylesheet(identifier: String) {
         browser?.executeJavaScript("document.getElementById('arch-style-\(identifier)')?.remove();")
     }
-    public func captureViewport(completion: @escaping (NSImage?) -> Void) { completion(nil) }
-    public func captureFullPage(completion: @escaping (NSImage?) -> Void) { completion(nil) }
+    public func captureViewport(completion: @escaping (NSImage?) -> Void) {
+        browser?.captureScreenshot(beyondViewport: false) { completion($0.flatMap(NSImage.init(data:))) }
+    }
+    public func captureFullPage(completion: @escaping (NSImage?) -> Void) {
+        browser?.captureScreenshot(beyondViewport: true) { completion($0.flatMap(NSImage.init(data:))) }
+    }
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         browser?.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
     }

@@ -3,13 +3,16 @@
 
 #include <crt_externs.h>
 #include <dispatch/dispatch.h>
+#include <map>
 
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_devtools_message_observer.h"
 #include "include/cef_find_handler.h"
+#include "include/cef_values.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -292,11 +295,42 @@ private:
     IMPLEMENT_REFCOUNTING(BridgePdfCallback);
 };
 
+// Resolves screenshot requests by the message id that `ExecuteDevToolsMethod` assigned.
+class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
+public:
+    void Expect(int messageID, void (^completion)(NSData *_Nullable)) { pending_[messageID] = completion; }
+
+    void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result,
+                                size_t result_size) override {
+        auto pending = pending_.find(message_id);
+        if (pending == pending_.end()) {
+            return;
+        }
+        void (^completion)(NSData *_Nullable) = pending->second;
+        pending_.erase(pending);
+        NSData *png = nil;
+        if (success && result_size > 0) {
+            NSData *json = [NSData dataWithBytesNoCopy:const_cast<void *>(result) length:result_size freeWhenDone:NO];
+            id base64 = [[NSJSONSerialization JSONObjectWithData:json options:0 error:nil] objectForKey:@"data"];
+            if ([base64 isKindOfClass:NSString.class]) {
+                png = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
+            }
+        }
+        completion(png);
+    }
+
+private:
+    std::map<int, void (^)(NSData *_Nullable)> pending_;
+    IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
+};
+
 }  // namespace
 
 @implementation ARCHCEFBrowser {
     CefRefPtr<BridgeClient> _client;
     CefRefPtr<CefBrowser> _browser;
+    CefRefPtr<BridgeDevToolsObserver> _devToolsObserver;
+    CefRefPtr<CefRegistration> _devToolsRegistration;
     __weak id<ARCHCEFBrowserDelegate> _delegate;
     NSView *_parentView;
 }
@@ -456,6 +490,27 @@ private:
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"arch-%@.pdf", NSUUID.UUID.UUIDString]];
     CefPdfPrintSettings settings;
     _browser->GetHost()->PrintToPDF(CefString(path.UTF8String), settings, new BridgePdfCallback(completion));
+}
+
+- (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport completion:(void (^)(NSData *_Nullable))completion {
+    if (!_browser) {
+        completion(nil);
+        return;
+    }
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    if (!_devToolsObserver) {
+        _devToolsObserver = new BridgeDevToolsObserver;
+        _devToolsRegistration = host->AddDevToolsMessageObserver(_devToolsObserver);
+    }
+    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+    params->SetString("format", "png");
+    params->SetBool("captureBeyondViewport", beyondViewport);
+    int messageID = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
+    if (messageID == 0) {
+        completion(nil);
+        return;
+    }
+    _devToolsObserver->Expect(messageID, completion);
 }
 
 - (void)close {
