@@ -41,6 +41,7 @@ public final class BrowserSession: ObservableObject {
                 isFindBarVisible = false
                 findResult = nil
             }
+            deferVisibleSheet()
             showNextSheet()
         }
     }
@@ -83,6 +84,12 @@ public final class BrowserSession: ObservableObject {
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert)?
+    /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
+    public var isQuitting = false {
+        didSet {
+            if isQuitting { cancelAllSheets() }
+        }
+    }
 
     /// Starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them.
     public init(registry: EngineRegistry = .shared, userDataDirectory: URL) throws {
@@ -257,6 +264,12 @@ public final class BrowserSession: ObservableObject {
         tab.didClose = { [weak self, weak tab] in
             if let self, let tab { self.closeTab(tab) }
         }
+        tab.didCancelDialogs = { [weak self, weak tab] in
+            if let self, let tab { self.cancelSheets(for: tab) }
+        }
+        tab.requestSelection = { [weak self, weak tab] in
+            if let self, let tab { self.selectedTabID = tab.id }
+        }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         tab.didFinishLoad = { [weak self, weak tab] in
             if let self, let tab { self.cookieSync.scheduleCopy(from: tab.engineKind) }
@@ -310,6 +323,14 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay.
+    public func requestCloseTab(_ tab: Tab) {
+        tab.webContents.tryToClose { [weak self, weak tab] closing in
+            guard closing, let self, let tab else { return }
+            self.closeTab(tab)
+        }
+    }
+
     /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
     public func closeTab(_ tab: Tab, remember: Bool = true) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
@@ -328,14 +349,14 @@ public final class BrowserSession: ObservableObject {
     }
 
     public func closeSelectedTab() {
-        selectedTab.map { closeTab($0) }
+        selectedTab.map(requestCloseTab)
     }
 
     /// Keeps pinned tabs and the selected tab; closes the rest of the selected tab's space.
     public func closeOtherTabs() {
         guard let selected = selectedTab else { return }
         for tab in tabs where tab.spaceID == selected.spaceID && !tab.isPinned && tab.id != selected.id {
-            closeTab(tab)
+            requestCloseTab(tab)
         }
     }
 
@@ -558,6 +579,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is selected, so a background page cannot cover the page in front.
     private func enqueueSheet(_ alert: NSAlert, for tab: Tab, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard !isQuitting else { return completion(.cancel) }
         pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, completion: completion))
         showNextSheet()
     }
@@ -570,18 +592,42 @@ public final class BrowserSession: ObservableObject {
         pendingSheets[tab.id] = queue.isEmpty ? nil : queue
         visibleSheet = (tab.id, sheet.alert)
         sheet.alert.beginSheetModal(for: window) { [weak self] response in
-            self?.visibleSheet = nil
-            sheet.completion(response)
-            self?.showNextSheet()
+            guard let self else { return sheet.completion(response) }
+            self.visibleSheet = nil
+            if response == Self.deferredSheetResponse {
+                self.pendingSheets[tab.id, default: []].insert(sheet, at: 0)
+            } else {
+                sheet.completion(response)
+            }
+            self.showNextSheet()
         }
     }
 
-    /// Gives a closing tab's sheets the safe answer, `.cancel`, including the one on screen.
+    /// Ends a sheet without answering it, so that it can show again.
+    private static let deferredSheetResponse = NSApplication.ModalResponse(rawValue: -1_100)
+
+    /// Puts away the sheet of a tab that is no longer selected, as when a link from another app opens a new tab. It shows again first when its tab is selected.
+    private func deferVisibleSheet() {
+        guard let visibleSheet, visibleSheet.tabID != selectedTabID, let window = visibleSheet.alert.window.sheetParent else { return }
+        window.endSheet(visibleSheet.alert.window, returnCode: Self.deferredSheetResponse)
+    }
+
+    /// Gives a closing tab's sheets the safe answer, `.cancel`, including the one on screen. The queue empties first, so that ending the visible sheet does not show the next one.
     private func cancelSheets(for tab: Tab) {
+        let waiting = pendingSheets.removeValue(forKey: tab.id) ?? []
         if let visibleSheet, visibleSheet.tabID == tab.id, let window = visibleSheet.alert.window.sheetParent {
             window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
         }
-        pendingSheets.removeValue(forKey: tab.id)?.forEach { $0.completion(.cancel) }
+        waiting.forEach { $0.completion(.cancel) }
+    }
+
+    private func cancelAllSheets() {
+        let waiting = pendingSheets.values.flatMap { $0 }
+        pendingSheets = [:]
+        if let visibleSheet, let window = visibleSheet.alert.window.sheetParent {
+            window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
+        }
+        waiting.forEach { $0.completion(.cancel) }
     }
 
     private static func permissionDescription(for types: [EnginePermissionType]) -> String {

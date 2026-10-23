@@ -64,6 +64,12 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 - (void)cancel;
 @end
 
+typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
+    ARCHCEFDialogKindAlert,
+    ARCHCEFDialogKindConfirm,
+    ARCHCEFDialogKindPrompt,
+};
+
 @protocol ARCHCEFBrowserDelegate <NSObject>
 - (void)cefBrowserDidCreateView;
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
@@ -85,6 +91,15 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 - (void)cefBrowserDidRequestPermissions:(ARCHCEFPermission)permissions
                              fromOrigin:(NSString *)origin
                                decision:(void (^)(BOOL allow))decision;
+/// Asks the app to show a page's `alert`, `confirm`, or `prompt`. Call `completion` once with whether the user accepted and, for a prompt, the text.
+- (void)cefBrowserRunDialog:(ARCHCEFDialogKind)kind
+                    message:(NSString *)message
+                defaultText:(NSString *)defaultText
+                 completion:(void (^)(BOOL accepted, NSString *_Nullable text))completion;
+/// Asks whether to leave a page whose `beforeunload` handler asks to stay. Call `completion` once.
+- (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
+/// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
+- (void)cefBrowserDidResetDialogs;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
 @end
@@ -133,6 +148,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
 - (void)close;
+/// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
+- (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;
 @end
 
 NS_ASSUME_NONNULL_END

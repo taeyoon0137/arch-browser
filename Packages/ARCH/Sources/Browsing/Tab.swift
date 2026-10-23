@@ -29,6 +29,10 @@ public final class Tab: ObservableObject, Identifiable {
     var didClose: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.
     var didFinishLoad: (() -> Void)?
+    /// The session sets this callback to close the sheets of a page whose dialogs no longer apply.
+    var didCancelDialogs: (() -> Void)?
+    /// The session sets this callback to bring the tab forward, so that a sheet it needs can show.
+    var requestSelection: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show a page's dialog as a sheet, which waits until the tab is selected. Without it the handler receives `.cancel` and the page gets the dialog's safe answer.
@@ -147,14 +151,19 @@ extension Tab: EngineWebContentsUIDelegate {
         showAlert(alert) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
-    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers.
+    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show.
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
+        requestSelection?()
         let alert = NSAlert()
         alert.messageText = "Leave this page?"
         alert.informativeText = "Changes you made may not be saved."
         alert.addButton(withTitle: "Leave")
         alert.addButton(withTitle: "Stay")
         showAlert(alert) { completion($0 != .alertSecondButtonReturn) }
+    }
+
+    public func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {
+        didCancelDialogs?()
     }
 
     /// Names the site in the title so that a page cannot pass its dialog off as one from the app.

@@ -25,7 +25,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         observations = [
             webView.observe(\.title) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeTitle($0) } },
             webView.observe(\.url) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeURL($0) } },
-            webView.observe(\.isLoading) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
+            webView.observe(\.isLoading) { [weak owner] _, _ in owner?.loadingStateDidChange() },
             webView.observe(\.estimatedProgress) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
             webView.observe(\.themeColor) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeThemeColor($0) } },
         ]
@@ -132,18 +132,19 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-        guard let delegate = owner.uiDelegate else { return completionHandler() }
-        delegate.webContents(owner, runJavaScriptAlert: message, completion: completionHandler)
+        guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler() }
+        let answer = owner.trackDialog(safeAnswer: ()) { completionHandler() }
+        delegate.webContents(owner, runJavaScriptAlert: message) { answer(()) }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        guard let delegate = owner.uiDelegate else { return completionHandler(false) }
-        delegate.webContents(owner, runJavaScriptConfirm: message, completion: completionHandler)
+        guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(false) }
+        delegate.webContents(owner, runJavaScriptConfirm: message, completion: owner.trackDialog(safeAnswer: false, completion: completionHandler))
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
-        guard let delegate = owner.uiDelegate else { return completionHandler(nil) }
-        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: completionHandler)
+        guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(nil) }
+        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
     }
 
     /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. WebKit handles geolocation through the app's location authorization.

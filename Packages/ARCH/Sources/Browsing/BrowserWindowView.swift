@@ -570,7 +570,7 @@ struct TabRowView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if isHovering {
-                TabCloseButton { session.closeTab(tab) }
+                TabCloseButton { session.requestCloseTab(tab) }
             }
         }
         .padding(.leading, 10)
@@ -586,7 +586,7 @@ struct TabRowView: View {
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
             Divider()
-            Button("Close Tab") { session.closeTab(tab) }
+            Button("Close Tab") { session.requestCloseTab(tab) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)

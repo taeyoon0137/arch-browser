@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func setQuitting(_ quitting: Bool) {
+        session?.isQuitting = quitting
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         session?.saveNow()
     }

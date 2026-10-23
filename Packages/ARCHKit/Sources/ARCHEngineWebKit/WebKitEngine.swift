@@ -194,10 +194,14 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
-    public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView)
+    public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView, contents: self)
     let allowsDownloads: Bool
     var bridge: WebKitDelegateBridge?
     var observers: [any EngineWebContentsNavigationObserver] = []
+    /// Gives the dialog the page waits on its safe answer. Set while an `alert`, `confirm`, or `prompt` dialog is open.
+    private var dismissPendingDialog: (() -> Void)?
+    /// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
+    private(set) var suppressesDialogs = false
 
     public init(sessionID: String, context: WebKitBrowserContext, configuration: EngineWebContentsConfiguration) {
         self.sessionID = sessionID
@@ -298,6 +302,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
     public func exitFullscreen() { webView.closeAllMediaPresentations() }
     public func discard() { webView.stopLoading() }
+    /// WebKit has no public way to run `beforeunload` handlers.
+    public func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
     public func clearSiteDataAndReload() { fatalError("skeleton") }
     public var devTools: (any EngineDevTools)? { nil }
     public var thumbnails: (any EngineThumbnails)? { nil }
@@ -324,22 +330,70 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
 }
 
+extension WebKitWebContents {
+    /// Wraps a dialog's completion so that it runs once, from the sheet or from a navigation the user starts, whichever comes first.
+    func trackDialog<Answer>(safeAnswer: Answer, completion: @escaping (Answer) -> Void) -> (Answer) -> Void {
+        var answered = false
+        let answer: (Answer) -> Void = { [weak self] value in
+            guard !answered else { return }
+            answered = true
+            self?.dismissPendingDialog = nil
+            completion(value)
+        }
+        dismissPendingDialog = { answer(safeAnswer) }
+        return answer
+    }
+
+    /// The page stops while its dialog waits, so a navigation the user starts would not begin. Dismiss the dialog first, as on the Chromium engine.
+    func dismissDialogBeforeNavigation() {
+        guard let dismiss = dismissPendingDialog else { return }
+        suppressesDialogs = true
+        dismiss()
+        uiDelegate?.webContentsDidCancelDialogs(self)
+    }
+
+    func loadingStateDidChange() {
+        if !webView.isLoading {
+            suppressesDialogs = false
+        }
+        uiDelegate?.webContentsDidChangeLoadingState(self)
+    }
+}
+
 public final class WebKitNavigationController: EngineNavigationController {
     let webView: WKWebView
+    private weak var contents: WebKitWebContents?
 
-    init(webView: WKWebView) {
+    init(webView: WKWebView, contents: WebKitWebContents) {
         self.webView = webView
+        self.contents = contents
     }
 
     public lazy var backForwardList: any EngineBackForwardList = WebKitBackForwardList(webView: webView)
-    public func load(_ request: URLRequest) { webView.load(request) }
-    public func reload() { webView.reload() }
-    public func reloadWithoutCache() { webView.reloadFromOrigin() }
+    public func load(_ request: URLRequest) {
+        contents?.dismissDialogBeforeNavigation()
+        webView.load(request)
+    }
+    public func reload() {
+        contents?.dismissDialogBeforeNavigation()
+        webView.reload()
+    }
+    public func reloadWithoutCache() {
+        contents?.dismissDialogBeforeNavigation()
+        webView.reloadFromOrigin()
+    }
     public func stop() { webView.stopLoading() }
-    public func goBack() { webView.goBack() }
-    public func goForward() { webView.goForward() }
+    public func goBack() {
+        contents?.dismissDialogBeforeNavigation()
+        webView.goBack()
+    }
+    public func goForward() {
+        contents?.dismissDialogBeforeNavigation()
+        webView.goForward()
+    }
     public func go(to item: any EngineBackForwardListItem) {
         guard let item = item as? WebKitBackForwardListItem else { return }
+        contents?.dismissDialogBeforeNavigation()
         webView.go(to: item.item)
     }
 }

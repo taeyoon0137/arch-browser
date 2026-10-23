@@ -253,6 +253,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func print() { browser?.print() }
     public func exitFullscreen() {}
     public func discard() { browser?.close() }
+    public func tryToClose(completion: @escaping (Bool) -> Void) {
+        guard let browser else { return completion(true) }
+        browser.tryClose(completion: completion)
+    }
     public func clearSiteDataAndReload() { browser?.reloadIgnoringCache() }
     public var devTools: (any EngineDevTools)? { nil }
     public var thumbnails: (any EngineThumbnails)? { nil }
@@ -315,6 +319,21 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidClose() {
         uiDelegate?.webContentsDidClose(self)
+    }
+    public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
+        guard let uiDelegate else { return completion(kind == .alert, nil) }
+        switch kind {
+        case .confirm: uiDelegate.webContents(self, runJavaScriptConfirm: message) { completion($0, nil) }
+        case .prompt: uiDelegate.webContents(self, runJavaScriptPrompt: message, defaultText: defaultText) { completion($0 != nil, $0) }
+        default: uiDelegate.webContents(self, runJavaScriptAlert: message) { completion(true, nil) }
+        }
+    }
+    public func cefBrowserRunLeavePageDialog(completion: @escaping (Bool) -> Void) {
+        guard let uiDelegate else { return completion(true) }
+        uiDelegate.webContents(self, runBeforeUnloadPanel: "", completion: completion)
+    }
+    public func cefBrowserDidResetDialogs() {
+        uiDelegate?.webContentsDidCancelDialogs(self)
     }
     public func cefBrowserShouldDownloadURL(_ url: String, hasDocument: Bool) -> Bool {
         guard let uiDelegate, let url = URL(string: url) else { return true }

@@ -16,6 +16,7 @@
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
+#include "include/cef_jsdialog_handler.h"
 #include "include/cef_permission_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_values.h"
@@ -45,7 +46,12 @@
 }
 
 - (void)terminate:(id)sender {
-    [ARCHCEFRuntime shutdown];
+    // AppKit does not quit while a window shows a sheet with more than one button, and quits only once that sheet ends. Answer the sheets with Cancel first so that none holds the app open. Ending a sheet can show another one, so the loop repeats a bounded number of times.
+    for (NSWindow *window in self.windows) {
+        for (int attempt = 0; attempt < 32 && window.attachedSheet; attempt++) {
+            [window endSheet:window.attachedSheet returnCode:NSModalResponseCancel];
+        }
+    }
     [super terminate:sender];
 }
 
@@ -315,6 +321,13 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
         return NO;
     }
     gInitialized = true;
+    // CEF shuts down only once AppKit has decided to quit, so a quit that does not happen leaves the engine running.
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification *notification) {
+                                                      [ARCHCEFRuntime shutdown];
+                                                  }];
     return YES;
 }
 
@@ -423,8 +436,13 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 #pragma mark - Browser
 
 @interface ARCHCEFBrowser ()
+/// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
+@property(nonatomic, readonly) BOOL suppressesDialogs;
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser;
 - (void)handleDoClose;
+- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
+- (void)handleLeavePageDialog:(void (^)(BOOL))completion;
+- (void)handleResetDialogs;
 - (void)handleTitle:(NSString *)title;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
@@ -491,6 +509,7 @@ class BridgeClient : public CefClient,
                      public CefLoadHandler,
                      public CefFindHandler,
                      public CefDownloadHandler,
+                     public CefJSDialogHandler,
                      public CefPermissionHandler,
                      public CefRequestHandler {
 public:
@@ -503,7 +522,40 @@ public:
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+
+    // The app shows the page's dialogs as its own sheets and answers through the callback, which stays alive in the block until then.
+    bool OnJSDialog(CefRefPtr<CefBrowser> browser, const CefString &origin_url, JSDialogType dialog_type, const CefString &message_text,
+                    const CefString &default_prompt_text, CefRefPtr<CefJSDialogCallback> callback, bool &suppress_message) override {
+        if (!owner_) {
+            return false;
+        }
+        if (owner_.suppressesDialogs) {
+            suppress_message = true;
+            return false;
+        }
+        ARCHCEFDialogKind kind = dialog_type == JSDIALOGTYPE_CONFIRM ? ARCHCEFDialogKindConfirm
+                                 : dialog_type == JSDIALOGTYPE_PROMPT ? ARCHCEFDialogKindPrompt
+                                                                      : ARCHCEFDialogKindAlert;
+        CefRefPtr<CefJSDialogCallback> continuation = callback;
+        [owner_ handleDialog:kind message:ToNSString(message_text) defaultText:ToNSString(default_prompt_text) completion:^(BOOL accepted, NSString *text) {
+            continuation->Continue(accepted, CefString(text ? text.UTF8String : ""));
+        }];
+        return true;
+    }
+
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString &message_text, bool is_reload,
+                              CefRefPtr<CefJSDialogCallback> callback) override {
+        if (!owner_) {
+            return false;
+        }
+        CefRefPtr<CefJSDialogCallback> continuation = callback;
+        [owner_ handleLeavePageDialog:^(BOOL leave) { continuation->Continue(leave, CefString()); }];
+        return true;
+    }
+
+    void OnResetDialogState(CefRefPtr<CefBrowser> browser) override { [owner_ handleResetDialogs]; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
     bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString &url, const CefString &request_method) override {
@@ -681,6 +733,10 @@ private:
     __weak id<ARCHCEFBrowserDelegate> _delegate;
     NSView *_parentView;
     NSMutableDictionary<NSNumber *, ARCHCEFDownload *> *_downloads;
+    /// Set while `tryCloseWithCompletion:` waits for the page's `beforeunload` handlers.
+    void (^_pendingClose)(BOOL);
+    /// Set while the page waits for the answer to an `alert`, `confirm`, or `prompt` dialog.
+    void (^_pendingDialog)(BOOL, NSString *_Nullable);
 }
 
 @synthesize browserView = _browserView;
@@ -738,6 +794,10 @@ private:
 }
 
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward {
+    // CEF resets the dialog state as soon as the navigation starts, before the page runs again, so only the end of loading ends the suppression.
+    if (!isLoading) {
+        _suppressesDialogs = NO;
+    }
     _isLoading = isLoading;
     _canGoBack = canGoBack;
     _canGoForward = canGoForward;
@@ -759,6 +819,71 @@ private:
 - (void)handleDoClose {
     [_browserView removeFromSuperview];
     _browserView = nil;
+    [self finishPendingClose:YES];
+}
+
+- (void)finishPendingClose:(BOOL)closing {
+    void (^completion)(BOOL) = _pendingClose;
+    _pendingClose = nil;
+    if (completion) {
+        completion(closing);
+    }
+}
+
+- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (!delegate) {
+        completion(kind == ARCHCEFDialogKindAlert, nil);
+        return;
+    }
+    // The dialog is answered once, by the sheet or by a navigation the user starts, whichever comes first.
+    __weak ARCHCEFBrowser *weakSelf = self;
+    __block BOOL answered = NO;
+    void (^answer)(BOOL, NSString *_Nullable) = ^(BOOL accepted, NSString *_Nullable text) {
+        if (answered) {
+            return;
+        }
+        answered = YES;
+        ARCHCEFBrowser *strongSelf = weakSelf;
+        if (strongSelf) {
+            strongSelf->_pendingDialog = nil;
+        }
+        completion(accepted, text);
+    };
+    _pendingDialog = answer;
+    [delegate cefBrowserRunDialog:kind message:message defaultText:defaultText completion:answer];
+}
+
+// The page stops while its dialog waits, so a navigation the user starts would never commit. Dismiss the dialog first, as other browsers do on reload or going back.
+- (void)dismissPendingDialog {
+    void (^answer)(BOOL, NSString *_Nullable) = _pendingDialog;
+    if (!answer) {
+        return;
+    }
+    _suppressesDialogs = YES;
+    answer(NO, nil);
+    [_delegate cefBrowserDidResetDialogs];
+}
+
+- (void)handleLeavePageDialog:(void (^)(BOOL))completion {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    __weak ARCHCEFBrowser *weakSelf = self;
+    void (^finish)(BOOL) = ^(BOOL leave) {
+        // Staying cancels a close that was waiting on this answer.
+        if (!leave) {
+            [weakSelf finishPendingClose:NO];
+        }
+        completion(leave);
+    };
+    if (delegate) {
+        [delegate cefBrowserRunLeavePageDialogWithCompletion:finish];
+    } else {
+        finish(YES);
+    }
+}
+
+- (void)handleResetDialogs {
+    [_delegate cefBrowserDidResetDialogs];
 }
 
 - (void)handleBeforeClose {
@@ -815,18 +940,21 @@ private:
 }
 
 - (void)loadURL:(NSString *)url {
+    [self dismissPendingDialog];
     if (_browser) {
         _browser->GetMainFrame()->LoadURL(CefString(url.UTF8String));
     }
 }
 
 - (void)reload {
+    [self dismissPendingDialog];
     if (_browser) {
         _browser->Reload();
     }
 }
 
 - (void)reloadIgnoringCache {
+    [self dismissPendingDialog];
     if (_browser) {
         _browser->ReloadIgnoreCache();
     }
@@ -839,12 +967,14 @@ private:
 }
 
 - (void)goBack {
+    [self dismissPendingDialog];
     if (_browser) {
         _browser->GoBack();
     }
 }
 
 - (void)goForward {
+    [self dismissPendingDialog];
     if (_browser) {
         _browser->GoForward();
     }
@@ -919,6 +1049,15 @@ private:
     if (_browser) {
         _browser->GetHost()->CloseBrowser(true);
     }
+}
+
+- (void)tryCloseWithCompletion:(void (^)(BOOL))completion {
+    if (!_browser) {
+        completion(YES);
+        return;
+    }
+    _pendingClose = [completion copy];
+    _browser->GetHost()->CloseBrowser(false);
 }
 
 @end
