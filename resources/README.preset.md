@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="../docs/plan.md"><img src="https://img.shields.io/badge/status-early-4D24E2" alt="status: early" /></a>
-  <a href="https://techcrunch.com/2026/10/22/arc-browser-sunsets-december-22-as-the-browser-company-doubles-down-on-dia/"><img src="https://img.shields.io/badge/In%20Loving%20Memory-Arc%20Browser%20%C2%B7%20Dec%2022%2C%202026-F54F8D" alt="In Loving Memory: Arc Browser, December 22, 2026" /></a>
+  <a href="https://techcrunch.com/2026/10/22/arc-browser-sunsets-december-22-as-the-browser-company-doubles-down-on-dia/"><img src="https://img.shields.io/badge/In%20Loving%20Memory-Arc%20Browser%20%C2%B7%20Dec%2022%2C%202026-555555?labelColor=F54F8D" alt="In Loving Memory: Arc Browser, December 22, 2026" /></a>
 </p>
 <p align="center">
   <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-%23F05138?logo=swift&logoColor=%23FFFFFF" alt="Swift" /></a>
