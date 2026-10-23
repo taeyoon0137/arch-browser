@@ -42,12 +42,19 @@ public struct BrowserWindowView: View {
                     .padding(.top, 20)
                     .padding(.trailing, 24)
             }
+            if session.commandPaletteMode != nil {
+                Color.black.opacity(0.15)
+                    .onTapGesture { session.dismissCommandPalette() }
+                    .transition(.opacity)
+            }
             if let mode = session.commandPaletteMode {
                 // Give each mode its own view identity to reset the typed text and initial address.
                 CommandPaletteView(session: session, mode: mode)
                     .id(mode)
+                    .transition(.commandPalette(from: session.commandPaletteOrigin))
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: session.commandPaletteMode)
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
         .ignoresSafeArea()
@@ -304,7 +311,7 @@ struct AddressPillView: View {
     }
 
     var body: some View {
-        Button(action: session.focusCommandBar) {
+        Button(action: { session.focusCommandBar(from: .sidebar) }) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
@@ -435,7 +442,7 @@ struct SpaceTabsView: View {
                 if !pinned.isEmpty {
                     Divider().padding(.vertical, 4).padding(.horizontal, 10)
                 }
-                NewTabButton(action: { session.showCommandPalette(.newTab) })
+                NewTabButton(action: { session.showCommandPalette(.newTab, from: .sidebar) })
                 ForEach(open) { tab in
                     TabRowView(session: session, tab: tab)
                 }

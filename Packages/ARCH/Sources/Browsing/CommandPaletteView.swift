@@ -31,49 +31,66 @@ struct CommandPaletteView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.black.opacity(0.15)
-                .ignoresSafeArea()
-                .onTapGesture { session.dismissCommandPalette() }
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 18))
-                        .focused($isFocused)
-                        .onSubmit { session.submitCommandPalette(text) }
-                        .onExitCommand { session.dismissCommandPalette() }
-                }
-                .padding(.horizontal, 16)
-                .frame(height: 52)
-                Divider()
-                PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
-                    .onTapGesture { session.submitCommandPalette(text) }
-                ForEach(matchingTabs) { tab in
-                    PaletteTabRow(tab: tab)
-                        .onTapGesture {
-                            session.selectedTabID = tab.id
-                            session.dismissCommandPalette()
-                        }
-                }
-                ForEach(historySuggestions) { entry in
-                    PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
-                        .onTapGesture { session.submitCommandPalette(entry.url.absoluteString) }
-                }
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 18))
+                    .focused($isFocused)
+                    .onSubmit { session.submitCommandPalette(text) }
+                    .onExitCommand { session.dismissCommandPalette() }
             }
-            .padding(.bottom, 6)
-            .frame(width: 560)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
-            .padding(.top, 120)
-            .onAppear {
-                if mode == .editCurrent { text = session.selectedTab?.url?.absoluteString ?? "" }
-                DispatchQueue.main.async { isFocused = true }
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            Divider()
+            PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
+                .onTapGesture { session.submitCommandPalette(text) }
+            ForEach(matchingTabs) { tab in
+                PaletteTabRow(tab: tab)
+                    .onTapGesture {
+                        session.selectedTabID = tab.id
+                        session.dismissCommandPalette()
+                    }
+            }
+            ForEach(historySuggestions) { entry in
+                PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
+                    .onTapGesture { session.submitCommandPalette(entry.url.absoluteString) }
             }
         }
+        .padding(.bottom, 6)
+        .frame(width: 560)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
+        .padding(.top, 120)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear {
+            if mode == .editCurrent { text = session.selectedTab?.url?.absoluteString ?? "" }
+            DispatchQueue.main.async { isFocused = true }
+        }
+    }
+}
+
+/// The palette rises a little from below with a blur when a shortcut opens it, and slides in from the sidebar's side when a sidebar control opens it. It leaves the same way.
+struct CommandPaletteAppearance: ViewModifier {
+    let offset: CGSize
+    let isHidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .offset(isHidden ? offset : .zero)
+            .blur(radius: isHidden ? 10 : 0)
+            .opacity(isHidden ? 0 : 1)
+    }
+}
+
+extension AnyTransition {
+    static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
+        // The sidebar sits on the leading side.
+        let offset = origin == .sidebar ? CGSize(width: -64, height: 0) : CGSize(width: 0, height: 16)
+        return .modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
     }
 }
 

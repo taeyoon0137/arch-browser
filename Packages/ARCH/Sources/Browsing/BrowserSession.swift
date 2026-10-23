@@ -32,6 +32,8 @@ public final class BrowserSession: ObservableObject {
     }
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
+    /// Where the open palette came from, which sets the direction it appears from.
+    @Published public private(set) var commandPaletteOrigin = CommandPaletteOrigin.keyboard
     @Published public private(set) var isFindBarVisible = false
     /// Counts the requests to focus the find bar's field, such as ⌘F while the bar is already open.
     @Published public private(set) var findBarFocusRequests = 0
@@ -301,7 +303,10 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Command palette
 
-    public func showCommandPalette(_ mode: CommandPaletteMode) { commandPaletteMode = mode }
+    public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) {
+        commandPaletteOrigin = origin
+        commandPaletteMode = mode
+    }
     public func dismissCommandPalette() {
         commandPaletteMode = nil
         focusPage()
@@ -471,7 +476,7 @@ public final class BrowserSession: ObservableObject {
     public func goForward() { selectedTab?.webContents.navigationController.goForward() }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
-    public func focusCommandBar() { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent) }
+    public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
 
     // MARK: Persistence
@@ -522,6 +527,13 @@ public final class BrowserSession: ObservableObject {
 public enum CommandPaletteMode {
     case editCurrent
     case newTab
+}
+
+public enum CommandPaletteOrigin {
+    /// A shortcut or menu command: the palette rises from below.
+    case keyboard
+    /// A control in the sidebar: the palette comes in from the sidebar's side.
+    case sidebar
 }
 
 extension BrowserSession: EngineBrowserDelegate {
