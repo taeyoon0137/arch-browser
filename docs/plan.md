@@ -17,7 +17,7 @@ This plan gives the context needed to continue work in another session or on ano
 - Design type names, module boundaries, method signatures, and file layout for Arch. A row in `docs/features.md` describes what a feature does, not how to build it.
 - Add engine protocol members only when a feature needs them. The current protocols are a starting point, not a list of requirements to implement.
 - AI is out of scope. For features that combine AI and non-AI capabilities, keep only the non-AI part.
-- The sidebar holds navigation, the address field, and the tabs. Nothing sits above the page. Only the code is written anew.
+- The sidebar holds navigation, the address field, favorites, and tabs grouped by space. The window background shows the current space's tint. Nothing sits above the page. Only the code is written anew.
 - Use the system framework whenever macOS provides the user experience. Do not build or retain an engine-specific version. Keep Chromium's existing native integrations. Route the remaining engine events to these frameworks and disable the engine's equivalent user interface.
 
 ## Current State
@@ -25,7 +25,7 @@ This plan gives the context needed to continue work in another session or on ano
 | Area | Status |
 |---|---|
 | Engine abstraction | `ARCHEngine` protocols are complete. `ARCHEngineWebKit` implements loading, reloading, stopping, back and forward navigation, find, script execution, style injection, viewport snapshots, and PDF export. Its delegate bridge handles navigation, user interface (UI), and key-value observing (KVO) events; browser creation and restoration, the back-forward list, full-page capture, printing, media, downloads, history, and content blocking remain stubs. `ARCHEngineChromium` embeds a CEF browser beside the sidebar through `CEFBridge`, using Alloy style. It implements loading, navigation, title and URL updates, popups, and closing. Its cookies, history, downloads, find, capture, PDF, printing, and media are stubs. Unsigned development builds use Chromium's mock keychain; signing the bundle is pending. |
-| Feature code | The `Browsing` module and the `Arch` app shell provide one window with a sidebar for navigation, the address field, and tabs. They support opening and closing tabs, URL and search entry, and engine fallback. Every other row in `docs/features.md` is not started. |
+| Feature code | The `Browsing` module and the `Arch` app shell provide one window. Its sidebar contains navigation, the address field, favorites, the current space's pinned and open tabs, and a space switcher. They support opening, closing, and pinning tabs; favorites; several spaces with a tint each; and site favicons. The command palette accepts URLs and search queries. ⌘L opens it for the current tab. ⌘T opens it for a new tab. It lists matching open tabs to switch to. Engine fallback is supported. They also support restoring spaces, favorites, tabs, and the selection from `session.json` in the app's Application Support folder. Every other row in `docs/features.md` is not started. |
 | Build | After `scripts/setup_cef.sh` prepares the CEF distribution, `swift build` builds every target. `scripts/bundle_app.sh` assembles `build/Arch.app`. This app bundle is required to run the Chromium engine. There are no third-party Swift dependencies. |
 | Documentation | Engine design in `docs/engine-protocol.md` and the feature list in `docs/features.md`. |
 
@@ -86,6 +86,7 @@ swift build
 ## Next Steps
 
 1. Complete the WebKit adapter using the steps above.
-2. Implement the app target, starting with windows, the sidebar, and the command bar (rows 1, 5, 7, and 11 in `docs/features.md`).
-3. Use the prebuilt CEF framework to bring up the Chromium engine.
-4. Replace names, images, and fonts.
+2. Continue the app target with the remaining rows in `docs/features.md`, starting with window appearance, tab archiving, and command bar commands.
+3. Sign the app bundle with a stable identity and remove the mock keychain flag from the CEF bridge so the Chromium engine stores its secrets in the keychain.
+4. Add an engine switch for development builds.
+5. Replace names, images, and fonts.

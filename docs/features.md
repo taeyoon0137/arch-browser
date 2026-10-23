@@ -29,9 +29,9 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 1 | Sidebar (collapse, expand, show on hover) | Custom AppKit and SwiftUI implementation | None | not started |
-| 2 | Spaces (create, switch, swipe, color themes) | Custom implementation with SwiftUI gradients for themes | None | not started |
-| 3 | Pinned tabs, favorites, tabs, automatic archiving | Custom implementation with local storage | Session restoration | not started |
+| 1 | Sidebar (collapse, expand, show on hover) | Custom AppKit and SwiftUI implementation | None | in progress |
+| 2 | Spaces (create, switch, swipe, color themes) | Custom implementation with SwiftUI gradients for themes | None | in progress |
+| 3 | Pinned tabs, favorites, tabs, automatic archiving | Custom implementation with local storage | Session restoration | in progress |
 | 4 | Folders and tab groups | Custom implementation | None | not started |
 | 5 | Split View | Custom implementation | None | not started |
 | 6 | Small browser window | Custom implementation | None | not started |
@@ -44,7 +44,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 11 | Command bar (URLs, search, commands, tab switching) | Custom implementation. AppKit text completion shows suggestions from local history and bookmarks, plus public search engine endpoints. No engine autocomplete is used | None | not started |
+| 11 | Command bar (URLs, search, commands, tab switching) | Custom implementation. AppKit text completion shows suggestions from local history and bookmarks, plus public search engine endpoints. No engine autocomplete is used | None | in progress |
 | 12 | Site Search | Custom implementation with a local search engine list | None | not started |
 | 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | not started |
 | 14 | Back, forward, reload, zoom | `WKWebView` | Navigation | not started |
@@ -66,7 +66,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 25 | PDF viewing and printing | Built-in WebKit PDF support, `NSPrintOperation` | PDF | not started |
 | 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | not started |
 | 27 | Fullscreen and sad tabs (crash recovery) | `WKWebView` fullscreen APIs, `webViewWebContentProcessDidTerminate` | Renderer termination | not started |
-| 28 | Favicons and theme colors | Custom favicon collection, `WKWebView.themeColor` | None | not started |
+| 28 | Favicons and theme colors | Custom favicon collection, `WKWebView.themeColor` | None | in progress |
 | 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage | Cookies and history | not started |
 
 ## 4. Creation and Sharing
