@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# commit-msg hook: enforces the commit subject format.
+#   - Maintenance work: <Prefix>: <subject>   (Prefix: Feat | Docs | Refactor | Fix | Chore | Test)
+#   - Planned work:     Task(<ID>): <subject>  (ID: Roman numeral phase and dotted numbers, e.g. I.1.1)
+#   - Prefix and subject are written in English. The subject must not be empty.
+#
+# Enable once after cloning: git config core.hooksPath .githooks
+
+commit_msg_file="$1"
+
+# Merge, revert, and autosquash (fixup!, squash!) commits skip the check.
+first_line=$(sed -n '1p' "$commit_msg_file")
+case "$first_line" in
+  "Merge "*|"Revert "*|fixup!*|squash!*)
+    exit 0
+    ;;
+esac
+
+# The subject is the first line that is neither a comment (#) nor blank.
+subject=$(grep -vE '^[[:space:]]*#' "$commit_msg_file" | grep -m1 -vE '^[[:space:]]*$')
+
+if printf '%s\n' "$subject" | grep -qE '^(Task\([IVXLCDM]+(\.[0-9]+)*\)|Feat|Docs|Refactor|Fix|Chore|Test): .+'; then
+  exit 0
+fi
+
+{
+  echo "✖ Invalid commit subject"
+  echo
+  echo "Allowed formats (English):"
+  echo "  - Maintenance: <Prefix>: <subject>   e.g. Docs: Add engine protocol design"
+  echo "  - Planned:     Task(<ID>): <subject>  e.g. Task(I.1.1): Verify repository baseline"
+  echo "  Prefix: Feat | Docs | Refactor | Fix | Chore | Test"
+  echo
+  echo "Given subject: ${subject}"
+} >&2
+
+exit 1
