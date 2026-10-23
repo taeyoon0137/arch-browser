@@ -11,6 +11,9 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var session: BrowserSession!
     private var window: NSWindow!
+    /// URLs handed to the app before the session exists. They open once the window is up.
+    private var pendingURLs: [URL] = []
+    private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let registry = EngineRegistry.shared
@@ -25,7 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             session = try? BrowserSession(engine: engine, userDataDirectory: supportDirectory)
         }
         guard session != nil else { fatalError("No engine could start") }
-        if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
+        if !pendingURLs.isEmpty {
+            pendingURLs.forEach { session.openTab(url: $0) }
+            pendingURLs.removeAll()
+        } else if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
             session.openTab(url: startURL)
         } else if session.tabs.isEmpty {
             session.openTab()
@@ -46,6 +52,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 1200, height: 800))
         window.center()
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        promptForDefaultBrowserIfNeeded()
+    }
+
+    /// Links from other apps open as new tabs. Before launch finishes they wait for the session.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let session else {
+            pendingURLs += urls
+            return
+        }
+        urls.forEach { session.openTab(url: $0) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -73,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Settings\u{2026}", action: #selector(showSettings), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Set as Default Browser\u{2026}", action: #selector(setAsDefaultBrowser), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Arch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         mainMenu.addItem(submenu(appMenu, title: "Arch"))
@@ -192,13 +210,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark follows the stored value, which the Settings window can also change.
+    /// The Appearance checkmark follows the stored value, which the Settings window can also change. Only an app bundle can become the default browser.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(setAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
+        }
+        if item.action == #selector(setAsDefaultBrowser) {
+            return Self.isRunningFromBundle && !Self.isDefaultBrowser
         }
         return true
     }
 
     @objc private func showSettings() { PreferencesWindowController.shared.show() }
+
+    // MARK: Default browser
+
+    /// A bare build product has no bundle, so the system cannot register it for URLs.
+    private static var isRunningFromBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+
+    private static var isDefaultBrowser: Bool {
+        guard let handler = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) else { return false }
+        return handler.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
+    }
+
+    /// The system shows its own confirmation. Registering http covers https as well.
+    @objc private func setAsDefaultBrowser() {
+        guard Self.isRunningFromBundle else { return }
+        NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "http") { _ in }
+    }
+
+    /// Asks once per user, after the window is up. Skipped outside a bundle and when the app is already the default.
+    private func promptForDefaultBrowserIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard Self.isRunningFromBundle, !defaults.bool(forKey: Self.askedDefaultBrowserKey), !Self.isDefaultBrowser else { return }
+        defaults.set(true, forKey: Self.askedDefaultBrowserKey)
+        let alert = NSAlert()
+        alert.messageText = "Set Arch as your default browser?"
+        alert.informativeText = "Links from other apps will open in Arch."
+        alert.addButton(withTitle: "Set as Default")
+        alert.addButton(withTitle: "Not Now")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.setAsDefaultBrowser() }
+        }
+    }
 }

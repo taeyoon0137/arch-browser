@@ -14,7 +14,7 @@ VERSION="0.1.0"
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 
 write_plist() {
-  # `$1` is the output path. `$2` is the executable name. `$3` is the bundle identifier. `$4` is the user interface element flag (0/1).
+  # `$1` is the output path. `$2` is the executable name. `$3` is the bundle identifier. `$4` is the user interface element flag (0/1). `$5` holds extra keys for the main app.
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -33,15 +33,26 @@ write_plist() {
 	<key>LSUIElement</key><string>$4</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+${5:-}
 </dict>
 </plist>
 PLIST
 }
 
+# The main app registers for web links so the system can offer it as the default browser.
+APP_KEYS='	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key><string>Web Address</string>
+			<key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+		</dict>
+	</array>'
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BIN/Arch" "$APP/Contents/MacOS/Arch"
-write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0
+write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
