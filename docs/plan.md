@@ -121,7 +121,7 @@ Rules for every tier:
 1. Take tasks at or below your tier. Read the files the task names before editing, and keep to them. If the task needs a file, a protocol member, or a decision it does not list, stop, write the blocker into the task row (`blocked: …`), and leave the code unchanged.
 2. Respect the order within a phase and the dependencies in the task text. Phases I and II run before III to V; VI is independent.
 3. One task per commit with the `Task(<ID>):` subject, staged by path. Run `swift build` for every code change and `scripts/bundle_app.sh` plus a launch when the task says "from the bundle".
-4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit.
+4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit, then go through the After each task list in `AGENTS.md`.
 5. Verification steps use a fresh Application Support folder unless the step says otherwise.
 
 ### Phase I: Stabilize the current features

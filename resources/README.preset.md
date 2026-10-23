@@ -137,6 +137,7 @@ arch-browser
 ├── .gitignore                      # Git exclusions
 ├── AGENTS.md                       # Agent working instructions (source of truth)
 ├── CLAUDE.md                       # Symbolic link to AGENTS.md
+├── LICENSE                         # MIT License
 ├── Package.swift                   # Package manifest (maintained by hand)
 └── README.md                       # Generated artifact
 ```

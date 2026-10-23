@@ -72,6 +72,14 @@ After a change, run the applicable checks:
 
 Report a check as passed only after running it and confirming that it passed.
 
+## After each task
+
+Check each item before reporting a task as finished:
+
+1. `README.md` still matches the repository: the introduction, the getting started steps, the docs list, the scripts table, and the repository structure. If the task changed any of them, edit `resources/README.preset.md`, run `./scripts/readme_update.sh`, and commit the regenerated files with the task.
+2. `docs/plan.md` Current State and `docs/features.md` describe the result, as the plan's Working Rules require.
+3. The checks under Verification ran and passed.
+
 ## Security and record keeping
 
 - Never commit secrets, tokens, credentials, or private keys.
