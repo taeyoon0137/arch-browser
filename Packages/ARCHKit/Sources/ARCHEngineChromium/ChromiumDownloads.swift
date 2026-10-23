@@ -77,10 +77,11 @@ final class ChromiumDownloadItem: EngineDownloadItem {
         owner.delegate?.downloads(owner, didUpdate: self)
     }
 
+    /// A paused download is still in progress for the engine. A failed one changes state only when the engine reports the resumed download.
     func resume() {
         guard state == .paused || state == .failed else { return }
         isPaused = false
-        state = .inProgress
+        if state == .paused { state = .inProgress }
         download.resume()
         owner.delegate?.downloads(owner, didUpdate: self)
     }
