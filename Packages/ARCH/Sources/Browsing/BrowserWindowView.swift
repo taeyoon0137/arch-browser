@@ -11,10 +11,15 @@ public struct BrowserWindowView: View {
         self.session = session
     }
 
+    /// The margin between the page and the window's edges.
+    static let pageMargin: CGFloat = 8
+    /// The space between the sidebar's controls and the page.
+    static let sidebarGap: CGFloat = 8
+
     /// When the sidebar is hidden, the page starts below the window buttons, or at the margin in full screen.
     private var pageTopInset: CGFloat {
-        guard !session.isSidebarVisible, windowButtons.trailingEdge != nil else { return SidebarView.inset }
-        return windowButtons.centerY + SidebarTopRow.height / 2 + SidebarView.inset
+        guard !session.isSidebarVisible, windowButtons.trailingEdge != nil else { return Self.pageMargin }
+        return windowButtons.centerY + SidebarTopRow.height / 2 + Self.pageMargin
     }
 
     public var body: some View {
@@ -27,7 +32,9 @@ public struct BrowserWindowView: View {
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
-                    .padding(EdgeInsets(top: pageTopInset, leading: session.isSidebarVisible ? 0 : SidebarView.inset, bottom: SidebarView.inset, trailing: SidebarView.inset))
+                    // The sidebar's own margin is part of the gap beside it.
+                    .padding(EdgeInsets(top: pageTopInset, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
+                                        bottom: Self.pageMargin, trailing: Self.pageMargin))
             }
             if session.isFindBarVisible {
                 FindBarView(session: session)
@@ -48,9 +55,9 @@ public struct BrowserWindowView: View {
     }
 }
 
-/// The rounded frame of the page, concentric with the window's corner (about 17 points with the unified toolbar) 6 points away. `WebContentsHostView` clips the engine's view with the same radius.
+/// The rounded frame of the page, concentric with the window's corner (about 17 points with the unified toolbar) 8 points away. `WebContentsHostView` clips the engine's view with the same radius.
 struct PageFrameShape: InsettableShape {
-    static let cornerRadius: CGFloat = 11
+    static let cornerRadius: CGFloat = 9
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
