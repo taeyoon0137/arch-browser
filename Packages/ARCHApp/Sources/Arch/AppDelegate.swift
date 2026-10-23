@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if session.tabs.isEmpty {
             session.openTab()
         }
+        applyAppearance(UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system")
         NSApp.mainMenu = makeMainMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -95,6 +96,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
+        let appearanceMenu = NSMenu(title: "Appearance")
+        let savedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system"
+        for (title, name) in [("System", "system"), ("Light", "light"), ("Dark", "dark")] {
+            let item = appearanceMenu.addItem(withTitle: title, action: #selector(setAppearance(_:)), keyEquivalent: "")
+            item.representedObject = name
+            item.state = name == savedAppearance ? .on : .off
+        }
+        viewMenu.addItem(submenu(appearanceMenu, title: "Appearance"))
         mainMenu.addItem(submenu(viewMenu, title: "View"))
 
         let tabMenu = NSMenu(title: "Tab")
@@ -159,4 +168,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func newSpace() { session.addSpace() }
     @objc private func nextSpace() { session.switchToAdjacentSpace(forward: true) }
     @objc private func previousSpace() { session.switchToAdjacentSpace(forward: false) }
+
+    // MARK: Appearance
+
+    private static let appearanceKey = "ARCHAppearance"
+
+    /// `nil` follows the system appearance.
+    private func applyAppearance(_ name: String) {
+        switch name {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
+
+    @objc private func setAppearance(_ sender: NSMenuItem) {
+        let name = sender.representedObject as? String ?? "system"
+        UserDefaults.standard.set(name, forKey: Self.appearanceKey)
+        applyAppearance(name)
+        sender.menu?.items.forEach { $0.state = $0 == sender ? .on : .off }
+    }
 }
