@@ -275,11 +275,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidClose() {
         uiDelegate?.webContentsDidClose(self)
     }
-    public func cefBrowserDidStartDownload(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
+    public func cefBrowserDidStart(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
         guard let downloads = context?.chromiumDownloads else { return decision(nil, true) }
         downloads.begin(download, suggestedName: suggestedName, decision: decision)
     }
-    public func cefBrowserDidUpdateDownload(_ download: ARCHCEFDownload) {
+    public func cefBrowserDidUpdate(_ download: ARCHCEFDownload) {
         context?.chromiumDownloads.update(download)
     }
     /// The UI delegate decides for the site. Camera and microphone grants also need the system's permission for this app, which is requested before the page gets access.
