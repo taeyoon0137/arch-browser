@@ -22,7 +22,7 @@ public final class BrowserSession: ObservableObject {
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
-    /// The last 10 closed tabs, oldest first. Reopening takes the newest.
+    /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
 
@@ -54,7 +54,6 @@ public final class BrowserSession: ObservableObject {
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
         restoreTabs(snapshot)
         observeChanges()
-        archiveInactiveTabs()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
     }
 
@@ -152,7 +151,7 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         browser.closeWebContents(tab.webContents)
         closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned))
-        if closedTabs.count > 10 { closedTabs.removeFirst() }
+        if closedTabs.count > 100 { closedTabs.removeFirst() }
         if selectedTabID == tab.id {
             let siblings = tabs.filter { $0.spaceID == tab.spaceID }
             selectedTabID = (siblings.first { !$0.isPinned } ?? siblings.first)?.id
@@ -211,15 +210,19 @@ public final class BrowserSession: ObservableObject {
 
     /// Closes unpinned tabs not activated within `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
     public func archiveInactiveTabs() {
-        let defaults = UserDefaults.standard
-        let hours = defaults.object(forKey: "ARCHArchiveAfterHours") == nil ? 12 : defaults.integer(forKey: "ARCHArchiveAfterHours")
-        guard hours > 0 else { return }
-        let now = Date()
-        selectedTab?.lastActivatedAt = now
-        let cutoff = now.addingTimeInterval(-TimeInterval(hours) * 3600)
+        guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
+        selectedTab?.lastActivatedAt = Date()
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab)
         }
+    }
+
+    /// `nil` when archiving is disabled.
+    private static func archiveCutoff(now: Date) -> Date? {
+        let defaults = UserDefaults.standard
+        let hours = defaults.object(forKey: "ARCHArchiveAfterHours") == nil ? 12 : defaults.integer(forKey: "ARCHArchiveAfterHours")
+        guard hours > 0 else { return nil }
+        return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }
 
     /// The tab stores the pinned flag. The session republishes the change for views that group tabs by this flag.
@@ -294,14 +297,19 @@ public final class BrowserSession: ObservableObject {
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
         guard let snapshot else { return }
-        for record in snapshot.tabs where spaces.contains(where: { $0.id == record.spaceID }) {
-            openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false).lastActivatedAt = record.lastActivatedAt ?? Date()
+        // Stale unpinned records are archived here, before any web contents exists for them.
+        let cutoff = Self.archiveCutoff(now: Date())
+        var selected: Tab?
+        for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
+            if !record.isPinned, let cutoff, let last = record.lastActivatedAt, last < cutoff {
+                closedTabs.append(record)
+                continue
+            }
+            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false)
+            tab.lastActivatedAt = record.lastActivatedAt ?? Date()
+            if index == snapshot.selectedTabIndex { selected = tab }
         }
-        if let index = snapshot.selectedTabIndex, tabs.indices.contains(index) {
-            selectedTabID = tabs[index].id
-        } else {
-            selectedTabID = tabs.first { $0.spaceID == currentSpaceID }?.id
-        }
+        selectedTabID = selected?.id ?? tabs.first { $0.spaceID == currentSpaceID }?.id
     }
 
     private func observeChanges() {

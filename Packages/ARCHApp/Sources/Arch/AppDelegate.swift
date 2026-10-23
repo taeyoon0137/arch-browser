@@ -4,6 +4,7 @@ import ARCHEngine
 import ARCHEngineChromium
 import ARCHEngineWebKit
 import Browsing
+import Preferences
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -28,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if session.tabs.isEmpty {
             session.openTab()
         }
-        applyAppearance(UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system")
+        NSApp.appearance = AppearanceSetting.current.appearance
         NSApp.mainMenu = makeMainMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -70,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Settings\u{2026}", action: #selector(showSettings), keyEquivalent: ",")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Arch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         mainMenu.addItem(submenu(appMenu, title: "Arch"))
 
@@ -97,11 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
         let appearanceMenu = NSMenu(title: "Appearance")
-        let savedAppearance = UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system"
-        for (title, name) in [("System", "system"), ("Light", "light"), ("Dark", "dark")] {
-            let item = appearanceMenu.addItem(withTitle: title, action: #selector(setAppearance(_:)), keyEquivalent: "")
-            item.representedObject = name
-            item.state = name == savedAppearance ? .on : .off
+        for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
+            appearanceMenu.addItem(withTitle: title, action: #selector(setAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
         }
         viewMenu.addItem(submenu(appearanceMenu, title: "Appearance"))
         mainMenu.addItem(submenu(viewMenu, title: "View"))
@@ -171,21 +171,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Appearance
 
-    private static let appearanceKey = "ARCHAppearance"
-
-    /// `nil` follows the system appearance.
-    private func applyAppearance(_ name: String) {
-        switch name {
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        default: NSApp.appearance = nil
-        }
-    }
-
     @objc private func setAppearance(_ sender: NSMenuItem) {
-        let name = sender.representedObject as? String ?? "system"
-        UserDefaults.standard.set(name, forKey: Self.appearanceKey)
-        applyAppearance(name)
-        sender.menu?.items.forEach { $0.state = $0 == sender ? .on : .off }
+        let setting = (sender.representedObject as? String).flatMap(AppearanceSetting.init(rawValue:)) ?? .system
+        UserDefaults.standard.set(setting.rawValue, forKey: AppearanceSetting.defaultsKey)
+        NSApp.appearance = setting.appearance
     }
+
+    /// The Appearance checkmark follows the stored value, which the Settings window can also change.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(setAppearance(_:)) {
+            item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
+        }
+        return true
+    }
+
+    @objc private func showSettings() { PreferencesWindowController.shared.show() }
 }
