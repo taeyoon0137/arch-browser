@@ -86,12 +86,23 @@ struct CommandPaletteAppearance: ViewModifier {
     }
 }
 
+extension Animation {
+    /// Something that appears arrives fast and slows to a stop.
+    static let paletteIn = Animation.timingCurve(0.16, 1, 0.3, 1, duration: 0.32)
+    /// Something that leaves starts slowly and speeds away.
+    static let paletteOut = Animation.timingCurve(0.7, 0, 0.84, 0, duration: 0.2)
+}
+
 extension AnyTransition {
     static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
         // The sidebar sits on the leading side.
         let offset = origin == .sidebar ? CGSize(width: -64, height: 0) : CGSize(width: 0, height: 16)
-        return .modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
+        let appearance = AnyTransition.modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
+        return .asymmetric(insertion: appearance.animation(.paletteIn), removal: appearance.animation(.paletteOut))
     }
+
+    /// The dimming behind the palette follows the palette's timing.
+    static let commandPaletteDimming = AnyTransition.asymmetric(insertion: .opacity.animation(.paletteIn), removal: .opacity.animation(.paletteOut))
 }
 
 struct PaletteRow: View {

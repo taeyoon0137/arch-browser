@@ -45,7 +45,7 @@ public struct BrowserWindowView: View {
             if session.commandPaletteMode != nil {
                 Color.black.opacity(0.15)
                     .onTapGesture { session.dismissCommandPalette() }
-                    .transition(.opacity)
+                    .transition(.commandPaletteDimming)
             }
             if let mode = session.commandPaletteMode {
                 // Give each mode its own view identity to reset the typed text and initial address.
@@ -54,7 +54,8 @@ public struct BrowserWindowView: View {
                     .transition(.commandPalette(from: session.commandPaletteOrigin))
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: session.commandPaletteMode)
+        // The transitions carry their own timing; this makes every palette change animate.
+        .animation(.paletteIn, value: session.commandPaletteMode)
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
         .ignoresSafeArea()
