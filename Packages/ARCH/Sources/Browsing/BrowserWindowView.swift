@@ -231,7 +231,7 @@ struct SelectedTabHeaderView: View {
 
 /// The sidebar button and the navigation buttons, on the line of the window's traffic light buttons. In full screen, where those buttons hide, the sidebar button takes their place.
 struct SidebarTopRow: View {
-    static let height: CGFloat = 28
+    static let height: CGFloat = 30
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
@@ -267,8 +267,8 @@ struct SidebarIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 28, height: 26)
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 30, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
@@ -300,7 +300,7 @@ struct AddressPillView: View {
         Button(action: session.focusCommandBar) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.tertiary)
                 Text(host)
                     .lineLimit(1)
@@ -308,10 +308,10 @@ struct AddressPillView: View {
                     .foregroundStyle(url == nil ? .secondary : .primary)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 13))
+            .font(.system(size: 14))
             .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+            .frame(height: 36)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -355,11 +355,11 @@ struct FavoriteTileView: View {
                     Image(nsImage: icon)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 } else {
                     Image(systemName: "globe")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -413,10 +413,10 @@ struct SpaceTabsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Image(systemName: space.symbol)
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                         .foregroundStyle(space.tint.color)
                     Text(space.name)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
@@ -454,9 +454,9 @@ struct TabRowView: View {
     var body: some View {
         HStack(spacing: 8) {
             TabIconView(tab: tab)
-                .frame(width: 16, height: 16)
+                .frame(width: 18, height: 18)
             Text(tab.displayTitle)
-                .font(.system(size: 13))
+                .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 0)
             if isHovering {
@@ -465,8 +465,8 @@ struct TabRowView: View {
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)
-        .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(fill))
+        .frame(height: 36)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(fill))
         // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
@@ -490,8 +490,8 @@ struct TabCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold))
-                .frame(width: 20, height: 20)
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.primary.opacity(isHovering ? 0.1 : 0)))
                 .contentShape(Circle())
         }
@@ -518,7 +518,7 @@ struct TabIconView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         } else {
             Image(systemName: "globe")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
         }
     }
@@ -533,15 +533,15 @@ struct NewTabButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 16)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 18)
                 Text("New Tab")
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+            .frame(height: 36)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -560,9 +560,9 @@ struct SpaceSwitcherView: View {
                 let isCurrent = space.id == session.currentSpaceID
                 Button(action: { session.switchToSpace(space.id) }) {
                     Image(systemName: space.symbol)
-                        .font(.system(size: isCurrent ? 11 : 8))
+                        .font(.system(size: isCurrent ? 12 : 9))
                         .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
