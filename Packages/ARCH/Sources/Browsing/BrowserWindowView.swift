@@ -168,10 +168,8 @@ struct TabRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: tab.isLoading ? "arrow.triangle.2.circlepath" : "globe")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
+            TabIconView(tab: tab)
+                .frame(width: 16, height: 16)
             Text(tab.displayTitle)
                 .font(.system(size: 13))
                 .lineLimit(1)
@@ -194,6 +192,27 @@ struct TabRowView: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onHover { isHovering = $0 }
+    }
+}
+
+struct TabIconView: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        if tab.isLoading {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+        } else if let favicon = tab.favicon {
+            Image(nsImage: favicon)
+                .resizable()
+                .interpolation(.high)
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        } else {
+            Image(systemName: "globe")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

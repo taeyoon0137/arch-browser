@@ -205,6 +205,7 @@ bool gInitialized = false;
 - (void)handleTitle:(NSString *)title;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+- (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handlePopup:(NSString *)url;
 - (void)handleBeforeClose;
 @end
@@ -251,6 +252,14 @@ public:
 
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
         [owner_ handleLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+    }
+
+    void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString> &icon_urls) override {
+        NSMutableArray<NSString *> *urls = [NSMutableArray arrayWithCapacity:icon_urls.size()];
+        for (const CefString &url : icon_urls) {
+            [urls addObject:ToNSString(url)];
+        }
+        [owner_ handleFaviconURLs:urls];
     }
 
 private:
@@ -324,6 +333,10 @@ private:
     _canGoBack = canGoBack;
     _canGoForward = canGoForward;
     [_delegate cefBrowserDidChangeLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+}
+
+- (void)handleFaviconURLs:(NSArray<NSString *> *)urls {
+    [_delegate cefBrowserDidChangeFaviconURLs:urls];
 }
 
 - (void)handlePopup:(NSString *)url {

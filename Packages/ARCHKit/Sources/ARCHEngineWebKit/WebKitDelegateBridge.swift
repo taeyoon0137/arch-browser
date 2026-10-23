@@ -62,6 +62,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         owner.observers.forEach { $0.webContents(owner, didFinish: self.navigation(navigation)) }
+        owner.refreshFavicon()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

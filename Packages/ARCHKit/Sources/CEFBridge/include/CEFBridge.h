@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
 - (void)cefBrowserDidChangeURL:(NSString *)url;
 - (void)cefBrowserDidChangeLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+- (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
 @end

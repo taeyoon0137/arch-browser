@@ -144,7 +144,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", delegate: self)
     }
 
-    public var favicon: NSImage? { nil }
+    public private(set) var favicon: NSImage?
     public var loadProgress: Double { isLoading ? 0.5 : 1 }
     public var themeColor: NSColor? { nil }
     public var selectedText: String? { nil }
@@ -201,6 +201,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
         uiDelegate?.webContentsDidChangeLoadingState(self)
+    }
+    public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
+        guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
+        FaviconLoader.load(iconURL) { [weak self] image in
+            guard let self, let image else { return }
+            self.favicon = image
+            self.uiDelegate?.webContentsDidChangeFavicon(self)
+        }
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))

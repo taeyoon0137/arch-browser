@@ -181,7 +181,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var view: NSView { webView }
     public var url: URL? { webView.url }
     public var title: String { webView.title ?? "" }
-    public var favicon: NSImage? { nil }
+    public private(set) var favicon: NSImage?
     public var isLoading: Bool { webView.isLoading }
     public var loadProgress: Double { webView.estimatedProgress }
     public var canGoBack: Bool { webView.canGoBack }
@@ -238,6 +238,22 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func clearSiteDataAndReload() { fatalError("skeleton") }
     public var devTools: (any EngineDevTools)? { nil }
     public var thumbnails: (any EngineThumbnails)? { nil }
+
+    /// Reads the page's declared icon, falls back to `/favicon.ico`, and publishes the result through the UI delegate.
+    func refreshFavicon() {
+        guard let pageURL = webView.url else { return }
+        let script = "(function(){var l=document.querySelector('link[rel~=\"icon\"],link[rel=\"shortcut icon\"],link[rel=\"apple-touch-icon\"]');return l?l.href:null;})()"
+        webView.evaluateJavaScript(script) { [weak self] value, _ in
+            guard let self else { return }
+            let declared = (value as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
+            guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
+            FaviconLoader.load(iconURL) { [weak self] image in
+                guard let self, let image else { return }
+                self.favicon = image
+                self.uiDelegate?.webContentsDidChangeFavicon(self)
+            }
+        }
+    }
 }
 
 public final class WebKitNavigationController: EngineNavigationController {
