@@ -149,7 +149,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var observers: [any EngineWebContentsNavigationObserver] = []
     private var pendingURL: URL?
     private var findCompletion: ((EngineFindResult) -> Void)?
-    private var lastFind: (text: String, matchCase: Bool)?
+    private var lastFind: (text: String, matchCase: Bool, forward: Bool)?
     private var lastActiveMatchOrdinal = 0
     private var didSelectFirstMatch = false
     /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
@@ -187,7 +187,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         }
         // CEF restarts the search when the text or case sensitivity changes; a repeated request only advances the active match.
         let findNext = lastFind?.text == text && lastFind?.matchCase == matchCase
-        lastFind = (text, matchCase)
+        lastFind = (text, matchCase, forward)
         if !findNext {
             lastActiveMatchOrdinal = 0
             didSelectFirstMatch = false
@@ -271,13 +271,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }
     }
-    /// Chromium reports the active match and the match count in separate updates, so the last reported ordinal accompanies each final count. A new search can finish with matches but no active match; one follow-up request then selects the first match. Every final update reaches the completion until the next search replaces it.
+    /// Chromium reports the active match and the match count in separate updates, so the last reported ordinal accompanies each final count. A new search can finish with matches but no active match; one follow-up request in the same direction then selects the first match. Every final update reaches the completion until the next search replaces it.
     public func cefBrowserDidFindMatches(_ count: Int, activeMatchOrdinal: Int, finalUpdate: Bool) {
         if activeMatchOrdinal > 0 { lastActiveMatchOrdinal = activeMatchOrdinal }
         guard finalUpdate, let completion = findCompletion else { return }
         if count > 0, lastActiveMatchOrdinal == 0, let lastFind, !didSelectFirstMatch {
             didSelectFirstMatch = true
-            browser?.findText(lastFind.text, forward: true, matchCase: lastFind.matchCase, findNext: true)
+            browser?.findText(lastFind.text, forward: lastFind.forward, matchCase: lastFind.matchCase, findNext: true)
             return
         }
         completion(EngineFindResult(activeMatchOrdinal: count == 0 ? 0 : lastActiveMatchOrdinal, numberOfMatches: count))
