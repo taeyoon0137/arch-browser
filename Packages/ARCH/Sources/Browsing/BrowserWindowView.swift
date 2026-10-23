@@ -10,13 +10,18 @@ public struct BrowserWindowView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            if session.isSidebarVisible {
-                SidebarView(session: session)
-                    .frame(width: 250)
+        ZStack {
+            HStack(spacing: 0) {
+                if session.isSidebarVisible {
+                    SidebarView(session: session)
+                        .frame(width: 250)
+                }
+                WebContentsHostView(contentView: session.selectedTab?.webContents.view)
+                    .padding(EdgeInsets(top: 8, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
             }
-            WebContentsHostView(contentView: session.selectedTab?.webContents.view)
-                .padding(EdgeInsets(top: 8, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
+            if let mode = session.commandPaletteMode {
+                CommandPaletteView(session: session, mode: mode)
+            }
         }
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .ignoresSafeArea()
@@ -110,13 +115,10 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host when not editing and the full address while editing.
+/// Shows the site's host. Clicking it opens the command palette with the full address.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
-    @State private var text = ""
-    @State private var isEditing = false
-    @FocusState private var isFocused: Bool
 
     private var host: String {
         tab.url?.host?.replacingOccurrences(of: "www.", with: "") ?? "Search or enter address"
@@ -127,22 +129,9 @@ struct AddressPillView: View {
             Image(systemName: tab.isLoading ? "arrow.triangle.2.circlepath" : (tab.url?.scheme == "https" ? "lock.fill" : "globe"))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-            if isEditing {
-                TextField("Search or enter address", text: $text)
-                    .textFieldStyle(.plain)
-                    .focused($isFocused)
-                    .onSubmit {
-                        session.navigate(to: text)
-                        isEditing = false
-                    }
-                    .onExitCommand { isEditing = false }
-                    .onChange(of: isFocused) { focused in if !focused { isEditing = false } }
-                    .onAppear { DispatchQueue.main.async { isFocused = true } }
-            } else {
-                Text(host)
-                    .lineLimit(1)
-                    .foregroundStyle(tab.url == nil ? .secondary : .primary)
-            }
+            Text(host)
+                .lineLimit(1)
+                .foregroundStyle(tab.url == nil ? .secondary : .primary)
             Spacer(minLength: 0)
         }
         .font(.system(size: 13))
@@ -150,13 +139,7 @@ struct AddressPillView: View {
         .frame(height: 32)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(nsColor: .controlBackgroundColor).opacity(0.45)))
         .contentShape(Rectangle())
-        .onTapGesture { beginEditing() }
-        .onChange(of: session.commandBarFocusRequest) { _ in beginEditing() }
-    }
-
-    private func beginEditing() {
-        text = tab.url?.absoluteString ?? ""
-        isEditing = true
+        .onTapGesture { session.showCommandPalette(.editCurrent) }
     }
 }
 
@@ -236,7 +219,7 @@ struct SpaceTabsView: View {
                 if !pinned.isEmpty {
                     Divider().padding(.vertical, 4).padding(.horizontal, 10)
                 }
-                NewTabButton(action: { session.openTab() })
+                NewTabButton(action: { session.showCommandPalette(.newTab) })
                 ForEach(open) { tab in
                     TabRowView(session: session, tab: tab)
                 }

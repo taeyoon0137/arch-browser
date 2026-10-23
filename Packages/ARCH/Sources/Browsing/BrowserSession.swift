@@ -14,8 +14,8 @@ public final class BrowserSession: ObservableObject {
     @Published public var currentSpaceID: UUID
     @Published public var selectedTabID: UUID?
     @Published public var isSidebarVisible = true
-    /// Increment this value to move keyboard focus to the command bar.
-    @Published public var commandBarFocusRequest = 0
+    /// `nil` when the command palette is hidden.
+    @Published public var commandPaletteMode: CommandPaletteMode?
 
     public static let searchURL = URL(string: "https://www.google.com/search")!
     public static let newTabURL = URL(string: "https://www.google.com")!
@@ -92,7 +92,7 @@ public final class BrowserSession: ObservableObject {
         favorites.removeAll { $0.id == favorite.id }
     }
 
-    /// Reuses an open tab of the same site in the current space before opening a new one.
+    /// Reuses an open tab for the same site in the current space. Opens a new tab if none matches.
     public func openFavorite(_ favorite: Favorite) {
         if let host = favorite.url.host, let existing = tabs.first(where: { $0.spaceID == currentSpaceID && $0.url?.host == host }) {
             selectedTabID = existing.id
@@ -149,18 +149,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Loads a URL when the text parses as one, otherwise runs a web search.
     public func navigate(to input: String) {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        let url: URL
-        if let parsed = URL(string: text), parsed.scheme != nil, parsed.host != nil {
-            url = parsed
-        } else if !text.contains(" "), text.contains("."), let parsed = URL(string: "https://\(text)"), parsed.host != nil {
-            url = parsed
-        } else {
-            var components = URLComponents(url: Self.searchURL, resolvingAgainstBaseURL: false)!
-            components.queryItems = [URLQueryItem(name: "q", value: text)]
-            url = components.url!
-        }
+        guard let url = Self.destination(forInput: input) else { return }
         if let tab = selectedTab {
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
@@ -168,10 +157,42 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// A URL only when the text is one: a full URL, or a dotted host without spaces.
+    public static func url(forInput input: String) -> URL? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let parsed = URL(string: text), parsed.scheme != nil, parsed.host != nil { return parsed }
+        if !text.contains(" "), let parsed = URL(string: "https://\(text)"), parsed.host?.contains(".") == true { return parsed }
+        return nil
+    }
+
+    /// Returns the input URL or, if the text is not a URL, a web search URL. Returns `nil` for empty text.
+    static func destination(forInput input: String) -> URL? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if let url = url(forInput: text) { return url }
+        var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "q", value: text)]
+        return components.url!
+    }
+
+    // MARK: Command palette
+
+    public func showCommandPalette(_ mode: CommandPaletteMode) { commandPaletteMode = mode }
+    public func dismissCommandPalette() { commandPaletteMode = nil }
+
+    public func submitCommandPalette(_ input: String) {
+        defer { commandPaletteMode = nil }
+        guard let mode = commandPaletteMode, let url = Self.destination(forInput: input) else { return }
+        switch mode {
+        case .editCurrent where selectedTab != nil: navigate(to: input)
+        case .editCurrent, .newTab: openTab(url: url)
+        }
+    }
+
     public func goBack() { selectedTab?.webContents.navigationController.goBack() }
     public func goForward() { selectedTab?.webContents.navigationController.goForward() }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
-    public func focusCommandBar() { commandBarFocusRequest += 1 }
+    public func focusCommandBar() { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
 
     // MARK: Persistence
@@ -209,6 +230,11 @@ public final class BrowserSession: ObservableObject {
                         tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned) },
                         selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID })
     }
+}
+
+public enum CommandPaletteMode {
+    case editCurrent
+    case newTab
 }
 
 extension BrowserSession: EngineBrowserDelegate {

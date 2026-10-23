@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc private func newTab() { session.openTab() }
+    @objc private func newTab() { session.showCommandPalette(.newTab) }
     @objc private func closeTab() { session.closeSelectedTab() }
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
