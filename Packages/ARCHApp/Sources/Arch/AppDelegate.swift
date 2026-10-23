@@ -23,7 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             session = try? BrowserSession(engine: engine, userDataDirectory: supportDirectory)
         }
         guard session != nil else { fatalError("No engine could start") }
-        session.openTab(url: ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)))
+        if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
+            session.openTab(url: startURL)
+        } else if session.tabs.isEmpty {
+            session.openTab()
+        }
         NSApp.mainMenu = makeMainMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -43,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        session?.saveNow()
+    }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.
     private static var cefFrameworkPath: String {
@@ -85,6 +93,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
         mainMenu.addItem(submenu(viewMenu, title: "View"))
 
+        let tabMenu = NSMenu(title: "Tab")
+        tabMenu.addItem(withTitle: "Pin or Unpin Tab", action: #selector(togglePinned), keyEquivalent: "d")
+        let favoriteItem = tabMenu.addItem(withTitle: "Add to Favorites", action: #selector(addFavorite), keyEquivalent: "D")
+        favoriteItem.keyEquivalentModifierMask = [.command, .shift]
+        mainMenu.addItem(submenu(tabMenu, title: "Tab"))
+
+        let spacesMenu = NSMenu(title: "Spaces")
+        let newSpaceItem = spacesMenu.addItem(withTitle: "New Space", action: #selector(newSpace), keyEquivalent: "n")
+        newSpaceItem.keyEquivalentModifierMask = [.command, .control]
+        let nextSpaceItem = spacesMenu.addItem(withTitle: "Next Space", action: #selector(nextSpace), keyEquivalent: String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)))
+        nextSpaceItem.keyEquivalentModifierMask = [.command, .control]
+        let previousSpaceItem = spacesMenu.addItem(withTitle: "Previous Space", action: #selector(previousSpace), keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
+        previousSpaceItem.keyEquivalentModifierMask = [.command, .control]
+        mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
+
         let historyMenu = NSMenu(title: "History")
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
@@ -105,4 +128,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reload() { session.reload() }
     @objc private func goBack() { session.goBack() }
     @objc private func goForward() { session.goForward() }
+    @objc private func togglePinned() { session.selectedTab.map(session.togglePinned) }
+    @objc private func addFavorite() { session.selectedTab.map(session.addFavorite) }
+    @objc private func newSpace() { session.addSpace() }
+    @objc private func nextSpace() { session.switchToAdjacentSpace(forward: true) }
+    @objc private func previousSpace() { session.switchToAdjacentSpace(forward: false) }
 }

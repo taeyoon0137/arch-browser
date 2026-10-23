@@ -1,4 +1,4 @@
-// Main window content. The sidebar contains navigation, the address field, and tabs. The page fills the remaining space with nothing above it.
+// Main window content. The current space's tint fills the window. The sidebar sits over the tint and contains navigation, the address field, favorites, the current space's tabs, and the space switcher. The page fills the remaining space with nothing above it.
 import ARCHEngine
 import SwiftUI
 
@@ -14,28 +14,41 @@ public struct BrowserWindowView: View {
             if session.isSidebarVisible {
                 SidebarView(session: session)
                     .frame(width: 250)
-                    .background(SidebarBackgroundView())
             }
             WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                 .padding(EdgeInsets(top: 8, leading: session.isSidebarVisible ? 0 : 8, bottom: 8, trailing: 8))
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .ignoresSafeArea()
         .frame(minWidth: 800, minHeight: 500)
     }
 }
 
-/// Uses window-background vibrancy for the standard macOS sidebar appearance.
-struct SidebarBackgroundView: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .sidebar
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
+/// Uses a soft gradient of the space's tint over the window background to keep the interface legible in light and dark appearances.
+struct SpaceBackgroundView: View {
+    let tint: Color
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            LinearGradient(colors: [tint.opacity(0.5), tint.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        .animation(.easeInOut(duration: 0.25), value: tint)
+    }
+}
+
+extension SpaceTint {
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .purple: return .purple
+        case .pink: return .pink
+        case .orange: return .orange
+        case .green: return .green
+        case .teal: return .teal
+        case .gray: return .gray
+        }
+    }
 }
 
 struct SidebarView: View {
@@ -50,10 +63,14 @@ struct SidebarView: View {
             } else {
                 SidebarIconButton(symbol: "sidebar.left", action: session.toggleSidebar)
             }
-            TabListView(session: session)
-                .padding(.top, 10)
+            if !session.favorites.isEmpty {
+                FavoritesGridView(session: session)
+                    .padding(.top, 6)
+            }
+            SpaceTabsView(session: session)
+                .padding(.top, 6)
             Spacer(minLength: 0)
-            NewTabButton(action: { session.openTab() })
+            SpaceSwitcherView(session: session)
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
@@ -131,7 +148,7 @@ struct AddressPillView: View {
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(nsColor: .controlBackgroundColor).opacity(0.45)))
         .contentShape(Rectangle())
         .onTapGesture { beginEditing() }
         .onChange(of: session.commandBarFocusRequest) { _ in beginEditing() }
@@ -143,16 +160,85 @@ struct AddressPillView: View {
     }
 }
 
-struct TabListView: View {
+/// Shows favorites as a grid of site icons. All spaces share the same favorites.
+struct FavoritesGridView: View {
+    @ObservedObject var session: BrowserSession
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(session.favorites) { favorite in
+                FavoriteTileView(favorite: favorite, isActive: session.selectedTab?.url?.host == favorite.url.host)
+                    .onTapGesture { session.openFavorite(favorite) }
+                    .contextMenu {
+                        Button("Remove from Favorites") { session.removeFavorite(favorite) }
+                    }
+            }
+        }
+    }
+}
+
+struct FavoriteTileView: View {
+    let favorite: Favorite
+    let isActive: Bool
+    @State private var icon: NSImage?
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(isActive ? 0.85 : 0.45))
+            .aspectRatio(1.5, contentMode: .fit)
+            .overlay {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+            .help(favorite.title)
+            .onAppear {
+                guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
+                FaviconLoader.load(url) { icon = $0 }
+            }
+    }
+}
+
+/// Shows the current space's pinned tabs first, followed by the new tab row and the remaining tabs.
+struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
 
     var body: some View {
+        let space = session.currentSpace
+        let pinned = session.tabs(in: space.id, pinned: true)
+        let open = session.tabs(in: space.id, pinned: false)
         ScrollView {
-            VStack(spacing: 2) {
-                ForEach(session.tabs) { tab in
-                    TabRowView(tab: tab, isSelected: tab.id == session.selectedTabID,
-                               select: { session.selectedTabID = tab.id },
-                               close: { session.closeTab(tab) })
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: space.symbol)
+                        .font(.system(size: 9))
+                        .foregroundStyle(space.tint.color)
+                    Text(space.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+                ForEach(pinned) { tab in
+                    TabRowView(session: session, tab: tab)
+                }
+                if !pinned.isEmpty {
+                    Divider().padding(.vertical, 4).padding(.horizontal, 10)
+                }
+                NewTabButton(action: { session.openTab() })
+                ForEach(open) { tab in
+                    TabRowView(session: session, tab: tab)
                 }
             }
         }
@@ -160,11 +246,11 @@ struct TabListView: View {
 }
 
 struct TabRowView: View {
+    @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
-    let isSelected: Bool
-    let select: () -> Void
-    let close: () -> Void
     @State private var isHovering = false
+
+    private var isSelected: Bool { tab.id == session.selectedTabID }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -175,7 +261,7 @@ struct TabRowView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if isHovering {
-                Button(action: close) {
+                Button(action: { session.closeTab(tab) }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
                         .frame(width: 18, height: 18)
@@ -187,11 +273,17 @@ struct TabRowView: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.75) : (isHovering ? Color.primary.opacity(0.05) : Color.clear)))
+            .fill(isSelected ? Color(nsColor: .controlBackgroundColor).opacity(0.85) : (isHovering ? Color(nsColor: .controlBackgroundColor).opacity(0.3) : Color.clear)))
         .shadow(color: .black.opacity(isSelected ? 0.06 : 0), radius: 2, y: 1)
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
+        .onTapGesture { session.selectedTabID = tab.id }
         .onHover { isHovering = $0 }
+        .contextMenu {
+            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
+            Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+            Divider()
+            Button("Close Tab") { session.closeTab(tab) }
+        }
     }
 }
 
@@ -235,5 +327,30 @@ struct NewTabButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+    }
+}
+
+/// Shows one symbol per space at the bottom of the sidebar, with a button to add a space.
+struct SpaceSwitcherView: View {
+    @ObservedObject var session: BrowserSession
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(session.spaces) { space in
+                let isCurrent = space.id == session.currentSpaceID
+                Button(action: { session.switchToSpace(space.id) }) {
+                    Image(systemName: space.symbol)
+                        .font(.system(size: isCurrent ? 11 : 8))
+                        .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(space.name)
+            }
+            Spacer(minLength: 0)
+            SidebarIconButton(symbol: "plus", action: session.addSpace)
+                .help("New Space")
+        }
     }
 }
