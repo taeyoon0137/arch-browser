@@ -39,8 +39,11 @@ ${5:-}
 PLIST
 }
 
-# The main app registers for web links so the system can offer it as the default browser.
-APP_KEYS='	<key>CFBundleURLTypes</key>
+# The main app registers for web links so the system can offer it as the default browser. The usage descriptions are required before the system asks for the camera, microphone, or location on a page's behalf.
+APP_KEYS='	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
+	<key>NSMicrophoneUsageDescription</key><string>Web pages can use the microphone after you allow them.</string>
+	<key>NSLocationUsageDescription</key><string>Web pages can use your location after you allow them.</string>
+	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key><string>Web Address</string>
