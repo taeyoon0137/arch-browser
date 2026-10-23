@@ -137,6 +137,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var browser: ARCHCEFBrowser?
     private var observers: [any EngineWebContentsNavigationObserver] = []
     private var pendingURL: URL?
+    private var findCompletion: ((EngineFindResult) -> Void)?
+    private var lastFind: (text: String, matchCase: Bool)?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     init(sessionID: String, configuration: EngineWebContentsConfiguration) {
@@ -156,8 +158,24 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
     public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.append(observer) }
     public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.removeAll { $0 === observer } }
-    public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) { fatalError("not implemented") }
-    public func stopFind() {}
+    public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
+        guard !text.isEmpty else {
+            stopFind()
+            completion(EngineFindResult(activeMatchOrdinal: 0, numberOfMatches: 0))
+            return
+        }
+        // CEF restarts the search when the text or case sensitivity changes; a repeated request only advances the active match.
+        let findNext = lastFind?.text == text && lastFind?.matchCase == matchCase
+        lastFind = (text, matchCase)
+        // A request that arrives before the previous final result replaces it, because Chromium cancels the superseded search.
+        findCompletion = completion
+        browser?.findText(text, forward: forward, matchCase: matchCase, findNext: findNext)
+    }
+    public func stopFind() {
+        findCompletion = nil
+        lastFind = nil
+        browser?.stopFinding()
+    }
     public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
         browser?.executeJavaScript(script)
         completion(.success(nil))
@@ -219,6 +237,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }
+    }
+    public func cefBrowserDidFindMatches(_ count: Int, activeMatchOrdinal: Int, finalUpdate: Bool) {
+        guard finalUpdate, let completion = findCompletion else { return }
+        findCompletion = nil
+        completion(EngineFindResult(activeMatchOrdinal: activeMatchOrdinal, numberOfMatches: count))
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))

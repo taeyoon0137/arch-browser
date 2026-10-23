@@ -13,6 +13,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserDidChangeURL:(NSString *)url;
 - (void)cefBrowserDidChangeLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
+/// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks the last report for that request.
+- (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
 @end
@@ -48,6 +50,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)goBack;
 - (void)goForward;
 - (void)executeJavaScript:(NSString *)script;
+- (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
+/// Ends the current search and keeps the active match selected.
+- (void)stopFinding;
 - (void)close;
 @end
 

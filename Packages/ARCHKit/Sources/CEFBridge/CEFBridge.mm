@@ -9,6 +9,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_find_handler.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -206,6 +207,7 @@ bool gInitialized = false;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
+- (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
 - (void)handleBeforeClose;
 @end
@@ -213,7 +215,7 @@ bool gInitialized = false;
 namespace {
 
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.
-class BridgeClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler, public CefLoadHandler {
+class BridgeClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler, public CefLoadHandler, public CefFindHandler {
 public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
@@ -222,6 +224,7 @@ public:
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         [owner_ handleAfterCreated:browser];
@@ -260,6 +263,11 @@ public:
             [urls addObject:ToNSString(url)];
         }
         [owner_ handleFaviconURLs:urls];
+    }
+
+    void OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count, const CefRect &selectionRect, int activeMatchOrdinal,
+                      bool finalUpdate) override {
+        [owner_ handleFindResult:count activeMatchOrdinal:activeMatchOrdinal finalUpdate:finalUpdate];
     }
 
 private:
@@ -339,6 +347,10 @@ private:
     [_delegate cefBrowserDidChangeFaviconURLs:urls];
 }
 
+- (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate {
+    [_delegate cefBrowserDidFindMatches:count activeMatchOrdinal:activeMatchOrdinal finalUpdate:finalUpdate];
+}
+
 - (void)handlePopup:(NSString *)url {
     [_delegate cefBrowserDidRequestPopupWithURL:url];
 }
@@ -398,6 +410,18 @@ private:
 - (void)setZoomLevel:(double)zoomLevel {
     if (_browser) {
         _browser->GetHost()->SetZoomLevel(zoomLevel);
+    }
+}
+
+- (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext {
+    if (_browser) {
+        _browser->GetHost()->Find(CefString(text.UTF8String), forward, matchCase, findNext);
+    }
+}
+
+- (void)stopFinding {
+    if (_browser) {
+        _browser->GetHost()->StopFinding(false);
     }
 }
 
