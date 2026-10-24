@@ -459,6 +459,20 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
+    /// Moves a dragged tab to `target`'s place in the target's list, taking the target's space and pinned state, so a tab can cross between the pinned and open lists. Within one list a tab coming from above lands below the target, so it passes the row it was dragged over.
+    public func moveTab(_ id: UUID, to target: Tab) {
+        guard id != target.id, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
+        let tab = tabs[from]
+        let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned
+        var reordered = tabs
+        reordered.remove(at: from)
+        guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
+        tab.spaceID = target.spaceID
+        tab.isPinned = target.isPinned
+        reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
+        tabs = reordered
+    }
+
     /// Closes unpinned tabs not activated within `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }

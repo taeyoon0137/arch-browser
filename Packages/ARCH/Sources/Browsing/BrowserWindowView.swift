@@ -644,7 +644,6 @@ struct SpacePagesView: View {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == session.currentSpaceID
                 SpaceTabsView(session: session, space: space)
-                    .padding(.horizontal, SidebarView.inset)
                     .frame(width: width)
                     // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar.
                     .allowsHitTesting(isCurrent)
@@ -662,29 +661,128 @@ struct SpacePagesView: View {
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     let space: Space
+    @Environment(\.colorScheme) private var colorScheme
+    /// The tab being dragged to a new place, while the drag lasts and while it settles.
+    @State private var drag: TabDrag?
+    /// Each tab row's frame in the list, for finding the row under the pointer and the place a dropped tab settles into.
+    @State private var rowFrames: [UUID: CGRect] = [:]
 
-    var body: some View {
+    private static let coordinateSpace = "SpaceTabs"
+
+    /// One row of the list. The pinned and the open tabs share one list, so a tab keeps its row, and its drag, when it crosses between them.
+    private enum Item: Identifiable {
+        case tab(Tab)
+        case divider
+        case newTab
+
+        var id: String {
+            switch self {
+            case .tab(let tab): return tab.id.uuidString
+            case .divider: return "divider"
+            case .newTab: return "new-tab"
+            }
+        }
+    }
+
+    private struct TabDrag {
+        let id: UUID
+        /// The pointer's height in the list.
+        var pointerY: CGFloat
+        /// How far below the row's top the pointer took hold of it.
+        let grabOffset: CGFloat
+        /// Set once the pointer lets go, while the row moves into its place.
+        var isSettling = false
+    }
+
+    private var items: [Item] {
         let pinned = session.tabs(in: space.id, pinned: true)
         let open = session.tabs(in: space.id, pinned: false)
+        return pinned.map(Item.tab) + (pinned.isEmpty ? [] : [.divider]) + [.newTab] + open.map(Item.tab)
+    }
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 SpaceHeaderView(session: session, space: space)
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 4)
-                ForEach(pinned) { tab in
-                    TabRowView(session: session, tab: tab)
-                }
-                if !pinned.isEmpty {
-                    Divider().padding(.vertical, 4).padding(.horizontal, 10)
-                }
-                NewTabButton(action: { session.showCommandPalette(.newTab, from: .sidebar) })
-                ForEach(open) { tab in
-                    TabRowView(session: session, tab: tab)
+                ForEach(items) { item in
+                    switch item {
+                    case .tab(let tab):
+                        row(for: tab)
+                    case .divider:
+                        Divider().padding(.vertical, 4).padding(.horizontal, 10)
+                    case .newTab:
+                        NewTabButton(action: { session.showCommandPalette(.newTab, from: .sidebar) })
+                    }
                 }
             }
+            // The margin sits inside the scroll view, which clips at its edges, so a lifted row's shadow has room at the sides.
+            .padding(.horizontal, SidebarView.inset)
+            .environment(\.isDraggingTab, drag != nil)
+            .coordinateSpace(name: Self.coordinateSpace)
+            .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
+            .overlay(alignment: .topLeading) { draggedRow }
         }
         .scrollIndicators(.never)
+    }
+
+    /// While its tab is dragged, a row leaves an empty, dimmed place in the list.
+    private func row(for tab: Tab) -> some View {
+        let isDragged = drag?.id == tab.id
+        return TabRowView(session: session, tab: tab)
+            .opacity(isDragged ? 0 : 1)
+            .background {
+                if isDragged {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06))
+                }
+            }
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: TabRowFramesKey.self, value: [tab.id: proxy.frame(in: .named(Self.coordinateSpace))])
+            })
+            .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.coordinateSpace))
+                .onChanged { dragChanged(tab, $0) }
+                .onEnded { _ in dragEnded() })
+    }
+
+    /// The dragged tab follows the pointer above the list. On release it moves into its place before the list shows it there.
+    @ViewBuilder private var draggedRow: some View {
+        if let drag, let tab = session.tabs.first(where: { $0.id == drag.id }), let frame = rowFrames[drag.id] {
+            TabRowView(session: session, tab: tab)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)))
+                .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                .frame(width: frame.width)
+                .offset(x: frame.minX, y: drag.isSettling ? frame.minY : drag.pointerY - drag.grabOffset)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
+        guard drag?.isSettling != true else { return }
+        if drag == nil {
+            drag = TabDrag(id: tab.id, pointerY: value.location.y, grabOffset: value.startLocation.y - (rowFrames[tab.id]?.minY ?? value.startLocation.y))
+        }
+        drag?.pointerY = value.location.y
+        // The row under the pointer gives up its place to the dragged tab, with a light haptic for each new place.
+        let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
+        guard let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id].map { ($0.minY...$0.maxY).contains(value.location.y) } == true }) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    private func dragEnded() {
+        guard drag != nil else { return }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { drag?.isSettling = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { drag = nil }
+    }
+}
+
+private struct TabRowFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 
@@ -692,13 +790,16 @@ struct TabRowView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
 
     private var isSelected: Bool { tab.id == session.selectedTabID }
+    /// Rows a dragged tab passes over do not react to the pointer.
+    private var showsHover: Bool { isHovering && !isDraggingTab }
 
     private var fill: Color {
         if isSelected { return SidebarFill.selected.color(in: colorScheme) }
-        return isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear
+        return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
     var body: some View {
@@ -709,7 +810,7 @@ struct TabRowView: View {
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 0)
-            if isHovering {
+            if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
             }
         }
@@ -983,6 +1084,10 @@ private struct SidebarIsFloatingKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct IsDraggingTabKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// The sidebar's current width, which the space pages and the bottom bar lay out against.
     var sidebarWidth: CGFloat {
@@ -994,6 +1099,12 @@ extension EnvironmentValues {
     var sidebarIsFloating: Bool {
         get { self[SidebarIsFloatingKey.self] }
         set { self[SidebarIsFloatingKey.self] = newValue }
+    }
+
+    /// Set in a space's tab list while one of its tabs is dragged.
+    var isDraggingTab: Bool {
+        get { self[IsDraggingTabKey.self] }
+        set { self[IsDraggingTabKey.self] = newValue }
     }
 }
 
