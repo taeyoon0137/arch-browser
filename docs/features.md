@@ -52,7 +52,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 15 | Find in page | `WKWebView.find(_:configuration:)` with match counts from a script on WebKit; CEF's find on Chromium | Find | complete |
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
 | 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | complete |
-| 18 | Drag and drop (tabs, links, files) | AppKit drag APIs | None | in progress |
+| 18 | Drag and drop (tabs, links, files) | Sidebar items drag with SwiftUI gestures into a lifted layer above the window: tabs reorder, pin, and move to another space's symbol; favorites and space symbols reorder. Links, files, and address text from other apps drop onto the tab list through SwiftUI `onDrop` with `NSItemProvider` and open in new tabs. Sidebar items cannot be dragged out to other apps | None | in progress |
 | 49 | Page context menus | One menu built by the app on both engines: Chromium through `CefContextMenuHandler::RunContextMenu`, with spelling suggestions from `NSSpellChecker` in the system's preferred languages if the profile's spelling language has none, and WebKit through `willOpenMenu(_:with:)` with the engine's own spelling and editing items kept. WebKit keeps its own menu for menus a page element provides and for elements in closed shadow roots. Inspect Element waits for DevTools (row 45) | Context menus | in progress |
 
 ## 3. Content and Media
@@ -103,7 +103,7 @@ Arch ships no model or provider account. All AI features use one AI interface. T
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 43 | AI interface and providers | One provider-neutral interface designed in `docs/ai.md`. Providers use API keys kept in the Keychain or command-line tools signed in through the built-in terminal (row 56). A provider and model are chosen per feature, with up to two fallbacks | None | not started |
+| 43 | AI interface and providers | One provider-neutral interface designed in `docs/ai.md`. Providers use API keys kept in the Keychain or command-line tools signed in through the built-in terminal (row 56). A provider and model are chosen per feature, with up to two fallbacks. Two HTTP message formats with API keys, routing with fallbacks, site exclusions, rate limits, budgets, usage, and Settings ▸ AI are built; command-line tools come with row 56 | None | in progress |
 | 52 | Page reader | A side panel that summarizes the current page and answers follow-up questions | Page text | not started |
 | 53 | Questions in the page | Questions about the page or a selection, with answers in a popover beside the page | Page text | not started |
 | 54 | AI hooks | Features subscribe to events such as page loads, downloads, and new tabs; the first hooks name tabs and rename downloaded files | None | not started |
