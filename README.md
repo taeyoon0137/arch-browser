@@ -109,8 +109,7 @@ git config core.hooksPath .githooks
 
 ```plaintext
 arch-browser
-├── .githooks/
-│   └── commit-msg                  # Commit subject format hook
+├── .githooks/                      # Commit subject format hook
 ├── Packages/
 │   ├── ARCH/Sources/               # Feature modules: Browsing, History, Preferences
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
@@ -120,19 +119,8 @@ arch-browser
 │       ├── ARCHEngineWebKit/       # WebKit adapter
 │       └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
 ├── docs/                           # Design documents
-├── resources/
-│   ├── assets/
-│   │   ├── img_hero_light.png      # Hero image, light appearance
-│   │   ├── img_hero_dark.png       # Hero image, dark appearance
-│   │   └── sym_arch.png            # App icon source
-│   ├── README.preset.md            # README source of truth
-│   ├── readme-hero.preset.svg      # Hero wrapper source
-│   └── readme-hero.svg             # Generated hero SVG
-├── scripts/
-│   ├── bundle_app.sh               # Assembles build/Arch.app
-│   ├── opaque_icon.swift           # Fills the icon's corners for the system icon shape
-│   ├── readme_update.sh            # README generator
-│   └── setup_cef.sh                # Downloads the pinned CEF distribution
+├── resources/                      # README source, hero images, and app icon
+├── scripts/                        # Build and README scripts (see Scripts)
 ├── .gitattributes                  # Line ending and attribute rules
 ├── .gitignore                      # Git exclusions
 ├── AGENTS.md                       # Agent working instructions (source of truth)
