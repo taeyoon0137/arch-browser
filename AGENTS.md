@@ -55,6 +55,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 - Treat existing modifications as intentional. Do not revert them.
 - Do not create graphic assets. Leave placeholders for the user to fill.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. On both engines, use macOS system frameworks for every feature that is part of the platform user experience. Follow the Platform integration table in `docs/features.md`.
+- Use only public APIs. Do not call undocumented classes, selectors, functions, or keys of system frameworks, even through runtime lookups. When an engine cannot provide a feature through public APIs, leave the feature out on that engine and record the reason in its row in `docs/features.md`. A required feature that neither engine can provide through public APIs needs the user's decision.
 
 ## Language
 
