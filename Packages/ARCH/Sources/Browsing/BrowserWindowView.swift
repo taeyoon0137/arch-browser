@@ -94,8 +94,7 @@ public struct BrowserWindowView: View {
                 .contentShape(Rectangle())
                 .onHover { if $0 { peekSidebar() } }
             if isSidebarPeeking {
-                SidebarView(session: session, windowButtons: buttons)
-                    .frame(width: width)
+                SidebarColumn(session: session, windowButtons: buttons, width: width, isFloating: true)
                     .background {
                         ZStack {
                             PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.25), radius: 16, y: 4)
@@ -134,6 +133,13 @@ public struct BrowserWindowView: View {
             || NSApp.windows.contains { $0.isVisible && ($0.parent != nil || $0.attachedSheet != nil) }
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
+        // A library opened in the card goes with it, once the card is out of sight, so the card comes back with the sidebar.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            guard !session.isSidebarVisible, !isSidebarPeeking, session.isLibraryVisible else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { session.isLibraryVisible = false }
+        }
     }
 
     /// Whether the pointer is within the window over the sidebar's place along its leading edge.
@@ -409,7 +415,7 @@ struct SidebarSwipeHandlers {
     let ended: (CGFloat, CGFloat) -> Void
 }
 
-/// The docked sidebar with the library to its left. Opening the library pushes the whole sidebar aside: the column widens by `libraryPeek`, the library takes the sidebar's width, set off by a line, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back.
+/// The sidebar with the library to its left. Opening the library pushes the whole sidebar aside. Docked, the column widens by `libraryPeek`, the library takes the sidebar's width, set off by a line, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back. Floating, the library takes the whole card.
 struct SidebarColumn: View {
     /// About a quarter of the narrowest sidebar.
     static let libraryPeek: CGFloat = 60
@@ -417,11 +423,13 @@ struct SidebarColumn: View {
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
     let width: CGFloat
-    let onResize: (CGFloat) -> Void
+    var isFloating = false
+    var onResize: (CGFloat) -> Void = { _ in }
     /// How far a swipe has brought the library in, from 0 to the library's width, while the fingers are down.
     @State private var swipeReveal: CGFloat?
 
     private var libraryWidth: CGFloat { width }
+    private var peek: CGFloat { isFloating ? 0 : Self.libraryPeek }
     private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? libraryWidth : 0) }
     private var progress: CGFloat { reveal / libraryWidth }
 
@@ -443,7 +451,7 @@ struct SidebarColumn: View {
                 .allowsHitTesting(progress == 0)
                 .accessibilityHidden(progress > 0)
                 .overlay {
-                    if session.isLibraryVisible {
+                    if session.isLibraryVisible, !isFloating {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { finishLibrarySwipe(opens: false) }
@@ -455,7 +463,7 @@ struct SidebarColumn: View {
                 }
         }
         .offset(x: reveal - libraryWidth)
-        .frame(width: width + Self.libraryPeek * progress, alignment: .leading)
+        .frame(width: width + peek * progress, alignment: .leading)
         .clipped()
         // A swipe over the open library or the pushed sidebar takes the library away again.
         .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
@@ -463,7 +471,7 @@ struct SidebarColumn: View {
                                    onEnd: { travel, velocity in finishLibrarySwipe(opens: !(travel < -libraryWidth * 0.3 || velocity < -300)) }))
         // The handle covers the gap between the sidebar's controls and the page: the sidebar's own margin and the part of the gap outside it.
         .overlay(alignment: .trailing) {
-            if progress == 0 {
+            if progress == 0, !isFloating {
                 SidebarResizeHandle(width: width, onResize: onResize)
                     .frame(width: BrowserWindowView.sidebarGap)
                     .offset(x: BrowserWindowView.sidebarGap - SidebarView.inset)

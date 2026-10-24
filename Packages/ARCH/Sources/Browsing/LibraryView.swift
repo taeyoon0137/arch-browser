@@ -74,7 +74,17 @@ struct LibraryToolRow: View {
 /// Opens and closes the library. While files download it shows a download symbol over their combined progress.
 struct LibraryButton: View {
     @ObservedObject var session: BrowserSession
+    @Environment(\.sidebarIsFloating) private var isFloating
     @State private var isHovering = false
+
+    /// In the floating sidebar the library opens in the card; elsewhere it also brings back a hidden sidebar.
+    private func toggle() {
+        if isFloating {
+            session.isLibraryVisible.toggle()
+        } else {
+            session.toggleLibrary()
+        }
+    }
 
     private var activeDownloads: [DownloadEntry] {
         session.downloads.filter { $0.state == .inProgress }
@@ -96,7 +106,7 @@ struct LibraryButton: View {
     }
 
     var body: some View {
-        Button(action: session.toggleLibrary) {
+        Button(action: toggle) {
             Group {
                 if activeDownloads.isEmpty {
                     Image(systemName: "archivebox")
