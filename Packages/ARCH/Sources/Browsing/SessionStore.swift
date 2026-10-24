@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, and version 3 its restorable page state. Files without a version are version 1.
-    static let currentVersion = 3
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, and version 4 each space's home page. Files without a version are version 1.
+    static let currentVersion = 4
 
     struct TabRecord: Codable {
         var spaceID: UUID

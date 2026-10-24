@@ -216,6 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let historyMenu = NSMenu(title: "History")
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
+        let homeItem = historyMenu.addItem(withTitle: "Home", action: #selector(goHome), keyEquivalent: "H")
+        homeItem.keyEquivalentModifierMask = [.command, .shift]
         historyMenu.addItem(.separator())
         historyMenu.addItem(withTitle: "Show All History", action: #selector(showHistory), keyEquivalent: "y")
         historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
@@ -266,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func findPrevious() { session.findPrevious() }
     @objc private func goBack() { session.goBack() }
     @objc private func goForward() { session.goForward() }
+    @objc private func goHome() { session.goHome() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
 
     /// Pages chosen in the History window open as new tabs in the browser window, which comes to the front.
@@ -330,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page over the tab.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return session?.canZoom == true
@@ -353,6 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(sharePage) {
             return session?.canShareSelectedPage == true
+        }
+        if item.action == #selector(goHome) {
+            return session?.canGoHome == true
         }
         return true
     }

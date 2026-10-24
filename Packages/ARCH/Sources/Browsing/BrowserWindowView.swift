@@ -1233,13 +1233,18 @@ struct TabRowView: View {
                     .font(.system(size: 14))
                     .lineLimit(1)
             }
+            if tab.isAudible {
+                TabAudioBadge()
+            }
             Spacer(minLength: 0)
-            // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place.
+            // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
             } else if commandKey.showsShortcuts, let number = session.shortcutNumber(for: tab) {
                 TabShortcutBadge(number: number)
                     .transition(.modifier(active: BlurFade(isHidden: true), identity: BlurFade(isHidden: false)))
+            } else if tab.isUnread {
+                TabUnreadDot()
             }
         }
         .padding(.leading, 10)
@@ -1249,6 +1254,8 @@ struct TabRowView: View {
         // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
+        // The row truncates long titles, so the tooltip has the whole title and the address.
+        .help([tab.displayTitle, tab.url?.absoluteString].compactMap { $0 }.joined(separator: "\n"))
         .onTapGesture { session.selectedTabID = tab.id }
         // The first click selects the tab at once; the second starts renaming it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { session.renamingTabID = tab.id })
@@ -1324,6 +1331,27 @@ struct TabShortcutBadge: View {
             .background(RoundedRectangle(cornerRadius: 4.5, style: .continuous).fill(Color.primary.opacity(0.08)))
             .frame(width: 22, height: 22)
             .accessibilityHidden(true)
+    }
+}
+
+/// A speaker after a tab's title while its page plays sound.
+struct TabAudioBadge: View {
+    var body: some View {
+        Image(systemName: "speaker.wave.2.fill")
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Playing Audio")
+    }
+}
+
+/// A dot in the close button's place on a tab that a page opened and the user has not selected yet.
+struct TabUnreadDot: View {
+    var body: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 6, height: 6)
+            .frame(width: 22, height: 22)
+            .accessibilityLabel("Unread")
     }
 }
 
@@ -1515,6 +1543,7 @@ struct SpaceMenuItems: View {
     let space: Space
 
     private var index: Int? { session.spaces.firstIndex { $0.id == space.id } }
+    private var homeURL: URL? { session.spaces.first { $0.id == space.id }?.homeURL }
 
     var body: some View {
         Button("Rename Space") {
@@ -1531,6 +1560,11 @@ struct SpaceMenuItems: View {
                 Label(choice.name, systemImage: choice.symbol).tag(choice.symbol)
             }
         }
+        Divider()
+        Button("Set Current Page as Home") { session.setCurrentPageAsHome(ofSpace: space.id) }
+            .disabled(!session.canSetCurrentPageAsHome)
+        Button("Clear Home") { session.clearHome(ofSpace: space.id) }
+            .disabled(homeURL == nil)
         Divider()
         Button("Move Left") { session.moveSpace(space.id, by: -1) }
             .disabled(index == 0)

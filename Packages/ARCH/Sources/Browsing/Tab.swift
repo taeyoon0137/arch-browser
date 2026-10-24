@@ -23,6 +23,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
+    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets and clears it.
+    @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
     /// How many times this tab's page process quit, kept for the tab close log (III.8).

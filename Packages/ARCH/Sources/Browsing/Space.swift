@@ -6,6 +6,8 @@ public struct Space: Identifiable, Codable, Hashable {
     public var name: String
     public var symbol: String
     public var tint: SpaceTint
+    /// The page Home opens in the selected tab. `nil` when the user has set none or the file predates home pages.
+    public var homeURL: URL?
 
     /// The symbols the space menu offers, with their names.
     public static let symbolChoices: [(symbol: String, name: String)] = [

@@ -41,6 +41,7 @@ public final class BrowserSession: ObservableObject {
             if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
             selectedTab?.lastActivatedAt = Date()
             recordActivation()
+            if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
             // Switching tabs ends the search because it belongs to one page.
             if isFindBarVisible, oldValue != selectedTabID {
@@ -312,6 +313,38 @@ public final class BrowserSession: ObservableObject {
         change(&spaces[index])
     }
 
+    // MARK: Home pages
+
+    /// Whether the selected tab shows a web page that can become a space's home page. An internal page over it has no address to use.
+    public var canSetCurrentPageAsHome: Bool {
+        guard internalPage == nil, let scheme = selectedTab?.url?.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    /// Makes the selected tab's page the home page of the space `id`, which need not be the current space.
+    public func setCurrentPageAsHome(ofSpace id: UUID) {
+        guard canSetCurrentPageAsHome, let url = selectedTab?.url else { return }
+        updateSpace(id) { $0.homeURL = url }
+    }
+
+    public func clearHome(ofSpace id: UUID) {
+        updateSpace(id) { $0.homeURL = nil }
+    }
+
+    /// Home needs a home page for the current space and no internal page over the tab.
+    public var canGoHome: Bool { internalPage == nil && currentSpace.homeURL != nil }
+
+    /// Loads the current space's home page in the selected tab, or in a new tab when no tab is selected.
+    public func goHome() {
+        guard canGoHome, let url = currentSpace.homeURL else { return }
+        guard let tab = selectedTab else {
+            openTab(url: url)
+            return
+        }
+        tab.forgetExternalAppDecline()
+        tab.webContents.navigationController.load(URLRequest(url: url))
+    }
+
     // MARK: Favorites
 
     public func addFavorite(_ tab: Tab) {
@@ -347,11 +380,15 @@ public final class BrowserSession: ObservableObject {
 
     private func adopt(_ webContents: any EngineWebContents, spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
         let tab = Tab(webContents: webContents, spaceID: spaceID, isPinned: pinned)
-        // A tab a page opens comes from the page's engine.
-        tab.openNewTab = { [weak self] popup in
+        // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space, marked unread.
+        tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
             self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
-            _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
+            guard let tab, tab.id != self.selectedTabID else {
+                _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
+                return
+            }
+            self.adopt(popup, spaceID: tab.spaceID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -398,10 +435,10 @@ public final class BrowserSession: ObservableObject {
                 self.fullscreenTabID = nil
             }
         }
-        // A link opened from a page's context menu opens behind the current tab, in the page's space and engine.
+        // A link opened from a page's context menu opens behind the current tab, in the page's space and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind)
+            self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
         }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
