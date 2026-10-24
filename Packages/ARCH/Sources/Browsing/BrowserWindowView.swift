@@ -814,8 +814,9 @@ struct TabRowView: View {
             // The close button comes first under the pointer; otherwise holding Command shows the row's ⌘-number shortcut in its place.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
-            } else if commandKey.isDown, let number = session.shortcutNumber(for: tab) {
+            } else if commandKey.showsShortcuts, let number = session.shortcutNumber(for: tab) {
                 TabShortcutBadge(number: number)
+                    .transition(.modifier(active: BlurFade(isHidden: true), identity: BlurFade(isHidden: false)))
             }
         }
         .padding(.leading, 10)
@@ -846,29 +847,55 @@ struct TabShortcutBadge: View {
 
     var body: some View {
         Text("\(number)")
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
-            .frame(width: 18, height: 18)
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.08)))
+            .frame(width: 16, height: 16)
+            .background(RoundedRectangle(cornerRadius: 4.5, style: .continuous).fill(Color.primary.opacity(0.08)))
             .frame(width: 22, height: 22)
             .accessibilityHidden(true)
     }
 }
 
-/// Follows whether Command alone is held while the app is active.
+/// Fades and blurs a view in and out.
+struct BlurFade: ViewModifier {
+    let isHidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: isHidden ? 4 : 0)
+            .opacity(isHidden ? 0 : 1)
+    }
+}
+
+/// Follows whether Command alone is held while the app is active. The shortcut numbers show once it has been held for a moment, so a quick ⌘-shortcut does not flash them, and go as soon as it is released.
 final class CommandKeyState: ObservableObject {
     static let shared = CommandKeyState()
-    @Published private(set) var isDown = false
+    @Published private(set) var showsShortcuts = false
+    private var pendingShow: DispatchWorkItem?
 
     private init() {
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.isDown = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            self?.setDown(event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command)
             return event
         }
         // The app gets no key events while another app is active, so a release there would go unseen.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.isDown = false
+            self?.setDown(false)
         }
+    }
+
+    private func setDown(_ isDown: Bool) {
+        pendingShow?.cancel()
+        pendingShow = nil
+        guard isDown else {
+            if showsShortcuts { withAnimation(.easeOut(duration: 0.12)) { showsShortcuts = false } }
+            return
+        }
+        let show = DispatchWorkItem { [weak self] in
+            withAnimation(.easeOut(duration: 0.18)) { self?.showsShortcuts = true }
+        }
+        pendingShow = show
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: show)
     }
 }
 
