@@ -7,6 +7,8 @@ struct CommandPaletteView: View {
     let mode: CommandPaletteMode
     @State private var text = ""
     @FocusState private var isFocused: Bool
+    /// Turned on as the palette appears, so its arrival animates like any change of state.
+    @State private var hasArrived = false
 
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
@@ -64,10 +66,12 @@ struct CommandPaletteView: View {
         .frame(width: 560)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
+        .modifier(CommandPaletteAppearance(offset: CommandPaletteAppearance.offset(from: session.commandPaletteOrigin), isHidden: !hasArrived))
         .padding(.top, 120)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             if mode == .editCurrent { text = session.selectedTab?.url?.absoluteString ?? "" }
+            withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { hasArrived = true }
             DispatchQueue.main.async { isFocused = true }
         }
     }
@@ -78,6 +82,11 @@ struct CommandPaletteAppearance: ViewModifier {
     let offset: CGSize
     let isHidden: Bool
 
+    /// The sidebar sits on the leading side.
+    static func offset(from origin: CommandPaletteOrigin) -> CGSize {
+        origin == .sidebar ? CGSize(width: -32, height: 0) : CGSize(width: 0, height: 16)
+    }
+
     func body(content: Content) -> some View {
         content
             .offset(isHidden ? offset : .zero)
@@ -87,22 +96,26 @@ struct CommandPaletteAppearance: ViewModifier {
 }
 
 extension Animation {
-    /// Something that appears arrives fast and slows to a stop.
-    static let paletteIn = Animation.timingCurve(0.16, 1, 0.3, 1, duration: 0.32)
+    /// Something that appears arrives fast and slows to a stop. A shortcut brings the palette in twice as fast as a sidebar control.
+    static func paletteIn(from origin: CommandPaletteOrigin) -> Animation {
+        .timingCurve(0.16, 1, 0.3, 1, duration: origin == .sidebar ? 0.32 : 0.16)
+    }
     /// Something that leaves starts slowly and speeds away.
     static let paletteOut = Animation.timingCurve(0.7, 0, 0.84, 0, duration: 0.2)
 }
 
 extension AnyTransition {
+    /// The palette animates its own arrival, because a transition fades and sharpens the palette's contents without moving them. Leaving needs no movement.
     static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
-        // The sidebar sits on the leading side.
-        let offset = origin == .sidebar ? CGSize(width: -32, height: 0) : CGSize(width: 0, height: 16)
+        let offset = CommandPaletteAppearance.offset(from: origin)
         let appearance = AnyTransition.modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
-        return .asymmetric(insertion: appearance.animation(.paletteIn), removal: appearance.animation(.paletteOut))
+        return .asymmetric(insertion: .identity, removal: appearance.animation(.paletteOut))
     }
 
     /// The dimming behind the palette follows the palette's timing.
-    static let commandPaletteDimming = AnyTransition.asymmetric(insertion: .opacity.animation(.paletteIn), removal: .opacity.animation(.paletteOut))
+    static func commandPaletteDimming(from origin: CommandPaletteOrigin) -> AnyTransition {
+        .asymmetric(insertion: .opacity.animation(.paletteIn(from: origin)), removal: .opacity.animation(.paletteOut))
+    }
 }
 
 struct PaletteRow: View {

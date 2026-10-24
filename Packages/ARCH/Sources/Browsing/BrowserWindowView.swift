@@ -59,7 +59,7 @@ public struct BrowserWindowView: View {
             if session.commandPaletteMode != nil {
                 Color.black.opacity(0.15)
                     .onTapGesture { session.dismissCommandPalette() }
-                    .transition(.commandPaletteDimming)
+                    .transition(.commandPaletteDimming(from: session.commandPaletteOrigin))
             }
             if let mode = session.commandPaletteMode {
                 // Give each mode its own view identity to reset the typed text and initial address.
@@ -69,7 +69,7 @@ public struct BrowserWindowView: View {
             }
         }
         // The transitions carry their own timing; this makes every palette change animate.
-        .animation(.paletteIn, value: session.commandPaletteMode)
+        .animation(.paletteIn(from: session.commandPaletteOrigin), value: session.commandPaletteMode)
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
         // Hiding or showing the sidebar slides it and widens or narrows the page.
