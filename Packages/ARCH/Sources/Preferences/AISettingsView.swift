@@ -64,14 +64,6 @@ func aiFootnote(_ text: String) -> some View {
         .frame(maxWidth: .infinity, alignment: .leading)
 }
 
-extension AISettingsStore {
-    /// "Provider — model" for pickers and lists.
-    func title(of ref: AIModelRef) -> String {
-        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return "\(ref.model) (removed)" }
-        return "\(provider.name) \u{2014} \(ref.model)"
-    }
-}
-
 // MARK: - Features
 
 /// The default route, then one section per registered feature with its switch, its models, what it sends, and its last error. The Test Prompt feature's section also holds the prompt.

@@ -4,6 +4,7 @@
 #include <crt_externs.h>
 #include <dispatch/dispatch.h>
 #include <map>
+#include <optional>
 
 #include <atomic>
 
@@ -195,6 +196,12 @@ const char kThemeColorScript[] = R"JS((() => {
   return context.fillStyle;
 })())JS";
 
+// The browser sends other scripts whose result it needs the same way. A request carries its number and the script; the reply carries the number and the string the script returned, or null.
+const char kScriptRequest[] = "ARCHScriptRequest";
+const char kScriptReply[] = "ARCHScriptReply";
+// How long the browser waits for a reply. A frame that navigates or goes away before it answers drops the request.
+const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
+
 const char kAudibleReport[] = "ARCHAudibleReport";
 const char kMediaReport[] = "ARCHMediaReport";
 
@@ -290,6 +297,22 @@ private:
     IMPLEMENT_REFCOUNTING(MediaReporter);
 };
 
+// Evaluates `script` in the frame's page world. Returns the string it evaluates to, or nothing when the frame has no script context or the script throws or returns another type.
+std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefString &script) {
+    CefRefPtr<CefV8Context> context = frame->GetV8Context();
+    if (!context || !context->Enter()) {
+        return std::nullopt;
+    }
+    std::optional<CefString> result;
+    CefRefPtr<CefV8Value> value;
+    CefRefPtr<CefV8Exception> exception;
+    if (context->Eval(script, CefString(), 0, value, exception) && value && value->IsString()) {
+        result = value->GetStringValue();
+    }
+    context->Exit();
+    return result;
+}
+
 // Runs in the helper's renderer processes and answers the browser's requests for values only a page's script can read.
 class HelperApp : public CefApp, public CefRenderProcessHandler {
 public:
@@ -314,23 +337,25 @@ public:
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
-        if (message->GetName() != kThemeColorRequest) {
-            return false;
+        if (message->GetName() == kThemeColorRequest) {
+            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
+            reply->GetArgumentList()->SetString(0, EvaluateString(frame, kThemeColorScript).value_or(CefString()));
+            frame->SendProcessMessage(PID_BROWSER, reply);
+            return true;
         }
-        std::string color;
-        CefRefPtr<CefV8Context> context = frame->GetV8Context();
-        if (context && context->Enter()) {
-            CefRefPtr<CefV8Value> value;
-            CefRefPtr<CefV8Exception> exception;
-            if (context->Eval(kThemeColorScript, CefString(), 0, value, exception) && value && value->IsString()) {
-                color = value->GetStringValue();
+        if (message->GetName() == kScriptRequest) {
+            CefRefPtr<CefListValue> request = message->GetArgumentList();
+            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kScriptReply);
+            reply->GetArgumentList()->SetInt(0, request->GetInt(0));
+            if (std::optional<CefString> result = EvaluateString(frame, request->GetString(1))) {
+                reply->GetArgumentList()->SetString(1, *result);
+            } else {
+                reply->GetArgumentList()->SetNull(1);
             }
-            context->Exit();
+            frame->SendProcessMessage(PID_BROWSER, reply);
+            return true;
         }
-        CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
-        reply->GetArgumentList()->SetString(0, color);
-        frame->SendProcessMessage(PID_BROWSER, reply);
-        return true;
+        return false;
     }
 
 private:
@@ -986,6 +1011,7 @@ private:
 - (void)handleThemeColor:(NSString *)color;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
 - (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
+- (void)handleScriptReply:(int)request result:(nullable NSString *)result;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -1279,6 +1305,11 @@ public:
             [owner_ handleMedia:ToNSString(message->GetArgumentList()->GetString(0)) frame:ToNSString(frame->GetIdentifier())];
             return true;
         }
+        if (message->GetName() == kScriptReply) {
+            CefRefPtr<CefListValue> reply = message->GetArgumentList();
+            [owner_ handleScriptReply:reply->GetInt(0) result:reply->GetType(1) == VTYPE_STRING ? ToNSString(reply->GetString(1)) : nil];
+            return true;
+        }
         return false;
     }
 
@@ -1427,6 +1458,9 @@ private:
     BOOL _mainFrameNavigationPending;
     /// The frames whose media elements play sound.
     NSMutableSet<NSString *> *_audibleFrames;
+    /// The completions of `evaluateScript:completion:` whose replies have not come yet, by request number.
+    NSMutableDictionary<NSNumber *, void (^)(NSString *_Nullable)> *_scriptReplies;
+    int _lastScriptRequest;
 }
 
 @synthesize browserView = _browserView;
@@ -1448,6 +1482,7 @@ private:
     _allowsDownloads = YES;
     _downloads = [NSMutableDictionary dictionary];
     _audibleFrames = [NSMutableSet set];
+    _scriptReplies = [NSMutableDictionary dictionary];
     [gBrowsers addObject:self];
     _client = new BridgeClient(self);
 
@@ -1462,6 +1497,7 @@ private:
 
 - (void)dealloc {
     [self finishContextMenu];
+    [self finishScriptRequests];
     if (_client) {
         _client->Detach();
     }
@@ -1654,6 +1690,7 @@ private:
 
 - (void)handleBeforeClose {
     [self finishContextMenu];
+    [self finishScriptRequests];
     _contextMenuFrame = nullptr;
     _browser = nullptr;
     _browserView = nil;
@@ -1729,6 +1766,7 @@ private:
         [_audibleFrames removeAllObjects];
         [_delegate cefBrowserDidChangeAudible:NO];
     }
+    [self finishScriptRequests];
     [_delegate cefBrowserRenderProcessDidTerminate];
 }
 
@@ -1871,6 +1909,42 @@ private:
 - (void)executeJavaScript:(NSString *)script {
     if (_browser) {
         _browser->GetMainFrame()->ExecuteJavaScript(CefString(script.UTF8String), _browser->GetMainFrame()->GetURL(), 0);
+    }
+}
+
+- (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable))completion {
+    CefRefPtr<CefFrame> frame = _browser ? _browser->GetMainFrame() : nullptr;
+    if (!frame) {
+        completion(nil);
+        return;
+    }
+    int request = ++_lastScriptRequest;
+    _scriptReplies[@(request)] = [completion copy];
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kScriptRequest);
+    message->GetArgumentList()->SetInt(0, request);
+    message->GetArgumentList()->SetString(1, CefString(script.UTF8String));
+    frame->SendProcessMessage(PID_RENDERER, message);
+    __weak ARCHCEFBrowser *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kScriptReplyTimeout), dispatch_get_main_queue(), ^{
+        [weakSelf handleScriptReply:request result:nil];
+    });
+}
+
+- (void)handleScriptReply:(int)request result:(nullable NSString *)result {
+    void (^completion)(NSString *_Nullable) = _scriptReplies[@(request)];
+    if (!completion) {
+        return;
+    }
+    [_scriptReplies removeObjectForKey:@(request)];
+    completion(result);
+}
+
+/// Ends every request still waiting for a reply, as when the page's process quits or the browser goes.
+- (void)finishScriptRequests {
+    NSArray<void (^)(NSString *_Nullable)> *completions = _scriptReplies.allValues;
+    [_scriptReplies removeAllObjects];
+    for (void (^completion)(NSString *_Nullable) in completions) {
+        completion(nil);
     }
 }
 

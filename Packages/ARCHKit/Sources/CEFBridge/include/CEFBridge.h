@@ -233,6 +233,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)goBack;
 - (void)goForward;
 - (void)executeJavaScript:(NSString *)script;
+/// Evaluates `script` in the main frame's page world and passes the string it evaluates to. `executeJavaScript:` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
+- (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable result))completion;
 /// Sends a media action to the frame that reported media through `cefBrowserDidChangeMedia:frame:`. Nothing happens once the frame is gone.
 - (void)performMediaAction:(ARCHCEFMediaAction)action inFrame:(NSString *)frameIdentifier NS_SWIFT_NAME(performMediaAction(_:inFrame:));
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;

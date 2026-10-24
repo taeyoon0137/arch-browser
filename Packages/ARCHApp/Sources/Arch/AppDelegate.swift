@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.showSettings = { PreferencesWindowController.shared.show() }
         // The built-in plugins that ship with the app.
         session.loadPlugins(builtIns: [PageAddressPlugin.self])
+        session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()
@@ -165,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
         let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
@@ -270,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.devToolsDock.side = side
     }
     @objc private func toggleDownloads() { session.toggleLibrary() }
+    @MainActor @objc private func togglePageReader() { session.pageAssistant.toggleReader() }
     @objc private func reload() { session.reload() }
     @objc private func zoomIn() { session.zoomIn() }
     @objc private func zoomOut() { session.zoomOut() }
@@ -379,6 +382,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Clearing site data needs a web page in front and no sheet on its window.
         if item.action == #selector(clearSiteData) {
             return session?.canClearSiteData == true
+        }
+        // The page reader stays out of the menu until a provider can serve it, and opens only over a tab no internal page covers.
+        if item.action == #selector(togglePageReader) {
+            let assistant = session?.pageAssistant
+            item.isHidden = !PageAssistant.isReaderAvailable
+            item.title = assistant?.isReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
+            return assistant?.canToggleReader == true
         }
         // Import waits while another import runs or the window shows a sheet. It touches no tab, so an internal page does not disable it.
         if item.action == #selector(importBookmarksAndHistory) {

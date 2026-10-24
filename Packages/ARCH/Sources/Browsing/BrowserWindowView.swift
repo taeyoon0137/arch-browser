@@ -78,9 +78,23 @@ public struct BrowserWindowView: View {
                             CaptureRegionOverlay(session: session, pageView: tab.webContents.view, cornerRadius: isPageFullscreen ? 0 : PageFrameShape.cornerRadius)
                         }
                     }
+                    // The find bar and the question popover float over the page's top trailing corner, the popover below the bar, so neither covers the page reader or docked developer tools beside the page.
+                    .overlay(alignment: .topTrailing) {
+                        VStack(alignment: .trailing, spacing: 8) {
+                            if session.isFindBarVisible {
+                                FindBarView(session: session)
+                            }
+                            PageQuestionLayer(session: session, assistant: session.pageAssistant)
+                        }
+                        .padding(.top, 12)
+                        .padding(.trailing, 16)
+                    }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(isPageFullscreen ? 0 : 0.08)).allowsHitTesting(false))
                     .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
                     .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
+                if !isPageFullscreen {
+                    PageReaderColumn(session: session, assistant: session.pageAssistant)
+                }
             }
             if !session.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
                 peekingSidebar
@@ -89,12 +103,6 @@ public struct BrowserWindowView: View {
                 .modifier(SidebarAppearance())
             SidebarItemDragLayer(session: session, tabDrag: tabDrag)
                 .modifier(SidebarAppearance())
-            if session.isFindBarVisible {
-                FindBarView(session: session)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.top, 20)
-                    .padding(.trailing, 24)
-            }
             if shownPaletteMode != nil {
                 Color.black.opacity(isPaletteLeaving ? 0 : 0.15)
                     .onTapGesture { session.dismissCommandPalette() }
@@ -887,7 +895,7 @@ private struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab, clearing its site's data, and the engine for new tabs.
+/// The site settings popover: the engine of the current tab, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     let tab: Tab?
@@ -905,6 +913,7 @@ struct SiteSettingsView: View {
                     }
                     .disabled(!session.canClearSiteData)
                 }
+                PageAISiteSection(tab: tab)
             }
             SiteSettingsSection(title: "New tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
                 Picker("New tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {

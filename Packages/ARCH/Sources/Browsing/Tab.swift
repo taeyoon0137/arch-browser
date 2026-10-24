@@ -45,6 +45,8 @@ public final class Tab: ObservableObject, Identifiable {
     var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
+    /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
+    var askAboutSelection: ((String) -> Void)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
     var didChangeFullscreen: ((Bool) -> Void)?
     /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
@@ -192,7 +194,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Context menus
 
-    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, and editing or Copy, separated by lines. Back, Forward, and Reload show only when none of those apply. The engine's own items keep their actions and enabled state.
+    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, editing or Copy, and Ask About Selection, separated by lines. Back, Forward, and Reload show only when none of those apply. The engine's own items keep their actions and enabled state.
     public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
         let engineItems = menu.items
         menu.removeAllItems()
@@ -222,6 +224,11 @@ extension Tab: EngineWebContentsUIDelegate {
         } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = engineItem(EngineContextMenuItem.copy, "Copy") {
             // WebKit offers Copy outside fields only when the click is not on a link, image, or media, so Chromium follows it.
             sections.append([copy])
+        }
+        // Text in a field is never sent, so the question needs a selection outside one.
+        if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable,
+           let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
+            sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
         }
         sections.removeAll { $0.isEmpty }
         if sections.isEmpty {

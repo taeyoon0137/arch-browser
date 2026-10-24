@@ -280,6 +280,13 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.executeJavaScript(script)
         completion(.success(nil))
     }
+    /// The helper's renderer runs the script in the page's world and replies with its result, which `executeJavaScript` cannot return and the DevTools protocol would return only by attaching a debugger. The page's scripts can change what the script sees there, which changes only the page's own text.
+    public func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {
+        guard let browser else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        browser.evaluateScript("(\(EngineReadableContent.script))(\(limit))") { result in
+            completion(Result { try EngineReadableContent(scriptResult: result) })
+        }
+    }
     public func insertStylesheet(_ css: String, identifier: String) {
         let escaped = css.replacingOccurrences(of: "`", with: "\\`")
         browser?.executeJavaScript("(function(){var s=document.getElementById('arch-style-\(identifier)');if(!s){s=document.createElement('style');s.id='arch-style-\(identifier)';document.documentElement.appendChild(s);}s.textContent=`\(escaped)`;})();")

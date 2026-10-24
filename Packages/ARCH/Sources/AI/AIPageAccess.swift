@@ -1,4 +1,4 @@
-// Page access: the checks every part passes before each attempt (declared kinds, site exclusions, addresses without query or fragment, and length limits), and the delimited text blocks providers receive page data in.
+// Page access: the checks every part passes before each attempt (declared kinds, site exclusions, addresses without query or fragment, and length limits), the switch that allows or excludes a page's site, and the delimited text blocks providers receive page data in.
 import Darwin
 import Foundation
 
@@ -89,6 +89,37 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         guard inet_pton(AF_INET6, host, &address) == 1 else { return nil }
         return withUnsafeBytes(of: &address) { Array($0) }
     }
+
+    /// The schemes whose pages can be sent: web pages and local files. Internal pages and other schemes are always excluded.
+    public static let sendableSchemes: Set<String> = ["http", "https", "file"]
+
+    /// The site that keeps `url`'s data from every provider: its host, or its scheme for an address without one. Nil when the address may be sent.
+    static func excludedSite(of url: URL, in patterns: [AISitePattern]) -> String? {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard !sendableSchemes.contains(scheme) || patterns.contains(where: { $0.matches(url) }) else { return nil }
+        return url.host.flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
+    }
+}
+
+// MARK: - Site switch
+
+extension AISettingsStore {
+    /// Whether features may send data from `url`: an `http`, `https`, or `file` address on no excluded site.
+    public func allowsAI(on url: URL) -> Bool {
+        AISitePattern.excludedSite(of: url, in: excludedSites) == nil
+    }
+
+    /// The Allow AI on This Site switch beside a page. Allowing removes every exclusion that matches the address, such as its parent domain or `local-network`; excluding adds its host, or `file:` for a local file. Addresses that can never be sent stay as they are.
+    public func setAllowsAI(_ isAllowed: Bool, on url: URL) {
+        guard let scheme = url.scheme?.lowercased(), AISitePattern.sendableSchemes.contains(scheme), allowsAI(on: url) != isAllowed else { return }
+        if isAllowed {
+            excludedSites.removeAll { $0.matches(url) }
+        } else if let host = url.host, !host.isEmpty {
+            excludedSites.append(AISitePattern(host.lowercased()))
+        } else {
+            excludedSites.append(AISitePattern("\(scheme):"))
+        }
+    }
 }
 
 // MARK: - Part checks
@@ -148,15 +179,11 @@ struct AIPartPolicy {
         }
     }
 
-    /// Only `http`, `https`, and `file` addresses can be sent; internal pages and other schemes are always excluded.
+    /// Throws for a kind the feature did not declare and for an address on an excluded site.
     private func allow(_ kind: AIDataKind, urls: [URL]) throws {
         guard scope.kinds.contains(kind) else { throw AIError.blockedByPolicy(.dataNotDeclared(kind)) }
         for url in urls {
-            let scheme = url.scheme?.lowercased() ?? ""
-            let site = url.host.flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
-            guard ["http", "https", "file"].contains(scheme), !excludedSites.contains(where: { $0.matches(url) }) else {
-                throw AIError.blockedByPolicy(.siteExcluded(site))
-            }
+            if let site = AISitePattern.excludedSite(of: url, in: excludedSites) { throw AIError.blockedByPolicy(.siteExcluded(site)) }
         }
     }
 

@@ -1,4 +1,4 @@
-// Routes: which models serve each feature, with up to two fallbacks. The service resolves a request's route once, at its start, and keeps it for the whole request.
+// Routes: which models serve each feature, with up to two fallbacks. The service resolves a request's route once, at its start, and keeps it for the whole request. The interface names a route's models and estimates their costs here.
 import Foundation
 
 public struct AIModelRef: Hashable, Codable, Sendable {
@@ -57,5 +57,22 @@ extension AISettingsStore {
         }
         guard !usable.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
         return usable
+    }
+}
+
+// MARK: - Model names and costs
+
+extension AISettingsStore {
+    /// "Provider — model", for pickers and for the line under an answer.
+    public func title(of ref: AIModelRef) -> String {
+        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return "\(ref.model) (removed)" }
+        return "\(provider.name) \u{2014} \(ref.model)"
+    }
+
+    /// The estimated cost of `usage` on the model `ref` names, in its price's currency, or nil when the model has no price.
+    public func estimatedCost(of usage: AIUsage, on ref: AIModelRef) -> AIMoney? {
+        let model = providers.first(where: { $0.id == ref.provider })?.models.first(where: { $0.name == ref.model })
+        guard let price = model?.price else { return nil }
+        return AIMoney(currency: price.currency, amount: price.cost(of: usage))
     }
 }

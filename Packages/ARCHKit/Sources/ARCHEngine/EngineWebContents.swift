@@ -101,6 +101,8 @@ public protocol EngineWebContents: AnyObject {
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void)
     func stopFind()
     func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void)
+    /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
+    func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
     /// CSS injection for site customizations. WebKit implements it with WKUserContentController.
     func insertStylesheet(_ css: String, identifier: String)
     func removeStylesheet(identifier: String)

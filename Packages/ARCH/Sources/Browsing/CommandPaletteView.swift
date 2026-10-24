@@ -1,4 +1,4 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching plugin commands, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching plugin commands, Ask About This Page when the words begin its name, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
 import History
 import Plugins
 import SwiftUI
@@ -51,6 +51,12 @@ struct CommandPaletteView: View {
         return "Search for \"\(trimmed)\""
     }
 
+    /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
+    private var offersAskAboutPage: Bool {
+        let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return !words.isEmpty && "ask about this page".hasPrefix(words) && session.pageAssistant.canAskAboutPage
+    }
+
     /// The palette's distance from the window's top.
     static let top: CGFloat = 120
     /// The height of the search field.
@@ -84,6 +90,13 @@ struct CommandPaletteView: View {
                         ForEach(pluginCommands, id: \.ref) { command in
                             PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
                                 .paletteAction { session.runPluginCommand(command.ref) }
+                        }
+                        if offersAskAboutPage {
+                            PaletteRow(symbol: "sparkles", title: "Ask About This Page")
+                                .paletteAction {
+                                    session.dismissCommandPalette()
+                                    session.pageAssistant.askAboutPage()
+                                }
                         }
                         ForEach(matchingTabs) { tab in
                             PaletteTabRow(tab: tab)

@@ -155,6 +155,8 @@ public final class BrowserSession: ObservableObject {
             .sink { [weak self] _ in self?.showNextSheet() }
             .store(in: &cancellables)
         nowPlaying = NowPlaying(session: self)
+        // The session is created on the main thread, where the AI interface runs.
+        MainActor.assumeIsolated { pageAssistant.attach(to: self) }
     }
 
     public enum SessionError: Error {
@@ -695,8 +697,8 @@ public final class BrowserSession: ObservableObject {
         tabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
-    /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a new tab's view is in the window.
-    private func focusPage() {
+    /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window.
+    func focusPage() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let view = self.selectedTab?.webContents.view, let window = view.window else { return }
             // Keys must not reach a page an internal page covers.
@@ -1330,6 +1332,11 @@ public final class BrowserSession: ObservableObject {
 
     /// Shows the media of the selected or most recently audible tab in Now Playing and sends the media keys to it.
     private var nowPlaying: NowPlaying?
+
+    // MARK: Page reader and questions
+
+    /// The page reader beside the page and the question popover over it. It follows the session's tabs once the session exists.
+    public let pageAssistant = PageAssistant()
 
     // MARK: Drag and drop
 

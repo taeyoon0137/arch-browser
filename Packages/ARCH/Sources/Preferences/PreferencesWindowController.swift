@@ -39,6 +39,9 @@ public final class PreferencesWindowController: NSWindowController {
     public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
     public static let defaultArchiveAfterHours = 12
 
+    /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
+    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())
+
     private init() {
         UserDefaults.standard.register(defaults: [Self.archiveAfterHoursKey: Self.defaultArchiveAfterHours])
         let sections = NSTabViewController()
@@ -49,7 +52,7 @@ public final class PreferencesWindowController: NSWindowController {
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
         sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
         sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection()))
-        sections.addTabViewItem(Self.section("AI", symbol: "sparkles", AISettingsView()))
+        sections.addTabViewItem(aiSection)
         let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference
@@ -79,5 +82,11 @@ public final class PreferencesWindowController: NSWindowController {
         if !window.isVisible { window.center() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Brings the Settings window to the front on the AI section. The tab view controller follows its tab view's selection.
+    public func showAISection() {
+        aiSection.tabView?.selectTabViewItem(aiSection)
+        show()
     }
 }
