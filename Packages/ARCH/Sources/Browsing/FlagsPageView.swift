@@ -37,7 +37,7 @@ struct FlagsPageView: View {
 
     /// Escape closes the page only while no field above it, such as the palette's or the find bar's, needs Escape.
     private var closesOnEscape: Bool {
-        session.commandPaletteMode == nil && !session.isFindBarVisible && session.renamingSpaceID == nil && session.renamingTabID == nil
+        session.commandPaletteMode == nil && !session.isFindBarVisible && session.renamingSpaceID == nil && session.renamingTabID == nil && session.renamingFolderID == nil
     }
 
     var body: some View {

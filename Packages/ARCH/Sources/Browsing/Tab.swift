@@ -12,6 +12,8 @@ public final class Tab: ObservableObject, Identifiable {
     /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space.
     @Published public var spaceID: UUID?
     @Published public var isPinned: Bool
+    /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
+    @Published public internal(set) var folderID: UUID?
     /// The session updates this on tab selection. Archiving closes unpinned tabs whose dates are too old.
     var lastActivatedAt = Date()
     @Published public private(set) var title: String

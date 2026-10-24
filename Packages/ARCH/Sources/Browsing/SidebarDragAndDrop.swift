@@ -1,4 +1,4 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over another space's symbol moves to that space. Links, addresses, and files that other apps drop onto the tab list open in new tabs.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over another space's symbol moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -39,12 +39,17 @@ extension TabDragState {
 
     /// A tab released over a space's symbol shrinks into it while the symbol's highlight fades.
     func settle(intoSpace spaceID: UUID, ownedBy owner: UUID) {
-        let symbol = spaceSymbolFrames[spaceID] ?? frame
+        settle(shrinkingInto: spaceSymbolFrames[spaceID] ?? frame, ownedBy: owner)
+    }
+
+    /// A tab released over a drop target, such as a folder's row, shrinks into the target's frame while its highlight fades.
+    func settle(shrinkingInto target: CGRect, ownedBy owner: UUID) {
         withAnimation(.easeIn(duration: 0.25)) {
             isSettling = true
-            isEnteringSpace = true
+            isEntering = true
             targetSpaceID = nil
-            frame.origin = CGPoint(x: symbol.midX - frame.width / 2, y: symbol.midY - frame.height / 2)
+            targetFolderID = nil
+            frame.origin = CGPoint(x: target.midX - frame.width / 2, y: target.midY - frame.height / 2)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.end(ownedBy: owner) }
     }

@@ -265,7 +265,7 @@ public struct BrowserWindowView: View {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
             || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
-        let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || window?.firstResponder is NSText
+        let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || session.renamingFolderID != nil || window?.firstResponder is NSText
         let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
@@ -1074,14 +1074,14 @@ struct SpacePagesView: View {
     }
 }
 
-/// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row.
+/// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row. Each of the two lists starts with its folders, each followed by its tabs unless collapsed.
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     let space: Space
     @EnvironmentObject private var tabDrag: TabDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
-    /// Each tab row's frame in the window, used to find the row under the pointer and the dropped tab's destination.
+    /// Each tab and folder row's frame in the window, used to find the row under the pointer and the dropped tab's destination.
     @State private var rowFrames: [UUID: CGRect] = [:]
     /// The visible part of the list in the window. Rows scrolled out of sight lie outside it.
     @State private var listFrame = CGRect.zero
@@ -1090,16 +1090,20 @@ struct SpaceTabsView: View {
 
     /// How long the lifted row's shadow and the slot's dimming take to appear and disappear.
     private static let liftDuration = TabDragState.liftDuration
+    /// How far a folder's tabs sit in from its row.
+    private static let folderIndent: CGFloat = 12
 
-    /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them.
+    /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them or into and out of a folder.
     private enum Item: Identifiable {
-        case tab(Tab)
+        case folder(TabFolder)
+        case tab(Tab, isInFolder: Bool)
         case divider
         case newTab
 
         var id: String {
             switch self {
-            case .tab(let tab): return tab.id.uuidString
+            case .folder(let folder): return folder.id.uuidString
+            case .tab(let tab, _): return tab.id.uuidString
             case .divider: return "divider"
             case .newTab: return "new-tab"
             }
@@ -1107,9 +1111,17 @@ struct SpaceTabsView: View {
     }
 
     private var items: [Item] {
-        let pinned = session.tabs(in: space.id, pinned: true)
-        let open = session.tabs(in: space.id, pinned: false)
-        return pinned.map(Item.tab) + (pinned.isEmpty ? [] : [.divider]) + open.map(Item.tab) + [.newTab]
+        let pinned = listItems(pinned: true)
+        return pinned + (pinned.isEmpty ? [] : [.divider]) + listItems(pinned: false) + [.newTab]
+    }
+
+    /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and a tab dragged into it until release, so that the drag keeps its row.
+    private func listItems(pinned: Bool) -> [Item] {
+        let folders = session.folders(in: space.id, pinned: pinned).flatMap { folder in
+            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == session.selectedTabID || ($0.id == tabDrag.tabID && !tabDrag.isSettling) }
+            return [Item.folder(folder)] + shown.map { Item.tab($0, isInFolder: true) }
+        }
+        return folders + session.tabsOutsideFolders(in: space.id, pinned: pinned).map { Item.tab($0, isInFolder: false) }
     }
 
     var body: some View {
@@ -1121,8 +1133,12 @@ struct SpaceTabsView: View {
                     .padding(.bottom, 4)
                 ForEach(items) { item in
                     switch item {
-                    case .tab(let tab):
+                    case .folder(let folder):
+                        TabFolderRowView(session: session, folder: folder)
+                            .background(frameReader(for: folder.id))
+                    case .tab(let tab, let isInFolder):
                         row(for: tab)
+                            .padding(.leading, isInFolder ? Self.folderIndent : 0)
                     case .divider:
                         Divider().padding(.vertical, 4).padding(.horizontal, 10)
                     case .newTab:
@@ -1163,14 +1179,19 @@ struct SpaceTabsView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(tabDrag.isLifted ? 0.06 : 0))
                 }
             }
-            .background(GeometryReader { proxy in
-                Color.clear.preference(key: TabRowFramesKey.self, value: [tab.id: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
-            })
+            .background(frameReader(for: tab.id))
             // Dragging in the name field selects text instead.
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
                 .onEnded { _ in dragEnded() }, including: session.renamingTabID == tab.id ? .subviews : .all)
+    }
+
+    /// Reports a tab's or folder's row frame in the window.
+    private func frameReader(for id: UUID) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(key: TabRowFramesKey.self, value: [id: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
+        }
     }
 
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
@@ -1182,18 +1203,22 @@ struct SpaceTabsView: View {
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: Self.liftDuration)) { tabDrag.isLifted = true } }
         }
         tabDrag.move(to: value.location)
-        // Another space's symbol under the pointer lights up, with a light haptic, and takes the tab on release.
-        let targetSpaceID = tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 }
-        if targetSpaceID != tabDrag.targetSpaceID {
-            withAnimation(.easeInOut(duration: 0.15)) { tabDrag.targetSpaceID = targetSpaceID }
-            if targetSpaceID != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
-        }
+        let isOverList = listFrame.contains(value.location)
+        // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it.
+        setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 })
+        setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
-        guard listFrame.contains(value.location),
-              let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id]?.contains(value.location) == true }) else { return }
+        guard isOverList, let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id]?.contains(value.location) == true }) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    /// Lights up a drop target newly under the dragged tab, with a light haptic, or turns off the one it left.
+    private func setDropTarget(_ target: ReferenceWritableKeyPath<TabDragState, UUID?>, to id: UUID?) {
+        guard tabDrag[keyPath: target] != id else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { tabDrag[keyPath: target] = id }
+        if id != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     }
 
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
@@ -1203,6 +1228,11 @@ struct SpaceTabsView: View {
         if let spaceID = tabDrag.targetSpaceID {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toSpace: spaceID) }
             return tabDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
+        }
+        // Over a folder's row, the tab goes after the folder's own tabs and the lifted row shrinks into the folder's row.
+        if let folderID = tabDrag.targetFolderID, let folderRow = rowFrames[folderID] {
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toFolder: folderID) }
+            return tabDrag.settle(shrinkingInto: folderRow, ownedBy: dragOwner)
         }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             tabDrag.isSettling = true
@@ -1225,8 +1255,10 @@ final class TabDragState: ObservableObject {
     @Published var isLifted = false
     /// The other space whose symbol is under a dragged tab. Releasing the tab there moves it to that space.
     @Published var targetSpaceID: UUID?
-    /// Set while a tab released over a space's symbol shrinks into it.
-    @Published var isEnteringSpace = false
+    /// The folder whose row is under a dragged tab. Releasing the tab there adds it to the folder.
+    @Published var targetFolderID: UUID?
+    /// Set while a tab released over a space's symbol or a folder's row shrinks into it.
+    @Published var isEntering = false
     /// Each space symbol's frame in the window and the strip's visible part, reported by the bottom bar on screen.
     var spaceSymbolFrames: [UUID: CGRect] = [:]
     var spaceStripFrame = CGRect.zero
@@ -1260,7 +1292,8 @@ final class TabDragState: ObservableObject {
         isSettling = false
         isLifted = false
         targetSpaceID = nil
-        isEnteringSpace = false
+        targetFolderID = nil
+        isEntering = false
     }
 }
 
@@ -1277,9 +1310,9 @@ struct TabDragLayer: View {
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(tabDrag.isLifted ? 1 : 0))
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
                 .shadow(color: .black.opacity(tabDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
-                // A tab released over a space's symbol shrinks into it.
-                .scaleEffect(tabDrag.isEnteringSpace ? 0.2 : 1)
-                .opacity(tabDrag.isEnteringSpace ? 0 : 1)
+                // A tab released over a space's symbol or a folder's row shrinks into it.
+                .scaleEffect(tabDrag.isEntering ? 0.2 : 1)
+                .opacity(tabDrag.isEntering ? 0 : 1)
                 .environment(\.isDraggingTab, true)
                 .frame(width: tabDrag.frame.width, height: tabDrag.frame.height)
                 .offset(x: tabDrag.frame.minX, y: tabDrag.frame.minY)
@@ -1320,7 +1353,8 @@ struct TabRowView: View {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
             if session.renamingTabID == tab.id {
-                TabNameField(session: session, tab: tab)
+                SidebarNameField(session: session, placeholder: "Tab Name", name: tab.displayTitle,
+                                 onRename: { session.renameTab(tab.id, to: $0) }, onEnd: { session.endRenaming(tab.id) })
             } else {
                 Text(tab.displayTitle)
                     .font(.system(size: 14))
@@ -1361,6 +1395,19 @@ struct TabRowView: View {
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
             Divider()
+            Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.addToNewFolder(tab) } }
+            let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []
+            if !otherFolders.isEmpty {
+                Menu("Move to Folder") {
+                    ForEach(otherFolders) { folder in
+                        Button(folder.name) { withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folder.id) } }
+                    }
+                }
+            }
+            if tab.folderID != nil {
+                Button("Remove from Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.removeFromFolder(tab) } }
+            }
+            Divider()
             Button("Close Tab") { session.requestCloseTab(tab) }
         }
         .accessibilityElement(children: .combine)
@@ -1370,25 +1417,30 @@ struct TabRowView: View {
     }
 }
 
-/// Edits a tab's name in place. Return or leaving the field keeps the name, and Escape cancels. An empty name returns the tab to its page's title, and an unedited name changes nothing.
-struct TabNameField: View {
+/// Edits a tab's or folder's name in place. Return or leaving the field passes the name to `onRename`, which decides what an empty name means, and Escape cancels. An unedited name changes nothing.
+struct SidebarNameField: View {
     @ObservedObject var session: BrowserSession
-    @ObservedObject var tab: Tab
+    let placeholder: String
+    /// The current name, which the field starts with.
+    let name: String
+    let onRename: (String) -> Void
+    /// Ends editing without a new name.
+    let onEnd: () -> Void
     @State private var draftName = ""
-    /// The name the field opened with.
+    /// `name` when the field opened. A tab's page can change its title meanwhile.
     @State private var initialName = ""
     @State private var isCancelled = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField("Tab Name", text: $draftName)
+        TextField(placeholder, text: $draftName)
             .textFieldStyle(.plain)
             .font(.system(size: 14))
             .focused($isFocused)
             .onSubmit(commit)
             .onExitCommand {
                 isCancelled = true
-                session.endRenaming(tab.id)
+                onEnd()
             }
             .onChange(of: isFocused) { focused in
                 if !focused { commit() }
@@ -1396,7 +1448,7 @@ struct TabNameField: View {
             // Selecting another tab or space leaves the field focused, so the name is saved here.
             .onChange(of: session.selectedTabID) { _ in commit() }
             .onAppear {
-                initialName = tab.displayTitle
+                initialName = name
                 draftName = initialName
                 DispatchQueue.main.async { isFocused = true }
             }
@@ -1404,11 +1456,11 @@ struct TabNameField: View {
             .onDisappear(perform: commit)
     }
 
-    /// Keeps the typed name even when renaming has moved on to another tab.
+    /// Keeps the typed name even when renaming has moved on to another tab or folder.
     private func commit() {
         guard !isCancelled else { return }
-        if draftName == initialName { return session.endRenaming(tab.id) }
-        session.renameTab(tab.id, to: draftName)
+        if draftName == initialName { return onEnd() }
+        onRename(draftName)
     }
 }
 
@@ -1666,6 +1718,7 @@ struct SpaceMenuItems: View {
         Button("Move Right") { session.moveSpace(space.id, by: 1) }
             .disabled(index == session.spaces.count - 1)
         Divider()
+        Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.addFolder(toSpace: space.id) } }
         Button("New Space", action: session.addSpace)
         Button("Delete Space") { session.deleteSpace(space.id) }
             .disabled(session.spaces.count < 2)

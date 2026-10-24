@@ -1,4 +1,4 @@
-// Spaces group sidebar tabs. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. `symbol` is an SF Symbol name.
+// Spaces group sidebar tabs, and folders group tabs inside a space. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. `symbol` is an SF Symbol name.
 import Foundation
 
 public struct Space: Identifiable, Codable, Hashable {
@@ -27,6 +27,17 @@ public struct Space: Identifiable, Codable, Hashable {
 public enum SpaceTint: String, Codable, CaseIterable {
     case blue, purple, pink, orange, green, teal, gray
     case automatic
+}
+
+/// A named group of tabs among a space's pinned or open tabs. Its tabs refer to it by `id` and share its space and pinned state.
+public struct TabFolder: Identifiable, Codable, Hashable {
+    public var id = UUID()
+    public var spaceID: UUID
+    public var name: String
+    /// Whether the folder sits among the pinned tabs rather than the open ones.
+    public var isPinned: Bool
+    /// A collapsed folder hides its tabs in the sidebar.
+    public var isCollapsed = false
 }
 
 public struct Favorite: Identifiable, Codable, Hashable {

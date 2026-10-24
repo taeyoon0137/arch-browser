@@ -1,4 +1,4 @@
-// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites and the tabs they keep alive, tabs, and the closed-tab list. Archives inactive tabs on a timer.
+// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites and the tabs they keep alive, tabs, tab folders, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
@@ -146,6 +146,7 @@ public final class BrowserSession: ObservableObject {
         spaces = initialSpaces
         currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
         favorites = snapshot?.favorites ?? []
+        folders = snapshot?.folders?.filter { folder in initialSpaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot?.closedTabs ?? []
         cookieSync.runtimes = { [weak self] in self.map { Array($0.runtimes.values) } ?? [] }
         adoptRuntime(started)
@@ -238,8 +239,9 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == currentSpaceID } ?? spaces[0]
     }
 
+    /// A space's pinned or open tabs in sidebar order: the tabs of each folder, folder by folder, then the tabs outside folders.
     public func tabs(in spaceID: UUID, pinned: Bool) -> [Tab] {
-        tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned }
+        folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
     }
 
     public func addSpace() {
@@ -303,16 +305,19 @@ public final class BrowserSession: ObservableObject {
         spaces.swapAt(index, index + offset)
     }
 
-    /// Removes a space. Its tabs move to the space before it, or to the next one for the first space, so no tab closes.
+    /// Removes a space. Its tabs and folders move to the space before it, or to the next one for the first space, so no tab closes.
     public func deleteSpace(_ id: UUID) {
         guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let destination = spaces[index == 0 ? 1 : index - 1].id
-        // The moved tabs go after the destination's own tabs instead of among them.
+        // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders.
         let moved = tabs.filter { $0.spaceID == id }
         let movedIDs = Set(moved.map(\.id))
         moved.forEach { $0.spaceID = destination }
         tabs.removeAll { movedIDs.contains($0.id) }
         tabs.append(contentsOf: moved)
+        var movedFolders = folders.filter { $0.spaceID == id }
+        for folderIndex in movedFolders.indices { movedFolders[folderIndex].spaceID = destination }
+        folders = folders.filter { $0.spaceID != id } + movedFolders
         if currentSpaceID == id { switchToSpace(destination) }
         spaces.remove(at: index)
     }
@@ -585,7 +590,7 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         retire(tab.webContents)
         if remember, let spaceID = tab.spaceID {
-            closedTabs.append(SessionSnapshot.TabRecord(spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, engine: tab.engineKind))
+            closedTabs.append(SessionSnapshot.TabRecord(spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
         // A favorite's tab leaves the selection to a tab of the current space.
@@ -611,12 +616,14 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab in its original space, or the current space if the original is gone.
+    /// Reopens the newest closed tab in its original space and folder, or the current space if the original is gone.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine).customTitle = record.customTitle
+        let tab = openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine)
+        tab.customTitle = record.customTitle
+        tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
     }
 
     /// Pressing another key or clicking in the page makes ⌘Z undo there instead of reopening tabs.
@@ -653,26 +660,27 @@ public final class BrowserSession: ObservableObject {
         selectedTabID = ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count].id
     }
 
-    /// Swaps the selected tab with its neighbor in the same space and pinned or open list.
+    /// Swaps the selected tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.
     public func moveSelectedTab(up: Bool) {
         guard let selected = selectedTab, let spaceID = selected.spaceID, let index = tabs.firstIndex(where: { $0.id == selected.id }) else { return }
-        let siblings = tabs(in: spaceID, pinned: selected.isPinned)
+        let siblings = selected.folderID == nil ? tabsOutsideFolders(in: spaceID, pinned: selected.isPinned) : tabs.filter { $0.folderID == selected.folderID }
         guard let position = siblings.firstIndex(where: { $0.id == selected.id }) else { return }
         let target = up ? position - 1 : position + 1
         guard siblings.indices.contains(target), let neighborIndex = tabs.firstIndex(where: { $0.id == siblings[target].id }) else { return }
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space and pinned state, allowing moves between pinned and open lists. Within a list, dragging from above places the tab below the target.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target.
     public func moveTab(_ id: UUID, to target: Tab) {
         guard id != target.id, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
-        let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned
+        let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
         guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
         tab.spaceID = target.spaceID
         tab.isPinned = target.isPinned
+        tab.folderID = target.folderID
         reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
         tabs = reordered
     }
@@ -695,9 +703,10 @@ public final class BrowserSession: ObservableObject {
         return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }
 
-    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it.
+    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list.
     public func togglePinned(_ tab: Tab) {
         objectWillChange.send()
+        tab.folderID = nil
         tab.isPinned.toggle()
     }
 
@@ -1428,15 +1437,128 @@ public final class BrowserSession: ObservableObject {
         spaces = reordered
     }
 
-    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs. The window follows the selected tab to its new space, so the sidebar keeps showing the page's tab.
+    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window follows the selected tab to its new space, so the sidebar keeps showing the page's tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
         guard spaces.contains(where: { $0.id == spaceID }), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
         tab.spaceID = spaceID
+        tab.folderID = nil
         reordered.append(tab)
         tabs = reordered
         if tab.id == selectedTabID { currentSpaceID = spaceID }
+    }
+
+    // MARK: Folders
+
+    /// Every space's folders. The sidebar shows a space's pinned and open folders in this order, each list starting with its folders.
+    @Published public private(set) var folders: [TabFolder] = []
+    /// The folder whose name is being edited in the sidebar.
+    @Published public var renamingFolderID: UUID?
+
+    /// A space's folders among its pinned or open tabs, in sidebar order.
+    public func folders(in spaceID: UUID, pinned: Bool) -> [TabFolder] {
+        folders.filter { $0.spaceID == spaceID && $0.isPinned == pinned }
+    }
+
+    /// A space's folders in sidebar order: those among its pinned tabs, then those among its open tabs.
+    public func folders(in spaceID: UUID) -> [TabFolder] {
+        folders(in: spaceID, pinned: true) + folders(in: spaceID, pinned: false)
+    }
+
+    /// A folder's tabs in sidebar order.
+    public func tabs(in folder: TabFolder) -> [Tab] {
+        tabs.filter { $0.folderID == folder.id }
+    }
+
+    /// A space's pinned or open tabs that are in no folder, in sidebar order.
+    public func tabsOutsideFolders(in spaceID: UUID, pinned: Bool) -> [Tab] {
+        tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil }
+    }
+
+    /// Adds an empty folder after the space's folders among its pinned tabs, shows the space, and starts renaming the folder.
+    public func addFolder(toSpace spaceID: UUID) {
+        guard spaces.contains(where: { $0.id == spaceID }) else { return }
+        switchToSpace(spaceID)
+        renamingFolderID = makeFolder(in: spaceID, pinned: true).id
+    }
+
+    /// Puts a tab in a new folder among its space's pinned or open tabs and starts renaming the folder. A favorite's tab belongs to no space and stays out of folders.
+    public func addToNewFolder(_ tab: Tab) {
+        guard let spaceID = tab.spaceID else { return }
+        let folder = makeFolder(in: spaceID, pinned: tab.isPinned)
+        moveTab(tab.id, toFolder: folder.id)
+        renamingFolderID = folder.id
+    }
+
+    /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list.
+    public func moveTab(_ id: UUID, toFolder folderID: UUID) {
+        guard let folder = folders.first(where: { $0.id == folderID }), let index = tabs.firstIndex(where: { $0.id == id }),
+              tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folderID else { return }
+        var reordered = tabs
+        let tab = reordered.remove(at: index)
+        tab.isPinned = folder.isPinned
+        tab.folderID = folderID
+        reordered.append(tab)
+        tabs = reordered
+    }
+
+    /// Takes a tab out of its folder.
+    public func removeFromFolder(_ tab: Tab) {
+        guard tab.folderID != nil else { return }
+        takeOutOfFolder([tab])
+    }
+
+    /// Keeps the old name when the new one is empty.
+    public func renameFolder(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { updateFolder(id) { $0.name = trimmed } }
+        endRenamingFolder(id)
+    }
+
+    /// Does not interrupt renaming another folder that may have started meanwhile.
+    public func endRenamingFolder(_ id: UUID) {
+        if renamingFolderID == id { renamingFolderID = nil }
+    }
+
+    public func toggleCollapsed(ofFolder id: UUID) {
+        updateFolder(id) { $0.isCollapsed.toggle() }
+    }
+
+    /// Removes a folder and keeps its tabs.
+    public func deleteFolder(_ id: UUID) {
+        guard let folder = folders.first(where: { $0.id == id }) else { return }
+        takeOutOfFolder(tabs(in: folder))
+        folders.removeAll { $0.id == id }
+        endRenamingFolder(id)
+    }
+
+    /// Appends a folder to a space's pinned or open folders.
+    private func makeFolder(in spaceID: UUID, pinned: Bool) -> TabFolder {
+        let folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+        folders.append(folder)
+        return folder
+    }
+
+    /// Takes tabs of one folder out of it and puts them, in order, first among their list's tabs outside folders, just below the folders.
+    private func takeOutOfFolder(_ moved: [Tab]) {
+        guard let first = moved.first else { return }
+        let movedIDs = Set(moved.map(\.id))
+        var reordered = tabs.filter { !movedIDs.contains($0.id) }
+        moved.forEach { $0.folderID = nil }
+        let destination = reordered.firstIndex { $0.spaceID == first.spaceID && $0.isPinned == first.isPinned && $0.folderID == nil } ?? reordered.endIndex
+        reordered.insert(contentsOf: moved, at: destination)
+        tabs = reordered
+    }
+
+    private func updateFolder(_ id: UUID, _ change: (inout TabFolder) -> Void) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        change(&folders[index])
+    }
+
+    /// `id` while it names a folder in that space's pinned or open list, so that a saved or closed tab returns to its folder unless the folder has gone or moved.
+    private func existingFolderID(_ id: UUID?, spaceID: UUID, pinned: Bool) -> UUID? {
+        folders.first { $0.id == id && $0.spaceID == spaceID && $0.isPinned == pinned }?.id
     }
 
     // MARK: Persistence
@@ -1455,6 +1577,7 @@ public final class BrowserSession: ObservableObject {
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine, state: record.state)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
+            tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
@@ -1475,7 +1598,7 @@ public final class BrowserSession: ObservableObject {
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, $currentSpaceID.map { _ in () })
             .merge(with: $selectedTabID.map { _ in () })
             .merge(with: $closedTabs.map { _ in () })
-            .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () })
+            .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () }, $folders.map { _ in () })
             .dropFirst()
             .sink { [weak self] in self?.scheduleSave() }
             .store(in: &cancellables)
@@ -1491,8 +1614,8 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
-                        selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
+                        folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
                         favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
     }
 
