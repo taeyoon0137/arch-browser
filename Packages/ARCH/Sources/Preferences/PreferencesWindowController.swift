@@ -1,6 +1,5 @@
-// Settings window for the default engine, appearance, and tab archive delay, saved in `UserDefaults`.
+// Settings window with a toolbar of sections in the system's settings layout: General, Sidebar, and Appearance, saved in `UserDefaults`.
 import AppKit
-import ARCHEngine
 import SwiftUI
 
 /// An appearance choice stored as a raw string under `ARCHAppearance`.
@@ -34,7 +33,7 @@ public enum AppearanceSetting: String, CaseIterable {
     }
 }
 
-/// Owns the single, fixed-size Settings window, which stays in memory when closed.
+/// Owns the single Settings window, which stays in memory when closed. Its toolbar switches between sections, and the window takes each section's title and size.
 public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
     public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
@@ -42,11 +41,27 @@ public final class PreferencesWindowController: NSWindowController {
 
     private init() {
         UserDefaults.standard.register(defaults: [Self.archiveAfterHoursKey: Self.defaultArchiveAfterHours])
-        let window = NSWindow(contentViewController: NSHostingController(rootView: PreferencesForm()))
+        let sections = NSTabViewController()
+        sections.tabStyle = .toolbar
+        sections.addTabViewItem(Self.section("General", symbol: "gearshape", GeneralSection()))
+        sections.addTabViewItem(Self.section("Sidebar", symbol: "sidebar.left", SidebarSection()))
+        sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
+        let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]
-        window.title = "Settings"
+        window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         super.init(window: window)
+    }
+
+    /// A toolbar section whose hosting controller reports the form's size, so the window fits each section.
+    private static func section(_ title: String, symbol: String, _ form: some View) -> NSTabViewItem {
+        let controller = NSHostingController(rootView: form)
+        controller.sizingOptions = .preferredContentSize
+        controller.title = title
+        let item = NSTabViewItem(viewController: controller)
+        item.label = title
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        return item
     }
 
     @available(*, unavailable)
@@ -60,35 +75,5 @@ public final class PreferencesWindowController: NSWindowController {
         if !window.isVisible { window.center() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-}
-
-private struct PreferencesForm: View {
-    @State private var defaultEngine = EngineRegistry.shared.defaultKind
-    @AppStorage(AppearanceSetting.defaultsKey) private var appearance = AppearanceSetting.system
-    @AppStorage(PreferencesWindowController.archiveAfterHoursKey) private var archiveAfterHours = PreferencesWindowController.defaultArchiveAfterHours
-
-    var body: some View {
-        Form {
-            Picker("Default engine:", selection: $defaultEngine) {
-                ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
-                    Text(kind.displayName)
-                }
-            }
-            .onChange(of: defaultEngine) { EngineRegistry.shared.defaultKind = $0 }
-
-            Picker("Appearance:", selection: $appearance) {
-                ForEach(AppearanceSetting.allCases, id: \.self) { choice in
-                    Text(choice.title)
-                }
-            }
-            .onChange(of: appearance) { NSApp.appearance = $0.appearance }
-
-            Stepper(value: $archiveAfterHours, in: 0...168) {
-                Text(archiveAfterHours == 0 ? "Archive tabs: Never" : "Archive tabs after \(archiveAfterHours) hours")
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 420)
     }
 }

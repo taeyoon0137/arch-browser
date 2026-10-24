@@ -94,7 +94,8 @@ public final class BrowserSession: ObservableObject {
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
 
-    public static let searchURL = URL(string: "https://www.google.com/search")!
+    /// The results page of the search engine chosen in Settings.
+    public static var searchURL: URL { SearchEngine.current.resultsURL }
     public static let newTabURL = URL(string: "https://www.google.com")!
 
     private let store: SessionStore
@@ -196,6 +197,7 @@ public final class BrowserSession: ObservableObject {
         let runtime = EngineRuntime(kind: started.kind, application: started.application, context: started.context, browser: browser)
         runtimes[started.kind] = runtime
         started.context.downloads.delegate = self
+        followDownloadSettings(of: started.context)
         downloads += started.context.downloads.items.map(DownloadEntry.init)
         browser.cookiesDidChange = { [weak self] in self?.cookieSync.scheduleCopy(from: started.kind) }
         // An engine that starts after another has none of its cookies yet.
@@ -733,6 +735,30 @@ public final class BrowserSession: ObservableObject {
             candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
         }
         return candidate
+    }
+
+    // MARK: Download settings
+
+    /// Settings saves the downloads folder's path and whether to ask where to save each download under these keys.
+    public static let downloadsFolderKey = "ARCHDownloadsFolder"
+    public static let asksWhereToSaveDownloadsKey = "ARCHAskWhereToSaveDownloads"
+
+    /// Copies the saved download settings into a profile's preferences, which choose each download's destination, now and after every change to the defaults. A saved folder that no longer exists leaves the user's Downloads folder in use.
+    private func followDownloadSettings(of context: any EngineBrowserContext) {
+        let apply = {
+            let defaults = UserDefaults.standard
+            var isDirectory: ObjCBool = false
+            let folder = defaults.string(forKey: Self.downloadsFolderKey).flatMap { path in
+                FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
+            }
+            context.preferences.downloadFilePath = folder
+            context.preferences.promptForDownloadPath = defaults.bool(forKey: Self.asksWhereToSaveDownloadsKey)
+        }
+        apply()
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { _ in apply() }
+            .store(in: &cancellables)
     }
 
     // MARK: Site permissions
