@@ -1,6 +1,6 @@
 # AI interface design
 
-This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.7 in `docs/plan.md` implement it. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
+This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.5 built the interface, the providers, the page reader, and questions in the page; VII.6 and VII.7 in `docs/plan.md` build the rest. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
 
 ## Purpose and principles
 
@@ -16,7 +16,7 @@ This note designs the AI interface (feature row 43) and the parts of rows 52 to 
 |---|---|---|---|
 | `AI` | `Packages/ARCH/Sources/AI` | `AIClient` and its value types, `AIService` (routing, page access checks, fallbacks, rate limits, usage), providers, Keychain storage, `ai.json`, hooks | Foundation, Security |
 | `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI | `AI` |
-| `Terminal` | `Packages/ARCH/Sources/Terminal` | The built-in terminal panel (VII.3) | Foundation, AppKit |
+| `Terminal` | `Packages/ARCH/Sources/Terminal` | The built-in terminal window | Foundation, AppKit |
 | `Browsing` | `Packages/ARCH/Sources/Browsing` | The page reader, questions in the page, hook events and their actions, and the page source for the interface | `AI` |
 | `Plugins` | `Packages/ARCH/Sources/Plugins` | The plugin system (V.11), the AI plugin composer and review sheet (VII.7) | `AI` |
 
@@ -884,11 +884,7 @@ public struct AIPrice: Codable, Sendable {
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, cool-down), the daily and monthly limits, and usage normalization.
 - Hook tests cover ordering by priority, `stop`, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, discarded actions after cancellation, and pausing after three failures.
 - Plugin tests (VII.7) cover manifest checks, the syntax check, digest mismatches, and that each `arch` call fails without its permission.
-- In-app checks after each task (the lead runs them from the bundle):
-  - VII.2: a provider with a key streams a reply into a test feature; a wrong key shows the authentication error; with a failing primary model, the fallback answers and its name shows.
-  - VII.3: a tool signed in through the built-in terminal answers a request; canceling ends its process.
-  - VII.4: the page reader summarizes a page on both engines; an excluded site sends nothing and shows Allow on This Site.
-  - VII.5: a selection's question from the context menu answers in a popover on both engines.
+- In-app checks for the remaining tasks (the lead runs them from the bundle; `docs/plan.md`'s regression checklist covers the built ones):
   - VII.6: with the tab name hook on, a new page's tab gets a short name; the user's own name is never replaced; a finished download is renamed and Restore Original Name works.
   - VII.7: a request produces a plugin whose review lists its permissions; it runs only after Enable; Remove deletes it.
 
@@ -896,11 +892,7 @@ public struct AIPrice: Codable, Sendable {
 
 | Task | Builds | Main files |
 |---|---|---|
-| VII.2 | The `AI` module: client types, `AIService`, routing, page access checks, both HTTP formats, Keychain storage, `ai.json`, rate limits, usage, and Settings ▸ AI; the `AITests` target | `Packages/ARCH/Sources/AI/*`, `Preferences/AISettingsView.swift`, `Package.swift` |
-| VII.3 | The `Terminal` module (a panel on a pseudo-terminal from `posix_openpt`, running the login shell) and the command-line provider | `Packages/ARCH/Sources/Terminal/*`, `AI/CommandLineProvider.swift`, `Arch` |
-| VII.4 | `readableContent` on both engines, `AIPageSource` in `Browsing`, the page reader panel, and the site switch in the site settings popover | `ARCHEngine`, both adapters, `CEFBridge.mm`, `Browsing` |
-| VII.5 | Ask About Page in the palette, Ask About Selection in the page context menu, and the answer popover | `Browsing` |
 | VII.6 | `AIHookCenter`, event posting and actions in `Browsing`, `Tab.suggestedTitle` in `session.json`, and the two hooks | `AI`, `Browsing`, `SessionStore.swift` |
 | VII.7 | The composer, checks, review sheet, and lifetime of AI-written plugins | `Plugins`, `AI` |
 
-VII.2 to VII.6 depend only on the tasks before them; VII.7 also needs V.11.
+VII.6 builds on the built tasks; VII.7 also needs V.11.
