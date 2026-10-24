@@ -6,7 +6,8 @@ import Foundation
 import History
 
 public final class Tab: ObservableObject, Identifiable {
-    public let id = UUID()
+    /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
+    public let id: UUID
     /// Replaced when the tab switches engines.
     @Published public private(set) var webContents: any EngineWebContents
     /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space.
@@ -67,7 +68,8 @@ public final class Tab: ObservableObject, Identifiable {
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private var isDownloadOnly = false
 
-    init(webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool) {
+    init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool) {
+        self.id = id
         self.webContents = webContents
         self.spaceID = spaceID
         self.isPinned = isPinned

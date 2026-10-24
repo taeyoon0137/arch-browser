@@ -3,10 +3,12 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, and version 7 each space's split view. Files without a version are version 1.
-    static let currentVersion = 7
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, and version 8 each tab's ID. Files without a version are version 1.
+    static let currentVersion = 8
 
     struct TabRecord: Codable {
+        /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
+        var id: UUID?
         var spaceID: UUID
         var url: URL?
         var title: String
@@ -25,6 +27,8 @@ struct SessionSnapshot: Codable {
 
     /// A favorite's tab, which opens where it was when the favorite is next opened.
     struct FavoriteTabRecord: Codable {
+        /// The tab's ID, as in a tab record.
+        var id: UUID?
         var favoriteID: UUID
         var url: URL?
         var engine: EngineKind
@@ -49,6 +53,25 @@ struct SessionSnapshot: Codable {
     var favoriteTabs: [FavoriteTabRecord]?
     /// The favorite whose tab was selected. `nil` when a space's tab was selected and in files before version 5.
     var selectedFavoriteID: UUID?
+
+    /// Fills in what older files lack and repairs what a file got wrong. The only migration point: `SessionStore.load()` returns every snapshot through it.
+    func normalized() -> SessionSnapshot {
+        // Every tab record, whether open, a favorite's, or closed, has an ID of its own. Records from files before version 8 have none, and a record that repeats an earlier record's ID gets a new one, so open tabs keep theirs first.
+        var usedIDs: Set<UUID> = []
+        func withUniqueIDs<Record>(_ records: [Record], at id: WritableKeyPath<Record, UUID?>) -> [Record] {
+            records.map { record in
+                if let kept = record[keyPath: id], usedIDs.insert(kept).inserted { return record }
+                var record = record
+                record[keyPath: id] = UUID()
+                return record
+            }
+        }
+        var snapshot = self
+        snapshot.tabs = withUniqueIDs(tabs, at: \.id)
+        snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
+        snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
+        return snapshot
+    }
 }
 
 final class SessionStore {
@@ -59,9 +82,23 @@ final class SessionStore {
         fileURL = directory.appendingPathComponent("session.json")
     }
 
+    /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? JSONDecoder().decode(SessionSnapshot.self, from: data)
+        let directory = fileURL.deletingLastPathComponent()
+        if let version = try? JSONDecoder().decode(SavedVersion.self, from: data).version, version > SessionSnapshot.currentVersion {
+            try? data.write(to: directory.appendingPathComponent("session-v\(version).json"), options: .atomic)
+        }
+        guard let snapshot = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
+            _ = try? FileManager.default.replaceItemAt(directory.appendingPathComponent("session.unreadable.json"), withItemAt: fileURL)
+            return nil
+        }
+        return snapshot.normalized()
+    }
+
+    /// The version a file was written with, read on its own so that a newer file is copied even when the rest does not decode.
+    private struct SavedVersion: Decodable {
+        var version: Int?
     }
 
     /// Combines rapid changes, such as tab updates, into one file write. Runs the `snapshot` closure when writing, not when scheduling.

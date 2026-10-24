@@ -406,7 +406,7 @@ public final class BrowserSession: ObservableObject {
             return
         }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), spaceID: nil, pinned: false)
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), id: saved?.id ?? UUID(), spaceID: nil, pinned: false)
         if let saved {
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -527,17 +527,17 @@ public final class BrowserSession: ObservableObject {
         runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
     }
 
-    /// Adds a tab for `webContents` to a space's list.
-    private func adopt(_ webContents: any EngineWebContents, spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
-        let tab = makeTab(webContents, spaceID: spaceID, pinned: pinned)
+    /// Adds a tab for `webContents` to a space's list. A tab that restores or reopens passes its saved `id`.
+    private func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
+        let tab = makeTab(webContents, id: id, spaceID: spaceID, pinned: pinned)
         tabs.append(tab)
         if select { selectedTabID = tab.id }
         return tab
     }
 
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
-    private func makeTab(_ webContents: any EngineWebContents, spaceID: UUID?, pinned: Bool) -> Tab {
-        let tab = Tab(webContents: webContents, spaceID: spaceID, isPinned: pinned)
+    private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, pinned: Bool) -> Tab {
+        let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned)
         // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
@@ -672,7 +672,7 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         retire(tab.webContents)
         if remember, let spaceID = tab.spaceID {
-            closedTabs.append(SessionSnapshot.TabRecord(spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind))
+            closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
         // A focused pane hands the selection to the pane beside it, so the rest of its split view stays on screen; a favorite's tab leaves the selection to a tab of the current space.
@@ -700,12 +700,12 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab in its original space and folder, or the current space if the original is gone.
+    /// Reopens the newest closed tab under its own ID in its original space and folder, or the current space if the original is gone.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        let tab = openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine)
+        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil), id: record.id ?? UUID(), spaceID: spaceID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
         tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
     }
@@ -1805,7 +1805,7 @@ public final class BrowserSession: ObservableObject {
                 closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }
-            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine, state: record.state)
+            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state), id: record.id ?? UUID(), spaceID: record.spaceID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
             tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
@@ -1849,7 +1849,7 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
+                        tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
                         folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
                         splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
     }
@@ -1858,7 +1858,7 @@ public final class BrowserSession: ObservableObject {
     private var favoriteTabRecords: [SessionSnapshot.FavoriteTabRecord] {
         favorites.compactMap { favorite in
             guard let tab = favoriteTabs[favorite.id] else { return savedFavoriteTabs[favorite.id] }
-            return SessionSnapshot.FavoriteTabRecord(favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
+            return SessionSnapshot.FavoriteTabRecord(id: tab.id, favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
         }
     }
 }
