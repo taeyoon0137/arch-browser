@@ -6,6 +6,8 @@ import SwiftUI
 /// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to the session. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing.
 final class PagePreview: ObservableObject {
     let webContents: any EngineWebContents
+    /// The Persona whose profile the page uses, as the tab or favorite it came from does.
+    let personaID: Persona.ID
     /// The address the preview opened with. Previewing it again keeps this preview.
     let openedURL: URL
     @Published private(set) var title = ""
@@ -19,8 +21,9 @@ final class PagePreview: ObservableObject {
     /// The session sets this callback to close the panel when the page closes itself.
     var didClose: (() -> Void)?
 
-    init(webContents: any EngineWebContents, openedURL: URL) {
+    init(webContents: any EngineWebContents, personaID: Persona.ID, openedURL: URL) {
         self.webContents = webContents
+        self.personaID = personaID
         self.openedURL = openedURL
         url = webContents.url ?? openedURL
         isLoading = webContents.isLoading

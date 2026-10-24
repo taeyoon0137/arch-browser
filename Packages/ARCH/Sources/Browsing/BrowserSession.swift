@@ -1,4 +1,4 @@
-// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, and the closed-tab list. Archives inactive tabs on a timer.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
@@ -7,15 +7,17 @@ import PDFKit
 import Plugins
 import UniformTypeIdentifiers
 
-/// One engine's running pieces: its application, the profile, and the browser that owns its tabs' web contents.
+/// One engine's running pieces for one Persona: the engine's application, the Persona's profile in it, and the browser that owns the web contents of the Persona's tabs in that engine.
 final class EngineRuntime {
     let kind: EngineKind
+    let personaID: Persona.ID
     let application: any EngineApplication
     let context: any EngineBrowserContext
     let browser: any EngineBrowser
 
-    init(kind: EngineKind, application: any EngineApplication, context: any EngineBrowserContext, browser: any EngineBrowser) {
+    init(kind: EngineKind, personaID: Persona.ID, application: any EngineApplication, context: any EngineBrowserContext, browser: any EngineBrowser) {
         self.kind = kind
+        self.personaID = personaID
         self.application = application
         self.context = context
         self.browser = browser
@@ -25,10 +27,12 @@ final class EngineRuntime {
 public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
     private let userDataDirectory: URL
-    private var runtimes: [EngineKind: EngineRuntime] = [:]
+    /// Each running engine's application, started once.
+    private var applications: [EngineKind: any EngineApplication] = [:]
+    /// Each Persona's runtimes, from the Persona's first tab until quit.
+    private var personaEngines: [Persona.ID: PersonaEngines] = [:]
     /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
     private let primaryEngine: EngineKind
-    private let cookieSync = CookieSync()
     /// The spaces' tabs. Favorites keep their own tabs in `favoriteTabs`.
     @Published public private(set) var tabs: [Tab] = []
     /// Every Persona, the default one among them. Each space, favorite, and tab belongs to one.
@@ -121,8 +125,8 @@ public final class BrowserSession: ObservableObject {
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. They close once the engine creates the download.
     private var downloadOnlyTabIDs: Set<UUID> = []
-    /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
-    private var downloadPages: [(engine: EngineKind, webContents: any EngineWebContents)] = []
+    /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
+    private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
     private let downloadNotifier = DownloadNotifier()
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not on screen.
@@ -142,12 +146,12 @@ public final class BrowserSession: ObservableObject {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
-        var started: StartedEngine?
-        for kind in candidates where started == nil {
-            started = Self.startEngine(kind, registry: registry, userDataDirectory: userDataDirectory)
+        var primary: (any EngineApplication)?
+        for kind in candidates where primary == nil {
+            primary = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
         }
-        guard let started else { throw SessionError.noEngineStarted }
-        primaryEngine = started.kind
+        guard let primary else { throw SessionError.noEngineStarted }
+        primaryEngine = primary.engineKind
         store = SessionStore(directory: userDataDirectory)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
@@ -157,8 +161,9 @@ public final class BrowserSession: ObservableObject {
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
-        cookieSync.runtimes = { [weak self] in self.map { Array($0.runtimes.values) } ?? [] }
-        adoptRuntime(started)
+        start(primary)
+        // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
+        _ = runtime(for: primaryEngine, in: Persona.defaultID)
         restoreTabs(snapshot)
         restoreFavoriteTabs(snapshot)
         observeChanges()
@@ -190,56 +195,78 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    private struct StartedEngine {
-        let kind: EngineKind
-        let application: any EngineApplication
-        let context: any EngineBrowserContext
-    }
-
-    /// Creates an engine's application and its default profile. Returns nil when the engine cannot start.
-    private static func startEngine(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> StartedEngine? {
+    /// Creates an engine's application. Returns nil when the engine cannot start.
+    private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> (any EngineApplication)? {
         guard let engine = registry.engine(for: kind) else { return nil }
         let configuration = EngineApplicationConfiguration(userDataDirectory: userDataDirectory,
                                                            cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
-        guard let application = try? engine.makeApplication(configuration: configuration) else { return nil }
-        var created: (any EngineBrowserContext)?
-        let attributes = EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "default"), userVisibleName: "Default", type: .regular)
-        application.createBrowserContext(attributes) { created = try? $0.get() }
-        guard let context = created else { return nil }
-        return StartedEngine(kind: kind, application: application, context: context)
+        return try? engine.makeApplication(configuration: configuration)
     }
 
-    /// Runs a started engine with the session as its delegate, creates its browser, and lists its downloads.
-    @discardableResult
-    private func adoptRuntime(_ started: StartedEngine) -> EngineRuntime {
-        started.application.delegate = self
-        started.application.run()
-        let browser = started.application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: started.context, delegate: self, window: nil)
-        let runtime = EngineRuntime(kind: started.kind, application: started.application, context: started.context, browser: browser)
-        runtimes[started.kind] = runtime
-        started.context.downloads.delegate = self
-        followDownloadSettings(of: started.context)
-        followSitePermissions(of: started.context)
-        downloads += started.context.downloads.items.map(DownloadEntry.init)
-        browser.cookiesDidChange = { [weak self] in self?.cookieSync.scheduleCopy(from: started.kind) }
-        // An engine that starts after another has none of its cookies yet.
-        if let source = runtimes.values.first(where: { $0.kind != started.kind }) {
-            cookieSync.copy(from: source, to: runtime) {}
+    /// Runs an application with the session as its delegate and keeps it for the engine's runtimes.
+    private func start(_ application: any EngineApplication) {
+        application.delegate = self
+        application.run()
+        applications[application.engineKind] = application
+    }
+
+    /// The engine's application, started on first use. Returns nil when the engine cannot start.
+    private func application(for kind: EngineKind) -> (any EngineApplication)? {
+        if let application = applications[kind] { return application }
+        guard let application = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory) else { return nil }
+        start(application)
+        return application
+    }
+
+    /// The Persona's runtimes, created empty on first use.
+    private func engines(of personaID: Persona.ID) -> PersonaEngines {
+        if let engines = personaEngines[personaID] { return engines }
+        let engines = PersonaEngines(personaID: personaID)
+        personaEngines[personaID] = engines
+        return engines
+    }
+
+    /// The Persona's runtime for `kind`, started on first use. Falls back to the Persona's runtime of the primary engine when `kind` cannot start, so a page never leaves its Persona's profile.
+    private func runtime(for kind: EngineKind, in personaID: Persona.ID) -> EngineRuntime {
+        let engines = engines(of: personaID)
+        if let runtime = engines.runtimes[kind] ?? startRuntime(kind, in: engines) { return runtime }
+        // Every Persona that pages use is listed, the primary engine runs from launch, and both engines create profiles without failing.
+        guard let runtime = engines.runtimes[primaryEngine] ?? startRuntime(primaryEngine, in: engines) else {
+            preconditionFailure("No profile for the Persona \(personaID)")
         }
         return runtime
     }
 
-    /// The runtime for `kind`, started on first use. Falls back to the primary engine's runtime when `kind` cannot start.
-    private func runtime(for kind: EngineKind) -> EngineRuntime {
-        if let runtime = runtimes[kind] { return runtime }
-        if let started = Self.startEngine(kind, registry: registry, userDataDirectory: userDataDirectory) {
-            return adoptRuntime(started)
+    /// Creates the Persona's profile and browser in the engine and connects them to the session: their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
+    private func startRuntime(_ kind: EngineKind, in engines: PersonaEngines) -> EngineRuntime? {
+        guard let application = application(for: kind), let persona = personas.first(where: { $0.id == engines.personaID }) else { return nil }
+        // Both engines create a profile before `createBrowserContext` returns.
+        var created: (any EngineBrowserContext)?
+        application.createBrowserContext(persona.contextAttributes) { created = try? $0.get() }
+        guard let context = created else { return nil }
+        let browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
+        let runtime = EngineRuntime(kind: kind, personaID: persona.id, application: application, context: context, browser: browser)
+        engines.runtimes[kind] = runtime
+        context.downloads.delegate = self
+        followDownloadSettings(of: context)
+        followSitePermissions(of: context)
+        downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
+        browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
+        // An engine that starts after another in the Persona has none of the Persona's cookies yet.
+        if let source = engines.runtimes.values.first(where: { $0.kind != kind }) {
+            engines.cookieSync.copy(from: source, to: runtime) {}
         }
-        return runtimes[primaryEngine]!
+        return runtime
     }
 
+    /// The runtime that created the tab's web contents.
+    private func runtime(of tab: Tab) -> EngineRuntime? {
+        personaEngines[tab.personaID]?.runtimes[tab.engineKind]
+    }
+
+    /// The runtime whose profile keeps the download list.
     private func runtime(owning downloads: any EngineDownloads) -> EngineRuntime? {
-        runtimes.values.first { ($0.context.downloads as AnyObject) === (downloads as AnyObject) }
+        personaEngines.values.flatMap(\.runtimes.values).first { ($0.context.downloads as AnyObject) === (downloads as AnyObject) }
     }
 
     // MARK: Spaces
@@ -418,7 +445,7 @@ public final class BrowserSession: ObservableObject {
             return
         }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
         if let saved {
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -466,34 +493,34 @@ public final class BrowserSession: ObservableObject {
     /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front leave the tab alone.
     private var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
 
-    /// Previews a favorite in the default engine, which opening the favorite would use.
+    /// Previews a favorite in the default engine and the favorite's Persona, which opening the favorite would use.
     func previewFavorite(_ favorite: Favorite) {
-        showPreview(of: favorite.url, engine: defaultEngine)
+        showPreview(of: favorite.url, engine: defaultEngine, in: favorite.resolvedPersonaID)
     }
 
-    /// Shows `url` in the panel, in place of any other preview, in a web contents of `engine` that no tab owns. A preview that opened with the same address stays as it is. The page cannot download, so closing the panel always closes the page at once.
-    private func showPreview(of url: URL, engine: EngineKind) {
+    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview that opened with the same address stays as it is. The page cannot download, so closing the panel always closes the page at once.
+    private func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
         guard preview?.openedURL != url else { return }
         closePreview()
         // The panel covers the page that a search or a region capture belongs to, so both end.
         hideFindBar()
         cancelRegionCapture()
-        let webContents = runtime(for: engine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
-        let preview = PagePreview(webContents: webContents, openedURL: url)
+        let runtime = runtime(for: engine, in: personaID)
+        let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
+        let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
         // A page the preview opens, as for a link to a new window, becomes a selected tab in the current space and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
         preview.openNewTab = { [weak self, weak preview] popup in
             guard let self else { return }
-            self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
+            runtime.browser.takeOwnership(of: popup)
             _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
             DispatchQueue.main.async { [weak self] in
                 if let self, let preview, self.preview === preview { self.closePreview() }
             }
         }
         // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
-        let previewEngine = webContents.engineKind
         preview.requestPermission = { [weak self] request, completion in
             completion(false)
-            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: previewEngine) }
+            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: runtime.context) }
         }
         preview.didClose = { [weak self] in self?.closePreview() }
         self.preview = preview
@@ -515,7 +542,7 @@ public final class BrowserSession: ObservableObject {
         let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
         // The page stops reporting to the panel before it closes.
         preview.webContents.uiDelegate = nil
-        retire(preview.webContents)
+        retire(preview.webContents, of: preview.personaID)
         if hadFocus { focusPage(leaving: view) }
     }
 
@@ -531,18 +558,23 @@ public final class BrowserSession: ObservableObject {
     /// Opens a tab in `engine`, or in the default engine when no engine is given.
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
-        adopt(makeWebContents(url: url, engine: engine, state: state), spaceID: spaceID ?? currentSpaceID, pinned: pinned, select: select)
+        let spaceID = spaceID ?? currentSpaceID
+        return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID(ofSpace: spaceID)), spaceID: spaceID, pinned: pinned, select: select)
     }
 
-    /// A web contents in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given.
-    private func makeWebContents(url: URL?, engine: EngineKind?, state: Data?) -> any EngineWebContents {
-        runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given.
+    private func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
+        runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
+    }
+
+    /// The Persona of a tab that `adopt` adds to the space `id`: the space's, or the current space's when no space has that ID.
+    private func personaID(ofSpace id: UUID) -> Persona.ID {
+        (spaces.first { $0.id == id } ?? currentSpace).resolvedPersonaID
     }
 
     /// Adds a tab for `webContents` to a space's list, in the space's Persona. A tab that restores or reopens passes its saved `id`.
     private func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
-        let space = spaces.first { $0.id == spaceID } ?? currentSpace
-        let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: space.resolvedPersonaID, pinned: pinned)
+        let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID(ofSpace: spaceID), pinned: pinned)
         tabs.append(tab)
         if select { selectedTabID = tab.id }
         return tab
@@ -551,10 +583,10 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
+        // A tab a page opens comes from the page's runtime. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
-            self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
+            self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             guard let tab, tab.id != self.selectedTabID else {
                 _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
                 return
@@ -579,7 +611,7 @@ public final class BrowserSession: ObservableObject {
         // The page takes its host's remembered zoom.
         tab.didFinishLoad = { [weak self, weak tab] in
             guard let self, let tab else { return }
-            self.cookieSync.scheduleCopy(from: tab.engineKind)
+            self.personaEngines[tab.personaID]?.cookieSync.scheduleCopy(from: tab.engineKind)
             self.scheduleSave()
             self.applyZoom(to: tab)
         }
@@ -611,10 +643,10 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
         }
-        // A web link the user clicks with Shift opens in the preview panel, in the page's engine.
+        // A web link the user clicks with Shift opens in the preview panel, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.showPreview(of: url, engine: tab.engineKind)
+            self.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
         }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
@@ -629,13 +661,13 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
-    /// Moves a tab to another engine: a web contents from `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
+    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
-        guard tab.engineKind != kind, allTabs.contains(where: { $0.id == tab.id }) else { return }
-        let target = runtime(for: kind)
-        guard target.kind == kind, let source = runtimes[tab.engineKind] else { return }
+        guard tab.engineKind != kind, allTabs.contains(where: { $0.id == tab.id }), let source = runtime(of: tab) else { return }
+        let target = runtime(for: kind, in: tab.personaID)
+        guard target.kind == kind else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
-        cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
+        engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
             guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             let old = tab.webContents
             let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
@@ -644,7 +676,7 @@ public final class BrowserSession: ObservableObject {
             if tab.id == self.selectedTabID, self.isFindBarVisible { self.hideFindBar() }
             tab.replaceWebContents(with: replacement)
             if tab.id == self.selectedTabID { self.devToolsDock.track(replacement.devTools) }
-            self.retire(old)
+            self.retire(old, of: tab.personaID)
             self.scheduleSave()
         }
     }
@@ -683,7 +715,7 @@ public final class BrowserSession: ObservableObject {
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
-        retire(tab.webContents)
+        retire(tab.webContents, of: tab.personaID)
         if remember, let spaceID = tab.spaceID {
             closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
@@ -718,7 +750,7 @@ public final class BrowserSession: ObservableObject {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil), id: record.id ?? UUID(), spaceID: spaceID, pinned: record.isPinned, select: true)
+        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID(ofSpace: spaceID)), id: record.id ?? UUID(), spaceID: spaceID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
         tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
     }
@@ -989,9 +1021,9 @@ public final class BrowserSession: ObservableObject {
         downloads.filter(\.isFinished).forEach { $0.item.remove() }
     }
 
-    /// The folder set in the primary engine's profile preferences, falling back to the user's Downloads folder, then the temporary folder.
+    /// The downloads folder saved in Settings, falling back to the user's Downloads folder, then the temporary folder.
     private var downloadsDirectory: URL {
-        runtimes[primaryEngine]?.context.preferences.downloadFilePath
+        Self.savedDownloadsFolder
             ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
     }
@@ -1015,16 +1047,19 @@ public final class BrowserSession: ObservableObject {
     public static let downloadsFolderKey = "ARCHDownloadsFolder"
     public static let asksWhereToSaveDownloadsKey = "ARCHAskWhereToSaveDownloads"
 
+    /// The downloads folder saved in Settings, or nil when none is saved or the saved folder no longer exists.
+    private static var savedDownloadsFolder: URL? {
+        var isDirectory: ObjCBool = false
+        return UserDefaults.standard.string(forKey: downloadsFolderKey).flatMap { path in
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
+        }
+    }
+
     /// Copies the saved download settings into a profile's preferences, which choose each download's destination, now and after every change to the defaults. A saved folder that no longer exists leaves the user's Downloads folder in use.
     private func followDownloadSettings(of context: any EngineBrowserContext) {
         let apply = {
-            let defaults = UserDefaults.standard
-            var isDirectory: ObjCBool = false
-            let folder = defaults.string(forKey: Self.downloadsFolderKey).flatMap { path in
-                FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
-            }
-            context.preferences.downloadFilePath = folder
-            context.preferences.promptForDownloadPath = defaults.bool(forKey: Self.asksWhereToSaveDownloadsKey)
+            context.preferences.downloadFilePath = Self.savedDownloadsFolder
+            context.preferences.promptForDownloadPath = UserDefaults.standard.bool(forKey: Self.asksWhereToSaveDownloadsKey)
         }
         apply()
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -1041,11 +1076,12 @@ public final class BrowserSession: ObservableObject {
     /// Answers a site's request from the remembered answers, or asks with a sheet and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks.
     private func decidePermission(_ request: EnginePermissionRequest, for tab: Tab, completion: @escaping (Bool) -> Void) {
         let store = SitePermissionStore.shared
-        let engine = tab.engineKind
+        let context = runtime(of: tab)?.context
         // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
         let answer = { [weak self] (granted: Bool) in
             completion(granted)
-            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: engine) }
+            guard let context else { return }
+            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: context) }
         }
         let isRemembered = !request.types.isEmpty && request.types.allSatisfy(SitePermissionStore.remembers)
         let origin = isRemembered ? SitePermissionStore.origin(of: request.origin) : nil
@@ -1071,9 +1107,8 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Gives the engine's own kept answers for the request's types the remembered answers, or none.
-    private func applyRememberedPermissions(for request: EnginePermissionRequest, to engine: EngineKind) {
-        guard let context = runtimes[engine]?.context else { return }
+    /// Gives a profile's own kept answers for the request's types the remembered answers, or none.
+    private func applyRememberedPermissions(for request: EnginePermissionRequest, to context: any EngineBrowserContext) {
         let origin = SitePermissionStore.origin(of: request.origin)
         for type in request.types {
             let decision = origin.flatMap { SitePermissionStore.shared.decision(for: type, origin: $0) }
@@ -1503,26 +1538,29 @@ public final class BrowserSession: ObservableObject {
         alert.informativeText = "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again."
         alert.addButton(withTitle: "Clear").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
+        let personaID = tab.personaID
         enqueueSheet(alert, for: tab) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.clearSiteData(of: site) }
+            if response == .alertFirstButtonReturn { self?.clearSiteData(of: site, in: personaID) }
         }
     }
 
-    /// Deletes the site's cookies from every engine at once, then each engine's other data for the site's origins, then reloads the site's tabs. An engine that has not started yet starts first, so that the cookies it keeps on disk cannot come back through a later copy.
-    private func clearSiteData(of site: SiteDataScope) {
-        availableEngines.forEach { _ = runtime(for: $0) }
-        cookieSync.removeCookies(where: { site.contains($0) }) { [weak self] in
+    /// Deletes the site's cookies from every engine of the Persona at once, then each engine's other data for the site's origins, then reloads the Persona's tabs of the site. An engine that has not started for the Persona yet starts first, so that the cookies it keeps on disk cannot come back through a later copy.
+    private func clearSiteData(of site: SiteDataScope, in personaID: Persona.ID) {
+        availableEngines.forEach { _ = runtime(for: $0, in: personaID) }
+        let engines = engines(of: personaID)
+        let isSiteTab = { (tab: Tab) in tab.personaID == personaID && tab.url?.host.map(site.contains(host:)) == true }
+        engines.cookieSync.removeCookies(where: { site.contains($0) }) { [weak self] in
             guard let self else { return }
-            let pages = self.allTabs.compactMap(\.url).filter { $0.host.map(site.contains(host:)) == true }
+            let pages = self.allTabs.filter(isSiteTab).compactMap(\.url)
             let origins = Array(Set(site.origins + pages.compactMap(SiteDataScope.origin(of:))))
             let group = DispatchGroup()
-            for runtime in self.runtimes.values {
+            for runtime in engines.runtimes.values {
                 group.enter()
                 runtime.browser.removeSiteData(for: origins) { group.leave() }
             }
             group.notify(queue: .main) { [weak self] in
                 guard let self else { return }
-                for tab in self.allTabs where tab.url?.host.map(site.contains(host:)) == true {
+                for tab in self.allTabs where isSiteTab(tab) {
                     tab.webContents.navigationController.reloadWithoutCache()
                 }
             }
@@ -1816,7 +1854,7 @@ public final class BrowserSession: ObservableObject {
                 closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }
-            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state), id: record.id ?? UUID(), spaceID: record.spaceID, pinned: record.isPinned, select: false)
+            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state, in: personaID(ofSpace: record.spaceID)), id: record.id ?? UUID(), spaceID: record.spaceID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
             tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
@@ -1905,12 +1943,14 @@ extension BrowserSession: EngineBrowserDelegate {
 
 extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
-        self.downloads += items.filter { item in !self.downloads.contains { $0.id == item.id } }.map(DownloadEntry.init)
+        guard let personaID = runtime(owning: downloads)?.personaID else { return }
+        self.downloads += items.filter { item in !self.downloads.contains { $0.id == item.id } }.map { DownloadEntry(item: $0, personaID: personaID) }
     }
 
     /// The library button shows a new download's progress, so the library itself stays as it is.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
-        self.downloads.append(DownloadEntry(item: item))
+        guard let personaID = runtime(owning: downloads)?.personaID else { return }
+        self.downloads.append(DownloadEntry(item: item, personaID: personaID))
         let finishedTabIDs = downloadOnlyTabIDs
         downloadOnlyTabIDs.removeAll()
         // The engine is still choosing the file's destination, so the tabs close once that callback returns.
@@ -1920,15 +1960,16 @@ extension BrowserSession: EngineDownloadsDelegate {
         }
     }
 
-    /// Closes a page that no tab shows any more. A page whose downloads would stop with it stays open on a blank page until they finish.
-    private func retire(_ webContents: any EngineWebContents) {
+    /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish.
+    private func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
+        guard let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
         if webContents.closingStopsDownloads {
             // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers.
             webContents.uiDelegate = nil
             webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
-            downloadPages.append((webContents.engineKind, webContents))
+            downloadPages.append((runtime, webContents))
         } else {
-            runtimes[webContents.engineKind]?.browser.closeWebContents(webContents)
+            runtime.browser.closeWebContents(webContents)
         }
     }
 
@@ -1937,7 +1978,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         let idle = downloadPages.filter { !$0.webContents.closingStopsDownloads }
         guard !idle.isEmpty else { return }
         downloadPages.removeAll { page in idle.contains { $0.webContents === page.webContents } }
-        for page in idle { runtimes[page.engine]?.browser.closeWebContents(page.webContents) }
+        for page in idle { page.runtime.browser.closeWebContents(page.webContents) }
     }
 
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.

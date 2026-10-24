@@ -6,6 +6,11 @@ public struct EngineBrowserContextID: Hashable, Codable, Sendable {
     public init(rawValue: String) { self.rawValue = rawValue }
 }
 
+public extension EngineBrowserContextID {
+    /// The engine's default profile, which keeps the data of builds before Personas: WebKit's default data store and CEF's global request context.
+    static let `default` = EngineBrowserContextID(rawValue: "default")
+}
+
 public enum EngineBrowserContextType: String, Codable, Sendable {
     case regular
     case incognito

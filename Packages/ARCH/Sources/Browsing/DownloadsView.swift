@@ -8,13 +8,16 @@ import UniformTypeIdentifiers
 public final class DownloadEntry: ObservableObject, Identifiable {
     public let id: String
     let item: any EngineDownloadItem
+    /// The Persona whose profile in the engine keeps the download.
+    let personaID: Persona.ID
     @Published public private(set) var state: EngineDownloadState
     @Published public private(set) var completedBytes: Int64
     @Published public private(set) var totalBytes: Int64
     @Published public private(set) var targetPath: URL?
 
-    init(item: any EngineDownloadItem) {
+    init(item: any EngineDownloadItem, personaID: Persona.ID) {
         self.item = item
+        self.personaID = personaID
         id = item.id
         state = item.state
         completedBytes = item.completedBytes
