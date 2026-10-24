@@ -109,6 +109,8 @@ public final class BrowserSession: ObservableObject {
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(engine: EngineKind, webContents: any EngineWebContents)] = []
+    /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
+    private let downloadNotifier = DownloadNotifier()
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert, isPageDialog: Bool)?
@@ -1122,6 +1124,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         let wasFinished = entry.isFinished
         entry.refresh()
         if !wasFinished, entry.state == .completed, !isLibraryVisible { unseenDownloadIDs.insert(entry.id) }
+        if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()
     }
 
