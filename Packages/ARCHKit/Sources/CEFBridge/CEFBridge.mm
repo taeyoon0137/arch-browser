@@ -20,6 +20,7 @@
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_permission_handler.h"
 #include "include/cef_render_process_handler.h"
+#include "include/cef_request_context.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_v8.h"
 #include "include/cef_values.h"
@@ -730,6 +731,44 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
     CefMainArgs mainArgs(argc, argv);
     CefRefPtr<CefApp> app = new HelperApp();
     return CefExecuteProcess(mainArgs, app, nullptr);
+}
+
+@end
+
+#pragma mark - Permission settings
+
+@implementation ARCHCEFPermissionStore
+
++ (void)setSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin {
+    CefRefPtr<CefRequestContext> context = gInitialized ? CefRequestContext::GetGlobalContext() : nullptr;
+    if (!context) {
+        return;
+    }
+    // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
+    struct Mapping {
+        ARCHCEFPermission permission;
+        cef_content_setting_types_t type;
+    };
+    static const Mapping kMappings[] = {
+        {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
+        {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
+        {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
+        {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
+        {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
+        {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
+    };
+    cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
+    if (setting == ARCHCEFPermissionSettingAllow) {
+        value = CEF_CONTENT_SETTING_VALUE_ALLOW;
+    } else if (setting == ARCHCEFPermissionSettingBlock) {
+        value = CEF_CONTENT_SETTING_VALUE_BLOCK;
+    }
+    CefString url(origin.UTF8String);
+    for (const Mapping &mapping : kMappings) {
+        if (permissions & mapping.permission) {
+            context->SetContentSetting(url, url, mapping.type, value);
+        }
+    }
 }
 
 @end

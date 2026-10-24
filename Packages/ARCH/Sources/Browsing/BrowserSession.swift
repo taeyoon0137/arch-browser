@@ -203,6 +203,7 @@ public final class BrowserSession: ObservableObject {
         runtimes[started.kind] = runtime
         started.context.downloads.delegate = self
         followDownloadSettings(of: started.context)
+        followSitePermissions(of: started.context)
         downloads += started.context.downloads.items.map(DownloadEntry.init)
         browser.cookiesDidChange = { [weak self] in self?.cookieSync.scheduleCopy(from: started.kind) }
         // An engine that starts after another has none of its cookies yet.
@@ -435,7 +436,7 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
+            self.decidePermission(request, for: tab, completion: completion)
         }
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
             guard let self, let tab else { return }
@@ -815,10 +816,74 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site permissions
 
+    /// The answers waiting for each permission sheet, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same sheet's answer.
+    private var permissionWaiters: [String: [(Bool) -> Void]] = [:]
+
+    /// Answers a site's request from the remembered answers, or asks with a sheet and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks.
+    private func decidePermission(_ request: EnginePermissionRequest, for tab: Tab, completion: @escaping (Bool) -> Void) {
+        let store = SitePermissionStore.shared
+        let engine = tab.engineKind
+        // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
+        let answer = { [weak self] (granted: Bool) in
+            completion(granted)
+            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: engine) }
+        }
+        let isRemembered = !request.types.isEmpty && request.types.allSatisfy(SitePermissionStore.remembers)
+        let origin = isRemembered ? SitePermissionStore.origin(of: request.origin) : nil
+        if let origin {
+            let decisions = request.types.map { store.decision(for: $0, origin: origin) }
+            if decisions.contains(.deny) { return answer(false) }
+            if decisions.allSatisfy({ $0 == .allow }) { return answer(true) }
+        }
+        let key = "\(tab.id) \(request.origin.absoluteString) \(request.types.map(\.rawValue).sorted())"
+        guard permissionWaiters[key] == nil else {
+            permissionWaiters[key]?.append(answer)
+            return
+        }
+        permissionWaiters[key] = [answer]
+        enqueueSheet(Self.permissionAlert(for: request, remembersAnswer: origin != nil), for: tab) { [weak self] response in
+            let waiters = self?.permissionWaiters.removeValue(forKey: key) ?? [answer]
+            let granted = response == .alertFirstButtonReturn
+            waiters.forEach { $0(granted) }
+            // A sheet that closed without an answer, as when its tab closed, leaves nothing to remember.
+            if let origin, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn {
+                store.set(granted ? .allow : .deny, for: request.types, origin: origin)
+            }
+        }
+    }
+
+    /// Gives the engine's own kept answers for the request's types the remembered answers, or none.
+    private func applyRememberedPermissions(for request: EnginePermissionRequest, to engine: EngineKind) {
+        guard let context = runtimes[engine]?.context else { return }
+        let origin = SitePermissionStore.origin(of: request.origin)
+        for type in request.types {
+            let decision = origin.flatMap { SitePermissionStore.shared.decision(for: type, origin: $0) }
+            context.setRememberedPermission(decision.map { $0 == .allow }, for: type, origin: request.origin)
+        }
+    }
+
+    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings.
+    private func followSitePermissions(of context: any EngineBrowserContext) {
+        let store = SitePermissionStore.shared
+        let apply = { (origin: String, types: [EnginePermissionType]) in
+            guard let url = URL(string: origin) else { return }
+            for type in types {
+                context.setRememberedPermission(store.decision(for: type, origin: origin).map { $0 == .allow }, for: type, origin: url)
+            }
+        }
+        for (origin, answers) in store.decisions { apply(origin, Array(answers.keys)) }
+        store.didChange
+            .sink { apply($0.origin, $0.types) }
+            .store(in: &cancellables)
+    }
+
     /// Asks with a sheet on the page's window, or on the main window while the page is not on screen. The engine calls this from inside its own message loop, so the sheet never blocks and a request without any window is denied. The answer reaches the engine once.
-    private static func permissionAlert(for request: EnginePermissionRequest) -> NSAlert {
+    private static func permissionAlert(for request: EnginePermissionRequest, remembersAnswer: Bool) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
+        if remembersAnswer {
+            alert.informativeText = "Arch remembers your answer for this website. You can change it in Settings > Websites."
+        }
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")
         return alert

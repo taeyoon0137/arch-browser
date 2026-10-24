@@ -27,6 +27,20 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
     ARCHCEFPermissionMidi = 1 << 6,
 };
 
+/// The answer Chromium's profile keeps for a site's permission.
+typedef NS_ENUM(NSInteger, ARCHCEFPermissionSetting) {
+    /// No answer: the site asks again.
+    ARCHCEFPermissionSettingAsk,
+    ARCHCEFPermissionSettingAllow,
+    ARCHCEFPermissionSettingBlock,
+};
+
+/// The answers Chromium's profile keeps from its own permission prompt, which it gives without asking again. Use after `ARCHCEFRuntime` initializes.
+@interface ARCHCEFPermissionStore : NSObject
+/// Sets the answer kept for `origin` and each of `permissions` that the prompt can ask for. Screen capture never reaches the prompt, so nothing is kept for it.
++ (void)setSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin;
+@end
+
 /// A cookie as the bridge passes it between Swift and CEF's cookie manager.
 @interface ARCHCEFCookie : NSObject
 @property (nonatomic, copy) NSString *name;

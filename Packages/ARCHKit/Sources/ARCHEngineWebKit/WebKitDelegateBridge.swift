@@ -170,7 +170,9 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             return status == .denied || status == .restricted
         }
         guard !isRefusedBySystem else { return decisionHandler(.deny) }
-        let request = EnginePermissionRequest(origin: URL(string: "\(origin.protocol)://\(origin.host)") ?? URL(string: "about:blank")!, types: types)
+        // Port 0 stands for the scheme's default port; any other port belongs to the origin, as in Chromium's requests.
+        let port = origin.port == 0 ? "" : ":\(origin.port)"
+        let request = EnginePermissionRequest(origin: URL(string: "\(origin.protocol)://\(origin.host)\(port)") ?? URL(string: "about:blank")!, types: types)
         delegate.webContents(owner, requestPermission: request) { granted in
             guard granted else { return decisionHandler(.deny) }
             Self.requestCaptureAccess(for: mediaTypes) { decisionHandler($0 ? .grant : .deny) }

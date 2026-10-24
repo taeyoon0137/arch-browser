@@ -88,6 +88,25 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
     public var history: any EngineHistory { fatalError("not implemented") }
     public var downloads: any EngineDownloads { chromiumDownloads }
     public var extensions: (any EngineExtensions)? { nil }
+
+    /// Chromium keeps every answer its own prompt gives, such as one for geolocation or notifications, and gives it without asking again, so the kept answers follow the app's.
+    public func setRememberedPermission(_ allowed: Bool?, for type: EnginePermissionType, origin: URL) {
+        let permission: ARCHCEFPermission = switch type {
+        case .camera: .camera
+        case .microphone: .microphone
+        case .screenCapture: .screenCapture
+        case .geolocation: .geolocation
+        case .notifications: .notifications
+        case .clipboard: .clipboard
+        case .midi: .midi
+        }
+        let setting: ARCHCEFPermissionSetting = switch allowed {
+        case true?: .allow
+        case false?: .block
+        case nil: .ask
+        }
+        ARCHCEFPermissionStore.setSetting(setting, forPermissions: permission, origin: origin.absoluteString)
+    }
 }
 
 public final class ChromiumBrowser: EngineBrowser {
