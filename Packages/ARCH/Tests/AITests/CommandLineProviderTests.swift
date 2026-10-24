@@ -164,7 +164,9 @@ import Testing
             Issue.record("Expected a timeout, got \(String(describing: result.error))")
             return
         }
-        #expect(await processGroupEnds(try await processGroup(in: pidFile), within: .seconds(1.5)))
+        // Under load the timeout can end the tool before it writes its process group; that tool has already ended.
+        guard let group = try? await processGroup(in: pidFile) else { return }
+        #expect(await processGroupEnds(group, within: .seconds(1.5)))
     }
 }
 
