@@ -779,8 +779,8 @@ struct SpaceMenuItems: View {
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
 
-    /// The widest the symbols may grow while staying centered: each side keeps room for one 30-point button and its gap, the library button on the leading side and the new space button on the trailing side.
-    private static let symbolsWidth = SidebarView.width - 2 * SidebarView.inset - 2 * (30 + 4)
+    /// The widest the symbols and the new space button may grow together while staying centered: each side keeps room for the 30-point library button and its gap, so the group never reaches it.
+    private static let groupWidth = SidebarView.width - 2 * SidebarView.inset - 2 * (30 + 4)
 
     private var symbols: some View {
         HStack(spacing: 4) {
@@ -809,23 +809,43 @@ struct SidebarBottomBar: View {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
             }
-            // Too many symbols to fit scroll sideways instead of covering the buttons or widening the sidebar.
-            ViewThatFits(in: .horizontal) {
-                symbols
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) { symbols }
-                        .onAppear { proxy.scrollTo(session.currentSpaceID) }
-                        .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id) } }
+            // The symbols and the new space button are centered as one group, as if the library button were not there.
+            HStack(spacing: 2) {
+                // Too many symbols to fit scroll sideways instead of covering the buttons or widening the sidebar.
+                ViewThatFits(in: .horizontal) {
+                    symbols
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) { symbols }
+                            .onAppear { proxy.scrollTo(session.currentSpaceID) }
+                            .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id) } }
+                    }
                 }
+                NewSpaceButton(action: session.addSpace)
             }
-            // The new space button sits just after the last symbol without moving the symbols off center. The overlay follows the symbols' own width, and the frame after it limits what they are offered.
-            .overlay(alignment: .trailing) {
-                SidebarIconButton(symbol: "plus", label: "New Space", action: session.addSpace)
-                    .fixedSize()
-                    .alignmentGuide(.trailing) { $0[.leading] - 4 }
-            }
-            .frame(maxWidth: Self.symbolsWidth)
+            .frame(maxWidth: Self.groupWidth)
+            // An optical correction: the group looks centered 4 points right of the true center.
+            .offset(x: 4)
         }
         .frame(height: 28)
+    }
+}
+
+/// A small, dim plus, so the new space button reads as part of the row of symbols rather than as a toolbar button.
+private struct NewSpaceButton: View {
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.secondary.opacity(isHovering ? 1 : 0.6))
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("New Space")
+        .accessibilityLabel("New Space")
     }
 }
