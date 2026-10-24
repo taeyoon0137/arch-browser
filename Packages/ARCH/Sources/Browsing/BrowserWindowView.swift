@@ -758,15 +758,19 @@ struct AddressPillView: View {
 
     private var url: URL? { tab?.url }
 
+    /// The site's host, a local file's name, or the whole address of a page without a host, such as `about:blank`.
     private var host: String {
         if let page = session.internalPage { return page.address }
-        guard let host = url?.host else { return "Search or enter address" }
+        guard let url else { return "Search or enter address" }
+        if url.isFileURL { return url.lastPathComponent }
+        guard let host = url.host, !host.isEmpty else { return url.absoluteString }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     private var symbol: String {
         if session.internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
+        if url.isFileURL { return "doc" }
         return url.scheme == "https" ? "lock.fill" : "globe"
     }
 
