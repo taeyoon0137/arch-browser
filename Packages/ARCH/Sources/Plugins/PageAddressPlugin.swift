@@ -24,9 +24,9 @@ public final class PageAddressPlugin: BuiltInPlugin {
         self.context = context
     }
 
-    /// Copies nothing when the invocation has no page.
+    /// Throws `noPage` and copies nothing when the invocation has no page, so the manager beeps and the clipboard keeps its contents.
     public func run(_ command: String, _ invocation: PluginInvocation) async throws {
-        guard let address = invocation.tab?.url?.absoluteString else { return }
+        guard let address = invocation.tab?.url?.absoluteString else { throw PluginError.noPage }
         try context?.copyToClipboard(address)
     }
 }

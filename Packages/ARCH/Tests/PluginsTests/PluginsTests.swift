@@ -111,6 +111,16 @@ import Testing
         #expect(PageAddressPlugin.manifest.permissions == [.tabs, .clipboard])
         #expect(PageAddressPlugin.manifest.contributions.commands.map(\.id) == ["copy"])
     }
+
+    @Test func pageAddressPluginFailsWithoutAPage() async throws {
+        let plugin = PageAddressPlugin()
+        try await plugin.activate(in: ScopedPluginContext(pluginID: PageAddressPlugin.manifest.id, personaID: UUID(), grant: PluginGrant(requestedBy: PageAddressPlugin.manifest)))
+        var blank = tab
+        blank.url = nil
+        for page in [nil, blank] {
+            await #expect(throws: PluginError.noPage) { try await plugin.run("copy", PluginInvocation(tab: page)) }
+        }
+    }
 }
 
 private func installed(_ id: String, name: String, commands: [PluginCommand], isEnabled: Bool = true) -> InstalledPlugin {

@@ -76,4 +76,6 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
 public enum PluginError: Error, Hashable, Sendable {
     /// The plugin's grant lacks the permission a call needs.
     case permissionDenied(PluginPermission)
+    /// The command acts on a page, and the invocation has none.
+    case noPage
 }
