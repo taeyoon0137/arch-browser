@@ -52,6 +52,8 @@ public protocol Engine: AnyObject {
     var kind: EngineKind { get }
     var capabilities: Set<EngineCapability> { get }
     func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication
+    /// Removes what a context with the storage identifier `identifier` stored, while no context of this process uses it, as at launch before `makeApplication`. Reports on the main thread whether the data is gone; false means try again at a later launch.
+    func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void)
 }
 
 /// Holds the registered engines and the default selection. The default is stored in UserDefaults under `ARCHDefaultEngine`.

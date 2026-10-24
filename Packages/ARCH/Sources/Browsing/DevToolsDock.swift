@@ -121,7 +121,7 @@ struct DevToolsDockSpace: ViewModifier {
         content
             .padding(side == .right ? .trailing : side == .left ? .leading : .bottom, side == nil ? 0 : size + gap(for: side!))
             .overlay(alignment: alignment) { if let side { space(for: side) } }
-            .onChange(of: side) { if $0 == nil { dock.setRegion(nil, in: nil) } }
+            .onChange(of: side) { if $1 == nil { dock.setRegion(nil, in: nil) } }
     }
 
     private var size: CGFloat { side == .bottom ? dock.height : dock.width }

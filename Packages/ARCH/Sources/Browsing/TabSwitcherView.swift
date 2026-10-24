@@ -31,7 +31,7 @@ struct TabSwitcherView: View {
             // Rows that scroll past the inset stay inside the panel's corners.
             .clipShape(panel)
             .onAppear { if let id = session.tabSwitcherHighlightID { proxy.scrollTo(id) } }
-            .onChange(of: session.tabSwitcherHighlightID) { id in if let id { proxy.scrollTo(id) } }
+            .onChange(of: session.tabSwitcherHighlightID) { _, id in if let id { proxy.scrollTo(id) } }
         }
         .modifier(PaletteSurface(shape: panel))
         .scaleEffect(isShown ? 1 : 0.97)

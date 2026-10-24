@@ -35,7 +35,7 @@ public protocol EngineBrowserDelegate: AnyObject {
     func browser(_ browser: any EngineBrowser, didChangeFullscreenState isFullscreen: Bool)
 }
 
-/// A container for one window. Creates web contents, which restore a page's state from their configuration. Manages cookies.
+/// The web contents of one browser context in one engine. Creates web contents, which restore a page's state from their configuration. Manages cookies.
 public protocol EngineBrowser: AnyObject {
     var sessionID: String { get }
     var context: any EngineBrowserContext { get }

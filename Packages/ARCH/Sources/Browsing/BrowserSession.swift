@@ -33,6 +33,8 @@ public final class BrowserSession: ObservableObject {
     private var personaEngines: [Persona.ID: PersonaEngines] = [:]
     /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
     private let primaryEngine: EngineKind
+    /// The deleted Personas whose stored data is still on disk.
+    private let personaDataRemoval: PersonaDataRemoval
     /// The spaces' tabs. Favorites keep their own tabs in `favoriteTabs`.
     @Published public private(set) var tabs: [Tab] = []
     /// Every Persona, the default one among them. Each space, favorite, and tab belongs to one.
@@ -141,10 +143,16 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them.
+    /// Loads the saved session, has the engines remove deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them.
     public init(registry: EngineRegistry = .shared, userDataDirectory: URL) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
+        store = SessionStore(directory: userDataDirectory)
+        // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
+        let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
+        // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
+        personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
+                                                configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory))
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
@@ -152,9 +160,6 @@ public final class BrowserSession: ObservableObject {
         }
         guard let primary else { throw SessionError.noEngineStarted }
         primaryEngine = primary.engineKind
-        store = SessionStore(directory: userDataDirectory)
-        // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
-        let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         personas = snapshot.personas ?? []
         spaces = snapshot.spaces
         currentSpaceID = snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id
@@ -167,6 +172,7 @@ public final class BrowserSession: ObservableObject {
         restoreTabs(snapshot)
         restoreFavoriteTabs(snapshot)
         observeChanges()
+        personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
         // Tabs restored at launch can ask before the window exists; their sheets show once it does.
         NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)
@@ -195,12 +201,15 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// Where every engine keeps its data.
+    private static func engineConfiguration(userDataDirectory: URL) -> EngineApplicationConfiguration {
+        EngineApplicationConfiguration(userDataDirectory: userDataDirectory, cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
+    }
+
     /// Creates an engine's application. Returns nil when the engine cannot start.
     private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> (any EngineApplication)? {
         guard let engine = registry.engine(for: kind) else { return nil }
-        let configuration = EngineApplicationConfiguration(userDataDirectory: userDataDirectory,
-                                                           cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
-        return try? engine.makeApplication(configuration: configuration)
+        return try? engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
     }
 
     /// Runs an application with the session as its delegate and keeps it for the engine's runtimes.
@@ -1901,7 +1910,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func snapshot() -> SessionSnapshot {
-        SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
+        SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
                         tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
                         folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
                         splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)

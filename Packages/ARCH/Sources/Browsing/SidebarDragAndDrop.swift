@@ -92,14 +92,14 @@ struct SidebarItemDrag: ViewModifier {
                 Color.clear
                     .preference(key: SidebarItemFramesKey.self, value: [item.id: frame])
                     .onAppear { self.frame = frame }
-                    .onChange(of: frame) { self.frame = $0 }
+                    .onChange(of: frame) { self.frame = $1 }
             })
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged(dragChanged)
                 .onEnded { _ in dragEnded() })
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
-            .onChange(of: isGestureActive) { isActive in
+            .onChange(of: isGestureActive) { _, isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
                     if !isGestureActive, !tabDrag.isSettling { tabDrag.end(ownedBy: owner) }

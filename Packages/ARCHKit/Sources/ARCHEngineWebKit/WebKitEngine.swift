@@ -15,6 +15,13 @@ public final class WebKitEngine: Engine {
         MainActor.assumeIsolated { WebKitInspectorAPI.register() }
         return WebKitApplication(configuration: configuration)
     }
+
+    /// WebKit keeps a store of its own in `~/Library/WebKit/<bundle identifier>/WebsiteDataStore/<UUID>`, and removing one that does not exist also succeeds. The WebKit application need not run.
+    public func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) {
+        // WebKit sets up its run loop when it creates its first object, and the store's class methods crash before that.
+        _ = WKWebViewConfiguration()
+        WKWebsiteDataStore.remove(forIdentifier: identifier) { error in completion(error == nil) }
+    }
 }
 
 public final class WebKitApplication: EngineApplication {
@@ -67,7 +74,7 @@ public final class WebKitApplication: EngineApplication {
     public func setExcludedDomains(_ domains: [String]) { fatalError("skeleton") }
 }
 
-/// One profile. `WKWebsiteDataStore` owns cookies and cache. History needs a separate store, which is not implemented.
+/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: a store that keeps nothing for incognito, otherwise the default store or, with a storage identifier, the store of that identifier. History needs a separate store, which is not implemented.
 public final class WebKitBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
     public weak var delegate: (any EngineBrowserContextDelegate)?
@@ -78,7 +85,11 @@ public final class WebKitBrowserContext: EngineBrowserContext {
 
     init(attributes: EngineBrowserContextAttributes) {
         self.attributes = attributes
-        self.dataStore = attributes.type == .incognito ? .nonPersistent() : .default()
+        self.dataStore = switch (attributes.type, attributes.storageIdentifier) {
+        case (.incognito, _): .nonPersistent()
+        case (.regular, nil): .default()
+        case let (.regular, identifier?): WKWebsiteDataStore(forIdentifier: identifier)
+        }
     }
 
     public var id: EngineBrowserContextID { attributes.id }
@@ -89,7 +100,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public var extensions: (any EngineExtensions)? { nil }
 }
 
-/// Tabs for one window. Cookies use the context's `WKHTTPCookieStore`.
+/// The tabs of one context. Cookies use the context's `WKHTTPCookieStore`.
 public final class WebKitBrowser: EngineBrowser {
     public let sessionID: String
     public let webKitContext: WebKitBrowserContext
@@ -478,7 +489,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
 
     /// Lets the system's browser inspect the page, which keeps working when the Web Inspector inside the app is off.
     private func allowInspection() {
-        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        webView.isInspectable = true
     }
     public var thumbnails: (any EngineThumbnails)? { nil }
 

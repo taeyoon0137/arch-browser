@@ -21,30 +21,85 @@ public final class ChromiumEngine: Engine {
 
     public enum StartError: Error {
         case initializationFailed
+        /// CEF refused the profile of a context with a storage identifier.
+        case profileUnavailable
     }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
-        let cachePath = configuration.cacheDirectory.appendingPathComponent("Chromium").path
-        guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: cachePath) else {
+        // A profile removed at an earlier launch stays on disk when the app quit before its deletion finished.
+        Self.deleteRemovedProfiles(in: configuration.chromiumRootCache)
+        guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: configuration.chromiumRootCache.path) else {
             throw StartError.initializationFailed
         }
         // The engine starts on the main thread, where the flags live.
         MainActor.assumeIsolated { accessibility.start() }
-        return ChromiumApplication()
+        return ChromiumApplication(configuration: configuration)
+    }
+
+    /// CEF may keep a loaded profile's files open, so nothing is removed while it runs. Otherwise the profile's directory gets a new name at once, which no context loads, and is deleted in the background.
+    public func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) {
+        guard !ARCHCEFRuntime.isInitialized() else { return completion(false) }
+        let profile = configuration.chromiumProfile(forStorage: identifier)
+        guard FileManager.default.fileExists(atPath: profile.path) else { return completion(true) }
+        do {
+            try FileManager.default.moveItem(at: profile, to: profile.appendingPathExtension(Self.removedProfileExtension))
+        } catch {
+            return completion(false)
+        }
+        Self.deleteRemovedProfiles(in: configuration.chromiumRootCache)
+        completion(true)
+    }
+
+    /// The profile of a context with a storage identifier is named by this prefix and the identifier. A removed one also has the extension until its deletion finishes.
+    fileprivate static let profileNamePrefix = "Persona-"
+    private static let removedProfileExtension = "removed"
+    /// Deletes removed profiles one at a time, so that two deletions never race over one directory.
+    private static let profileDeletionQueue = DispatchQueue(label: "local.arch.browser.chromium.profile-deletion", qos: .utility)
+
+    /// Deletes, in the background, every profile directory that `removeStoredData` renamed.
+    private static func deleteRemovedProfiles(in rootCache: URL) {
+        profileDeletionQueue.async {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: rootCache.path)) ?? []
+            for name in names where name.hasPrefix(profileNamePrefix) && (name as NSString).pathExtension == removedProfileExtension {
+                try? FileManager.default.removeItem(at: rootCache.appendingPathComponent(name))
+            }
+        }
+    }
+}
+
+private extension EngineApplicationConfiguration {
+    /// CEF's root cache path. The global profile is `Default` under it, and the profile of a context with a storage identifier is `Persona-<UUID>` beside it.
+    var chromiumRootCache: URL { cacheDirectory.appendingPathComponent("Chromium") }
+
+    func chromiumProfile(forStorage identifier: UUID) -> URL {
+        chromiumRootCache.appendingPathComponent(ChromiumEngine.profileNamePrefix + identifier.uuidString)
     }
 }
 
 public final class ChromiumApplication: EngineApplication {
     public let engineKind: EngineKind = .chromium
     public weak var delegate: (any EngineApplicationDelegate)?
+    let configuration: EngineApplicationConfiguration
     var contexts: [EngineBrowserContextID: ChromiumBrowserContext] = [:]
+
+    init(configuration: EngineApplicationConfiguration) {
+        self.configuration = configuration
+    }
 
     public var version: String { "Chromium (CEF)" }
     public func run() { delegate?.applicationDidInitialize(self) }
     public func tryToTerminate(completion: @escaping (Bool) -> Void) { completion(true) }
     public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
+    /// A context without a storage identifier uses CEF's global request context; one with an identifier gets a request context of its own, which browsers can use at once.
     public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
-        let context = ChromiumBrowserContext(attributes: attributes)
+        let requestContext: ARCHCEFRequestContext?
+        if let identifier = attributes.storageIdentifier {
+            requestContext = ARCHCEFRequestContext(cachePath: configuration.chromiumProfile(forStorage: identifier).path)
+        } else {
+            requestContext = .global
+        }
+        guard let requestContext else { return completion(.failure(ChromiumEngine.StartError.profileUnavailable)) }
+        let context = ChromiumBrowserContext(attributes: attributes, requestContext: requestContext)
         context.application = self
         contexts[attributes.id] = context
         completion(.success(context))
@@ -76,17 +131,18 @@ public final class ChromiumApplication: EngineApplication {
     public func setExcludedDomains(_ domains: [String]) { fatalError("not implemented") }
 }
 
-/// One profile, whose request context keeps its cookies, site storage, caches, and permission answers. Every context uses CEF's global request context until Personas get storage of their own.
+/// One profile, whose request context keeps its cookies, site storage, caches, and permission answers for the app's lifetime.
 public final class ChromiumBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
     public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
-    let requestContext = ARCHCEFRequestContext.global
+    let requestContext: ARCHCEFRequestContext
 
-    init(attributes: EngineBrowserContextAttributes) {
+    init(attributes: EngineBrowserContextAttributes, requestContext: ARCHCEFRequestContext) {
         self.attributes = attributes
+        self.requestContext = requestContext
     }
 
     public var id: EngineBrowserContextID { attributes.id }

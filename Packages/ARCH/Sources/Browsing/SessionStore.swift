@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, and version 9 the Personas with the Persona of each space, favorite, and tab. Files without a version are version 1.
-    static let currentVersion = 9
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, and version 10 the deleted Personas whose stored data the engines still have to remove. Files without a version are version 1.
+    static let currentVersion = 10
 
     struct TabRecord: Codable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -42,6 +42,8 @@ struct SessionSnapshot: Codable {
 
     /// Every Persona, the default one among them. `nil` in files before version 9.
     var personas: [Persona]?
+    /// Deleted Personas whose cookies and website data the engines remove at the next launch, before any engine starts. `nil` in files before version 10.
+    var removedPersonaIDs: [UUID]?
     var spaces: [Space]
     var currentSpaceID: UUID
     var favorites: [Favorite]
@@ -75,6 +77,9 @@ struct SessionSnapshot: Codable {
         snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.assignPersonas()
+        // Only a Persona that is gone loses its stored data. The default Persona is always listed, so the engines' default storage is never removed.
+        let listedIDs = Set((snapshot.personas ?? []).map(\.id))
+        snapshot.removedPersonaIDs = removedPersonaIDs?.filter { !listedIDs.contains($0) }
         return snapshot
     }
 

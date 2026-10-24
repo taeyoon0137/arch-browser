@@ -33,7 +33,7 @@ struct GeneralSection: View {
                         Text(kind.displayName)
                     }
                 }
-                .onChange(of: defaultEngine) { EngineRegistry.shared.defaultKind = $0 }
+                .onChange(of: defaultEngine) { EngineRegistry.shared.defaultKind = $1 }
                 Picker("Search engine", selection: $searchEngine) {
                     ForEach(SearchEngine.allCases, id: \.self) { engine in
                         Text(engine.title)
@@ -123,7 +123,7 @@ struct AppearanceSection: View {
                     Text(choice.title)
                 }
             }
-            .onChange(of: appearance) { NSApp.appearance = $0.appearance }
+            .onChange(of: appearance) { NSApp.appearance = $1.appearance }
             Picker("Space tint", selection: $tintStrength) {
                 ForEach(TintStrength.allCases, id: \.self) { strength in
                     Text(strength.title)

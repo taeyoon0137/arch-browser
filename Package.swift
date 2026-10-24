@@ -28,7 +28,7 @@ let cefWrapperSources = [
 
 let package = Package(
     name: "ArchBrowser",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "ARCHEngine", targets: ["ARCHEngine"]),
         .library(name: "ARCHPrivateAPI", targets: ["ARCHPrivateAPI"]),

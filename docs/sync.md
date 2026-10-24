@@ -127,7 +127,7 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 
 ## Requirements
 
-- `CKSyncEngine` needs macOS 14. The package targets macOS 13, so the `Sync` module marks its types `@available(macOS 14, *)` and hides the toggle on macOS 13.
+- `CKSyncEngine` needs macOS 14, the package's deployment target.
 - The iCloud capability needs an Apple Developer Program membership (needs verification for personal teams), an explicit App ID for `local.arch.browser` with iCloud (CloudKit) and Push Notifications, an iCloud container, and a provisioning profile for the build Mac.
 - `scripts/bundle_app.sh` embeds the profile as `Contents/embedded.provisionprofile` and signs the app with an entitlements file holding `com.apple.developer.icloud-services` (`CloudKit`), `com.apple.developer.icloud-container-identifiers`, `com.apple.developer.aps-environment`, and the application and team identifiers. Working Rule 8 keeps the team identifier out of the repository. The script therefore reads these values from the profile at bundle time (`security cms -D`). The script signs helper apps first without these entitlements. `codesign --deep` would give them to every helper. IV.14 needs the same profile step for its passkey entitlement.
 - Without the container entitlement, as with ad hoc signing, `CKContainer.default()` raises an exception. Sync therefore reads its own entitlements through `SecTaskCopyValueForEntitlement` first. If the entitlement is missing, the toggle is disabled and says the build is not signed for iCloud.
@@ -160,6 +160,6 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 4. The first sync merges spaces by name and favorites by address (this note), or keeps every item from both Macs.
 5. Switching iCloud accounts merges the local sidebar into the new account (this note), or starts the Mac from the new account's data only.
 6. CloudKit environment: Production with the schema deployed from CloudKit Console, or Development, which an Apple Development signed build uses by default (needs verification for selecting Production with `com.apple.developer.icloud-container-environment`).
-7. macOS 13: hide sync there (this note), or raise the package's deployment target to macOS 14.
+7. macOS 13: not supported, because the package targets macOS 14 (decided with open decision 1 of `docs/windows-personas.md`).
 8. A Persona deleted on another Mac removes this Mac's site data for it (this note), or keeps that data until the user removes it.
 9. Browsing history: never syncs (this note), or a later `Visit` record type.

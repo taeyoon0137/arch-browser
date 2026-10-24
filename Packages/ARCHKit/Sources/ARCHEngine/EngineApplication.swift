@@ -20,10 +20,13 @@ public struct EngineBrowserContextAttributes: Hashable, Codable, Sendable {
     public var id: EngineBrowserContextID
     public var userVisibleName: String
     public var type: EngineBrowserContextType
-    public init(id: EngineBrowserContextID, userVisibleName: String, type: EngineBrowserContextType) {
+    /// Where a regular context keeps its data. nil: the engine's default storage. A UUID: storage of its own, `WKWebsiteDataStore(forIdentifier:)` or a CEF request context whose profile is the `Persona-<UUID>` directory under the root cache path.
+    public var storageIdentifier: UUID?
+    public init(id: EngineBrowserContextID, userVisibleName: String, type: EngineBrowserContextType, storageIdentifier: UUID? = nil) {
         self.id = id
         self.userVisibleName = userVisibleName
         self.type = type
+        self.storageIdentifier = storageIdentifier
     }
 }
 

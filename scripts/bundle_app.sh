@@ -10,7 +10,7 @@ ICON_SOURCE="$ROOT/resources/assets/sym_arch.png"
 SDEF="$ROOT/Packages/ARCHApp/Sources/Arch/Arch.sdef"
 APP="$ROOT/build/Arch.app"
 VERSION="0.1.0"
-MIN_MACOS="13.0"
+MIN_MACOS="14.0"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }

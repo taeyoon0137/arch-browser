@@ -16,8 +16,9 @@ public struct Persona: Identifiable, Codable, Hashable {
     public static let defaultID = UUID(uuidString: "D59DAF4B-E372-4AF9-890E-455B8B3860F3")!
     public var isDefault: Bool { id == Self.defaultID }
 
-    /// The profile the Persona's tabs use in each engine. The default Persona keeps the engines' `default` profile, and any other Persona names its profile by its UUID.
+    /// The profile the Persona's tabs use in each engine. The default Persona keeps the engines' `default` profile and their default storage, and any other Persona names its profile and its storage by its UUID.
     var contextAttributes: EngineBrowserContextAttributes {
-        EngineBrowserContextAttributes(id: isDefault ? .default : EngineBrowserContextID(rawValue: id.uuidString), userVisibleName: name, type: .regular)
+        EngineBrowserContextAttributes(id: isDefault ? .default : EngineBrowserContextID(rawValue: id.uuidString), userVisibleName: name, type: .regular,
+                                       storageIdentifier: isDefault ? nil : id)
     }
 }

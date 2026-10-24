@@ -110,10 +110,10 @@ public struct BrowserWindowView: View {
         .background(GeometryReader { proxy in
             Color.clear
                 .onAppear { windowSize = proxy.size }
-                .onChange(of: proxy.size) { windowSize = $0 }
+                .onChange(of: proxy.size) { windowSize = $1 }
         })
         .onAppear { shownPaletteMode = session.commandPaletteMode }
-        .onChange(of: session.commandPaletteMode) { mode in
+        .onChange(of: session.commandPaletteMode) { _, mode in
             guard mode == nil else {
                 isPaletteLeaving = false
                 paletteMotion = PaletteMotion(origin: session.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowSize.width)
@@ -142,7 +142,7 @@ public struct BrowserWindowView: View {
                                             slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
                                             reference: windowReference))
         // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
-        .onChange(of: isPageFullscreen) { isFullscreen in
+        .onChange(of: isPageFullscreen) { _, isFullscreen in
             guard let window = windowReference.window else { return }
             let isWindowFullScreen = window.styleMask.contains(.fullScreen)
             if isFullscreen, !isWindowFullScreen {
@@ -164,7 +164,7 @@ public struct BrowserWindowView: View {
             if isPageFullscreen { session.exitPageFullscreen() }
         }
         // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
-        .onChange(of: session.isSidebarVisible) { isVisible in
+        .onChange(of: session.isSidebarVisible) { _, isVisible in
             peekCheck?.cancel()
             guard isVisible, isSidebarPeeking else { return isSidebarPeeking = false }
             withAnimation(SidebarView.pageSpring) { isCardDocking = true }
@@ -566,7 +566,7 @@ struct SidebarView: View {
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
-        .onChange(of: session.isLibraryVisible) { _ in isSwipingLibrary = false }
+        .onChange(of: session.isLibraryVisible) { isSwipingLibrary = false }
     }
 }
 
@@ -652,7 +652,7 @@ struct SidebarColumn: View {
         }
         .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
         .environment(\.sidebarWidth, width)
-        .onChange(of: session.isLibraryVisible) { _ in swipeReveal = nil }
+        .onChange(of: session.isLibraryVisible) { swipeReveal = nil }
         // On a strong tint, the sidebar's text and icons may take the other appearance to stay readable.
         .modifier(SidebarAppearance())
     }
@@ -1135,7 +1135,7 @@ struct SpaceTabsView: View {
             .environment(\.isDraggingTab, tabDrag.tabID != nil)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
-            .onChange(of: isDragGestureActive) { isActive in
+            .onChange(of: isDragGestureActive) { _, isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
                     if !isDragGestureActive, !tabDrag.isSettling { tabDrag.end(ownedBy: dragOwner) }
@@ -1147,7 +1147,7 @@ struct SpaceTabsView: View {
             let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
             Color.clear
                 .onAppear { listFrame = frame }
-                .onChange(of: frame) { listFrame = $0 }
+                .onChange(of: frame) { listFrame = $1 }
         })
         // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
         .onDisappear { tabDrag.end(ownedBy: dragOwner) }
@@ -1455,11 +1455,11 @@ struct SidebarNameField: View {
                 isCancelled = true
                 onEnd()
             }
-            .onChange(of: isFocused) { focused in
+            .onChange(of: isFocused) { _, focused in
                 if !focused { commit() }
             }
             // Selecting another tab or space leaves the field focused, so the name is saved here.
-            .onChange(of: session.selectedTabID) { _ in commit() }
+            .onChange(of: session.selectedTabID) { commit() }
             .onAppear {
                 initialName = name
                 draftName = initialName
@@ -1653,7 +1653,7 @@ struct SpaceHeaderView: View {
                     .focused($isNameFocused)
                     .onSubmit { session.renameSpace(space.id, to: draftName) }
                     .onExitCommand { session.renamingSpaceID = nil }
-                    .onChange(of: isNameFocused) { focused in
+                    .onChange(of: isNameFocused) { _, focused in
                         if !focused, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
                     }
                     .onAppear {
@@ -1690,7 +1690,7 @@ struct SpaceHeaderView: View {
         }
         .frame(height: 22)
         // Another space's page takes over the keyboard, so the name in this one is kept.
-        .onChange(of: session.currentSpaceID) { id in
+        .onChange(of: session.currentSpaceID) { _, id in
             if id != space.id, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
         }
     }
@@ -1815,7 +1815,7 @@ struct SidebarBottomBar: View {
                     ScrollView(.horizontal, showsIndicators: false) { strip(shrinksAtEdges: true) }
                         .coordinateSpace(name: Self.stripSpace)
                         .onAppear { proxy.scrollTo(session.currentSpaceID, anchor: .center) }
-                        .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                        .onChange(of: session.currentSpaceID) { _, id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
                 }
             }
             .frame(maxWidth: groupWidth)
@@ -1824,7 +1824,7 @@ struct SidebarBottomBar: View {
                 let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
                 Color.clear
                     .onAppear { tabDrag.spaceStripFrame = frame }
-                    .onChange(of: frame) { tabDrag.spaceStripFrame = $0 }
+                    .onChange(of: frame) { tabDrag.spaceStripFrame = $1 }
             })
             .onPreferenceChange(SidebarItemFramesKey.self) { tabDrag.spaceSymbolFrames = $0 }
             // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.

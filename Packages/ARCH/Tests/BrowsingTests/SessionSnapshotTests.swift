@@ -122,6 +122,22 @@ import Testing
         #expect(reloaded.closedTabs?.map(\.personaID) == loaded.closedTabs?.map(\.personaID))
     }
 
+    @Test func onlyPersonasThatAreGoneStayListedForRemoval() throws {
+        let folder = try SessionFolder()
+        try folder.write(version10File)
+        let loaded = try #require(folder.store.load())
+        // The default Persona and the listed Work Persona keep their data. The unlisted Persona is gone, though a space still names it.
+        #expect(loaded.removedPersonaIDs == [removedPersona, unlistedPersona])
+        folder.store.saveNow(loaded)
+        #expect(try #require(folder.store.load()).removedPersonaIDs == [removedPersona, unlistedPersona])
+    }
+
+    @Test func filesBeforeVersion10ListNoPersonasForRemoval() throws {
+        let folder = try SessionFolder()
+        try folder.write(version9File)
+        #expect(try #require(folder.store.load()).removedPersonaIDs == nil)
+    }
+
     @Test func anEmptySnapshotGetsTheDefaultPersonaAndOneSpace() {
         let snapshot = SessionSnapshot.empty.normalized()
         #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default")])
@@ -142,7 +158,7 @@ import Testing
 
     @Test func currentFilesLeaveNoCopy() throws {
         let folder = try SessionFolder()
-        try folder.write(version9File)
+        try folder.write(version10File)
         _ = try #require(folder.store.load())
         #expect(try folder.fileNames() == ["session.json"])
     }
@@ -212,6 +228,7 @@ private let workFavoriteID = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6
 private let workPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F31")!
 private let homePersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F32")!
 private let unlistedPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F33")!
+private let removedPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F34")!
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]
@@ -335,3 +352,9 @@ private let version9File = """
   ]
 }
 """
+
+/// A version 10 file: the version 9 file with Personas listed for removal, among them the default Persona, a listed Persona, and the unlisted Persona that a space still names.
+private let version10File = version9File.replacingOccurrences(of: #""version": 9,"#, with: """
+"version": 10,
+  "removedPersonaIDs": ["\(removedPersona)", "\(Persona.defaultID)", "\(workPersona)", "\(unlistedPersona)"],
+""")

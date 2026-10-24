@@ -22,6 +22,7 @@
 #include "include/cef_permission_handler.h"
 #include "include/cef_render_process_handler.h"
 #include "include/cef_request_context.h"
+#include "include/cef_request_context_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_v8.h"
 #include "include/cef_values.h"
@@ -179,8 +180,12 @@ private:
 
 bool gInitialized = false;
 bool gAccessibilityEnabled = false;
+// The root cache path the runtime initialized with, standardized. Every request context's profile is a direct child of it.
+NSString *gRootCachePath;
 // Every browser, so that accessibility changes reach the open ones.
 NSHashTable *gBrowsers = [NSHashTable weakObjectsHashTable];
+// Every request context object, so that shutdown releases their references to CEF.
+NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
 
 // CEF returns no value from `ExecuteJavaScript`, so the browser asks the page's renderer process for the theme color.
 const char kThemeColorRequest[] = "ARCHThemeColorRequest";
@@ -596,15 +601,46 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 - (instancetype)initWithoutContext;
 /// Gives the object CEF's context and that context's cookie manager.
 - (void)attachContext:(CefRefPtr<CefRequestContext>)context;
-/// Releases the CEF objects. Calls after that change nothing.
+/// Releases the CEF objects and runs the waiting calls. Calls after that change nothing.
 - (void)detachContext;
+/// Runs the calls that waited for Chromium to initialize the context, in order. Later calls run at once.
+- (void)runWaitingCalls;
 /// The context for browsers of this profile, or null without one.
 - (CefRefPtr<CefRequestContext>)cefContext;
 @end
 
+namespace {
+
+// Tells its context object on the main queue once Chromium has initialized both the context and its cookie store. CEF keeps the handler until every object of the context is gone.
+class ContextReadiness : public CefRequestContextHandler, public CefCompletionCallback {
+  public:
+    explicit ContextReadiness(ARCHCEFRequestContext *owner) : owner_(owner) {}
+
+    void OnRequestContextInitialized(CefRefPtr<CefRequestContext> request_context) override { Arrive(); }
+
+    // The cookie manager calls it once its storage has initialized.
+    void OnComplete() override { Arrive(); }
+
+  private:
+    void Arrive() {
+        if (--remaining_ == 0) {
+            __weak ARCHCEFRequestContext *owner = owner_;
+            dispatch_async(dispatch_get_main_queue(), ^{ [owner runWaitingCalls]; });
+        }
+    }
+
+    __weak ARCHCEFRequestContext *owner_;
+    std::atomic<int> remaining_{2};
+    IMPLEMENT_REFCOUNTING(ContextReadiness);
+};
+
+}  // namespace
+
 @implementation ARCHCEFRequestContext {
     CefRefPtr<CefRequestContext> _context;
     CefRefPtr<CefCookieManager> _cookieManager;
+    /// The calls made before Chromium reported the context and its cookie store initialized, oldest first. Nil once calls run at once.
+    NSMutableArray<dispatch_block_t> *_waitingCalls;
 }
 
 + (ARCHCEFRequestContext *)globalContext {
@@ -615,7 +651,32 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 }
 
 - (instancetype)initWithoutContext {
-    return [super init];
+    self = [super init];
+    if (self) {
+        [gRequestContexts addObject:self];
+    }
+    return self;
+}
+
+- (instancetype)initWithCachePath:(NSString *)cachePath {
+    if (!gInitialized || ![cachePath.stringByStandardizingPath.stringByDeletingLastPathComponent isEqualToString:gRootCachePath]) {
+        return nil;
+    }
+    self = [self initWithoutContext];
+    if (!self) {
+        return nil;
+    }
+    _waitingCalls = [NSMutableArray array];
+    // The other settings stay empty, as the runtime leaves its own.
+    CefRequestContextSettings settings;
+    CefString(&settings.cache_path) = cachePath.UTF8String;
+    CefRefPtr<ContextReadiness> readiness = new ContextReadiness(self);
+    _context = CefRequestContext::CreateContext(settings, readiness);
+    if (!_context) {
+        return nil;
+    }
+    _cookieManager = _context->GetCookieManager(readiness);
+    return self;
 }
 
 - (void)attachContext:(CefRefPtr<CefRequestContext>)context {
@@ -626,6 +687,24 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 - (void)detachContext {
     _cookieManager = nullptr;
     _context = nullptr;
+    [self runWaitingCalls];
+}
+
+- (void)runWaitingCalls {
+    NSArray<dispatch_block_t> *calls = _waitingCalls;
+    _waitingCalls = nil;
+    for (dispatch_block_t call in calls) {
+        call();
+    }
+}
+
+/// Runs `call` at once, or after the calls that wait for Chromium to initialize the context.
+- (void)whenReady:(dispatch_block_t)call {
+    if (_waitingCalls) {
+        [_waitingCalls addObject:[call copy]];
+    } else {
+        call();
+    }
 }
 
 - (CefRefPtr<CefRequestContext>)cefContext {
@@ -633,37 +712,45 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 }
 
 - (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {
-    CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
-    if (_cookieManager) {
-        _cookieManager->VisitAllCookies(collector);
-    }
+    [self whenReady:^{
+        CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
+        if (self->_cookieManager) {
+            self->_cookieManager->VisitAllCookies(collector);
+        }
+    }];
 }
 
 - (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
-    if (_cookieManager) {
-        _cookieManager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
-    }
+    [self whenReady:^{
+        if (self->_cookieManager) {
+            self->_cookieManager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
+        }
+    }];
 }
 
 - (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
-    NSUInteger count = MIN(cookies.count, urls.count);
-    if (!_cookieManager || count == 0) {
-        dispatch_async(dispatch_get_main_queue(), completion);
-        return;
-    }
-    CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
-    for (NSUInteger index = 0; index < count; index++) {
-        // A cookie CEF refuses never calls back, so it counts as finished at once.
-        if (!_cookieManager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
-            callback->Finish();
+    [self whenReady:^{
+        NSUInteger count = MIN(cookies.count, urls.count);
+        if (!self->_cookieManager || count == 0) {
+            dispatch_async(dispatch_get_main_queue(), completion);
+            return;
         }
-    }
+        CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
+        for (NSUInteger index = 0; index < count; index++) {
+            // A cookie CEF refuses never calls back, so it counts as finished at once.
+            if (!self->_cookieManager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
+                callback->Finish();
+            }
+        }
+    }];
 }
 
 - (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
-    if (_cookieManager) {
-        _cookieManager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
-    }
+    [self whenReady:^{
+        if (self->_cookieManager) {
+            self->_cookieManager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
+        }
+    }];
 }
 
 /// Writes the cookie store to disk, then calls `completion` once on the main thread.
@@ -675,59 +762,65 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 }
 
 - (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *))test completion:(void (^)(void))completion {
-    // The flush of the store the deleter visited runs after the deletions, so its end reports them applied.
-    CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, ^{ [self flushCookiesWithCompletion:completion]; });
-    if (_cookieManager) {
-        _cookieManager->VisitAllCookies(deleter);
-    }
+    [self whenReady:^{
+        // The flush of the store the deleter visited runs after the deletions, so its end reports them applied.
+        CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, ^{ [self flushCookiesWithCompletion:completion]; });
+        if (self->_cookieManager) {
+            self->_cookieManager->VisitAllCookies(deleter);
+        }
+    }];
 }
 
 - (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion {
-    if (!_context || origins.count == 0) {
-        dispatch_async(dispatch_get_main_queue(), completion);
-        return;
-    }
-    // The browser needs a parent view, which stays out of every window and holds the browser's view until it closes.
-    NSView *parentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
-    CefRefPtr<StorageClearingClient> client = new StorageClearingClient(origins, parentView, completion);
-    CefWindowInfo windowInfo;
-    windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView), CefRect(0, 0, 1, 1));
-    windowInfo.hidden = true;
-    CefBrowserSettings settings;
-    if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, _context)) {
-        dispatch_async(dispatch_get_main_queue(), completion);
-    }
+    [self whenReady:^{
+        if (!self->_context || origins.count == 0) {
+            dispatch_async(dispatch_get_main_queue(), completion);
+            return;
+        }
+        // The browser needs a parent view, which stays out of every window and holds the browser's view until it closes.
+        NSView *parentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+        CefRefPtr<StorageClearingClient> client = new StorageClearingClient(origins, parentView, completion);
+        CefWindowInfo windowInfo;
+        windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView), CefRect(0, 0, 1, 1));
+        windowInfo.hidden = true;
+        CefBrowserSettings settings;
+        if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, self->_context)) {
+            dispatch_async(dispatch_get_main_queue(), completion);
+        }
+    }];
 }
 
 - (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin {
-    if (!_context) {
-        return;
-    }
-    // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
-    struct Mapping {
-        ARCHCEFPermission permission;
-        cef_content_setting_types_t type;
-    };
-    static const Mapping kMappings[] = {
-        {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
-        {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
-        {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
-        {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
-        {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
-        {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
-    };
-    cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
-    if (setting == ARCHCEFPermissionSettingAllow) {
-        value = CEF_CONTENT_SETTING_VALUE_ALLOW;
-    } else if (setting == ARCHCEFPermissionSettingBlock) {
-        value = CEF_CONTENT_SETTING_VALUE_BLOCK;
-    }
-    CefString url(origin.UTF8String);
-    for (const Mapping &mapping : kMappings) {
-        if (permissions & mapping.permission) {
-            _context->SetContentSetting(url, url, mapping.type, value);
+    [self whenReady:^{
+        if (!self->_context) {
+            return;
         }
-    }
+        // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
+        struct Mapping {
+            ARCHCEFPermission permission;
+            cef_content_setting_types_t type;
+        };
+        static const Mapping kMappings[] = {
+            {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
+            {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
+            {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
+            {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
+            {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
+            {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
+        };
+        cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
+        if (setting == ARCHCEFPermissionSettingAllow) {
+            value = CEF_CONTENT_SETTING_VALUE_ALLOW;
+        } else if (setting == ARCHCEFPermissionSettingBlock) {
+            value = CEF_CONTENT_SETTING_VALUE_BLOCK;
+        }
+        CefString url(origin.UTF8String);
+        for (const Mapping &mapping : kMappings) {
+            if (permissions & mapping.permission) {
+                self->_context->SetContentSetting(url, url, mapping.type, value);
+            }
+        }
+    }];
 }
 
 @end
@@ -772,6 +865,7 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
         return NO;
     }
     gInitialized = true;
+    gRootCachePath = cachePath.stringByStandardizingPath;
     [ARCHCEFRequestContext.globalContext attachContext:CefRequestContext::GetGlobalContext()];
     // CEF shuts down only once AppKit has decided to quit, so a quit that does not happen leaves the engine running.
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification
@@ -792,8 +886,10 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
         return;
     }
     gInitialized = false;
-    // CEF asserts in debug builds on references the app still holds when it shuts down. Storage calls from here on change nothing, as they did before the runtime initialized.
-    [ARCHCEFRequestContext.globalContext detachContext];
+    // CEF asserts in debug builds on references the app still holds when it shuts down. Storage calls from here on change nothing, as they did before the runtime initialized, and calls still waiting for a context complete the same way.
+    for (ARCHCEFRequestContext *context in gRequestContexts.allObjects) {
+        [context detachContext];
+    }
     // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashes once Chrome-style developer tools have opened. The closes run CEF's work for at most two seconds.
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
         [browser close];

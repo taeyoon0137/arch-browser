@@ -36,7 +36,7 @@ Engines and bridge
 - `cef_types.h`: `CefRequestContextSettings.cache_path` "must be an absolute path that is either equal to or a child directory of CefSettings.root_cache_path"; an empty value means incognito. `persist_session_cookies`, `accept_language_list`, and the cookieable schemes are ignored when `cache_path` matches the global one. A `CefSettings.cache_path` that is a child of the root is ignored in favor of the default profile.
 - `cef_request_context.h`: `CreateContext(settings, handler)` creates a context. `GetCookieManager(callback)` runs the callback "after the manager's storage has been initialized". "Browser objects with different request contexts will never be hosted in the same render process." Browsers that `window.open` creates share the source's context, but Arch cancels those in `OnBeforePopup` and creates its own browser. `cef_request_context_handler.h`: `OnRequestContextInitialized` runs on the UI thread. `cef_browser.h`: `CreateBrowser` "will not block", and an empty `request_context` means the global context. `cef_cookie.h`: `GetGlobalManager` equals the global context's default cookie manager.
 - `wrapper_src/shutdown_checker.cc` is compiled (Package.swift:11). In DCHECK builds it asserts "Object reference incorrectly held at CefShutdown". `+[ARCHCEFRuntime shutdown]` closes the browsers, runs CEF's work for up to two seconds, then calls `CefShutdown` (CEFBridge.mm:700–715).
-- `WKWebsiteDataStore.h` in the macOS 27 SDK: `+dataStoreForIdentifier:` (macOS 14; "Throws exception if identifier is 0"), `+removeDataStoreForIdentifier:completionHandler:` (macOS 14; "WKWebView using the data store must be released before removal"), `+fetchAllDataStoreIdentifiers:` (macOS 14), and `identifier` (nil for the default and non-persistent stores). `WKWebExtensionControllerConfiguration.h`: `+configurationWithIdentifier:` and `defaultWebsiteDataStore` (macOS 15.4). The package targets `.macOS(.v13)` (Package.swift:31).
+- `WKWebsiteDataStore.h` in the macOS 27 SDK: `+dataStoreForIdentifier:` (macOS 14; "Throws exception if identifier is 0"), `+removeDataStoreForIdentifier:completionHandler:` (macOS 14; "WKWebView using the data store must be released before removal"), `+fetchAllDataStoreIdentifiers:` (macOS 14), and `identifier` (nil for the default and non-persistent stores). `WKWebExtensionControllerConfiguration.h`: `+configurationWithIdentifier:` and `defaultWebsiteDataStore` (macOS 15.4). The package targets macOS 14 (open decision 1).
 
 Not verified; the implementation order checks each
 - That CEF treats `Cache/Chromium/Persona-<UUID>` as a profile of its own with the same `Accept-Language` as the global profile, and whether CEF delays `CreateBrowser` until a new context initializes.
@@ -88,7 +88,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | R5 | Chromium keeps permission answers per profile, and the app writes only the global one | `setRememberedPermission` writes to the context's own request context, and every runtime follows the remembered answers | 4 |
 | R6 | A new CEF context is used before its storage initializes, so a cookie copy reads nothing and counts as finished | The bridge queues cookie, storage, and content-setting calls until `OnRequestContextInitialized` and `GetCookieManager(callback)` have both fired. `createBrowserContext` still completes synchronously, and browsers are created at once | 4, 5 |
 | R7 | A context reference held at `CefShutdown` asserts in debug builds | The bridge tracks its context objects and releases their references after the browsers close and before `CefShutdown` | 4 |
-| R8 | `WKWebsiteDataStore(forIdentifier:)` needs macOS 14, and the package targets 13 | Open decision 1 recommends macOS 14. Until then, New Persona is hidden on macOS 13, and a non-default Persona's WebKit context there uses a non-persistent store of its own, so it stays separate | 5 |
+| R8 | `WKWebsiteDataStore(forIdentifier:)` needs macOS 14 | The package targets macOS 14 (open decision 1) | 5 |
 | R9 | Moving the default Persona to new storage would sign the user out everywhere | The default Persona passes no storage identifier | 5 |
 | R10 | WebKit cannot remove a store while a web view uses it, CEF keeps a loaded profile's files open, and a snapshot that failed to decode lists no Personas | `removedPersonaIDs` in the snapshot, processed at the next launch before any engine starts. An unreadable `session.json` is moved aside, never overwritten | 1, 5 |
 | R11 | `moveTab(_:to:)`, `moveTab(_:toSpace:)`, `deleteSpace`, `reopenLastClosedTab`, drops on a space symbol, folders, and sync orphan moves put a web contents under another Persona's space | `Tab.personaID` is a constant; one guard for every space change; `deleteSpace` picks a neighbor in the same Persona and refuses a Persona's last space | 2, 13 |
@@ -343,9 +343,9 @@ public protocol Engine: AnyObject {
 
 ### WebKit adapter
 
-- `WebKitBrowserContext.init(attributes:)` picks the store: `.nonPersistent()` for incognito; `.default()` without a storage identifier; `WKWebsiteDataStore(forIdentifier:)` with one on macOS 14 or later; a `.nonPersistent()` store of its own with one on macOS 13. The macOS 13 case does not fail, so a Persona from a file written on macOS 14 still opens there and stays separate, even when WebKit is the only engine that starts. Each context keeps its store object for the app's lifetime.
+- `WebKitBrowserContext.init(attributes:)` picks the store: `.nonPersistent()` for incognito; `.default()` without a storage identifier; `WKWebsiteDataStore(forIdentifier:)` with one. Each context keeps its store object for the app's lifetime.
 - Tabs, popups, the downloads' hidden web view, and the cookie observer already use the context's store and need no change.
-- `WebKitEngine.removeStoredData` calls `+removeDataStoreForIdentifier:completionHandler:` on macOS 14 and reports success when the error is nil. On macOS 13 it reports true, because nothing was stored. It does not start the WebKit application.
+- `WebKitEngine.removeStoredData` calls `+removeDataStoreForIdentifier:completionHandler:` and reports success when the error is nil. It does not start the WebKit application.
 - IV.12: one `WKWebExtensionController` per Persona, from `configurationWithIdentifier:` with the Persona's UUID (the default Persona's too) and `defaultWebsiteDataStore` set to the Persona's store.
 
 ### Chromium adapter
@@ -524,7 +524,6 @@ Preference
   - The Clear Site Data sheet names the Persona: "…removed from both engines in the Persona “Work”…".
 - Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the active window; an empty name changes nothing. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
 - Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the target filter at BrowserWindowView.swift:1160 uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette lists only tabs of the window's Persona.
-- New Persona is hidden on macOS 13 while the deployment target stays there (open decision 1).
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:
   1. Every window on its spaces switches to the first space of the first remaining Persona; window rule 3 picks the tab.
   2. Its small windows close, and their tabs close as in item 3.
@@ -687,7 +686,6 @@ Coordination
       - Window 2 on Work shows Work's favorites while window 1 shows the default Persona's; a favorite added in Work does not appear in the default Persona.
       - Dragging a default-Persona tab onto a Work space symbol neither lights the symbol nor moves the tab. Move Left on Work's first space does not cross into the default group.
       - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directory and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona has no Delete Persona item.
-      - On macOS 13, if the deployment target stays there, New Persona is absent.
       - Separate plugins per Persona are checked when V.11 lands.
 
 ## Documents
@@ -707,7 +705,7 @@ Coordination
 
 Until the user decides otherwise, the implementation takes the recommended option of each decision, or the option this note describes.
 
-1. Deployment target: raise `Package.swift` to macOS 14 (recommended; `WKWebsiteDataStore(forIdentifier:)` and `CKSyncEngine` both need it, which also settles sync's open decision 7), or keep macOS 13 with New Persona hidden there and a non-persistent WebKit store for other Personas.
+1. Deployment target: macOS 14 (decided), which `WKWebsiteDataStore(forIdentifier:)` and `CKSyncEngine` both need. This also settles sync's open decision 7.
 2. History per Persona: V.11 adds a nullable `persona` column to visits, recorded from `Tab.personaID`, and filters plugin access and palette suggestions by it (recommended), or `docs/plugins.md` drops "a plugin sees only its Persona's … history".
 3. Remembered permissions: app-wide and copied into every Persona's contexts (this note), or per Persona.
 4. Small-window tabs at quit: saved as open tabs of their destination space (this note), moved to the closed list, or restored as small windows.

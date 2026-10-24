@@ -90,7 +90,7 @@ private struct PageReaderTabView: View {
                 }
                 .padding(14)
             }
-            .onChange(of: conversation.exchanges.last?.reply) { _ in
+            .onChange(of: conversation.exchanges.last?.reply) {
                 if let last = conversation.exchanges.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }

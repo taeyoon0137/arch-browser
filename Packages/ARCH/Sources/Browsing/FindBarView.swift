@@ -42,6 +42,6 @@ struct FindBarView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFocused = true } }
-        .onChange(of: session.findBarFocusRequests) { _ in isFocused = true }
+        .onChange(of: session.findBarFocusRequests) { isFocused = true }
     }
 }
