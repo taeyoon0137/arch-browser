@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Browsing`, `History`, and `Preferences`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Browsing`, `History`, `Import`, and `Preferences`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -114,7 +114,7 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: Browsing, History, Preferences
+│   ├── ARCH/Sources/               # Feature modules: Browsing, History, Import, Preferences
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   └── ARCHKit/Sources/
 │       ├── ARCHEngine/             # Engine protocols, registry, and selection
