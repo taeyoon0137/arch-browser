@@ -27,17 +27,10 @@ public struct BrowserWindowView: View {
         ZStack {
             HStack(spacing: 0) {
                 if session.isSidebarVisible {
-                    let width = SidebarView.clampedWidth(sidebarWidth)
-                    SidebarView(session: session, windowButtons: windowButtons)
-                        .frame(width: width)
-                        // The handle covers the gap between the sidebar's controls and the page: the sidebar's own margin and the part of the gap outside it.
-                        .overlay(alignment: .trailing) {
-                            SidebarResizeHandle(width: width) { sidebarWidth = Double(SidebarView.clampedWidth($0)) }
-                                .frame(width: Self.sidebarGap)
-                                .offset(x: Self.sidebarGap - SidebarView.inset)
-                        }
-                        .environment(\.sidebarWidth, width)
-                        .transition(.move(edge: .leading))
+                    SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
+                        sidebarWidth = Double(SidebarView.clampedWidth($0))
+                    }
+                    .transition(.move(edge: .leading))
                 }
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
@@ -314,10 +307,14 @@ struct SidebarView: View {
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
+    /// Takes a swipe past the first space, which brings the library in. The floating sidebar has none.
+    var librarySwipe: SidebarSwipeHandlers?
     @Environment(\.sidebarWidth) private var width
     /// How far the space pages follow the fingers during a swipe, in points.
     @State private var swipeTranslation: CGFloat = 0
     @State private var swipePassesHalfway = false
+    /// Set while the current swipe moves the library rather than the space pages.
+    @State private var isSwipingLibrary = false
 
     private var currentIndex: Int {
         session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
@@ -331,6 +328,12 @@ struct SidebarView: View {
 
     private func swipeChanged(_ travel: CGFloat) {
         guard !session.isLibraryVisible else { return }
+        if let librarySwipe, isSwipingLibrary || (currentIndex == 0 && travel > 0) {
+            isSwipingLibrary = true
+            swipeTranslation = 0
+            librarySwipe.changed(travel)
+            return
+        }
         swipeTranslation = pageTranslation(for: travel)
         let passesHalfway = abs(swipeTranslation) > width / 2
         if passesHalfway != swipePassesHalfway {
@@ -341,6 +344,11 @@ struct SidebarView: View {
 
     /// Moves to the neighboring space when the swipe went far or fast enough, otherwise returns to the current one.
     private func swipeEnded(_ travel: CGFloat, velocity: CGFloat) {
+        if isSwipingLibrary, let librarySwipe {
+            isSwipingLibrary = false
+            librarySwipe.ended(travel, velocity)
+            return
+        }
         // The library may have opened during the swipe; the pages go back to rest behind it.
         guard !session.isLibraryVisible else {
             swipeTranslation = 0
@@ -373,35 +381,95 @@ struct SidebarView: View {
                     SidebarTopRow(session: session, windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
-                // The library pushes the favorites and space pages out toward the page. Both reach the sidebar's edges so that they slide in from outside it.
-                ZStack {
-                    if session.isLibraryVisible {
-                        LibraryView(session: session)
+                // The space pages reach the sidebar's edges so that they slide in from outside it.
+                VStack(alignment: .leading, spacing: 8) {
+                    if !session.favorites.isEmpty {
+                        FavoritesGridView(session: session)
                             .padding(.horizontal, Self.inset)
-                            .transition(.move(edge: .leading))
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if !session.favorites.isEmpty {
-                                FavoritesGridView(session: session)
-                                    .padding(.horizontal, Self.inset)
-                            }
-                            SpacePagesView(session: session, translation: swipeTranslation)
-                        }
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .transition(.move(edge: .trailing))
                     }
+                    SpacePagesView(session: session, translation: swipeTranslation)
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 6)
                 .padding(.horizontal, -Self.inset)
                 .clipped()
             }
-            // The swipe area reaches the sidebar's edges and the gap above the bar.
-            .background(SpaceSwipeView(onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
+            // The swipe area reaches the sidebar's edges and the gap above the bar. It rests while the library has pushed the sidebar aside, because its area then reaches over the page.
+            .background(SpaceSwipeView(isEnabled: !session.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
             SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
-        .animation(Self.pageSpring, value: session.isLibraryVisible)
+    }
+}
+
+/// Receives a swipe that the sidebar hands on: the travel while the fingers move, then the travel and the velocity when they lift.
+struct SidebarSwipeHandlers {
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+}
+
+/// The docked sidebar with the library to its left. Opening the library pushes the whole sidebar aside: the column widens by `libraryPeek`, the library takes the sidebar's width, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back.
+struct SidebarColumn: View {
+    /// About a quarter of the narrowest sidebar.
+    static let libraryPeek: CGFloat = 60
+
+    @ObservedObject var session: BrowserSession
+    let windowButtons: WindowButtonMetrics
+    let width: CGFloat
+    let onResize: (CGFloat) -> Void
+    /// How far a swipe has brought the library in, from 0 to the sidebar's width, while the fingers are down.
+    @State private var swipeReveal: CGFloat?
+
+    private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? width : 0) }
+    private var progress: CGFloat { reveal / width }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            LibraryPanel(session: session, windowButtons: windowButtons)
+                .frame(width: width)
+            SidebarView(session: session, windowButtons: windowButtons,
+                        librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(width, max(0, $0)) },
+                                                           ended: { travel, velocity in finishLibrarySwipe(opens: travel > width * 0.3 || velocity > 300) }))
+                .frame(width: width)
+                .opacity(1 - 0.5 * progress)
+                .allowsHitTesting(progress == 0)
+                .overlay {
+                    if session.isLibraryVisible {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { finishLibrarySwipe(opens: false) }
+                            .accessibilityElement()
+                            .accessibilityLabel("Show Sidebar")
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction { finishLibrarySwipe(opens: false) }
+                    }
+                }
+        }
+        .offset(x: reveal - width)
+        .frame(width: width + Self.libraryPeek * progress, alignment: .leading)
+        .clipped()
+        // A swipe over the open library or the pushed sidebar takes the library away again.
+        .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
+                                   onChange: { travel in swipeReveal = min(width, max(0, width + travel)) },
+                                   onEnd: { travel, velocity in finishLibrarySwipe(opens: !(travel < -width * 0.3 || velocity < -300)) }))
+        // The handle covers the gap between the sidebar's controls and the page: the sidebar's own margin and the part of the gap outside it.
+        .overlay(alignment: .trailing) {
+            if progress == 0 {
+                SidebarResizeHandle(width: width, onResize: onResize)
+                    .frame(width: BrowserWindowView.sidebarGap)
+                    .offset(x: BrowserWindowView.sidebarGap - SidebarView.inset)
+            }
+        }
+        .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
+        .environment(\.sidebarWidth, width)
+    }
+
+    private func finishLibrarySwipe(opens: Bool) {
+        withAnimation(SidebarView.pageSpring) {
+            swipeReveal = nil
+            session.isLibraryVisible = opens
+        }
     }
 }
 

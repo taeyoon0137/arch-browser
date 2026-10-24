@@ -3,6 +3,8 @@ import AppKit
 import SwiftUI
 
 struct SpaceSwipeView: NSViewRepresentable {
+    /// While off, scroll events pass by untouched.
+    var isEnabled = true
     /// Receives the horizontal finger travel in points while a swipe is in progress. Positive values mean the fingers moved right.
     let onChange: (_ translation: CGFloat) -> Void
     /// Receives the final travel and the finger velocity in points per second when the fingers lift.
@@ -15,12 +17,14 @@ struct SpaceSwipeView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: SpaceSwipeNSView, context: Context) {
+        view.isEnabled = isEnabled
         view.onChange = onChange
         view.onEnd = onEnd
     }
 }
 
 final class SpaceSwipeNSView: NSView {
+    var isEnabled = true
     var onChange: ((CGFloat) -> Void)?
     var onEnd: ((CGFloat, CGFloat) -> Void)?
     private var monitor: Any?
@@ -50,7 +54,7 @@ final class SpaceSwipeNSView: NSView {
 
     /// Returns the event to pass it on, or nil to consume it as part of a horizontal swipe.
     private func handle(_ event: NSEvent) -> NSEvent? {
-        guard event.hasPreciseScrollingDeltas, event.window === window else { return event }
+        guard isEnabled, event.hasPreciseScrollingDeltas, event.window === window else { return event }
         if event.phase == .began {
             isTracking = bounds.contains(convert(event.locationInWindow, from: nil))
             axis = .undecided
