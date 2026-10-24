@@ -151,13 +151,14 @@ struct PageCrashNoticeView: View {
     }
 }
 
-/// Fills the page frame: the window background under a page, or a blurred view of what lies behind the window when no tab is open.
+/// Fills the page frame: the window background under a page, or, when no tab is open, the window's material and the space's tint a little darker than the sidebar.
 struct PageBackgroundView: View {
     let isEmpty: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if isEmpty {
-            WindowMaterialView(material: .popover, cornerRadius: PageFrameShape.cornerRadius)
+            PageFrameShape().fill(Color.black.opacity(colorScheme == .dark ? 0.12 : 0.05))
         } else {
             PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.12), radius: 2, y: 1)
         }
