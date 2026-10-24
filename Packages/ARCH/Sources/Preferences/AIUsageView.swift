@@ -29,7 +29,7 @@ struct AIUsagePage: View {
             rows(Self.group(totals, by: { ($0.feature, $0.featureName) }))
         }
         Section("By Model") {
-            rows(Self.group(totals, by: { ("\($0.provider)/\($0.model)", "\($0.providerName) \u{2014} \($0.model)") }))
+            rows(Self.group(totals, by: { ("\($0.provider)/\($0.model)", "\($0.providerName) \u{2014} \(aiModelTitle($0.model))") }))
         }
         Section {
             Stepper("Automatic requests per day: \(settings.limits.automaticRequestsPerDay)", value: $settings.limits.automaticRequestsPerDay, in: 10...10_000, step: 10)

@@ -3,7 +3,7 @@ import Foundation
 
 public struct AIModelRef: Hashable, Codable, Sendable {
     public var provider: AIProviderID
-    /// The provider's model name.
+    /// The provider's model name. Empty for a command-line tool's own default model.
     public var model: String
 
     public init(provider: AIProviderID, model: String) {
@@ -39,8 +39,8 @@ struct AIRouteModel: Sendable {
 }
 
 extension AISettingsStore {
-    /// The models that serve `feature`, in order. Throws `notConfigured` when the feature is off or has no usable model. An automatic feature never uses the default route, so nothing runs on its own until the user assigns it a model.
-    func routeModels(for feature: AIFeature) throws -> [AIRouteModel] {
+    /// The models that serve `feature`, in order. Throws `notConfigured` when the feature is off or has no usable model. An automatic feature never uses the default route, so nothing runs on its own until the user assigns it a model. A request that carries page data skips command-line tools that may run their own tools, and throws `blockedByPolicy` when only that rule left no model.
+    func routeModels(for feature: AIFeature, carryingPageData: Bool = false) throws -> [AIRouteModel] {
         let route = route(for: feature.id)
         guard route.isEnabled else { throw AIError.notConfigured(.switchedOff) }
         var refs = route.models
@@ -56,17 +56,25 @@ extension AISettingsStore {
             return AIRouteModel(ref: ref, provider: provider, model: model)
         }
         guard !usable.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
-        return usable
+        guard carryingPageData else { return usable }
+        let allowed = usable.filter(\.provider.acceptsPageData)
+        guard !allowed.isEmpty else { throw AIError.blockedByPolicy(.commandLineToolWithPageData) }
+        return allowed
     }
 }
 
 // MARK: - Model names and costs
 
+/// A model's name in lists. A command-line tool's own default model has no name.
+public func aiModelTitle(_ name: String) -> String {
+    name.isEmpty ? "default model" : name
+}
+
 extension AISettingsStore {
     /// "Provider — model", for pickers and for the line under an answer.
     public func title(of ref: AIModelRef) -> String {
-        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return "\(ref.model) (removed)" }
-        return "\(provider.name) \u{2014} \(ref.model)"
+        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return "\(aiModelTitle(ref.model)) (removed)" }
+        return "\(provider.name) \u{2014} \(aiModelTitle(ref.model))"
     }
 
     /// The estimated cost of `usage` on the model `ref` names, in its price's currency, or nil when the model has no price.

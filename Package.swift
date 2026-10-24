@@ -40,6 +40,7 @@ let package = Package(
         .library(name: "Import", targets: ["Import"]),
         .library(name: "AI", targets: ["AI"]),
         .library(name: "Plugins", targets: ["Plugins"]),
+        .library(name: "Terminal", targets: ["Terminal"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
     ],
@@ -64,13 +65,15 @@ let package = Package(
         .target(name: "Plugins", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Plugins"),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "AI"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
+        .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "Plugins", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         .testTarget(name: "AITests", dependencies: ["AI"], path: "Packages/ARCH/Tests/AITests"),
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests"),
+        .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20
 )

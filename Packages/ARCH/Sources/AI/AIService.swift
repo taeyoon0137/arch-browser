@@ -48,6 +48,7 @@ public final class AIService: ObservableObject, AIClient {
                   makeProvider: { configuration, key in
                       switch configuration.kind {
                       case .http(let http): return HTTPProvider(configuration: configuration, http: http, key: key, session: session)
+                      case .commandLine(let tool): return CommandLineProvider(configuration: configuration, tool: tool)
                       }
                   })
     }
@@ -87,6 +88,20 @@ public final class AIService: ObservableObject, AIClient {
         return try await makeProvider(configuration, resolvedKey).listModels()
     }
 
+    /// Sends a short request to the provider's first model and returns the reply, for the Check button in Settings ▸ AI. The configuration may be unsaved. The request belongs to no feature, so it waits for no rate limiter and counts toward no usage.
+    public func check(_ configuration: AIProviderConfiguration) async throws -> String {
+        guard let model = configuration.models.first else { throw AIError.notConfigured(.noModel) }
+        let request = AIProviderRequest(model: model.name, instructions: nil, messages: [AIMessage(role: .user, parts: [.text("Reply with one short sentence.")])],
+                                        tools: [], output: .text, maxOutputTokens: 256)
+        var reply = ""
+        for try await event in makeProvider(configuration, try await storedKey(for: configuration)).stream(request) {
+            if case .text(let text) = event { reply += text }
+        }
+        // A stream read by a cancelled task ends without an error.
+        if Task.isCancelled { throw AIError.cancelled }
+        return reply
+    }
+
     // MARK: Requests
 
     nonisolated public func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
@@ -112,7 +127,7 @@ public final class AIService: ObservableObject, AIClient {
     /// Runs the request on its route's models in order. It moves to the next model only when the current one fails before any text or tool call reached the caller, so a reply is never repeated or mixed.
     private func serve(_ request: AIRequest, entry: inout AIActivityEntry, continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws -> AIFinishReason {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
-        let models = try settings.routeModels(for: feature)
+        let models = try settings.routeModels(for: feature, carryingPageData: AIPartText.carriesData(request.messages))
         try checkBudgets(for: feature)
         if feature.trigger == .automatic { usage.countAutomaticRequest(for: feature.id) }
         var attempt = AIAttempt(continuation: continuation)

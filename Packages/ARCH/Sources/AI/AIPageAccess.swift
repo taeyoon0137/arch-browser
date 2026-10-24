@@ -238,9 +238,14 @@ enum AIPartText {
 
     /// The request's instructions, with the note about untrusted content first when the messages carry page data or files.
     static func instructions(_ instructions: String?, for messages: [AIMessage]) -> String? {
-        guard messages.contains(where: { $0.parts.contains(where: carriesData) }) else { return instructions }
+        guard carriesData(messages) else { return instructions }
         guard let instructions, !instructions.isEmpty else { return untrustedContentNote }
         return "\(untrustedContentNote)\n\n\(instructions)"
+    }
+
+    /// Whether the messages carry page, selection, file, or download parts, including in tool results.
+    static func carriesData(_ messages: [AIMessage]) -> Bool {
+        messages.contains { $0.parts.contains(where: carriesData) }
     }
 
     private static func carriesData(_ part: AIPart) -> Bool {

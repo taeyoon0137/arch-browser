@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Providers: the list of connected providers and the sheet that adds or edits one, with its format, base URL, key, headers, models, and limits.
+// Settings ▸ AI ▸ Providers: the list of connected providers, the sheet that adds or edits an HTTP provider with its format, base URL, key, headers, models, and limits, and the parts that the command-line tool editor shares.
 import AI
 import LocalAuthentication
 import SwiftUI
@@ -6,7 +6,7 @@ import SwiftUI
 struct AIProvidersPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
-    @State private var editing: AIProviderDraft?
+    @State private var editing: AIProviderSheet?
 
     var body: some View {
         Section {
@@ -20,28 +20,63 @@ struct AIProvidersPage: View {
                         Text(Self.detail(of: provider)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Edit\u{2026}") { editing = AIProviderDraft(provider) }
+                    Button("Edit\u{2026}") { editing = AIProviderSheet(provider) }
                 }
             }
             HStack {
                 Spacer()
-                Button("Add Provider\u{2026}") { editing = AIProviderDraft() }
+                if let openTerminal = PreferencesWindowController.openTerminal {
+                    Button("Open Terminal", action: openTerminal)
+                }
+                Menu("Add Provider") {
+                    Button("HTTP API\u{2026}") { editing = .http(AIProviderDraft()) }
+                    Button("Command-Line Tool\u{2026}") { editing = .commandLine(AICommandLineDraft()) }
+                }
+                .fixedSize()
             }
-            .sheet(item: $editing) { draft in
-                AIProviderEditor(draft: draft, service: service, settings: settings)
+            .sheet(item: $editing) { sheet in
+                switch sheet {
+                case .http(let draft): AIProviderEditor(draft: draft, service: service, settings: settings)
+                case .commandLine(let draft): AICommandLineEditor(draft: draft, service: service, settings: settings)
+                }
             }
         } header: {
             Text("Providers")
         } footer: {
-            aiFootnote("Connect a service you subscribe to with its API key, or a model server on this Mac. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
+            aiFootnote("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
         }
     }
 
     private static func detail(of provider: AIProviderConfiguration) -> String {
-        guard case .http(let http) = provider.kind else { return "" }
-        let key = http.hasKey ? "key saved" : "no key"
         let models = provider.models.count == 1 ? "1 model" : "\(provider.models.count) models"
-        return [http.format.title, http.baseURL.host ?? http.baseURL.absoluteString, key, models].joined(separator: " \u{00B7} ")
+        switch provider.kind {
+        case .http(let http):
+            let key = http.hasKey ? "key saved" : "no key"
+            return [http.format.title, http.baseURL.host ?? http.baseURL.absoluteString, key, models].joined(separator: " \u{00B7} ")
+        case .commandLine(let tool):
+            let data = tool.runsWithoutTools ? "may get page data" : "text only"
+            return ["Command-line tool", tool.executable.lastPathComponent, data, models].joined(separator: " \u{00B7} ")
+        }
+    }
+}
+
+/// The provider being added or edited, in the editor for its kind.
+private enum AIProviderSheet: Identifiable {
+    case http(AIProviderDraft)
+    case commandLine(AICommandLineDraft)
+
+    init(_ provider: AIProviderConfiguration) {
+        switch provider.kind {
+        case .http(let http): self = .http(AIProviderDraft(provider, http: http))
+        case .commandLine(let tool): self = .commandLine(AICommandLineDraft(provider, tool: tool))
+        }
+    }
+
+    var id: AIProviderID {
+        switch self {
+        case .http(let draft): return draft.id
+        case .commandLine(let draft): return draft.id
+        }
     }
 }
 
@@ -54,20 +89,14 @@ extension AIWireFormat {
     }
 }
 
-/// A provider being added or edited. Nothing reaches `ai.json` or the Keychain until the user saves.
+/// An HTTP provider being added or edited. Nothing reaches `ai.json` or the Keychain until the user saves.
 struct AIProviderDraft: Identifiable {
-    struct Header: Identifiable {
-        let id = UUID()
-        var name: String
-        var value: String
-    }
-
     let id: AIProviderID
     let isNew: Bool
     var name: String
     var format: AIWireFormat
     var baseURL: String
-    var headers: [Header]
+    var headers: [AINameValue]
     /// Whether the Keychain holds a key for the provider now.
     let hasKey: Bool
     var newKey = ""
@@ -87,14 +116,13 @@ struct AIProviderDraft: Identifiable {
         limits = .http
     }
 
-    init(_ provider: AIProviderConfiguration) {
-        guard case .http(let http) = provider.kind else { fatalError("Only HTTP providers exist") }
+    init(_ provider: AIProviderConfiguration, http: AIHTTPConfiguration) {
         id = provider.id
         isNew = false
         name = provider.name
         format = http.format
         baseURL = http.baseURL.absoluteString
-        headers = http.headers.sorted { $0.key < $1.key }.map { Header(name: $0.key, value: $0.value) }
+        headers = AINameValue.rows(http.headers)
         hasKey = http.hasKey
         models = provider.models
         limits = provider.limits
@@ -108,8 +136,7 @@ struct AIProviderDraft: Identifiable {
     /// The configuration as it stands, with the key state the Keychain has before saving.
     var configuration: AIProviderConfiguration? {
         guard let url = validBaseURL else { return nil }
-        let headerValues = Dictionary(headers.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }.map { ($0.name.trimmingCharacters(in: .whitespaces), $0.value) }, uniquingKeysWith: { _, last in last })
-        let http = AIHTTPConfiguration(format: format, baseURL: url, headers: headerValues, hasKey: hasKey)
+        let http = AIHTTPConfiguration(format: format, baseURL: url, headers: AINameValue.dictionary(headers), hasKey: hasKey)
         return AIProviderConfiguration(id: id, name: name.trimmingCharacters(in: .whitespaces), kind: .http(http), models: models, limits: limits)
     }
 }
@@ -120,11 +147,9 @@ private struct AIProviderEditor: View {
     let service: AIService
     @ObservedObject var settings: AISettingsStore
     @Environment(\.dismiss) private var dismiss
-    @State private var newModel = ""
     @State private var isReplacingKey = false
     @State private var isRefreshing = false
     @State private var message: String?
-    @State private var confirmsRemoval = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -146,35 +171,19 @@ private struct AIProviderEditor: View {
                 keySection
                 headersSection
                 modelsSection
-                Section("Limits") {
-                    Stepper("Concurrent requests: \(draft.limits.concurrentRequests)", value: $draft.limits.concurrentRequests, in: 1...16)
-                    TextField("Requests per minute", value: $draft.limits.requestsPerMinute, format: .number, prompt: Text("No limit"))
-                }
+                AIProviderLimitsSection(limits: $draft.limits)
                 if let message {
                     Section { Text(message).foregroundStyle(.secondary) }
                 }
             }
             .formStyle(.grouped)
             Divider()
-            HStack {
-                if !draft.isNew {
-                    Button("Remove Provider\u{2026}", role: .destructive) { confirmsRemoval = true }
-                }
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button(draft.isNew ? "Add" : "Save") { Task { await save() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(draft.configuration == nil || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(16)
+            AIProviderEditorButtons(name: draft.name, isNew: draft.isNew,
+                                    canSave: draft.configuration != nil && !draft.name.trimmingCharacters(in: .whitespaces).isEmpty,
+                                    removalNote: "Its key leaves the Keychain, and features that used its models fall back to their other models.",
+                                    remove: remove, save: save)
         }
         .frame(width: 480, height: 580)
-        .confirmationDialog("Remove \(draft.name)?", isPresented: $confirmsRemoval) {
-            Button("Remove", role: .destructive) { Task { await remove() } }
-        } message: {
-            Text("Its key leaves the Keychain, and features that used its models fall back to their other models.")
-        }
     }
 
     // MARK: Key
@@ -208,24 +217,7 @@ private struct AIProviderEditor: View {
 
     @ViewBuilder private var headersSection: some View {
         Section {
-            ForEach(draft.headers) { header in
-                HStack {
-                    TextField("Name", text: headerBinding(header.id, \.name), prompt: Text("Name"))
-                        .labelsHidden()
-                    TextField("Value", text: headerBinding(header.id, \.value), prompt: Text("Value"))
-                        .labelsHidden()
-                    Button {
-                        draft.headers.removeAll { $0.id == header.id }
-                    } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            HStack {
-                Spacer()
-                Button("Add Header") { draft.headers.append(.init(name: "", value: "")) }
-            }
+            AINameValueRows(rows: $draft.headers, addTitle: "Add Header")
         } header: {
             Text("Headers")
         } footer: {
@@ -233,31 +225,11 @@ private struct AIProviderEditor: View {
         }
     }
 
-    /// Looks the header up by ID on every read and write, so removing a row never reads a stale index.
-    private func headerBinding(_ id: UUID, _ field: WritableKeyPath<AIProviderDraft.Header, String>) -> Binding<String> {
-        Binding(
-            get: { draft.headers.first(where: { $0.id == id })?[keyPath: field] ?? "" },
-            set: { value in
-                guard let index = draft.headers.firstIndex(where: { $0.id == id }) else { return }
-                draft.headers[index][keyPath: field] = value
-            })
-    }
-
     // MARK: Models
 
     @ViewBuilder private var modelsSection: some View {
         Section {
-            ForEach(draft.models.map(\.name), id: \.self) { name in
-                AIModelRow(model: modelBinding(name), format: draft.format) {
-                    draft.models.removeAll { $0.name == name }
-                }
-            }
-            HStack {
-                TextField("Model", text: $newModel, prompt: Text("Model name"))
-                    .labelsHidden()
-                    .onSubmit(addModel)
-                Button("Add", action: addModel)
-                    .disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
+            AIModelList(models: $draft.models, defaultCapabilities: draft.format.capabilities) {
                 Button(isRefreshing ? "Refreshing\u{2026}" : "Refresh") { Task { await refreshModels() } }
                     .disabled(isRefreshing || draft.configuration == nil)
                     .help("Add the models the provider lists")
@@ -267,22 +239,6 @@ private struct AIProviderEditor: View {
         } footer: {
             aiFootnote("Refresh asks the provider for its models; it is the only request Settings sends on its own.")
         }
-    }
-
-    private func modelBinding(_ name: String) -> Binding<AIModelConfiguration> {
-        Binding(
-            get: { draft.models.first(where: { $0.name == name }) ?? AIModelConfiguration(name: name) },
-            set: { model in
-                guard let index = draft.models.firstIndex(where: { $0.name == name }) else { return }
-                draft.models[index] = model
-            })
-    }
-
-    private func addModel() {
-        let name = newModel.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        if !draft.models.contains(where: { $0.name == name }) { draft.models.append(AIModelConfiguration(name: name)) }
-        newModel = ""
     }
 
     private func refreshModels() async {
@@ -346,14 +302,156 @@ private struct AIProviderEditor: View {
     }
 }
 
-/// One model with its input limit, optional price, and capability overrides.
+// MARK: - Shared editor parts
+
+/// A provider's models, each with its input limit, price, and capability overrides, and a field that adds one by name. `accessory` follows the Add button.
+struct AIModelList<Accessory: View>: View {
+    @Binding var models: [AIModelConfiguration]
+    /// The capabilities of the provider's kind, which a model has unless it overrides them.
+    let defaultCapabilities: Set<AIModelCapability>
+    @ViewBuilder let accessory: () -> Accessory
+    @State private var newModel = ""
+
+    var body: some View {
+        ForEach(models.map(\.name), id: \.self) { name in
+            AIModelRow(model: binding(name), defaultCapabilities: defaultCapabilities) {
+                models.removeAll { $0.name == name }
+            }
+        }
+        HStack {
+            TextField("Model", text: $newModel, prompt: Text("Model name"))
+                .labelsHidden()
+                .onSubmit(add)
+            Button("Add", action: add)
+                .disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
+            accessory()
+        }
+    }
+
+    private func binding(_ name: String) -> Binding<AIModelConfiguration> {
+        Binding(
+            get: { models.first(where: { $0.name == name }) ?? AIModelConfiguration(name: name) },
+            set: { model in
+                guard let index = models.firstIndex(where: { $0.name == name }) else { return }
+                models[index] = model
+            })
+    }
+
+    private func add() {
+        let name = newModel.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        if !models.contains(where: { $0.name == name }) { models.append(AIModelConfiguration(name: name)) }
+        newModel = ""
+    }
+}
+
+/// A name and a value the user enters, such as a header or an environment variable.
+struct AINameValue: Identifiable {
+    let id = UUID()
+    var name: String
+    var value: String
+
+    /// Rows for stored values, sorted by name.
+    static func rows(_ values: [String: String]) -> [AINameValue] {
+        values.sorted { $0.key < $1.key }.map { AINameValue(name: $0.key, value: $0.value) }
+    }
+
+    /// The rows that have a name; a later row with the same name wins.
+    static func dictionary(_ rows: [AINameValue]) -> [String: String] {
+        Dictionary(rows.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }.map { ($0.name.trimmingCharacters(in: .whitespaces), $0.value) },
+                   uniquingKeysWith: { _, last in last })
+    }
+}
+
+/// Rows of names and values, each with a button that removes it, and a button that adds a row.
+struct AINameValueRows: View {
+    @Binding var rows: [AINameValue]
+    let addTitle: String
+
+    var body: some View {
+        ForEach(rows) { row in
+            HStack {
+                TextField("Name", text: rowBinding($rows, id: row.id, field: \.name), prompt: Text("Name"))
+                    .labelsHidden()
+                TextField("Value", text: rowBinding($rows, id: row.id, field: \.value), prompt: Text("Value"))
+                    .labelsHidden()
+                Button {
+                    rows.removeAll { $0.id == row.id }
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        HStack {
+            Spacer()
+            Button(addTitle) { rows.append(AINameValue(name: "", value: "")) }
+        }
+    }
+}
+
+/// One field of the row with `id`, looked up on every read and write so that removing a row never reads a stale index.
+func rowBinding<Row: Identifiable>(_ rows: Binding<[Row]>, id: Row.ID, field: WritableKeyPath<Row, String>) -> Binding<String> {
+    Binding(
+        get: { rows.wrappedValue.first(where: { $0.id == id })?[keyPath: field] ?? "" },
+        set: { value in
+            guard let index = rows.wrappedValue.firstIndex(where: { $0.id == id }) else { return }
+            rows.wrappedValue[index][keyPath: field] = value
+        })
+}
+
+struct AIProviderLimitsSection: View {
+    @Binding var limits: AIProviderLimits
+
+    var body: some View {
+        Section("Limits") {
+            Stepper("Concurrent requests: \(limits.concurrentRequests)", value: $limits.concurrentRequests, in: 1...16)
+            TextField("Requests per minute", value: $limits.requestsPerMinute, format: .number, prompt: Text("No limit"))
+        }
+    }
+}
+
+/// The buttons under a provider editor: Remove Provider… for a saved provider, which asks first, then Cancel and Add or Save.
+struct AIProviderEditorButtons: View {
+    let name: String
+    let isNew: Bool
+    let canSave: Bool
+    /// What removing the provider changes, under the confirmation's title.
+    let removalNote: String
+    let remove: () async -> Void
+    let save: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmsRemoval = false
+
+    var body: some View {
+        HStack {
+            if !isNew {
+                Button("Remove Provider\u{2026}", role: .destructive) { confirmsRemoval = true }
+            }
+            Spacer()
+            Button("Cancel", role: .cancel) { dismiss() }
+                .keyboardShortcut(.cancelAction)
+            Button(isNew ? "Add" : "Save") { Task { await save() } }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+        }
+        .padding(16)
+        .confirmationDialog("Remove \(name)?", isPresented: $confirmsRemoval) {
+            Button("Remove", role: .destructive) { Task { await remove() } }
+        } message: {
+            Text(removalNote)
+        }
+    }
+}
+
+/// One model with its input limit, optional price, and capability overrides. A command-line tool's model without a name is the tool's own default model.
 private struct AIModelRow: View {
     @Binding var model: AIModelConfiguration
-    let format: AIWireFormat
+    let defaultCapabilities: Set<AIModelCapability>
     let remove: () -> Void
 
     var body: some View {
-        DisclosureGroup(model.name) {
+        DisclosureGroup(model.name.isEmpty ? "Default model" : model.name) {
             TextField("Input limit (characters)", value: $model.inputCharacterLimit, format: .number)
             Toggle("Price per million tokens", isOn: Binding(
                 get: { model.price != nil },
@@ -364,9 +462,9 @@ private struct AIModelRow: View {
                 TextField("Output", value: priceBinding(\.outputPerMillion, fallback: 0), format: .number)
                 TextField("Cached input", value: priceBinding(\.cachedInputPerMillion, fallback: nil), format: .number, prompt: Text("Same as input"))
             }
-            Toggle("Use the format's capabilities", isOn: Binding(
+            Toggle("Use the provider's capabilities", isOn: Binding(
                 get: { model.capabilities == nil },
-                set: { model.capabilities = $0 ? nil : format.capabilities }))
+                set: { model.capabilities = $0 ? nil : defaultCapabilities }))
             if let capabilities = model.capabilities {
                 ForEach(AIModelCapability.allCases, id: \.self) { capability in
                     Toggle(capability.title, isOn: Binding(

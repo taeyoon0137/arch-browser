@@ -38,6 +38,8 @@ public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
     public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
     public static let defaultArchiveAfterHours = 12
+    /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
+    public static var openTerminal: (() -> Void)?
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
     private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())

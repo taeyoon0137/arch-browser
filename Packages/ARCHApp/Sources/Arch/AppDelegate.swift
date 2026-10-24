@@ -10,6 +10,7 @@ import Import
 import Plugins
 import Preferences
 import SwiftUI
+import Terminal
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     /// Scripting reads it through the application.
@@ -36,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The built-in plugins that ship with the app.
         session.loadPlugins(builtIns: [PageAddressPlugin.self])
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
+        PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()

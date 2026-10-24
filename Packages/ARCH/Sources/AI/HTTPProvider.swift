@@ -215,8 +215,8 @@ struct ServerSentLines<Base: AsyncSequence>: AsyncSequence where Base.Element ==
     }
 }
 
-/// Throws once no line has arrived for the current timeout: the first-byte timeout until the first line, then the chunk timeout after each line.
-private final class StallTimer: @unchecked Sendable {
+/// Throws once no output has arrived for the current timeout: the first timeout until the first output, then the timeout each `extend(by:)` sets. HTTP providers extend it for each line, command-line tools for each read.
+final class StallTimer: @unchecked Sendable {
     private let lock = NSLock()
     private var deadline: ContinuousClock.Instant
 
