@@ -77,7 +77,7 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         func url(_ key: String) -> URL? { (body[key] as? String).flatMap(URL.init(engineString:)) }
         let selection = body["selection"] as? String
         webView.pendingElement = EngineContextMenuElement(linkURL: url("link"), imageURL: url("image"), mediaURL: url("media"),
-                                                          selectedText: selection?.isEmpty == false ? selection : nil)
+                                                          selectedText: selection?.isEmpty == false ? selection : nil, isInMainFrame: message.frameInfo.isMainFrame)
     }
 }
 

@@ -1,4 +1,4 @@
-// One conversation with the AI module about a tab's page, as the page reader and the question popover keep it. Each question goes out with the conversation so far, the page's text when it is new to the conversation, and the selected text it is about. The reply streams in, and only a whole reply joins the conversation that later questions carry.
+// One conversation with the AI module about a tab's page, as the page reader and the question popover keep it. Each question goes out with the conversation so far, the page's text when it is new to the conversation, and the selected text it is about. A new page's text takes the place of the text of the page read before it, so a request carries only the page now open. The reply streams in, and only a whole reply joins the conversation that later questions carry.
 import AI
 import Foundation
 
@@ -113,6 +113,8 @@ final class PageConversation: ObservableObject {
         do {
             let pageRead = pageChanges
             let carriesPage = pageInMessages != pageRead
+            // The page read before goes, so the model answers from the page now open, and the service, which cuts page text from the last page part first, never cuts the new page for the old one.
+            let history = carriesPage ? messages.map(Self.withoutPage) : messages
             var parts: [AIPart] = []
             if carriesPage {
                 parts.append(.page(try await pages.content(ofTab: tabID, limit: Self.pageTextLimit)))
@@ -126,7 +128,7 @@ final class PageConversation: ObservableObject {
             update(id) { $0.state = .sent }
             let question = AIMessage(role: .user, parts: parts)
             var reply = ""
-            for try await event in client.stream(AIRequest(feature: feature, instructions: instructions, messages: messages + [question])) {
+            for try await event in client.stream(AIRequest(feature: feature, instructions: instructions, messages: history + [question])) {
                 try Task.checkCancellation()
                 switch event {
                 case .waiting(let reason):
@@ -149,7 +151,7 @@ final class PageConversation: ObservableObject {
             }
             // A cancelled stream ends without an error.
             try Task.checkCancellation()
-            messages += [question, AIMessage(role: .assistant, parts: [.text(reply)])]
+            messages = history + [question, AIMessage(role: .assistant, parts: [.text(reply)])]
             if carriesPage { pageInMessages = pageRead }
         } catch {
             update(id) { $0.state = Self.isCancellation(error) ? .stopped : .failed(error) }
@@ -172,6 +174,13 @@ final class PageConversation: ObservableObject {
     private func update(_ id: Exchange.ID, _ change: (inout Exchange) -> Void) {
         guard let index = exchanges.firstIndex(where: { $0.id == id }) else { return }
         change(&exchanges[index])
+    }
+
+    /// The message without its page text. A question always keeps its own text.
+    private static func withoutPage(_ message: AIMessage) -> AIMessage {
+        var message = message
+        message.parts.removeAll { if case .page = $0 { true } else { false } }
+        return message
     }
 
     private static func isCancellation(_ error: Error) -> Bool {

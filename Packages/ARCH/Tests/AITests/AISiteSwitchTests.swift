@@ -46,6 +46,20 @@ import Testing
         #expect(settings.excludedSites == AISitePattern.defaultExclusions + [AISitePattern("other.test")])
     }
 
+    @Test func excludingAgainPutsBackWhatAllowingRemoved() {
+        let settings = settings()
+        settings.excludedSites += [AISitePattern("example.org")]
+        for page in [URL(string: "http://localhost:3000/")!, URL(string: "https://news.example.org/story")!] {
+            settings.setAllowsAI(true, on: page)
+            #expect(settings.allowsAI(on: page))
+            settings.setAllowsAI(false, on: page)
+            #expect(!settings.allowsAI(on: page))
+        }
+        #expect(settings.excludedSites == AISitePattern.defaultExclusions + [AISitePattern("example.org")])
+        #expect(!settings.allowsAI(on: URL(string: "http://192.168.1.1/")!))
+        #expect(!settings.allowsAI(on: URL(string: "https://mail.example.org/")!))
+    }
+
     @Test func localFilesSwitchTheFileScheme() {
         let settings = settings()
         let file = URL(fileURLWithPath: "/tmp/page.html")

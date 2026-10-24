@@ -7,6 +7,8 @@ public final class AISettingsStore: ObservableObject {
     /// Keyed by the feature ID's raw value. A feature without an entry uses `AIRoute.standard(for:)`.
     @Published public var routes: [String: AIRoute] { didSet { scheduleSave() } }
     @Published public var excludedSites: [AISitePattern] { didSet { scheduleSave() } }
+    /// The exclusions the Allow AI on This Site switch removed, by the site it allowed, so switching that site off again puts them back. Kept for the session only.
+    var exclusionsRemovedBySwitch: [String: [AISitePattern]] = [:]
     @Published public var limits: AILimits { didSet { scheduleSave() } }
     /// Whether `ai.json` failed to decode at launch and was renamed `ai.json.unreadable`, so Settings ▸ AI can say so.
     @Published public private(set) var replacedUnreadableFile = false

@@ -75,12 +75,15 @@ public struct EngineContextMenuElement: Sendable {
     public var mediaURL: URL?
     public var selectedText: String?
     public var isEditable: Bool
-    public init(linkURL: URL? = nil, imageURL: URL? = nil, mediaURL: URL? = nil, selectedText: String? = nil, isEditable: Bool = false) {
+    /// Whether the menu opened in the page's main frame, not in a frame inside the page, which can show another site. False when the engine could not tell.
+    public var isInMainFrame: Bool
+    public init(linkURL: URL? = nil, imageURL: URL? = nil, mediaURL: URL? = nil, selectedText: String? = nil, isEditable: Bool = false, isInMainFrame: Bool = false) {
         self.linkURL = linkURL
         self.imageURL = imageURL
         self.mediaURL = mediaURL
         self.selectedText = selectedText
         self.isEditable = isEditable
+        self.isInMainFrame = isInMainFrame
     }
 }
 

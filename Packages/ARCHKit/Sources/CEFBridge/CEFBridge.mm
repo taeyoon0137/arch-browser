@@ -937,17 +937,19 @@ private:
 #pragma mark - Context menu
 
 @interface ARCHCEFContextMenuParams ()
-- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params location:(NSPoint)location;
+- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params frame:(CefRefPtr<CefFrame>)frame location:(NSPoint)location;
 @end
 
 @implementation ARCHCEFContextMenuParams
 
-- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params location:(NSPoint)location {
+- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params frame:(CefRefPtr<CefFrame>)frame location:(NSPoint)location {
     self = [super init];
     if (!self) {
         return nil;
     }
     _location = location;
+    // CEF passes the frame the menu opened in.
+    _isInMainFrame = frame && frame->IsMain();
     CefString link = params->GetUnfilteredLinkUrl();
     if ((params->GetTypeFlags() & CM_TYPEFLAG_LINK) && !link.empty()) {
         _linkURL = ToNSString(link);
@@ -1795,7 +1797,7 @@ private:
     if (!_parentView.isFlipped) {
         point.y = NSHeight(_parentView.bounds) - point.y;
     }
-    ARCHCEFContextMenuParams *values = [[ARCHCEFContextMenuParams alloc] initWithParams:params location:point];
+    ARCHCEFContextMenuParams *values = [[ARCHCEFContextMenuParams alloc] initWithParams:params frame:frame location:point];
     CefRefPtr<CefRunContextMenuCallback> continuation = callback;
     __weak ARCHCEFBrowser *weakSelf = self;
     __block BOOL finished = NO;

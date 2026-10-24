@@ -48,7 +48,12 @@ struct PageExchangeView: View {
         case .finished(let reason):
             note(PageReply.footer(for: exchange, finishedBecause: reason, settings: settings))
         case .stopped:
-            note("Stopped.")
+            // A reply stopped by closing the reader, as its first summary can be, is asked for again here.
+            VStack(alignment: .leading, spacing: 6) {
+                note("Stopped.")
+                Button("Retry", action: retry)
+                    .controlSize(.small)
+            }
         case .failed(let error):
             failure(error)
         }
@@ -89,6 +94,8 @@ struct PageExchangeView: View {
             return assistant.showAISettings.map { ("Open AI Settings", $0) }
         case .blockedByPolicy(.siteExcluded):
             guard let pageURL else { return nil }
+            // The switch helps only while the page's own site is off; data from another address, such as a page that changed while it was read, is asked for again.
+            guard !settings.allowsAI(on: pageURL) else { return ("Retry", retry) }
             return ("Allow AI on This Site", { [settings, retry] in
                 settings.setAllowsAI(true, on: pageURL)
                 retry()

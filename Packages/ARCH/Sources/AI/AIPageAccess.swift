@@ -109,15 +109,15 @@ extension AISettingsStore {
         AISitePattern.excludedSite(of: url, in: excludedSites) == nil
     }
 
-    /// The Allow AI on This Site switch beside a page. Allowing removes every exclusion that matches the address, such as its parent domain or `local-network`; excluding adds its host, or `file:` for a local file. Addresses that can never be sent stay as they are.
+    /// The Allow AI on This Site switch beside a page. Allowing removes every exclusion that matches the address, such as its parent domain or `local-network`; excluding puts back what allowing the same site removed in this session, so switching on and off again leaves the exclusions as they were, and otherwise adds its host, or `file:` for a local file. Addresses that can never be sent stay as they are.
     public func setAllowsAI(_ isAllowed: Bool, on url: URL) {
         guard let scheme = url.scheme?.lowercased(), AISitePattern.sendableSchemes.contains(scheme), allowsAI(on: url) != isAllowed else { return }
+        let site = url.host.flatMap { $0.isEmpty ? nil : $0.lowercased() } ?? "\(scheme):"
         if isAllowed {
+            exclusionsRemovedBySwitch[site] = excludedSites.filter { $0.matches(url) }
             excludedSites.removeAll { $0.matches(url) }
-        } else if let host = url.host, !host.isEmpty {
-            excludedSites.append(AISitePattern(host.lowercased()))
         } else {
-            excludedSites.append(AISitePattern("\(scheme):"))
+            excludedSites += exclusionsRemovedBySwitch.removeValue(forKey: site) ?? [AISitePattern(site)]
         }
     }
 }

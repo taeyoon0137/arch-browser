@@ -280,11 +280,15 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.executeJavaScript(script)
         completion(.success(nil))
     }
-    /// The helper's renderer runs the script in the page's world and replies with its result, which `executeJavaScript` cannot return and the DevTools protocol would return only by attaching a debugger. The page's scripts can change what the script sees there, which changes only the page's own text.
+    /// The helper's renderer runs the script in the page's world and replies with its result, which `executeJavaScript` cannot return and the DevTools protocol would return only by attaching a debugger. The page's scripts can change what the script sees there, which changes only the page's own text. Chromium's own pages, such as the error page it shows in place of a page that failed to load, are unreadable.
     public func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {
         guard let browser else { return completion(.failure(EngineReadableContentError.unreadable)) }
         browser.evaluateScript("(\(EngineReadableContent.script))(\(limit))") { result in
-            completion(Result { try EngineReadableContent(scriptResult: result) })
+            completion(Result {
+                let content = try EngineReadableContent(scriptResult: result)
+                guard !Self.internalSchemes.contains(content.url.scheme?.lowercased() ?? "") else { throw EngineReadableContentError.unreadable }
+                return content
+            })
         }
     }
     public func insertStylesheet(_ css: String, identifier: String) {
@@ -456,7 +460,8 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         let element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
                                                mediaURL: params.mediaURL.flatMap(URL.init(engineString:)),
-                                               selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable)
+                                               selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable,
+                                               isInMainFrame: params.isInMainFrame)
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu

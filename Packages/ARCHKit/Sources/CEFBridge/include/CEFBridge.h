@@ -129,6 +129,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly, copy, nullable) NSString *mediaURL;
 @property (nonatomic, readonly, copy) NSString *selectionText;
 @property (nonatomic, readonly) BOOL isEditable;
+/// Whether the menu opened in the main frame rather than in a frame inside the page.
+@property (nonatomic, readonly) BOOL isInMainFrame;
 @property (nonatomic, readonly) ARCHCEFEditCommand editCommands;
 /// Empty unless the menu opened on a misspelled word in an editable field.
 @property (nonatomic, readonly, copy) NSString *misspelledWord;
