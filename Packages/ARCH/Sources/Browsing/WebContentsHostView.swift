@@ -67,9 +67,9 @@ struct WebContentsHostView: NSViewRepresentable {
             }
         }
 
-        /// Counts a click only where it reaches the page, not where a view above the page takes it, such as the find bar or a pane's close control.
+        /// Counts a click only where it reaches the page, not where a view above the page takes it, such as the find bar or a pane's close control. The monitor sees a click before the window does, so it also skips one that the window refuses while a sheet or a modal window blocks it.
         private func handleClick(_ event: NSEvent) {
-            guard let window, event.window === window, let content = window.contentView,
+            guard let window, event.window === window, window.attachedSheet == nil, NSApp.modalWindow == nil, let content = window.contentView,
                   let hit = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
                   hit.isDescendant(of: self) else { return }
             onClick?()

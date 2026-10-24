@@ -55,6 +55,7 @@ public final class BrowserSession: ObservableObject {
             deferVisibleSheet()
             showNextSheet()
             devToolsDock.track(selectedTab?.webContents.devTools)
+            focusSelectedPane()
         }
     }
     @Published public var isSidebarVisible = true
@@ -63,7 +64,13 @@ public final class BrowserSession: ObservableObject {
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
-    @Published public private(set) var fullscreenTabID: UUID?
+    @Published public private(set) var fullscreenTabID: UUID? {
+        didSet {
+            // The other panes of a split view leave the screen while the selected page fills the window, and their sheets wait until the panes return.
+            deferVisibleSheet()
+            showNextSheet()
+        }
+    }
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Counts palette openings and mode changes so each gets a fresh view.
@@ -116,7 +123,7 @@ public final class BrowserSession: ObservableObject {
     private var downloadPages: [(engine: EngineKind, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
     private let downloadNotifier = DownloadNotifier()
-    /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
+    /// Sheets that tabs asked for, oldest first. They wait while their tab is not on screen.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert, isPageDialog: Bool)?
     /// Set while the selected page renders as PDF for Print or Export as PDF, so a second request cannot start another.
@@ -857,6 +864,18 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// Moves keyboard focus to the selected tab's page from another pane of the split view on screen, which stays in the window and would keep the keys. Checks after the event that changed the selection, so a pane that a click selected has taken focus itself by then and keeps the element focused in it.
+    private func focusSelectedPane() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let isFocusInOtherPane = self.paneTabs.contains { pane in
+                let view = pane.webContents.view
+                return pane.id != self.selectedTabID && (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
+            }
+            if isFocusInOtherPane { self.focusPage() }
+        }
+    }
+
     // MARK: Plugins
 
     /// The plugins of the default Persona. `nil` until the app loads its built-in plugins at launch.
@@ -1074,16 +1093,23 @@ public final class BrowserSession: ObservableObject {
         let completion: (NSApplication.ModalResponse) -> Void
     }
 
-    /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is selected, so a background page cannot cover the page in front.
+    /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is on screen, as the selected tab or another pane of its split view, so a background page cannot cover the page in front.
     private func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
         pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, isPageDialog: isPageDialog, completion: completion))
         showNextSheet()
     }
 
-    /// Shows the selected tab's oldest waiting sheet when no sheet is on screen. Nothing runs an app-modal alert inside an engine callback.
+    /// The tabs whose sheets can show, the selected tab first: the panes on screen, or the selected tab alone while its page fills the window.
+    private var sheetTabs: [Tab] {
+        guard let selected = selectedTab else { return [] }
+        if fullscreenTabID == selected.id { return [selected] }
+        return [selected] + paneTabs.filter { $0.id != selected.id }
+    }
+
+    /// Shows the oldest waiting sheet of the selected tab, or else of another pane on screen, when no sheet is on screen. Nothing runs an app-modal alert inside an engine callback.
     private func showNextSheet() {
-        guard visibleSheet == nil, let tab = selectedTab, var queue = pendingSheets[tab.id], !queue.isEmpty,
+        guard visibleSheet == nil, let tab = sheetTabs.first(where: { pendingSheets[$0.id]?.isEmpty == false }), var queue = pendingSheets[tab.id],
               let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
         let sheet = queue.removeFirst()
         pendingSheets[tab.id] = queue.isEmpty ? nil : queue
@@ -1103,9 +1129,9 @@ public final class BrowserSession: ObservableObject {
     /// Ends a sheet without answering it, so that it can show again.
     private static let deferredSheetResponse = NSApplication.ModalResponse(rawValue: -1_100)
 
-    /// Puts away the sheet of a tab that is no longer selected, as when a link from another app opens a new tab. It shows again first when its tab is selected.
+    /// Puts away the sheet of a tab that is no longer on screen, as when a link from another app opens a new tab. It shows again first when its tab is back on screen.
     private func deferVisibleSheet() {
-        guard let visibleSheet, visibleSheet.tabID != selectedTabID, let window = visibleSheet.alert.window.sheetParent else { return }
+        guard let visibleSheet, !sheetTabs.contains(where: { $0.id == visibleSheet.tabID }), let window = visibleSheet.alert.window.sheetParent else { return }
         window.endSheet(visibleSheet.alert.window, returnCode: Self.deferredSheetResponse)
     }
 
@@ -1650,7 +1676,13 @@ public final class BrowserSession: ObservableObject {
     /// The most tabs a split view shows side by side.
     static let maximumPanes = 4
     /// Each space's split view: two to four of its tabs that share the page area, left to right. The page area shows a space's split view while one of its tabs is selected, and the selected tab is the focused pane.
-    @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:]
+    @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:] {
+        didSet {
+            // The panes on screen change with the split views, and the sheets that can show change with them.
+            deferVisibleSheet()
+            showNextSheet()
+        }
+    }
 
     /// The split view the page area shows: the selected tab's, if it is in one.
     private var splitOnScreen: [UUID]? {
