@@ -152,7 +152,6 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 
 | ID | Task | Reasoning | Files | Done when |
 |---|---|---|---|---|
-| III.1 | Sidebar hover reveal and width: when hidden, a hot zone at the left edge shows the sidebar as an overlay until the pointer leaves; ⌘S keeps toggling; the width is draggable between 200 and 400 points and saved in `UserDefaults`. | medium | `BrowserWindowView.swift`, `BrowserSession.swift` | Row 1 complete |
 | III.3 | Folders: a folder groups open tabs inside a space, collapses, renames, and persists. Add a `folderID` to the tab record and a `folders` list to the snapshot with a schema version. | high | `Tab.swift`, `Space.swift`, `SessionStore.swift`, `BrowserSession.swift`, `BrowserWindowView.swift` | Row 4 complete; an old `session.json` still loads |
 | III.4 | Drag and drop: reorder tabs, pinned tabs, favorites, and space symbols by drag; drop a URL, text, or file onto the sidebar to open it; drag a tab onto a space symbol to move it. Use SwiftUI `onDrag`/`onDrop` with `NSItemProvider`. | medium | `BrowserWindowView.swift`, `BrowserSession.swift` | Row 18 complete |
 | III.5 | Split view: two to four panes in the page area, each showing one tab; add a pane with ⌘⌥= or by dropping a tab on the page; the pane under the pointer is the selected tab for the address pill and find bar; the layout persists per space. | high | `Browsing` | Row 5 complete |
