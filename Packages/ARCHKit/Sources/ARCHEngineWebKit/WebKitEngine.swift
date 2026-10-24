@@ -245,8 +245,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public let context: WebKitBrowserContext
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
+    public weak var pageScriptDelegate: (any EnginePageScriptDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
     public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView, contents: self)
+    /// The web view's content controller, which holds its page scripts.
+    let userContent: WebKitUserContentController
     let allowsDownloads: Bool
     var bridge: WebKitDelegateBridge?
     var observers: [any EngineWebContentsNavigationObserver] = []
@@ -279,6 +282,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
         if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
+        self.userContent = WebKitUserContentController()
+        webConfiguration.userContentController = userContent
         self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
         self.view = WebKitPageView(webView: webView)
         super.init()
@@ -286,6 +291,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         installContextMenu()
         installAudibleScript()
         allowInspection()
+        userContent.setPageScripts(configuration.pageScripts)
         // Restoring loads the current entry; a state WebKit cannot read leaves the list empty, and the page loads its address instead.
         if let state = configuration.restorableState {
             webView.interactionState = state
@@ -295,10 +301,14 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
 
-    /// For popups (window.open). The configuration WebKit hands over must be used as-is.
+    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller and page scripts.
     init(sessionID: String, parentConfiguration: WKWebViewConfiguration, context: WebKitBrowserContext) {
+        guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
+            preconditionFailure("WebKit popups come from web views of WebKit web contents")
+        }
         self.sessionID = sessionID
         self.context = context
+        self.userContent = userContent
         self.allowsDownloads = true
         self.webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
         self.view = WebKitPageView(webView: webView)

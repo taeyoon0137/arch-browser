@@ -9,6 +9,13 @@ public protocol Plugin: AnyObject {
     func activate(in context: any PluginContext) async throws
     /// Runs one of the commands the manifest lists.
     func run(_ command: String, _ invocation: PluginInvocation) async throws
+    /// A value one of the plugin's page scripts sent. The returned value is the script's reply.
+    func receive(_ message: PluginPageMessage) async throws -> PluginValue?
+}
+
+extension Plugin {
+    /// Without an implementation, the plugin replies with nothing.
+    public func receive(_ message: PluginPageMessage) async throws -> PluginValue? { nil }
 }
 
 /// A plugin compiled into the app. The app passes the list of these types to the plugin manager.
@@ -40,6 +47,16 @@ public struct PluginInvocation: Sendable {
     public init(tab: PluginTab?) {
         self.tab = tab
     }
+}
+
+/// A value a page script sent to its plugin.
+public struct PluginPageMessage: Sendable {
+    /// The tab whose page holds the sending frame.
+    public var tab: PluginTab
+    /// The address of the sending frame's document, which the plugin's granted sites cover.
+    public var frameURL: URL
+    public var isMainFrame: Bool
+    public var body: PluginValue
 }
 
 /// A tab as a plugin sees it.

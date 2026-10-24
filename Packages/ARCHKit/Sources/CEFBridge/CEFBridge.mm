@@ -3,8 +3,10 @@
 
 #include <crt_externs.h>
 #include <dispatch/dispatch.h>
+#include <algorithm>
 #include <map>
 #include <optional>
+#include <vector>
 
 #include <atomic>
 
@@ -201,7 +203,7 @@ const char kThemeColorScript[] = R"JS((() => {
   return context.fillStyle;
 })())JS";
 
-// The browser sends other scripts whose result it needs the same way. A request carries its number and the script; the reply carries the number and the string the script returned, or null.
+// The browser sends other scripts whose result it needs the same way. A request carries its number, the script, and a page script world or null; with a world, the script is a function to call with that world's channel. The reply carries the number, whether the script ran, and the string it returned, or null.
 const char kScriptRequest[] = "ARCHScriptRequest";
 const char kScriptReply[] = "ARCHScriptReply";
 // How long the browser waits for a reply. A frame that navigates or goes away before it answers drops the request.
@@ -302,6 +304,118 @@ private:
     IMPLEMENT_REFCOUNTING(MediaReporter);
 };
 
+// The browser passes a browser's page scripts to its renderers in the browser's extra info under this key, and in this message whenever they change.
+const char kPageScriptsKey[] = "pageScripts";
+const char kPageScriptsUpdate[] = "ARCHPageScriptsUpdate";
+// The keys of one page script in those lists.
+const char kPageScriptWorldKey[] = "world";
+const char kPageScriptSourceKey[] = "source";
+const char kPageScriptAtDocumentEndKey[] = "atDocumentEnd";
+const char kPageScriptMainFrameOnlyKey[] = "mainFrameOnly";
+// A value a page script sends carries its world, the request's number, and the JSON text. The reply carries the world, the number, and the reply's JSON text or null.
+const char kPageScriptSend[] = "ARCHPageScriptSend";
+const char kPageScriptReply[] = "ARCHPageScriptReply";
+// A value for the listeners of a world's channel in the main frame carries the world and the JSON text.
+const char kPageScriptDelivery[] = "ARCHPageScriptDelivery";
+
+// Opens a world's channel in a document. It takes the native function that sends JSON text to the browser and returns the request's number, and returns the renderer's endpoint: the `channel` the world's scripts receive, `deliver` for posted values, `reply` for replies, and `run` for the world's scripts. It runs in the page's main world, so it keeps what it uses from the page's reach: it captures the built-ins it calls before the page's scripts run and keeps its state in objects without prototypes. Keep the channel in step with `WebKitPageScripts.channelSource` in the WebKit adapter.
+const char kPageScriptEndpoint[] = R"JS(((post) => {
+  const stringify = JSON.stringify, parse = JSON.parse, apply = Reflect.apply, freeze = Object.freeze, report = reportError, PromiseType = Promise;
+  const listen = EventTarget.prototype.addEventListener, readyState = Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get;
+  const listeners = Object.create(null), replies = Object.create(null);
+  let listenerCount = 0;
+  const call = (target, args) => { try { apply(target, undefined, args); } catch (error) { report(error); } };
+  const channel = freeze({
+    send: (value) => new PromiseType((resolve) => {
+      const json = stringify(value);
+      if (typeof json !== "string") throw new TypeError("A page script can send only values JSON can hold.");
+      replies[post(json)] = resolve;
+    }),
+    onMessage: (listener) => {
+      if (typeof listener !== "function") throw new TypeError("A page script's message listener must be a function.");
+      listeners[listenerCount++] = listener;
+    },
+  });
+  return freeze({
+    channel,
+    deliver: (json) => { const value = parse(json); for (let i = 0; i < listenerCount; i++) call(listeners[i], [value]); },
+    reply: (request, json) => {
+      const resolve = replies[request];
+      if (!resolve) return;
+      delete replies[request];
+      resolve(typeof json === "string" ? parse(json) : undefined);
+    },
+    run: (script, atDocumentEnd) => {
+      const start = () => call(script, [channel]);
+      if (atDocumentEnd && apply(readyState, document, []) === "loading") apply(listen, document, ["DOMContentLoaded", start, { once: true }]);
+      else start();
+    },
+  });
+}))JS";
+
+// One page script as a renderer keeps it.
+struct PageScript {
+    std::string world;
+    std::string source;
+    bool atDocumentEnd;
+    bool mainFrameOnly;
+};
+
+std::vector<PageScript> ReadPageScripts(CefRefPtr<CefListValue> list) {
+    std::vector<PageScript> scripts;
+    for (size_t index = 0; list && index < list->GetSize(); index++) {
+        CefRefPtr<CefDictionaryValue> entry = list->GetDictionary(index);
+        scripts.push_back({entry->GetString(kPageScriptWorldKey).ToString(), entry->GetString(kPageScriptSourceKey).ToString(),
+                           entry->GetBool(kPageScriptAtDocumentEndKey), entry->GetBool(kPageScriptMainFrameOnlyKey)});
+    }
+    return scripts;
+}
+
+// The number of the last value a page script sent from this renderer process. Numbers are never reused, so a reply that comes after its document went away cannot settle a promise of the frame's next document.
+int gLastPageScriptRequest = 0;
+
+// Sends the JSON text a page script passes to its world's channel from the renderer to the browser, and returns the request's number, which the reply carries back.
+class PageScriptSender : public CefV8Handler {
+public:
+    explicit PageScriptSender(const std::string &world) : world_(world) {}
+
+    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
+                 CefString &exception) override {
+        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
+        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
+        if (arguments.size() != 1 || !arguments[0]->IsString() || !frame) {
+            exception = "The page script channel sends only JSON text.";
+            return true;
+        }
+        int request = ++gLastPageScriptRequest;
+        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPageScriptSend);
+        message->GetArgumentList()->SetString(0, world_);
+        message->GetArgumentList()->SetInt(1, request);
+        message->GetArgumentList()->SetString(2, arguments[0]->GetStringValue());
+        frame->SendProcessMessage(PID_BROWSER, message);
+        retval = CefV8Value::CreateInt(request);
+        return true;
+    }
+
+private:
+    std::string world_;
+    IMPLEMENT_REFCOUNTING(PageScriptSender);
+};
+
+// Evaluates `code` in the context the caller entered. Returns its value, or nullptr when it throws.
+CefRefPtr<CefV8Value> Evaluate(CefRefPtr<CefV8Context> context, const CefString &code) {
+    CefRefPtr<CefV8Value> value;
+    CefRefPtr<CefV8Exception> exception;
+    return context->Eval(code, CefString(), 0, value, exception) ? value : nullptr;
+}
+
+// Evaluates a function expression in the context the caller entered. Returns the function, or nullptr when the text is not one.
+CefRefPtr<CefV8Value> EvaluateFunction(CefRefPtr<CefV8Context> context, const std::string &function) {
+    // On lines of their own, the brackets make any function expression evaluate to its function, and a final line comment in it cannot hide them.
+    CefRefPtr<CefV8Value> value = Evaluate(context, "(\n" + function + "\n)");
+    return value && value->IsFunction() ? value : nullptr;
+}
+
 // Evaluates `script` in the frame's page world. Returns the string it evaluates to, or nothing when the frame has no script context or the script throws or returns another type.
 std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefString &script) {
     CefRefPtr<CefV8Context> context = frame->GetV8Context();
@@ -309,21 +423,37 @@ std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefStri
         return std::nullopt;
     }
     std::optional<CefString> result;
-    CefRefPtr<CefV8Value> value;
-    CefRefPtr<CefV8Exception> exception;
-    if (context->Eval(script, CefString(), 0, value, exception) && value && value->IsString()) {
+    if (CefRefPtr<CefV8Value> value = Evaluate(context, script); value && value->IsString()) {
         result = value->GetStringValue();
     }
     context->Exit();
     return result;
 }
 
-// Runs in the helper's renderer processes and answers the browser's requests for values only a page's script can read.
+// Calls the function a world's endpoint holds under `name`, in the context the caller entered.
+void CallEndpoint(CefRefPtr<CefV8Value> endpoint, const char *name, const CefV8ValueList &arguments) {
+    CefRefPtr<CefV8Value> function = endpoint->GetValue(name);
+    if (function && function->IsFunction()) {
+        function->ExecuteFunction(nullptr, arguments);
+    }
+}
+
+// Runs in the helper's renderer processes. It answers the browser's requests for values only a page's script can read, and runs each browser's page scripts with their worlds' channels.
 class HelperApp : public CefApp, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
 
-    // Every frame's document reports its audible state and its media, through functions pages can call but not replace.
+    void OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extra_info) override {
+        if (extra_info && extra_info->HasKey(kPageScriptsKey)) {
+            SetPageScripts(browser, ReadPageScripts(extra_info->GetList(kPageScriptsKey)));
+        }
+    }
+
+    void OnBrowserDestroyed(CefRefPtr<CefBrowser> browser) override {
+        std::erase_if(pageScripts_, [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
+    }
+
+    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the page scripts run, before the page's own scripts.
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
         if (!context->Enter()) {
             return;
@@ -334,14 +464,18 @@ public:
         context->GetGlobal()->SetValue("__archReportMedia", CefV8Value::CreateFunction("__archReportMedia", new MediaReporter()),
                                        static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
                                                                                V8_PROPERTY_ATTRIBUTE_DONTDELETE));
-        CefRefPtr<CefV8Value> result;
-        CefRefPtr<CefV8Exception> exception;
-        context->Eval(kAudibleScript, CefString(), 0, result, exception);
+        Evaluate(context, kAudibleScript);
+        RunPageScripts(browser, frame, context);
         context->Exit();
+    }
+
+    void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        std::erase_if(endpoints_, [&](const WorldEndpoint &endpoint) { return endpoint.context->IsSame(context); });
     }
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
+        CefRefPtr<CefListValue> arguments = message->GetArgumentList();
         if (message->GetName() == kThemeColorRequest) {
             CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
             reply->GetArgumentList()->SetString(0, EvaluateString(frame, kThemeColorScript).value_or(CefString()));
@@ -349,21 +483,143 @@ public:
             return true;
         }
         if (message->GetName() == kScriptRequest) {
-            CefRefPtr<CefListValue> request = message->GetArgumentList();
-            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kScriptReply);
-            reply->GetArgumentList()->SetInt(0, request->GetInt(0));
-            if (std::optional<CefString> result = EvaluateString(frame, request->GetString(1))) {
-                reply->GetArgumentList()->SetString(1, *result);
+            // A request with a world calls a function with that world's channel; one without evaluates a script, for which a value other than a string counts as a failure.
+            std::optional<CefString> result;
+            bool succeeded;
+            if (arguments->GetType(2) == VTYPE_STRING) {
+                succeeded = CallWithChannel(frame, arguments->GetString(2).ToString(), arguments->GetString(1).ToString(), result);
             } else {
-                reply->GetArgumentList()->SetNull(1);
+                result = EvaluateString(frame, arguments->GetString(1));
+                succeeded = result.has_value();
+            }
+            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kScriptReply);
+            reply->GetArgumentList()->SetInt(0, arguments->GetInt(0));
+            reply->GetArgumentList()->SetBool(1, succeeded);
+            if (result) {
+                reply->GetArgumentList()->SetString(2, *result);
+            } else {
+                reply->GetArgumentList()->SetNull(2);
             }
             frame->SendProcessMessage(PID_BROWSER, reply);
+            return true;
+        }
+        if (message->GetName() == kPageScriptsUpdate) {
+            SetPageScripts(browser, ReadPageScripts(arguments->GetList(0)));
+            return true;
+        }
+        if (message->GetName() == kPageScriptReply) {
+            Deliver(frame, arguments->GetString(0).ToString(), "reply", [&] {
+                CefRefPtr<CefV8Value> json = arguments->GetType(2) == VTYPE_STRING ? CefV8Value::CreateString(arguments->GetString(2)) : CefV8Value::CreateNull();
+                return CefV8ValueList{CefV8Value::CreateInt(arguments->GetInt(1)), json};
+            });
+            return true;
+        }
+        if (message->GetName() == kPageScriptDelivery) {
+            Deliver(frame, arguments->GetString(0).ToString(), "deliver", [&] { return CefV8ValueList{CefV8Value::CreateString(arguments->GetString(1))}; });
             return true;
         }
         return false;
     }
 
 private:
+    // The page scripts of one browser in this process. During a cross-origin navigation, CEF can create a browser object before it destroys the old one with the same identifier, so the scripts belong to the object.
+    struct BrowserScripts {
+        CefRefPtr<CefBrowser> browser;
+        std::vector<PageScript> scripts;
+    };
+
+    // A world's endpoint in one document.
+    struct WorldEndpoint {
+        std::string world;
+        CefRefPtr<CefV8Context> context;
+        CefRefPtr<CefV8Value> endpoint;
+    };
+
+    void SetPageScripts(CefRefPtr<CefBrowser> browser, std::vector<PageScript> scripts) {
+        for (BrowserScripts &entry : pageScripts_) {
+            if (entry.browser->IsSame(browser)) {
+                entry.scripts = std::move(scripts);
+                return;
+            }
+        }
+        pageScripts_.push_back({browser, std::move(scripts)});
+    }
+
+    // Runs the browser's page scripts that apply to the frame in its new document, in the context the caller entered. A script can run code that creates another frame's context and runs these again, so the loop goes over its own copy.
+    void RunPageScripts(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
+        auto found = std::find_if(pageScripts_.begin(), pageScripts_.end(), [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
+        if (found == pageScripts_.end()) {
+            return;
+        }
+        const std::vector<PageScript> scripts = found->scripts;
+        for (const PageScript &script : scripts) {
+            if (script.mainFrameOnly && !frame->IsMain()) {
+                continue;
+            }
+            CefRefPtr<CefV8Value> endpoint = OpenEndpoint(context, script.world);
+            CefRefPtr<CefV8Value> function = EvaluateFunction(context, script.source);
+            if (endpoint && function) {
+                CallEndpoint(endpoint, "run", {function, CefV8Value::CreateBool(script.atDocumentEnd)});
+            }
+        }
+    }
+
+    // The world's endpoint in the document of `context`, or nullptr when the document has none.
+    CefRefPtr<CefV8Value> FindEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
+        for (const WorldEndpoint &endpoint : endpoints_) {
+            if (endpoint.world == world && endpoint.context->IsSame(context)) {
+                return endpoint.endpoint;
+            }
+        }
+        return nullptr;
+    }
+
+    // The world's endpoint in the document of `context`, which the caller entered, opened there if the document has none. nullptr when the endpoint script fails.
+    CefRefPtr<CefV8Value> OpenEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
+        if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
+            return endpoint;
+        }
+        CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpoint);
+        CefRefPtr<CefV8Value> endpoint = open && open->IsFunction() ? open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))}) : nullptr;
+        if (!endpoint || !endpoint->IsObject()) {
+            return nullptr;
+        }
+        endpoints_.push_back({world, context, endpoint});
+        return endpoint;
+    }
+
+    // Calls `function`, a function expression, with the world's channel in the frame's current document. Returns whether it ran without throwing, with the string it returned in `result`.
+    bool CallWithChannel(CefRefPtr<CefFrame> frame, const std::string &world, const std::string &function, std::optional<CefString> &result) {
+        CefRefPtr<CefV8Context> context = frame->GetV8Context();
+        if (!context || !context->Enter()) {
+            return false;
+        }
+        CefRefPtr<CefV8Value> endpoint = OpenEndpoint(context, world);
+        CefRefPtr<CefV8Value> callee = EvaluateFunction(context, function);
+        CefRefPtr<CefV8Value> value = endpoint && callee ? callee->ExecuteFunction(nullptr, {endpoint->GetValue("channel")}) : nullptr;
+        if (value && value->IsString()) {
+            result = value->GetStringValue();
+        }
+        context->Exit();
+        return value != nullptr;
+    }
+
+    // Calls a function of the world's endpoint in the frame's current document with the arguments `makeArguments` creates there. Nothing happens when the document has no endpoint for the world.
+    template <typename MakeArguments>
+    void Deliver(CefRefPtr<CefFrame> frame, const std::string &world, const char *name, MakeArguments makeArguments) {
+        CefRefPtr<CefV8Context> context = frame->GetV8Context();
+        if (!context || !context->Enter()) {
+            return;
+        }
+        if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
+            CallEndpoint(endpoint, name, makeArguments());
+        }
+        context->Exit();
+    }
+
+    std::vector<BrowserScripts> pageScripts_;
+    // The endpoints of the documents in this process, removed as their contexts go.
+    std::vector<WorldEndpoint> endpoints_;
     IMPLEMENT_REFCOUNTING(HelperApp);
 };
 
@@ -1123,6 +1379,41 @@ private:
 
 @end
 
+#pragma mark - Page scripts
+
+@implementation ARCHCEFPageScript
+
+- (instancetype)initWithWorld:(NSString *)world source:(NSString *)source runsAtDocumentEnd:(BOOL)runsAtDocumentEnd mainFrameOnly:(BOOL)mainFrameOnly {
+    self = [super init];
+    if (self) {
+        _world = [world copy];
+        _source = [source copy];
+        _runsAtDocumentEnd = runsAtDocumentEnd;
+        _mainFrameOnly = mainFrameOnly;
+    }
+    return self;
+}
+
+@end
+
+namespace {
+
+// The scripts as the renderer reads them with `ReadPageScripts`.
+CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
+    CefRefPtr<CefListValue> list = CefListValue::Create();
+    for (ARCHCEFPageScript *script in scripts) {
+        CefRefPtr<CefDictionaryValue> entry = CefDictionaryValue::Create();
+        entry->SetString(kPageScriptWorldKey, script.world.UTF8String);
+        entry->SetString(kPageScriptSourceKey, script.source.UTF8String);
+        entry->SetBool(kPageScriptAtDocumentEndKey, script.runsAtDocumentEnd);
+        entry->SetBool(kPageScriptMainFrameOnlyKey, script.mainFrameOnly);
+        list->SetDictionary(list->GetSize(), entry);
+    }
+    return list;
+}
+
+}  // namespace
+
 #pragma mark - Browser
 
 @interface ARCHCEFBrowser ()
@@ -1138,7 +1429,9 @@ private:
 - (void)handleThemeColor:(NSString *)color;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
 - (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
-- (void)handleScriptReply:(int)request result:(nullable NSString *)result;
+- (void)handleScriptReply:(int)request succeeded:(BOOL)succeeded result:(nullable NSString *)result;
+- (void)handlePageScriptMessage:(CefRefPtr<CefListValue>)arguments frame:(CefRefPtr<CefFrame>)frame;
+- (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -1219,7 +1512,8 @@ class BridgeClient : public CefClient,
                      public CefJSDialogHandler,
                      public CefPermissionHandler,
                      public CefRequestHandler,
-                     public CefContextMenuHandler {
+                     public CefContextMenuHandler,
+                     public CefFrameHandler {
 public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
@@ -1232,6 +1526,9 @@ public:
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+    CefRefPtr<CefFrameHandler> GetFrameHandler() override { return this; }
+
+    void OnFrameCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) override { [owner_ handleFrameCreated:frame]; }
 
     // The app shows its own menu once CEF's current work returns, so Chromium's menu never shows. CEF's model is left as it is, because CEF asks only when the model has items.
     bool RunContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefContextMenuParams> params,
@@ -1442,7 +1739,11 @@ public:
         }
         if (message->GetName() == kScriptReply) {
             CefRefPtr<CefListValue> reply = message->GetArgumentList();
-            [owner_ handleScriptReply:reply->GetInt(0) result:reply->GetType(1) == VTYPE_STRING ? ToNSString(reply->GetString(1)) : nil];
+            [owner_ handleScriptReply:reply->GetInt(0) succeeded:reply->GetBool(1) result:reply->GetType(2) == VTYPE_STRING ? ToNSString(reply->GetString(2)) : nil];
+            return true;
+        }
+        if (message->GetName() == kPageScriptSend && frame) {
+            [owner_ handlePageScriptMessage:message->GetArgumentList() frame:frame];
             return true;
         }
         return false;
@@ -1593,9 +1894,12 @@ private:
     BOOL _mainFrameNavigationPending;
     /// The frames whose media elements play sound.
     NSMutableSet<NSString *> *_audibleFrames;
-    /// The completions of `evaluateScript:completion:` whose replies have not come yet, by request number.
-    NSMutableDictionary<NSNumber *, void (^)(NSString *_Nullable)> *_scriptReplies;
+    /// The completions of script requests whose replies have not come yet, by request number.
+    NSMutableDictionary<NSNumber *, void (^)(BOOL, NSString *_Nullable)> *_scriptReplies;
     int _lastScriptRequest;
+    NSArray<ARCHCEFPageScript *> *_pageScripts;
+    /// Whether the page scripts changed after they went to the renderer in the browser's extra info.
+    BOOL _pageScriptsChanged;
 }
 
 @synthesize browserView = _browserView;
@@ -1608,6 +1912,7 @@ private:
 - (instancetype)initWithParentView:(NSView *)parentView
                                url:(NSString *)url
                     requestContext:(ARCHCEFRequestContext *)requestContext
+                       pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate {
     self = [super init];
     if (!self) {
@@ -1621,6 +1926,7 @@ private:
     _downloads = [NSMutableDictionary dictionary];
     _audibleFrames = [NSMutableSet set];
     _scriptReplies = [NSMutableDictionary dictionary];
+    _pageScripts = [pageScripts copy];
     [gBrowsers addObject:self];
     _client = new BridgeClient(self);
 
@@ -1629,7 +1935,10 @@ private:
     windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView),
                           CefRect(0, 0, (int)NSWidth(bounds), (int)NSHeight(bounds)));
     CefBrowserSettings settings;
-    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, nullptr, [requestContext cefContext]);
+    // Every renderer process that hosts one of the browser's frames receives the extra info before the frame's first document.
+    CefRefPtr<CefDictionaryValue> extraInfo = CefDictionaryValue::Create();
+    extraInfo->SetList(kPageScriptsKey, PageScriptList(_pageScripts));
+    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, extraInfo, [requestContext cefContext]);
     return self;
 }
 
@@ -2060,9 +2369,20 @@ private:
 }
 
 - (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable))completion {
+    [self requestScript:script world:nil completion:^(BOOL succeeded, NSString *_Nullable result) {
+        completion(succeeded ? result : nil);
+    }];
+}
+
+- (void)callPageScriptFunction:(NSString *)function inWorld:(NSString *)world completion:(void (^)(BOOL, NSString *_Nullable))completion {
+    [self requestScript:function world:world completion:completion];
+}
+
+/// Asks the main frame's renderer to evaluate `script`, or, with a world, to call it with that world's channel, and passes on the reply.
+- (void)requestScript:(NSString *)script world:(nullable NSString *)world completion:(void (^)(BOOL, NSString *_Nullable))completion {
     CefRefPtr<CefFrame> frame = _browser ? _browser->GetMainFrame() : nullptr;
     if (!frame) {
-        completion(nil);
+        completion(NO, nil);
         return;
     }
     int request = ++_lastScriptRequest;
@@ -2070,29 +2390,102 @@ private:
     CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kScriptRequest);
     message->GetArgumentList()->SetInt(0, request);
     message->GetArgumentList()->SetString(1, CefString(script.UTF8String));
+    if (world) {
+        message->GetArgumentList()->SetString(2, CefString(world.UTF8String));
+    } else {
+        message->GetArgumentList()->SetNull(2);
+    }
     frame->SendProcessMessage(PID_RENDERER, message);
     __weak ARCHCEFBrowser *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kScriptReplyTimeout), dispatch_get_main_queue(), ^{
-        [weakSelf handleScriptReply:request result:nil];
+        [weakSelf handleScriptReply:request succeeded:NO result:nil];
     });
 }
 
-- (void)handleScriptReply:(int)request result:(nullable NSString *)result {
-    void (^completion)(NSString *_Nullable) = _scriptReplies[@(request)];
+- (void)handleScriptReply:(int)request succeeded:(BOOL)succeeded result:(nullable NSString *)result {
+    void (^completion)(BOOL, NSString *_Nullable) = _scriptReplies[@(request)];
     if (!completion) {
         return;
     }
     [_scriptReplies removeObjectForKey:@(request)];
-    completion(result);
+    completion(succeeded, result);
 }
 
 /// Ends every request still waiting for a reply, as when the page's process quits or the browser goes.
 - (void)finishScriptRequests {
-    NSArray<void (^)(NSString *_Nullable)> *completions = _scriptReplies.allValues;
+    NSArray<void (^)(BOOL, NSString *_Nullable)> *completions = _scriptReplies.allValues;
     [_scriptReplies removeAllObjects];
-    for (void (^completion)(NSString *_Nullable) in completions) {
-        completion(nil);
+    for (void (^completion)(BOOL, NSString *_Nullable) in completions) {
+        completion(NO, nil);
     }
+}
+
+- (void)setPageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts {
+    _pageScripts = [pageScripts copy];
+    _pageScriptsChanged = YES;
+    if (!_browser) {
+        return;
+    }
+    // Each frame's renderer process keeps the scripts for the whole browser, so frames that share a process receive the same list more than once.
+    std::vector<CefString> identifiers;
+    _browser->GetFrameIdentifiers(identifiers);
+    for (const CefString &identifier : identifiers) {
+        [self sendPageScriptsToFrame:_browser->GetFrameByIdentifier(identifier)];
+    }
+}
+
+/// A frame created after the scripts changed may be the first of the browser in a new renderer process, which received only the scripts of the browser's extra info. CEF sends the message before the frame attaches.
+- (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame {
+    if (_pageScriptsChanged) {
+        [self sendPageScriptsToFrame:frame];
+    }
+}
+
+- (void)sendPageScriptsToFrame:(CefRefPtr<CefFrame>)frame {
+    if (!frame) {
+        return;
+    }
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPageScriptsUpdate);
+    message->GetArgumentList()->SetList(0, PageScriptList(_pageScripts));
+    frame->SendProcessMessage(PID_RENDERER, message);
+}
+
+- (void)handlePageScriptMessage:(CefRefPtr<CefListValue>)arguments frame:(CefRefPtr<CefFrame>)frame {
+    NSString *world = ToNSString(arguments->GetString(0));
+    int request = arguments->GetInt(1);
+    void (^reply)(NSString *_Nullable) = ^(NSString *_Nullable json) {
+        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPageScriptReply);
+        message->GetArgumentList()->SetString(0, CefString(world.UTF8String));
+        message->GetArgumentList()->SetInt(1, request);
+        if (json) {
+            message->GetArgumentList()->SetString(2, CefString(json.UTF8String));
+        } else {
+            message->GetArgumentList()->SetNull(2);
+        }
+        // A frame that went away discards the message.
+        frame->SendProcessMessage(PID_RENDERER, message);
+    };
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (!delegate) {
+        reply(nil);
+        return;
+    }
+    [delegate cefBrowserDidReceivePageScriptMessage:ToNSString(arguments->GetString(2))
+                                              world:world
+                                           frameURL:ToNSString(frame->GetURL())
+                                        isMainFrame:frame->IsMain()
+                                              reply:reply];
+}
+
+- (void)postPageScriptMessage:(NSString *)json toWorld:(NSString *)world {
+    CefRefPtr<CefFrame> frame = _browser ? _browser->GetMainFrame() : nullptr;
+    if (!frame) {
+        return;
+    }
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPageScriptDelivery);
+    message->GetArgumentList()->SetString(0, CefString(world.UTF8String));
+    message->GetArgumentList()->SetString(1, CefString(json.UTF8String));
+    frame->SendProcessMessage(PID_RENDERER, message);
 }
 
 - (double)zoomLevel {

@@ -1,11 +1,31 @@
-// What plugins add to the interface, and the index of the contributions of a Persona's enabled plugins. Each contribution keeps the plugin that adds it, so the interface can name the plugin wherever the contribution appears.
+// What plugins add to the interface and to pages, and the index of the contributions of a Persona's enabled plugins. Each contribution keeps the plugin that adds it, so the interface can name the plugin wherever the contribution appears.
+import ARCHEngine
 import Foundation
 
 public struct PluginContributions: Hashable, Sendable {
     public var commands: [PluginCommand]
+    public var pageScripts: [PluginPageScript]
 
-    public init(commands: [PluginCommand] = []) {
+    public init(commands: [PluginCommand] = [], pageScripts: [PluginPageScript] = []) {
         self.commands = commands
+        self.pageScripts = pageScripts
+    }
+}
+
+/// A script that runs in each document whose address one of its patterns and one of the plugin's granted sites cover, on both engines. It reaches its plugin through `arch`: `arch.send(value)` returns a promise of the reply from `Plugin.receive(_:)`, and `arch.onMessage(listener)` receives the values posted to the page's main frame.
+public struct PluginPageScript: Hashable, Sendable {
+    public var matches: [MatchPattern]
+    /// JavaScript, run as the body of a function.
+    public var source: String
+    public var runAt: EnginePageScriptInjectionTime
+    /// Whether the script also runs in the frames inside a page.
+    public var allFrames: Bool
+
+    public init(matches: [MatchPattern], source: String, runAt: EnginePageScriptInjectionTime = .documentEnd, allFrames: Bool = false) {
+        self.matches = matches
+        self.source = source
+        self.runAt = runAt
+        self.allFrames = allFrames
     }
 }
 

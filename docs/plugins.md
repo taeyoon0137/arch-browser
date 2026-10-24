@@ -108,10 +108,10 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 
 ## Page scripts
 
-A page script is a JavaScript or CSS file from the plugin's package that runs in the pages its grant covers. Arch wraps each script in a guard that checks the frame's address against the plugin's patterns. Engines only need to inject scripts; they do not need to match addresses. Each plugin has its own world name, `ARCHPlugin.<plugin id>`.
+A page script is a JavaScript or CSS file from the plugin's package, or JavaScript in a built-in plugin's manifest, that runs in the pages its grant covers. Arch wraps each script in a guard that checks the frame's address against the script's patterns and the plugin's granted sites, then runs the script as the body of a function with its world's channel as `arch`. The guard reads the document's `location`, whose properties a page cannot replace, and applies the rules of Match patterns through a JavaScript copy of `MatchPattern.matches(_:)`. Engines only need to inject scripts; they do not need to match addresses. Each plugin has its own world name, `ARCHPlugin.<plugin id>`.
 
-- WebKit: each script becomes a `WKUserScript` in the plugin's `WKContentWorld.world(name:)`, so the page and other plugins cannot see its globals. Messages from the script go through a `WKScriptMessageHandlerWithReply` added only to that world. Arch reaches the script with `evaluateJavaScript(_:in:in:)` in the same world. Style files go through the existing `insertStylesheet`.
-- Chromium: CEF 156's public API has no isolated worlds (needs verification). The app passes the scripts to the renderer in `extra_info` when it creates the browser and in a process message when they change. The helper's `CefRenderProcessHandler::OnContextCreated` runs them in the page's main world before the page's own scripts. A native function made with `CefV8Value::CreateFunction` carries messages to the browser process as `CefProcessMessage`s. Each plugin's wrapper keeps that function and its delivery function in a closure. It removes them from `window` before the page runs. Document-end scripts wait for `DOMContentLoaded`.
+- WebKit: each script becomes a `WKUserScript` in the plugin's `WKContentWorld.world(name:)`, so the page and other plugins cannot see its globals. Messages from the script go through a `WKScriptMessageHandlerWithReply` added only to that world. Arch reaches the script with `evaluateJavaScript(_:in:in:)` in the same world. Style files go through the existing `insertStylesheet`. A page that a tab opens uses the tab's content controller, so the two share one script list.
+- Chromium: CEF 156's public API has no isolated worlds (needs verification). The app passes the scripts to the renderer in `extra_info` when it creates the browser, and in a process message to each frame when they change and to each frame created after a change. The helper's `CefRenderProcessHandler::OnContextCreated` runs them in the page's main world before the page's own scripts. A native function made with `CefV8Value::CreateFunction` carries messages to the browser process as `CefProcessMessage`s. The helper passes it to each world's channel script as an argument, so it never reaches `window`. The channel keeps it, its delivery functions, and the built-ins it calls in a closure. Document-end scripts wait for `DOMContentLoaded`.
 - The Chromium difference: the page can see what a plugin's script changes in the DOM and can replace DOM methods the script calls later. The script's closure stays private. Plugins treat pages as untrusted on both engines. The app treats every page script message as page input. The difference therefore affects plugin reliability, not app safety. A CEF patch that adds isolated worlds can join Phase VI if a plugin needs one.
 - With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, the host runs them in the selected tab's current page through `executeJavaScript(_:inWorld:completion:)` when the user runs one of that plugin's commands there. They stay in that tab's list until it leaves the site.
 - Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs. Disabling a plugin closes its message channel at once. Running scripts cannot reach it and stop at the next load.
@@ -380,12 +380,13 @@ public struct PluginSetting: Identifiable, Hashable, Codable, Sendable {
 }
 
 public struct PluginPageScript: Hashable, Codable, Sendable {
-    public enum RunAt: String, Hashable, Codable, Sendable { case documentStart, documentEnd }
     public var matches: [MatchPattern]
     public var excludes: [MatchPattern]
-    public var scripts: [String]
+    /// JavaScript, run as the body of a function with the plugin's page API as `arch`. The script runtime reads it from the package files that the manifest's `js` lists.
+    public var source: String
+    /// Package paths of style files.
     public var styles: [String]
-    public var runAt: RunAt
+    public var runAt: EnginePageScriptInjectionTime
     public var allFrames: Bool
 }
 ```
@@ -669,8 +670,8 @@ public final class PluginManager: ObservableObject {
     public func post(_ event: PluginEvent)
     /// The page scripts of every enabled plugin, wrapped with their address guards, for a tab of this Persona.
     public func pageScripts() -> [EnginePageScript]
-    /// A message from a page script. Returns the JSON reply, or nil.
-    public func receive(_ message: EnginePageScriptMessage, fromTab tab: UUID) async -> String?
+    /// A message from a page script in `tab`, which the session describes in full; the manager removes what the grant does not cover. Returns the JSON reply, or nil.
+    public func receive(_ message: EnginePageScriptMessage, from tab: PluginTab) async -> String?
 }
 ```
 
@@ -695,17 +696,17 @@ Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves 
 
 ## Engine protocol additions
 
-V.11 adds these Tier 1 members, which both adapters implement, and records them in `docs/engine-protocol.md` when implemented:
+V.11 adds these Tier 1 members, which both adapters implement. `docs/engine-protocol.md` records them.
 
 ```swift
-public enum EnginePageScriptInjectionTime: String, Sendable {
+public enum EnginePageScriptInjectionTime: String, Hashable, Sendable {
     case documentStart, documentEnd
 }
 
 public struct EnginePageScript: Hashable, Sendable {
-    public var id: String
-    /// Scripts in one world share globals. WebKit gives each world its own `WKContentWorld`; Chromium runs every world in the page's main world.
+    /// Scripts in one world share globals and one channel. WebKit gives each world its own `WKContentWorld`; Chromium runs every world in the page's main world.
     public var world: String
+    /// A function expression that the engine calls with the world's channel: `channel.send(value)` returns a promise of the delegate's reply, and `channel.onMessage(listener)` receives posted values.
     public var source: String
     public var injectionTime: EnginePageScriptInjectionTime
     public var mainFrameOnly: Bool
@@ -719,6 +720,7 @@ public struct EnginePageScriptMessage: Sendable {
 }
 
 public protocol EnginePageScriptDelegate: AnyObject {
+    /// The first call to `reply` settles the script's promise; a reply dropped without a call counts as nil.
     func webContents(_ webContents: any EngineWebContents, didReceive message: EnginePageScriptMessage,
                      reply: @escaping (String?) -> Void)
 }
@@ -728,15 +730,15 @@ public var pageScripts: [EnginePageScript]
 
 // EngineWebContents
 var pageScriptDelegate: (any EnginePageScriptDelegate)? { get set }
-/// Replaces the scripts that run in each new document, from the next navigation on.
+/// Replaces the scripts that run in each new document, from the next document on.
 func setPageScripts(_ scripts: [EnginePageScript])
-/// Runs a script in a world of the main frame and returns its JSON result.
+/// Calls a function expression with a world's channel in the main frame and returns the string it returns.
 func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
-/// Delivers a JSON message to the scripts of a world in the main frame.
+/// Delivers a JSON message to the listeners of a world's channel in the main frame.
 func postPageScriptMessage(_ json: String, toWorld world: String)
 ```
 
-Chromium's `executeJavaScript(_:inWorld:completion:)` evaluates in the renderer and answers with a process message, like the theme color, because CEF's `ExecuteJavaScript` returns no value.
+Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the renderer and answers with a process message, like `readableContent`, because CEF's `ExecuteJavaScript` returns no value.
 
 ## Build order
 

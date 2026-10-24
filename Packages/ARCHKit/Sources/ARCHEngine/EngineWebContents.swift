@@ -14,11 +14,14 @@ public struct EngineWebContentsConfiguration: Sendable {
     public var engineOverride: EngineKind?
     /// Page state that an earlier web contents of the same engine reported as `restorableState`. The engine restores it in place of loading `initialURL` when it can.
     public var restorableState: Data?
+    /// The scripts that run in each new document, from the first one on. A web contents a page opens starts with its opener's scripts.
+    public var pageScripts: [EnginePageScript]
     public init(initialURL: URL? = nil, initiallyHidden: Bool = false, initiallyMuted: Bool = false, disallowAutoplay: Bool = false,
                 disallowContextMenus: Bool = false, disallowDownloads: Bool = false, transparentBackground: Bool = false,
-                forcedViewSize: CGSize? = nil, engineOverride: EngineKind? = nil, restorableState: Data? = nil) {
+                forcedViewSize: CGSize? = nil, engineOverride: EngineKind? = nil, restorableState: Data? = nil, pageScripts: [EnginePageScript] = []) {
         self.initialURL = initialURL
         self.restorableState = restorableState
+        self.pageScripts = pageScripts
         self.initiallyHidden = initiallyHidden
         self.initiallyMuted = initiallyMuted
         self.disallowAutoplay = disallowAutoplay
@@ -101,6 +104,14 @@ public protocol EngineWebContents: AnyObject {
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void)
     func stopFind()
     func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void)
+    /// Receives what the page scripts send.
+    var pageScriptDelegate: (any EnginePageScriptDelegate)? { get set }
+    /// Replaces the scripts that run in each new document, from the next document on. On WebKit, a web contents and those its pages open share one set, so replacing it in one replaces it in all.
+    func setPageScripts(_ scripts: [EnginePageScript])
+    /// Calls a JavaScript function expression, such as `(channel) => …`, with the channel of `world` in the main frame's current document, opening one there if the world has none, and passes the string the function returns, or nil for any other value. Fails when the function throws or the main frame has no document to run it in.
+    func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
+    /// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document. Nothing happens without them.
+    func postPageScriptMessage(_ json: String, toWorld world: String)
     /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
     /// CSS injection for site customizations. WebKit implements it with WKUserContentController.

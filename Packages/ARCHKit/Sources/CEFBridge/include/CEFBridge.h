@@ -108,6 +108,18 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
     ARCHCEFMediaActionNextTrack,
 };
 
+/// A script the helper's renderer runs in each new document of a browser, in the page's main world. The scripts of one world share one channel to the app.
+@interface ARCHCEFPageScript : NSObject
+- (instancetype)initWithWorld:(NSString *)world source:(NSString *)source runsAtDocumentEnd:(BOOL)runsAtDocumentEnd mainFrameOnly:(BOOL)mainFrameOnly NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
+@property (nonatomic, readonly, copy) NSString *world;
+/// A JavaScript function expression, which the renderer calls with the world's channel.
+@property (nonatomic, readonly, copy) NSString *source;
+/// Whether the script waits for `DOMContentLoaded`. Otherwise it runs before the page's own scripts.
+@property (nonatomic, readonly) BOOL runsAtDocumentEnd;
+@property (nonatomic, readonly) BOOL mainFrameOnly;
+@end
+
 /// One page in a browser's back-forward list.
 @interface ARCHCEFNavigationEntry : NSObject
 /// The page's place in the list, from 0 for the oldest.
@@ -191,6 +203,12 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
                                                   originURL:(NSString *)originURL
                                                     isProxy:(BOOL)isProxy
                                                  completion:(void (^)(NSString *_Nullable user, NSString *_Nullable password))completion;
+/// Reports a value, as JSON text, that a page script sent through the channel of `world` from the frame whose document is at `frameURL`. Call `reply` with the reply's JSON text, or nil for none; the first call settles the script's promise.
+- (void)cefBrowserDidReceivePageScriptMessage:(NSString *)json
+                                        world:(NSString *)world
+                                     frameURL:(NSString *)frameURL
+                                  isMainFrame:(BOOL)isMainFrame
+                                        reply:(void (^)(NSString *_Nullable json))reply;
 @end
 
 @interface ARCHCEFRuntime : NSObject
@@ -208,10 +226,11 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 
 /// One browser embedded as a child of `parentView`. CEF adds its own view inside `parentView`.
 @interface ARCHCEFBrowser : NSObject
-/// Creates the browser in `requestContext`, whose profile the page loads in.
+/// Creates the browser in `requestContext`, whose profile the page loads in. The renderer runs `pageScripts` from the first document on.
 - (instancetype)initWithParentView:(NSView *)parentView
                                url:(NSString *)url
                     requestContext:(ARCHCEFRequestContext *)requestContext
+                       pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;
 @property (nonatomic, readonly, nullable) NSView *browserView;
 /// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops such downloads when the browser closes, and only this browser can resume an interrupted one.
@@ -238,6 +257,14 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)executeJavaScript:(NSString *)script;
 /// Evaluates `script` in the main frame's page world and passes the string it evaluates to. `executeJavaScript:` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
 - (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable result))completion;
+/// Replaces the page scripts, from each frame's next document on. The renderer processes of the browser's frames get them at once, and each frame created after the change gets them before its first document (needs verification for a frame in a new renderer process).
+- (void)setPageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts;
+/// Calls a JavaScript function expression with the channel of `world` in the main frame's current document, opening one there if the world has none. Calls `completion` once on the main thread with whether the function ran without throwing and the string it returned, or with NO when the frame has no script context, the page's process quits, the browser goes, or no reply comes within ten seconds.
+- (void)callPageScriptFunction:(NSString *)function
+                       inWorld:(NSString *)world
+                    completion:(void (^)(BOOL succeeded, NSString *_Nullable result))completion NS_SWIFT_NAME(callPageScriptFunction(_:inWorld:completion:));
+/// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document.
+- (void)postPageScriptMessage:(NSString *)json toWorld:(NSString *)world NS_SWIFT_NAME(postPageScriptMessage(_:toWorld:));
 /// Sends a media action to the frame that reported media through `cefBrowserDidChangeMedia:frame:`. Nothing happens once the frame is gone.
 - (void)performMediaAction:(ARCHCEFMediaAction)action inFrame:(NSString *)frameIdentifier NS_SWIFT_NAME(performMediaAction(_:inFrame:));
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;

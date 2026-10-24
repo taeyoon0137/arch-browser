@@ -272,6 +272,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public let view: NSView
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
+    public weak var pageScriptDelegate: (any EnginePageScriptDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
     /// Chromium scales the page by 1.2 per zoom level; level 0 is the default size.
     public var zoomFactor: Double {
@@ -299,6 +300,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var authenticationAttempts: [String: Int] = [:]
     /// The context menu while it tracks, so that a closing browser can end it.
     private var contextMenu: NSMenu?
+    /// The page scripts, which a page this one opens starts with.
+    private var pageScripts: [EnginePageScript]
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     init(sessionID: String, context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
@@ -308,13 +311,20 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         self.view.wantsLayer = true
         self.url = configuration.initialURL
+        self.pageScripts = configuration.pageScripts
         super.init()
-        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", requestContext: requestContext, delegate: self)
+        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", requestContext: requestContext,
+                                 pageScripts: Self.bridgeScripts(pageScripts), delegate: self)
         browser?.allowsDownloads = !configuration.disallowDownloads
     }
 
     public enum PDFError: Error {
         case exportFailed
+    }
+
+    public enum ScriptError: Error {
+        /// The function threw, or the main frame had no document to run it in or did not answer within ten seconds.
+        case failed
     }
 
     public private(set) var favicon: NSImage?
@@ -376,6 +386,23 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
                 return content
             })
         }
+    }
+    public func setPageScripts(_ scripts: [EnginePageScript]) {
+        pageScripts = scripts
+        browser?.setPageScripts(Self.bridgeScripts(scripts))
+    }
+    /// The helper's renderer calls the function in the page's world, where every world's scripts run, and replies with its result, which `executeJavaScript` cannot return.
+    public func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
+        guard let browser else { return completion(.failure(ScriptError.failed)) }
+        browser.callPageScriptFunction(script, inWorld: world) { succeeded, result in
+            completion(succeeded ? .success(result) : .failure(ScriptError.failed))
+        }
+    }
+    public func postPageScriptMessage(_ json: String, toWorld world: String) {
+        browser?.postPageScriptMessage(json, toWorld: world)
+    }
+    private static func bridgeScripts(_ scripts: [EnginePageScript]) -> [ARCHCEFPageScript] {
+        scripts.map { ARCHCEFPageScript(world: $0.world, source: $0.source, runsAtDocumentEnd: $0.injectionTime == .documentEnd, mainFrameOnly: $0.mainFrameOnly) }
     }
     public func insertStylesheet(_ css: String, identifier: String) {
         let escaped = css.replacingOccurrences(of: "`", with: "\\`")
@@ -500,7 +527,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, requestContext: requestContext,
-                                        configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
+                                        configuration: EngineWebContentsConfiguration(initialURL: URL(string: url), pageScripts: pageScripts))
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
     }
     public func cefBrowserDidClose() {
@@ -661,6 +688,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidChangeMedia(_ media: [String: Any]?, frame: String) {
         chromiumMediaSession.update(document: frame, report: media)
+    }
+
+    public func cefBrowserDidReceivePageScriptMessage(_ json: String, world: String, frameURL: String, isMainFrame: Bool, reply: @escaping (String?) -> Void) {
+        let reply = EnginePageScriptReply(reply)
+        guard let pageScriptDelegate else { return reply.send(nil) }
+        pageScriptDelegate.webContents(self, didReceive: EnginePageScriptMessage(world: world, frameURL: URL(engineString: frameURL), isMainFrame: isMainFrame, json: json),
+                                       reply: reply.send)
     }
 
     public func cefBrowserDidChangeThemeColor(_ color: String) {

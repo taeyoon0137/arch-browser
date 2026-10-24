@@ -1,6 +1,7 @@
-// Plugin identifiers, match patterns, palette matching, values and storage, and the manager: which plugins it registers, when it starts their code, what an invocation carries, and where each plugin's storage lives.
+// Plugin identifiers, match patterns, palette matching, values and storage, page scripts, and the manager: which plugins it registers, when it starts their code, what an invocation and a page script value carry, and where each plugin's storage lives.
 import ARCHEngine
 import Foundation
+import JavaScriptCore
 import Testing
 @testable import Plugins
 
@@ -320,6 +321,106 @@ import Testing
     }
 }
 
+@MainActor
+@Suite(.serialized) struct PluginPageScriptTests {
+    private let folder = TemporaryFolder()
+    private let world = PluginID(rawValue: "org.example.page-script")!.pageScriptWorld
+
+    init() {
+        Recorder.reset()
+    }
+
+    private func manager() -> PluginManager {
+        PluginManager(persona: UUID(), directory: folder.url, builtIns: [PageScriptPlugin.self, DisabledPageScriptPlugin.self])
+    }
+
+    @Test func runsTheScriptsOfEnabledPluginsInTheirWorlds() {
+        let scripts = manager().pageScripts()
+        #expect(scripts.map(\.world) == ["ARCHPlugin.org.example.page-script", "ARCHPlugin.org.example.page-script"])
+        #expect(scripts.map(\.injectionTime) == [.documentStart, .documentEnd])
+        #expect(scripts.map(\.mainFrameOnly) == [true, false])
+    }
+
+    @Test func startsOnlyWhereThePatternsAndTheGrantCoverThePage() throws {
+        let script = PluginPageScript(matches: [try MatchPattern("https://*.example.org/docs/*")], source: "ran = arch; // A final comment")
+        let engineScript = script.engineScript(world: world, sites: [try MatchPattern("https://example.org/*"), try MatchPattern("https://a.example.org/*")])
+        let cases: [(String, Bool)] = [
+            ("https://example.org/docs/a", true),
+            ("https://a.example.org/docs/?q=1", true),
+            ("https://b.example.org/docs/a", false),
+            ("https://example.org/other", false),
+            ("http://example.org/docs/a", false),
+        ]
+        for (address, runs) in cases {
+            let context = try #require(JSContext())
+            context.setObject(location(address), forKeyedSubscript: "location" as NSString)
+            context.evaluateScript("var ran = null; const channel = {};")
+            context.evaluateScript("(\(engineScript.source))(channel);")
+            #expect(context.exception == nil, "\(address)")
+            #expect(context.evaluateScript("ran === channel").toBool() == runs, "\(address)")
+        }
+    }
+
+    @Test func pageMatcherAgreesWithMatchPatterns() throws {
+        let patterns = try ["<all_urls>", "https://example.com/*", "*://*.example.com/*", "https://example.com/docs/*", "https://example.com/search*",
+                            "https://example.com/*.pdf", "https://example.com/a*b*c", "https://example.com/a%20b", "https://example.com/x?", "http://localhost/"].map(MatchPattern.init)
+        let addresses = ["http://example.com/", "https://example.com/", "https://EXAMPLE.com/a", "https://example.com", "https://example.com:8443/a",
+                         "https://www.example.com/", "https://example.com.test/", "https://example.com@other.test/", "https://other.test/?example.com",
+                         "https://a.b.example.com/", "https://badexample.com/", "https://example.com/docs/", "https://example.com/docs", "https://example.com/Docs/a",
+                         "https://example.com/search?q=arch", "https://example.com/a/b.pdf#page=2", "https://example.com/a.pdf?download=1",
+                         "https://example.com/a-b-b-c", "https://example.com/a-c-b", "https://example.com/a%20b", "https://example.com/x?", "https://example.com/x?#f",
+                         "http://localhost/", "file:///Users/example/page.html", "about:blank", "data:text/plain,a"]
+        let context = try #require(JSContext())
+        let matcher = try #require(context.evaluateScript("(\(MatchPattern.javaScriptMatcher))"))
+        for pattern in patterns {
+            let literal = try #require(context.evaluateScript(MatchPattern.javaScriptLiteral([pattern])))
+            for address in addresses {
+                let pageResult = matcher.call(withArguments: [location(address), literal])?.toBool()
+                #expect(pageResult == pattern.matches(URL(string: address)!), "\(pattern) \(address)")
+            }
+        }
+        #expect(context.exception == nil)
+    }
+
+    @Test func passesValuesFromGrantedFramesAndReturnsTheReply() async throws {
+        var tab = PluginTab(id: UUID(), spaceID: nil, title: "Other", url: URL(string: "https://other.example/")!, engine: .webKit, isPinned: false, isSelected: true)
+        let frameURL = URL(string: "https://example.org/docs/a")!
+        let reply = await manager().receive(EnginePageScriptMessage(world: world, frameURL: frameURL, isMainFrame: false, json: #"{"count": 2}"#), from: tab)
+        #expect(reply == #"["echo",{"count":2}]"#)
+        let message = try #require(Recorder.pageMessages.first)
+        #expect(message.body == .object(["count": .number(2)]))
+        #expect(message.frameURL == frameURL && !message.isMainFrame)
+        // The grant covers the frame but not the tab's page.
+        tab.title = nil
+        tab.url = nil
+        #expect(message.tab == tab)
+    }
+
+    @Test func dropsValuesThePluginMayNotReceive() async {
+        let tab = PluginTab(id: UUID(), spaceID: nil, title: nil, url: nil, engine: .chromium, isPinned: false, isSelected: true)
+        let covered = URL(string: "https://example.org/")
+        let messages = [
+            EnginePageScriptMessage(world: world, frameURL: URL(string: "https://other.example/"), isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: world, frameURL: nil, isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: world, frameURL: covered, isMainFrame: true, json: "not json"),
+            EnginePageScriptMessage(world: "ARCHPlugin.org.example.unknown", frameURL: covered, isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: PluginID(rawValue: "org.example.disabled-page-script")!.pageScriptWorld, frameURL: covered, isMainFrame: true, json: "1"),
+        ]
+        let manager = manager()
+        for message in messages {
+            #expect(await manager.receive(message, from: tab) == nil, "\(message)")
+        }
+        #expect(Recorder.activations.isEmpty && Recorder.pageMessages.isEmpty)
+    }
+}
+
+/// The parts of `location` that page scripts read, as a browser writes them for `address`.
+private func location(_ address: String) -> [String: String] {
+    let url = URL(string: address)!
+    let path = url.path()
+    return ["protocol": url.scheme!.lowercased() + ":", "hostname": url.host()?.lowercased() ?? "", "pathname": path.isEmpty ? "/" : path, "href": address]
+}
+
 private func installed(_ id: String, name: String, commands: [PluginCommand], isEnabled: Bool = true) -> InstalledPlugin {
     let manifest = PluginManifest(id: PluginID(rawValue: id)!, name: name, version: "1", summary: "", contributions: PluginContributions(commands: commands))
     return InstalledPlugin(manifest: manifest, grant: PluginGrant(requestedBy: manifest), isEnabled: isEnabled)
@@ -339,17 +440,19 @@ private final class TemporaryFolder {
     }
 }
 
-/// What the test plugins saw: the Persona and storage of each activation and the tab of each run.
+/// What the test plugins saw: the Persona and storage of each activation, the tab of each run, and each page script value.
 @MainActor
 private enum Recorder {
     static var activations: [PersonaID] = []
     static var storages: [any PluginStorage] = []
     static var runs: [PluginTab?] = []
+    static var pageMessages: [PluginPageMessage] = []
 
     static func reset() {
         activations = []
         storages = []
         runs = []
+        pageMessages = []
     }
 
     static func record(_ context: any PluginContext) {
@@ -379,6 +482,12 @@ private class RecordingPlugin: BuiltInPlugin {
 
     func run(_ command: String, _ invocation: PluginInvocation) async throws {
         Recorder.runs.append(invocation.tab)
+    }
+
+    /// Replies `["echo", body]`.
+    func receive(_ message: PluginPageMessage) async throws -> PluginValue? {
+        Recorder.pageMessages.append(message)
+        return .array([.string("echo"), message.body])
     }
 }
 
@@ -424,4 +533,24 @@ private final class CountingPlugin: RecordingPlugin {
         let runs = if case let .number(runs)? = storage?.value(forKey: "runs") { runs } else { 0.0 }
         try storage?.setValue(.number(runs + 1), forKey: "runs")
     }
+}
+
+/// Two page scripts on example.org, which its grant covers: one for every page at document start in the main frame, one for `/docs/` at document end in every frame.
+private func pageScriptManifest(_ id: String) -> PluginManifest {
+    PluginManifest(id: PluginID(rawValue: id)!, name: id, version: "1", summary: "", sites: [try! MatchPattern("https://example.org/*")],
+                   contributions: PluginContributions(pageScripts: [
+                       PluginPageScript(matches: [try! MatchPattern("https://example.org/*")], source: "arch.send(1);", runAt: .documentStart),
+                       PluginPageScript(matches: [try! MatchPattern("https://example.org/docs/*")], source: "", runAt: .documentEnd, allFrames: true),
+                   ]))
+}
+
+@MainActor
+private class PageScriptPlugin: RecordingPlugin {
+    override class var manifest: PluginManifest { pageScriptManifest("org.example.page-script") }
+}
+
+@MainActor
+private final class DisabledPageScriptPlugin: PageScriptPlugin {
+    override class var manifest: PluginManifest { pageScriptManifest("org.example.disabled-page-script") }
+    override class var isOnByDefault: Bool { false }
 }
