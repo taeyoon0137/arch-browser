@@ -2,19 +2,19 @@
 
 ## Purpose and scope
 
-- This note designs Arch's plugin system for queue task V.11 and rows 44 and 50 of `docs/features.md`. It also covers how the other tasks that build on plugins fit: web extensions on WebKit (IV.12) and on Chromium (VI.1), the password manager plugins (IV.13, row 39), Personas (III.12), AI hooks (VII.6), and plugins that AI writes (VII.7, row 55).
-- A plugin can add sidebar items, palette commands, menu items, keyboard shortcuts, settings, panels, and page scripts that run on both engines. These are more capabilities than a browser extension gets, and every one of them uses the app's own interface.
+- This note designs Arch's plugin system for queue task V.11 and rows 44 and 50 of `docs/features.md`. It also covers how tasks that build on plugins fit: web extensions on WebKit (IV.12) and on Chromium (VI.1), the password manager plugins (IV.13, row 39), Personas (III.12), AI hooks (VII.6), and plugins that AI writes (VII.7, row 55).
+- A plugin can add sidebar items, palette commands, menu items, keyboard shortcuts, settings, panels, and page scripts that run on both engines. Plugins have more capabilities than browser extensions. Each capability uses the app's own interface.
 - Built-in plugins ship with the app. Later features can ship as built-in plugins and reach the browser only through the plugin API.
 - Installed plugins belong to one Persona. Manifest V3 web extensions are one kind of installed plugin.
 - Plugins use public APIs only. Nothing in this note needs a private API or a flag on `flags://`.
 
 ## Principles
 
-- One API for every kind. Built-in, installed, and AI-written plugins call the same Swift API, which `PluginContext` defines. Script plugins reach it through a JavaScript bridge, and web extensions reach it through a manifest mapping. A plugin gets a new capability only when a member is added to `PluginContext`, the same rule the engine protocols follow.
-- Declare first. A plugin's manifest lists its contributions, its permissions, and the events it wants. Arch shows the contributions and starts the plugin's code only when one of them is used.
-- No plugin code runs in the app process except built-in Swift plugins, which are part of the app. Installed code runs in a WebKit web content process or in an engine's own extension runtime.
-- The code the user reviewed is the code that runs. Script plugins load scripts only from their own package, and page scripts come only from package files.
-- No servers, no store, no automatic updates. Plugins come from the app bundle, from files the user chooses, or from the AI feature (VII.7). An update is a new install of the same identifier.
+- All plugin kinds call one API. Built-in, installed, and AI-written plugins call the Swift API defined by `PluginContext`. Script plugins reach it through a JavaScript bridge, and web extensions reach it through a manifest mapping. A plugin gains a capability only when `PluginContext` gains a member. The engine protocols follow the same rule.
+- Declare first. A plugin's manifest lists its contributions, permissions, and requested events. Arch shows the contributions and starts the plugin's code only when one of them is used.
+- Only built-in Swift plugins, which are part of the app, run in the app process. Installed code runs in a WebKit web content process or in an engine's own extension runtime.
+- Only code the user reviewed runs. Script plugins load scripts only from their own package, and page scripts come only from package files.
+- No servers, no store, no automatic updates. Plugins come from the app bundle, user-selected files, or the AI feature (VII.7). An update is a new install of the same identifier.
 
 ## Plugin kinds
 
@@ -24,7 +24,7 @@
 | `script` | Arch package: `plugin.json`, HTML, JavaScript, CSS | A hidden `WKWebView` per running plugin; page scripts in the tab's engine | A folder or `.zip` the user chooses, or VII.7 | Installed in one Persona |
 | `webExtension` | Manifest V3 web extension package | `WKWebExtensionController` on WebKit tabs; CEF's extension runtime on Chromium tabs after VI.1 | A folder, `.zip`, or `.crx` file the user chooses | Installed in one Persona |
 
-A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` that has `manifest_version` 3 is a web extension. Arch refuses any other folder, and any manifest with an `apiVersion` higher than the one the app supports.
+A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` that has `manifest_version` 3 is a web extension. Arch refuses other folders, and manifests with an `apiVersion` higher than the app supports.
 
 ## Package and manifest
 
@@ -75,32 +75,32 @@ A script plugin's `plugin.json`:
 | `background` | The background script. A plugin without one can still add page scripts, settings, and panels |
 | `contributes` | Commands, menu items, sidebar items, settings, a settings page, and page scripts |
 
-Symbols are SF Symbols names, so a plugin needs no image files. A package may still carry an `icon` image for its Settings row.
+Symbols use SF Symbols names, so plugins need no image files. A package may still carry an `icon` image for its Settings row.
 
 ## Contributions
 
-Each contribution names its plugin wherever it appears: in the palette row's subtitle, in the menu item's section, in the sidebar item's tooltip, and in the Settings section. Identifiers are scoped to the plugin, so two plugins can use the same command `id`.
+Each contribution names its plugin wherever it appears: in the palette row's subtitle, in the menu item's section, in the sidebar item's tooltip, and in the Settings section. Identifiers belong to the plugin, so two plugins can use the same command `id`.
 
 | Contribution | Where it appears | Notes |
 |---|---|---|
 | Command | The command palette, after the primary row and before history suggestions, when the typed text matches the title or a keyword; Settings ▸ Shortcuts (IV.3) | A command with `takesArgument` shows its title as a token in the palette field and receives the text the user types after it |
-| Shortcut | The command's menu item | The app's own shortcuts win over a plugin's. Between plugins, the first installed keeps the shortcut and Settings shows the conflict |
+| Shortcut | The command's menu item | App shortcuts take priority over plugin shortcuts. Between plugins, the first installed keeps the shortcut, and Settings shows the conflict |
 | Menu item | A Plugins menu in the menu bar, grouped by plugin; the page context menu for the listed contexts (page, link, image, selection, editable); the tab context menu; the space menu | Page context menu items run app-side, so they work alike on both engines, as row 49 requires |
 | Sidebar item | A row below the favorites with a symbol, a title, and an optional badge | It runs a command or opens a panel |
-| Panel | A popover beside the sidebar item, or a page that takes the sidebar's place as the library does | A script plugin's panel is one of its HTML files in a sandboxed web view; a built-in plugin's panel is a view controller |
+| Panel | A popover beside the sidebar item, or a page that takes the sidebar's place as the library does | A script plugin's panel uses one of its HTML files in a sandboxed web view. A built-in plugin's panel uses a view controller |
 | Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. A script plugin may add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
 | Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
 
 ## Page scripts
 
-A page script is a JavaScript or CSS file from the plugin's package that runs in the pages its grant covers. Arch wraps each script in a guard that checks the frame's address against the plugin's patterns, so the engines only need to inject scripts, not match addresses. Each plugin has its own world name, `ARCHPlugin.<plugin id>`.
+A page script is a JavaScript or CSS file from the plugin's package that runs in the pages its grant covers. Arch wraps each script in a guard that checks the frame's address against the plugin's patterns. Engines only need to inject scripts; they do not need to match addresses. Each plugin has its own world name, `ARCHPlugin.<plugin id>`.
 
 - WebKit: each script becomes a `WKUserScript` in the plugin's `WKContentWorld.world(name:)`, so the page and other plugins cannot see its globals. Messages from the script go through a `WKScriptMessageHandlerWithReply` added only to that world. Arch reaches the script with `evaluateJavaScript(_:in:in:)` in the same world. Style files go through the existing `insertStylesheet`.
-- Chromium: CEF 156's public API has no isolated worlds (needs verification). The app passes the scripts to the renderer in `extra_info` when it creates the browser and in a process message when they change. The helper's `CefRenderProcessHandler::OnContextCreated` runs them in the page's main world before the page's own scripts. A native function made with `CefV8Value::CreateFunction` carries messages to the browser process as `CefProcessMessage`s. Each plugin's wrapper keeps that function and its delivery function in a closure and removes them from `window` before the page runs. Document-end scripts wait for `DOMContentLoaded`.
-- The Chromium difference: the page can see what a plugin's script changes in the DOM and can replace DOM methods the script calls later. The script's closure stays private. Plugins treat the page as untrusted on both engines, and the app treats every message from a page script as page input, so the difference affects a plugin's reliability, not the app's safety. A CEF patch that adds isolated worlds can join Phase VI if a plugin needs one.
-- With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, the host runs them in the selected tab's current page through `executeJavaScript(_:inWorld:completion:)` when the user runs one of the plugin's commands there, and keeps them in that tab's list until the tab leaves the site.
-- Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs. Disabling a plugin closes its message channel at once, so scripts that already run cannot reach it, and they stop at the next load.
+- Chromium: CEF 156's public API has no isolated worlds (needs verification). The app passes the scripts to the renderer in `extra_info` when it creates the browser and in a process message when they change. The helper's `CefRenderProcessHandler::OnContextCreated` runs them in the page's main world before the page's own scripts. A native function made with `CefV8Value::CreateFunction` carries messages to the browser process as `CefProcessMessage`s. Each plugin's wrapper keeps that function and its delivery function in a closure. It removes them from `window` before the page runs. Document-end scripts wait for `DOMContentLoaded`.
+- The Chromium difference: the page can see what a plugin's script changes in the DOM and can replace DOM methods the script calls later. The script's closure stays private. Plugins treat pages as untrusted on both engines. The app treats every page script message as page input. The difference therefore affects plugin reliability, not app safety. A CEF patch that adds isolated worlds can join Phase VI if a plugin needs one.
+- With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, the host runs them in the selected tab's current page through `executeJavaScript(_:inWorld:completion:)` when the user runs one of that plugin's commands there. They stay in that tab's list until it leaves the site.
+- Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs. Disabling a plugin closes its message channel at once. Running scripts cannot reach it and stop at the next load.
 - Messages carry JSON. The app delivers a page message to the plugin only when the sending frame's address still matches the plugin's grant.
 
 ## Permissions
@@ -118,25 +118,25 @@ A page script is a JavaScript or CSS file from the plugin's package that runs in
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own routing entry | No AI access |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
-- Install shows a sheet with each permission as a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com". The user can narrow the sites and switch `siteAccess` to `whenInvoked` before installing; when a manifest asks for all sites, the sheet starts with `whenInvoked`. The result is the plugin's `PluginGrant`.
+- Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com". The user can narrow the sites and switch `siteAccess` to `whenInvoked` before installing. When a manifest asks for all sites, the sheet starts with `whenInvoked`. The result is the plugin's `PluginGrant`.
 - Granting access to all sites or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table.
-- Settings ▸ Plugins lists each grant and revokes any part of it. A plugin whose call needs a revoked permission gets `permissionDenied`; contributions that need it are hidden.
+- Settings ▸ Plugins lists each grant and revokes any part of it. Calls that need a revoked permission get `permissionDenied`. Contributions that need it are hidden.
 - An update that asks for more than the current grant shows the sheet again with the new items marked. An update that asks for less narrows the grant without asking.
-- Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other, Settings shows it, and the user can switch a built-in plugin off.
+- Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other. Settings shows the grant, and the user can switch the plugin off.
 - A plugin never sees cookies, passwords, or API keys. Its fetches carry no Persona cookies, so a plugin cannot act as the user on a site. Site data stays in the engines.
 
 ## Sandboxing
 
 - Built-in plugins run in the app process. They are trusted, reviewed with the app, and limited to `PluginContext` by convention.
-- Script plugins run their background script in a hidden `WKWebView` that the `Plugins` module owns, so the code runs in a separate WebKit web content process whatever engine the tabs use:
+- Script plugins run their background script in a hidden `WKWebView` owned by the `Plugins` module. The code runs in a separate WebKit web content process, regardless of the tabs' engine:
   - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package.
-  - Every document is served with a content security policy of `default-src 'self'` and a `connect-src` limited to the scheme itself, with no `unsafe-eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
+  - Every document has a content security policy of `default-src 'self'` and a `connect-src` limited to the scheme itself, with no `unsafe-eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
   - A `WKContentRuleList` blocks every load outside the plugin's scheme as a second layer.
   - Each plugin uses its own `WKWebsiteDataStore.nonPersistent()`, so it shares no cookies or site storage with any Persona or plugin. Its lasting state goes through `arch.storage`.
-  - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. The host knows the calling plugin from the web view that sent the message, never from the message.
+  - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. The host identifies the calling plugin by the sending web view, never by the message.
   - Panels and HTML settings pages use the same configuration and bridge.
 - Web extensions run in the engines' own extension sandboxes: WebKit's for `WKWebExtensionController`, Chromium's for CEF's extension runtime.
-- Hangs and crashes: a background that leaves an event or command unanswered for 10 seconds counts as hung. The host releases its web view (whether WebKit then ends the process at once needs verification) and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. After three failures within five minutes, the host disables the plugin and its Settings row says why.
+- Hangs and crashes: a background is hung if it leaves an event or command unanswered for 10 seconds. The host releases its web view (whether WebKit then ends the process at once needs verification) and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. After three failures within five minutes, the host disables the plugin. Its Settings row says why.
 - Resources: a background starts at its first event, command, or page message and stops after 30 seconds without work. A panel's web view lives only while the panel is open.
 
 ## Lifecycle
@@ -151,12 +151,12 @@ A page script is a JavaScript or CSS file from the plugin's package that runs in
 
 1. Stage: the user chooses a folder or archive with `NSOpenPanel`, or VII.7 hands over a folder. Arch copies it to a staging folder, reads and validates the manifest, and lists the files.
 2. Review: the install sheet shows the name, version, origin, permissions, and sites. For an AI-written plugin it also shows every file's source.
-3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json` as disabled, or enabled when the user chose Install and Enable.
+3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable.
 4. Enable: Arch registers the contributions, adds the page scripts to the Persona's tabs from their next load, and sends `activate` when the background first starts.
-5. Update: the same `id` installed again replaces the package after the review. Storage is kept. A running background stops and restarts on the new code.
+5. Update: installing the same `id` again replaces the package after review and keeps storage. A running background stops and restarts on the new code.
 6. Disable: Arch removes the contributions, closes page message channels, sends `deactivate`, and stops the background.
 7. Remove: after a confirmation sheet, Arch disables the plugin and deletes its package, storage, and Keychain items. Built-in plugins cannot be removed, only disabled.
-8. Launch: each Persona's manager reads `plugins.json`, registers the built-in types, and shows enabled contributions. No installed plugin's code runs until it is needed.
+8. Launch: each Persona's manager reads `plugins.json`, registers the built-in types, and shows enabled contributions. Installed plugin code runs only when needed.
 
 ## Storage
 
@@ -174,8 +174,8 @@ A page script is a JavaScript or CSS file from the plugin's package that runs in
 
 ## Personas
 
-- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads, and gets events only from them.
-- A plugin installed in two Personas is two installations, with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
+- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them.
+- Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
 - V.11 builds after III.12. If it starts first, every plugin belongs to one default Persona whose identifier III.12 adopts.
 
@@ -192,33 +192,33 @@ The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesi
 | `content_scripts` | Run by the engine's extension runtime, not by Arch's page scripts |
 | `nativeMessaging` | Arch relays messages to the native helper (see below) |
 
-- WebKit: one `WKWebExtensionController` per Persona, made with `WKWebExtensionController.Configuration(identifier:)` and the Persona's identifier, and set as each WebKit tab's `webExtensionController`. Arch adapts its tabs and windows to `WKWebExtensionTab` and `WKWebExtensionWindow`, and answers permission prompts, action popups, and options pages from the controller's delegate with its own sheets and popovers. Requires macOS 15.4; below it, web extension plugins are `unavailable`.
+- WebKit: one `WKWebExtensionController` per Persona, made with `WKWebExtensionController.Configuration(identifier:)` and the Persona's identifier, and set as each WebKit tab's `webExtensionController`. Arch adapts its tabs and windows to `WKWebExtensionTab` and `WKWebExtensionWindow`. It handles permission prompts, action popups, and options pages from the controller's delegate with its own sheets and popovers. Requires macOS 15.4; below it, web extension plugins are `unavailable`.
 - Chromium: after VI.1, CEF's extension runtime loads the same package into the Persona's `CefRequestContext` (needs verification). Until then, an extension runs on WebKit tabs only, and its contributions say so on Chromium tabs.
-- One install, two runtimes: each engine runs its own copy of the extension with its own background and storage. An extension's state, such as a password manager's lock, is not shared between engines. The tab list each copy sees covers its own engine's tabs; whether WebKit can list Chromium tabs as tabs without a web view needs verification.
-- Identifier: Arch keeps one extension identifier for both engines, taken from the package's public key when it has one and generated at install otherwise. WebKit receives it as the context's `uniqueIdentifier` (needs verification for helpers that check the calling extension's origin).
+- One install, two runtimes: each engine runs its own copy of the extension with its own background and storage. An extension's state, such as a password manager's lock, is not shared between engines. Each copy lists its own engine's tabs. Whether WebKit can list Chromium tabs as tabs without a web view needs verification.
+- Identifier: Arch uses one extension identifier for both engines. It takes the identifier from the package's public key if present; otherwise, it generates one at install. WebKit receives it as the context's `uniqueIdentifier` (needs verification for helpers that check the calling extension's origin).
 - Native messaging: Arch answers `webExtensionController(_:sendMessage:toApplicationWithIdentifier:for:)` and the matching port call on WebKit. It finds the helper through a host manifest in `~/Library/Application Support/Arch/NativeMessagingHosts/`, starts it with `Process`, and exchanges length-prefixed JSON over its standard input and output. Chromium's runtime does its own native messaging after VI.1. Whether the vendors' helpers install host manifests for Arch needs verification in IV.13.
 
 ## Password manager plugins
 
-- The 1Password and iCloud Passwords extensions are web extension plugins the user installs in each Persona that needs them. Arch bundles no third-party code.
+- The user installs the 1Password and iCloud Passwords web extension plugins in each Persona that needs them. Arch bundles no third-party code.
 - Both need `nativeMessaging` to reach their desktop helpers, so installing them asks for Touch ID.
-- 1Password's desktop app accepts a browser it does not list only when the browser is signed and installed in `/Applications`. The iCloud Passwords helper starts only for browsers on Apple's `apple/password-manager-resources` list. Both stay blocked on a stable signing identity (I.7), and the Chromium side on VI.1, as IV.13 records.
+- 1Password's desktop app accepts a browser it does not list only when the browser is signed and installed in `/Applications`. The iCloud Passwords helper starts only for browsers on Apple's `apple/password-manager-resources` list. Both remain blocked on a stable signing identity (I.7), and on Chromium also on VI.1, as IV.13 records.
 - Universal Autofill (⌘\\) reads the page's accessibility tree and is not a plugin matter; it needs II.13 on Chromium.
-- Each plugin's Settings row shows whether its helper answered, so a missing allow-list entry shows as a status, not a silent failure.
+- Each plugin's Settings row shows whether its helper answered. A missing allow-list entry shows as a status instead of failing silently.
 
 ## AI hooks and plugins that AI writes
 
 - AI hooks (VII.6) are built-in plugins. They subscribe to `pageLoaded` and `downloadFinished` and call the AI interface through the `ai` permission. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`.
-- The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules; the plugin never sees a provider or a key.
+- The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
 - VII.7 writes a script plugin only, never a built-in plugin or a web extension, and never with `nativeMessaging`. It puts the package in a staging folder and calls `PluginManager.stage(_:)`.
-- An AI-written plugin goes through the same review sheet, which shows every file's full source and the permissions. It installs disabled with the origin `generated`, and Settings labels it Written by AI. The user enables it.
-- When the user asks the AI to change the plugin, the AI writes a new version with the same `id`. The review shows the files that changed and any added permission. Removing it works like any plugin.
-- Because a script plugin can load no code from outside its package, the reviewed files are the code that runs. A plugin can still act on data it fetches, so its `network` hosts are part of the review.
+- An AI-written plugin uses the same review sheet, showing every file's full source and the permissions. It installs disabled with the origin `generated`, and Settings labels it Written by AI. The user enables it.
+- When the user requests a change, the AI writes a new plugin version with the same `id`. The review shows the files that changed and any added permission. Removing it works like any plugin.
+- Script plugins load code only from their package, so only reviewed files run. A plugin can still act on data it fetches, so its `network` hosts are part of the review.
 - The AI receives the JavaScript API reference below as its context for writing plugins (VII.7 decides how).
 
 ## Swift API
 
-The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`. `Browsing` and `Preferences` depend on it to show contributions; `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements, so the modules do not depend on each other in a loop. `Extensions` (IV.12) depends on `Plugins` and supplies the web extension runtime. All types below are public.
+The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`. `Browsing` and `Preferences` depend on it to show contributions. `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements. This avoids a dependency loop. `Extensions` (IV.12) depends on `Plugins` and supplies the web extension runtime. All types below are public.
 
 ### Identity and manifest
 
@@ -657,7 +657,7 @@ public final class PluginManager: ObservableObject {
 
 ### JavaScript API for script plugins
 
-The bridge script that the runtime adds to every plugin document defines `arch`. Each call is a promise that resolves with the Swift call's result or rejects with the `PluginError` case name.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with the `PluginError` case name.
 
 | JavaScript | Swift |
 |---|---|
@@ -676,7 +676,7 @@ Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves 
 
 ## Engine protocol additions
 
-V.11 adds these Tier 1 members, which both adapters implement, and records them in `docs/engine-protocol.md` when it builds them:
+V.11 adds these Tier 1 members, which both adapters implement, and records them in `docs/engine-protocol.md` when implemented:
 
 ```swift
 public enum EnginePageScriptInjectionTime: String, Sendable {
@@ -717,7 +717,7 @@ func executeJavaScript(_ script: String, inWorld world: String, completion: @esc
 func postPageScriptMessage(_ json: String, toWorld world: String)
 ```
 
-Chromium's `executeJavaScript(_:inWorld:completion:)` evaluates in the renderer and answers with a process message, as the theme color does, because CEF's `ExecuteJavaScript` returns no value.
+Chromium's `executeJavaScript(_:inWorld:completion:)` evaluates in the renderer and answers with a process message, like the theme color, because CEF's `ExecuteJavaScript` returns no value.
 
 ## Build order
 
@@ -731,9 +731,9 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` evaluates in the renderer 
 ## Open decisions
 
 - Isolation on Chromium: plugin page scripts share the page's main world until a CEF patch adds isolated worlds. The alternative is to run plugin page scripts on WebKit tabs only.
-- Sandbox for script plugins: a hidden `WKWebView` per running plugin costs a web content process each. JavaScriptCore in the app process would cost less, but it gives no process isolation, and its execution time limit is private API.
+- Sandbox for script plugins: a hidden `WKWebView` per running plugin costs a web content process each. JavaScriptCore in the app process would cost less. It provides no process isolation, and its execution time limit is private API.
 - One extension, two runtimes: each engine keeps its own copy of an extension's state and storage, so the user may unlock a password manager once per engine.
-- Install sources: folders, `.zip`, and `.crx` files only, with no install straight from an online store.
-- Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site would have to use a page script on that site instead.
+- Install sources: folders, `.zip`, and `.crx` files only. No direct installs from an online store.
+- Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
 - Site access defaults to `whenInvoked` when a manifest asks for all sites.
 - The 10-second hang limit, 30-second idle stop, and 5 MB storage limit are starting values.

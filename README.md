@@ -42,7 +42,7 @@ We also recommend [Dia](https://www.diabrowser.com), the new browser from the te
 
 ## 🧭 Role
 
-Arch is a sidebar-first macOS browser with its own implementation: Personas that own their spaces, pinned tabs, split view, a command bar, plugins, and media controls.
+Arch is a sidebar-first macOS browser with its own implementation: Personas with their own spaces, pinned tabs, split view, a command bar, plugins, and media controls.
 
 The core goals are:
 
@@ -50,7 +50,7 @@ The core goals are:
 - Use Chromium packaged through the Chromium Embedded Framework (CEF) as the primary engine. Use WebKit as the secondary engine. Support both through one engine protocol. Allow engine switching per profile and per tab.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. On both engines, use macOS system frameworks for every part of the platform user experience.
 - Run no servers. Use iCloud or other replacements for sync and other features that need a server.
-- Offer AI features through providers the user connects using an API key or a signed-in command-line tool. The user chooses a provider and model for each feature. Ship no model or account.
+- Offer AI features through providers the user connects with an API key or a signed-in command-line tool. The user chooses a provider and model for each feature. Ship no model or account.
 
 Out of scope:
 
@@ -86,7 +86,7 @@ git config core.hooksPath .githooks
 - [`docs/plan.md`](./docs/plan.md): read this first for goals, approach, current state, working rules, build steps, engine plan, and next steps.
 - [`docs/engine-protocol.md`](./docs/engine-protocol.md): the protocols in `ARCHEngine`, adapter modules, capability tiers, and engine switching.
 - [`docs/features.md`](./docs/features.md): planned features with the implementation approach and status of each.
-- [`docs/sync.md`](./docs/sync.md): the sync design, with CloudKit record types, conflict handling, offline behavior, and what never syncs.
+- [`docs/sync.md`](./docs/sync.md): the sync design: CloudKit record types, conflict handling, offline behavior, and what never syncs.
 - [`docs/plugins.md`](./docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
 
