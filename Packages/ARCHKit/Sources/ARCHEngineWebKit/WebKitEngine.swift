@@ -203,12 +203,19 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
     private(set) var suppressesDialogs = false
 
+    /// The version and engine tokens a full browser on this system appends to its user agent. `WKWebView` leaves them out, and some sites then send pages made for old browsers. The system's WebKit carries the system's version number.
+    static let applicationNameForUserAgent: String = {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "Version/\(version.majorVersion).\(version.minorVersion) Safari/605.1.15"
+    }()
+
     public init(sessionID: String, context: WebKitBrowserContext, configuration: EngineWebContentsConfiguration) {
         self.sessionID = sessionID
         self.context = context
         self.allowsDownloads = !configuration.disallowDownloads
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.websiteDataStore = context.dataStore
+        webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
         super.init()
         installBridge()
