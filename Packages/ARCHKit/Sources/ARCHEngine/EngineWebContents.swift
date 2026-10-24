@@ -127,6 +127,10 @@ public protocol EngineThumbnails: AnyObject {
 
 public protocol EngineDevTools: AnyObject {
     var isOpen: Bool { get }
+    /// The window the tools show in while they are open, for the app to place beside the page.
+    var window: NSWindow? { get }
+    /// Called when the tools open in a window or close.
+    var didChangeWindow: (() -> Void)? { get set }
     func open()
     func close()
     func openConsoleView()

@@ -496,6 +496,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             completion(credential?.user, credential?.password)
         }
     }
+    public func cefBrowserDevToolsDidOpen(_ window: NSWindow) {
+        (devTools as? ChromiumDevTools)?.setWindow(window)
+    }
+
+    public func cefBrowserDevToolsDidClose() {
+        (devTools as? ChromiumDevTools)?.setWindow(nil)
+    }
+
     public func cefBrowserDidChangeAudible(_ isAudible: Bool) {
         self.isAudible = isAudible
         uiDelegate?.webContentsDidChangeAudibleState(self)
@@ -560,12 +568,19 @@ public final class ChromiumNavigationController: EngineNavigationController {
     }
 }
 
-/// Chromium's developer tools in their own window. CEF offers no way to pick a panel, so every view opens the tools as they are.
+/// Chromium's developer tools in a window that CEF makes. CEF offers no way to pick a panel, so every view opens the tools as they are.
 final class ChromiumDevTools: EngineDevTools {
     private unowned let webContents: ChromiumWebContents
+    private(set) var window: NSWindow?
+    var didChangeWindow: (() -> Void)?
 
     init(webContents: ChromiumWebContents) {
         self.webContents = webContents
+    }
+
+    fileprivate func setWindow(_ window: NSWindow?) {
+        self.window = window
+        didChangeWindow?()
     }
 
     var isOpen: Bool { webContents.hasDevTools }

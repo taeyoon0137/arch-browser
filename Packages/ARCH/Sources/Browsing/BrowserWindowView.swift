@@ -47,6 +47,11 @@ public struct BrowserWindowView: View {
     /// While the selected tab's page is in fullscreen, it fills the window without the sidebar or margins.
     private var isPageFullscreen: Bool { session.fullscreenTabID != nil && session.fullscreenTabID == session.selectedTabID }
 
+    /// The sidebar's own margin is part of the gap beside it.
+    private var pageMargins: EdgeInsets {
+        EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin, bottom: Self.pageMargin, trailing: Self.pageMargin)
+    }
+
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
@@ -67,9 +72,8 @@ public struct BrowserWindowView: View {
                         }
                     }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(isPageFullscreen ? 0 : 0.08)).allowsHitTesting(false))
-                    // The sidebar's own margin is part of the gap beside it.
-                    .padding(isPageFullscreen ? EdgeInsets() : EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
-                                                                          bottom: Self.pageMargin, trailing: Self.pageMargin))
+                    .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
+                    .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
             }
             if !session.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
                 peekingSidebar

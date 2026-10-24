@@ -168,7 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         viewMenu.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
         viewMenu.addItem(.separator())
         let developerMenu = NSMenu(title: "Developer")
-        developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(showDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
+        developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(toggleDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
+        developerMenu.addItem(.separator())
+        for side in DevToolsSide.allCases {
+            developerMenu.addItem(withTitle: side.title, action: #selector(chooseDevToolsSide(_:)), keyEquivalent: "").representedObject = side.rawValue
+        }
         viewMenu.addItem(submenu(developerMenu, title: "Developer"))
         let appearanceMenu = NSMenu(title: "Appearance")
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
@@ -244,7 +248,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func exportAsPDF() { session.exportPageAsPDF() }
     @objc private func sharePage() { session.shareSelectedPage() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
-    @objc private func showDeveloperTools() { session.showDeveloperTools() }
+    @objc private func toggleDeveloperTools() { session.toggleDeveloperTools() }
+    @objc private func chooseDevToolsSide(_ sender: NSMenuItem) {
+        guard let side = (sender.representedObject as? String).flatMap(DevToolsSide.init(rawValue:)) else { return }
+        session.devToolsDock.side = side
+    }
     @objc private func toggleDownloads() { session.toggleLibrary() }
     @objc private func reload() { session.reload() }
     @objc private func zoomIn() { session.zoomIn() }
@@ -333,7 +341,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(setAsDefaultBrowser) {
             return Self.isRunningFromBundle && !Self.isDefaultBrowser
         }
-        if item.action == #selector(showDeveloperTools) {
+        if item.action == #selector(chooseDevToolsSide(_:)) {
+            item.state = (item.representedObject as? String) == session?.devToolsDock.side.rawValue ? .on : .off
+        }
+        if item.action == #selector(toggleDeveloperTools) {
+            item.title = session?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
             return session?.canShowDeveloperTools == true
         }
         if item.action == #selector(sharePage) {

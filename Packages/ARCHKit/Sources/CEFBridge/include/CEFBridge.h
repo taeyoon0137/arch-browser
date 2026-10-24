@@ -146,6 +146,10 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)cefBrowserDidChangeThemeColor:(NSString *)color;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
+/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own.
+- (void)cefBrowserDevToolsDidOpenWindow:(NSWindow *)window;
+/// Reports that the developer tools closed.
+- (void)cefBrowserDevToolsDidClose;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port

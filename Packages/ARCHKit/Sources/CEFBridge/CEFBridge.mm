@@ -1065,6 +1065,42 @@ private:
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
 };
 
+// Reports the developer tools' window to the inspected browser's delegate. CEF makes the window; the app places it.
+class BridgeDevToolsClient : public CefClient, public CefLifeSpanHandler {
+public:
+    explicit BridgeDevToolsClient(id<ARCHCEFBrowserDelegate> delegate) : delegate_(delegate) {}
+
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { ReportWindow(browser, 40); }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        isClosed_ = true;
+        [delegate_ cefBrowserDevToolsDidClose];
+    }
+
+private:
+    // The tools' window appears a little after `OnAfterCreated`, so the handle is read again every 50 milliseconds, up to `attempts` times.
+    void ReportWindow(CefRefPtr<CefBrowser> browser, int attempts) {
+        if (isClosed_) {
+            return;
+        }
+        NSWindow *window = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle()).window;
+        if (window) {
+            [delegate_ cefBrowserDevToolsDidOpenWindow:window];
+        } else if (attempts > 1) {
+            CefRefPtr<BridgeDevToolsClient> client = this;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                client->ReportWindow(browser, attempts - 1);
+            });
+        }
+    }
+
+    __weak id<ARCHCEFBrowserDelegate> delegate_;
+    bool isClosed_ = false;
+    IMPLEMENT_REFCOUNTING(BridgeDevToolsClient);
+};
+
 }  // namespace
 
 @implementation ARCHCEFBrowser {
@@ -1534,8 +1570,8 @@ private:
 
 - (void)showDevTools {
     if (_browser) {
-        // With no window info and no client, CEF makes and owns the tools' window.
-        _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
+        // With no window info, CEF makes and owns the tools' window; the client reports it to the delegate. Open tools only take focus.
+        _browser->GetHost()->ShowDevTools(CefWindowInfo(), new BridgeDevToolsClient(_delegate), CefBrowserSettings(), CefPoint());
     }
 }
 

@@ -49,9 +49,12 @@ public final class BrowserSession: ObservableObject {
             }
             deferVisibleSheet()
             showNextSheet()
+            devToolsDock.track(selectedTab?.webContents.devTools)
         }
     }
     @Published public var isSidebarVisible = true
+    /// Where the selected tab's developer tools show.
+    public let devToolsDock = DevToolsDock()
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
@@ -424,6 +427,7 @@ public final class BrowserSession: ObservableObject {
             self.cancelSheets(for: tab)
             if tab.id == self.selectedTabID, self.isFindBarVisible { self.hideFindBar() }
             tab.replaceWebContents(with: replacement)
+            if tab.id == self.selectedTabID { self.devToolsDock.track(replacement.devTools) }
             self.retire(old)
             self.scheduleSave()
         }
@@ -850,7 +854,12 @@ public final class BrowserSession: ObservableObject {
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
     /// Whether the selected tab's engine offers developer tools.
     public var canShowDeveloperTools: Bool { selectedTab?.webContents.devTools != nil }
-    public func showDeveloperTools() { selectedTab?.webContents.devTools?.open() }
+    public var isShowingDeveloperTools: Bool { selectedTab?.webContents.devTools?.isOpen == true }
+    public func toggleDeveloperTools() {
+        guard let devTools = selectedTab?.webContents.devTools else { return }
+        devToolsDock.track(devTools)
+        devTools.isOpen ? devTools.close() : devTools.open()
+    }
     public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
 

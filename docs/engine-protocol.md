@@ -41,7 +41,7 @@
 | Capability | Chromium | WebKit |
 |---|---|---|
 | `extensions` (Chrome extensions) | Planned | None |
-| `devTools` | CEF's developer tools in their own window; a panel cannot be chosen | None: the adapter only sets `isInspectable`, because opening the inspector needs a private API |
+| `devTools` | CEF's developer tools in a window the adapter reports through `EngineDevTools.window`, which the app places beside the page; a panel cannot be chosen | None: the adapter only sets `isInspectable`, because opening the inspector needs a private API |
 | `pdfController` | Planned | Built-in PDF support |
 | `importSources` | Planned | None |
 | `notifications` | Planned | None |
