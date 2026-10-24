@@ -89,12 +89,16 @@ open build/Arch.app
 Regression checklist, run from the bundle on the Chromium engine with a fresh Application Support folder:
 
 1. ⌘F opens the find bar focused; typing shows "n of m"; Return and ⇧Return move through matches; Escape closes the bar and the page keeps keyboard focus; switching tabs closes it.
-2. ⌘⇧J and the library button toggle the library; a file download shows its progress on the button and appears in the library; pause, resume, and cancel change the row; a download that finishes with the library closed adds to the button's badge until the library opens; Clear removes finished rows. The save panel path (`promptForDownloadPath`) has no setting yet; V.8 adds one.
+2. ⌘⇧J and the library button toggle the library, which pushes the sidebar aside with its first 60 points dimmed; a click on that part or a swipe brings the sidebar back, and a swipe past the first space brings the library in; a file download shows its progress on the button and appears in the library; pause, resume, and cancel change the row; a download that finishes with the library closed adds to the button's badge until the library opens; Clear removes finished rows. The save panel path (`promptForDownloadPath`) has no setting yet; V.8 adds one.
 3. After visiting three pages, ⌘L lists them under the typed text; choosing one navigates; a reload does not raise its visit count.
 4. `open -a build/Arch.app https://example.org` opens a tab in the running app and at launch.
 5. The first launch asks to set the default browser; Set as Default shows the system confirmation; afterwards the menu item is disabled.
 6. A page requesting the camera gets Arch's sheet, then the system prompt; Allow reaches the page, Don't Allow reports a denied request.
 7. Killing the renderer helper reloads the page once; a second crash on the same page shows the notice with Reload, Reload brings the page back, and the app keeps running.
+8. After a tab loads three pages, the History menu lists the two earlier ones, most recent first; choosing the older one loads it, on both engines.
+9. Dragging the sidebar's trailing edge resizes it within 240 to 400 points and the width survives a relaunch; ⌘S hides the sidebar and the window buttons; the pointer at the window's leading edge brings the sidebar out as a card with the window buttons, and the card goes once the pointer leaves it.
+10. Dragging a tab leaves a dimmed slot that moves with a light haptic at each new place, and the tab settles into the slot on release; dropping it among the pinned tabs pins it.
+11. Holding ⌘ alone for a moment shows each tab's ⌘-number where its close button goes; releasing ⌘ hides the numbers at once.
 
 ## Engine Plan
 
