@@ -4,7 +4,7 @@ import ARCHEngine
 import Combine
 import MediaPlayer
 
-/// Feeds `MPNowPlayingInfoCenter` from the media session of the selected tab while it plays sound, and otherwise of the tab that played sound last, and sends `MPRemoteCommandCenter` commands to that session. The page's Media Session metadata names the media; without it, the page's title and site stand in.
+/// Feeds `MPNowPlayingInfoCenter` from the media session of the focused tab, the active window's selected tab, while it plays sound, and otherwise of the tab that played sound last, and sends `MPRemoteCommandCenter` commands to that session. The page's Media Session metadata names the media; without it, the page's title and site stand in.
 final class NowPlaying: EngineMediaSessionDelegate {
     private weak var session: BrowserSession?
     private var cancellables: Set<AnyCancellable> = []
@@ -26,7 +26,7 @@ final class NowPlaying: EngineMediaSessionDelegate {
         session.$tabs.combineLatest(session.$favoriteTabs) { tabs, favoriteTabs in tabs + favoriteTabs.values }
             .sink { [weak self] tabs in self?.observe(tabs) }
             .store(in: &cancellables)
-        session.$selectedTabID.sink { [weak self] _ in self?.scheduleUpdate() }.store(in: &cancellables)
+        session.$focusedTabID.sink { [weak self] _ in self?.scheduleUpdate() }.store(in: &cancellables)
     }
 
     private func observe(_ tabs: [Tab]) {
@@ -68,11 +68,11 @@ final class NowPlaying: EngineMediaSessionDelegate {
         }
     }
 
-    /// The selected tab while it plays sound; otherwise the tab that plays sound and started last, or, while none plays, the one that stopped last.
+    /// The focused tab while it plays sound; otherwise the tab that plays sound and started last, or, while none plays, the one that stopped last.
     private func tabToShow() -> Tab? {
         guard let session else { return nil }
         let candidates = session.allTabs.filter { audibleChangedAt[$0.id] != nil && $0.webContents.mediaSession.playbackState != .none }
-        if let selected = session.selectedTab, selected.isAudible, candidates.contains(where: { $0 === selected }) { return selected }
+        if let focused = session.focusedTab, focused.isAudible, candidates.contains(where: { $0 === focused }) { return focused }
         return candidates.max { ($0.isAudible ? 1 : 0, audibleChangedAt[$0.id] ?? .distantPast) < ($1.isAudible ? 1 : 0, audibleChangedAt[$1.id] ?? .distantPast) }
     }
 

@@ -1,19 +1,20 @@
 // The page area and split view. The page area shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
 import SwiftUI
 
-/// The page area: the panes the session shows, or the empty page frame with no tab open. While the selected page fills the window in fullscreen, only its pane shows.
+/// The page area: the panes the window shows, or the empty page frame with no tab open. While the selected page fills the window in fullscreen, only its pane shows.
 struct PageAreaView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Receives the panes' frames, so that a dragged tab can open beside one. The page area itself does not change during a drag.
     let tabDrag: TabDragState
     let isPageFullscreen: Bool
 
     var body: some View {
-        let panes = isPageFullscreen ? session.selectedTab.map { [$0] } ?? [] : session.paneTabs
+        let panes = isPageFullscreen ? windowModel.selectedTab.map { [$0] } ?? [] : windowModel.paneTabs
         Group {
             if panes.isEmpty {
                 PageBackgroundView(isEmpty: true)
-                    .overlay { InternalPageOverlay(session: session) }
+                    .overlay { InternalPageOverlay() }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
             } else {
                 HStack(spacing: BrowserWindowView.pageMargin) {
@@ -35,23 +36,24 @@ struct PageAreaView: View {
 /// One tab's page in its rounded frame, with the crash notice and, for the selected tab, the internal page, the region capture overlay, the find bar, and the question popover. In a split view, a click on the page selects its tab, the selected tab's pane has a ring in the space's tint, and each pane has a close control.
 private struct PagePaneView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Observed so that the pane shows the new view when the tab switches engines.
     @ObservedObject var tab: Tab
     let isSplit: Bool
     let isPageFullscreen: Bool
     @Environment(\.spaceTheme) private var theme
 
-    private var isSelected: Bool { tab.id == session.selectedTabID }
+    private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     private var cornerRadius: CGFloat { isPageFullscreen ? 0 : PageFrameShape.cornerRadius }
 
     var body: some View {
         WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil)
             .background(PageBackgroundView(isEmpty: false))
             .overlay { PageCrashNoticeView(tab: tab) }
-            .overlay { if isSelected { InternalPageOverlay(session: session) } }
+            .overlay { if isSelected { InternalPageOverlay() } }
             .overlay {
-                if isSelected, session.regionCaptureTabID == tab.id, session.internalPage == nil {
-                    CaptureRegionOverlay(session: session, pageView: tab.webContents.view, cornerRadius: cornerRadius)
+                if isSelected, windowModel.regionCaptureTabID == tab.id, windowModel.internalPage == nil {
+                    CaptureRegionOverlay(windowModel: windowModel, pageView: tab.webContents.view, cornerRadius: cornerRadius)
                 }
             }
             .overlay(frameBorder.allowsHitTesting(false))
@@ -59,10 +61,10 @@ private struct PagePaneView: View {
             .overlay(alignment: .topTrailing) {
                 if isSelected {
                     VStack(alignment: .trailing, spacing: 8) {
-                        if session.isFindBarVisible {
-                            FindBarView(session: session)
+                        if windowModel.isFindBarVisible {
+                            FindBarView()
                         }
-                        PageQuestionLayer(session: session, assistant: session.pageAssistant)
+                        PageQuestionLayer(session: session)
                     }
                     .padding(.top, 12)
                     .padding(.trailing, 16)
@@ -70,7 +72,7 @@ private struct PagePaneView: View {
             }
             .overlay(alignment: .topLeading) {
                 if isSplit {
-                    PaneCloseButton { session.closePane(tab) }
+                    PaneCloseButton { windowModel.closePane(tab) }
                         .padding(6)
                 }
             }
@@ -87,17 +89,17 @@ private struct PagePaneView: View {
 
     /// Selecting the tab again would close an internal page over it.
     private func selectTab() {
-        if session.selectedTabID != tab.id { session.selectedTabID = tab.id }
+        if windowModel.selectedTabID != tab.id { windowModel.selectedTabID = tab.id }
     }
 }
 
 /// The internal page over the selected tab's pane, or over the empty page frame with no tab open.
 private struct InternalPageOverlay: View {
-    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
-        if let page = session.internalPage {
-            InternalPageView(session: session, page: page)
+        if let page = windowModel.internalPage {
+            InternalPageView(page: page)
                 .clipShape(PageFrameShape())
         }
     }
@@ -152,14 +154,14 @@ private struct PaneFramesKey: PreferenceKey {
 
 extension TabDragState {
     /// Where `tab` released at `point` opens in split view: before the pane under the pointer over its leading half, after it over its trailing half. `nil` when the tab cannot join the panes on screen, or when a pane would stay where it is.
-    func splitDrop(of tab: Tab, at point: CGPoint, in session: BrowserSession) -> SplitDrop? {
+    func splitDrop(of tab: Tab, at point: CGPoint, in windowModel: BrowserWindowModel) -> SplitDrop? {
         guard let paneIndex = paneFrames.firstIndex(where: { $0.frame.contains(point) }) else { return nil }
         let frame = paneFrames[paneIndex].frame
         let isLeading = point.x < frame.midX
         let index = isLeading ? paneIndex : paneIndex + 1
         if let current = paneFrames.firstIndex(where: { $0.tabID == tab.id }) {
             guard index != current, index != current + 1 else { return nil }
-        } else if !session.canOpenInSplitView(tab) {
+        } else if !windowModel.canOpenInSplitView(tab) {
             return nil
         }
         let halves = frame.divided(atDistance: frame.width / 2, from: .minXEdge)

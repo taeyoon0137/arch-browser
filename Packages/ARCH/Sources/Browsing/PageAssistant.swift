@@ -1,4 +1,4 @@
-// The AI features that read pages: the page reader beside the page and the question popover over it. They reach the AI module only through its client API, as features the user starts, and keep their conversations in memory: the reader's one per tab until the tab closes or moves to another site, the popover's one question at a time.
+// The AI features that read pages: the page reader beside the page and the question popover over it, which each window shows and opens (`BrowserWindowModel`). They reach the AI module only through its client API, as features the user starts, and keep their conversations in memory: the reader's one per tab until the tab closes or moves to another site, the popover's one question at a time.
 import AI
 import ARCHEngine
 import Combine
@@ -30,10 +30,6 @@ struct PageQuestion: Identifiable {
 
 @MainActor
 public final class PageAssistant: ObservableObject {
-    /// Whether the page reader shows beside the page.
-    @Published public private(set) var isReaderVisible = false
-    /// The question popover while it is open.
-    @Published private(set) var question: PageQuestion?
     /// Set by the app to open Settings ▸ AI, where errors about models, keys, and limits send the user.
     public var showAISettings: (() -> Void)?
 
@@ -56,8 +52,6 @@ public final class PageAssistant: ObservableObject {
         AIService.shared.register(.pageReader)
         AIService.shared.register(.pageQuestion)
         session.$tabs.sink { [weak self] tabs in self?.follow(tabs) }.store(in: &cancellables)
-        // The popover belongs to the page it opened over.
-        session.$selectedTabID.removeDuplicates().dropFirst().sink { [weak self] _ in self?.closeQuestion() }.store(in: &cancellables)
     }
 
     // MARK: Availability
@@ -80,21 +74,15 @@ public final class PageAssistant: ObservableObject {
 
     // MARK: Page reader
 
-    /// The reader opens beside a selected tab that no internal page covers, and closes at any time.
-    public var canToggleReader: Bool {
-        isReaderVisible || (session?.selectedTab != nil && session?.internalPage == nil)
+    /// Summarizes the tab's page as a window's reader opens beside it, unless its conversation has begun or AI is off for its site.
+    func readerDidShow(_ tab: Tab) {
+        guard let url = tab.url, AIService.shared.settings.allowsAI(on: url), readerConversation(for: tab).exchanges.isEmpty else { return }
+        summarize(tab)
     }
 
-    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it stops every reply being written.
-    public func toggleReader() {
-        withAnimation(SidebarView.pageSpring) { isReaderVisible.toggle() }
-        guard isReaderVisible else {
-            readerConversations.values.forEach { $0.cancel() }
-            return
-        }
-        if let tab = session?.selectedTab, let url = tab.url, AIService.shared.settings.allowsAI(on: url), readerConversation(for: tab).exchanges.isEmpty {
-            summarize(tab)
-        }
+    /// Stops every reply being written, as when a window's reader hides.
+    func stopReaderReplies() {
+        readerConversations.values.forEach { $0.cancel() }
     }
 
     func readerConversation(for tab: Tab) -> PageConversation {
@@ -115,38 +103,9 @@ public final class PageAssistant: ObservableObject {
 
     // MARK: Question popover
 
-    /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that no internal page covers.
-    var canAskAboutPage: Bool {
-        guard let session, session.internalPage == nil, let url = session.selectedTab?.url else { return false }
-        return Self.isQuestionAvailable && Self.canRead(url)
-    }
-
-    func askAboutPage() {
-        guard canAskAboutPage, let tab = session?.selectedTab else { return }
-        openQuestion(in: tab, selection: nil)
-    }
-
-    /// From the page's context menu, so the tab is the selected one.
-    func askAboutSelection(_ text: String, in tab: Tab) {
-        guard Self.isQuestionAvailable, let url = tab.url, Self.canRead(url) else { return }
-        openQuestion(in: tab, selection: AISelection(pageURL: url, pageTitle: tab.pageTitle, text: text))
-    }
-
-    /// Closes the popover the user dismissed and gives the page keyboard focus again.
-    func dismissQuestion() {
-        closeQuestion()
-        session?.focusPage()
-    }
-
-    private func openQuestion(in tab: Tab, selection: AISelection?) {
-        question?.conversation.cancel()
-        let conversation = PageConversation(feature: .pageQuestion, tabID: tab.id, instructions: Self.questionInstructions, pages: pages, client: AIService.shared)
-        question = PageQuestion(tabID: tab.id, selection: selection, conversation: conversation)
-    }
-
-    private func closeQuestion() {
-        question?.conversation.cancel()
-        question = nil
+    /// The conversation of one question about the tab's page, for a window's popover.
+    func makeQuestionConversation(forTab id: UUID) -> PageConversation {
+        PageConversation(feature: .pageQuestion, tabID: id, instructions: Self.questionInstructions, pages: pages, client: AIService.shared)
     }
 
     // MARK: Links in replies
@@ -168,9 +127,10 @@ public final class PageAssistant: ObservableObject {
             forgetConversations(ofTab: id)
         }
         for tab in tabs where tabObservers[tab.id] == nil {
+            // The page's context menu opens over the active window's selected tab.
             tab.askAboutSelection = { [weak self, weak tab] text in
                 guard let self, let tab else { return }
-                MainActor.assumeIsolated { self.askAboutSelection(text, in: tab) }
+                MainActor.assumeIsolated { self.session?.activeWindow?.askAboutSelection(text, in: tab) }
             }
             tabObservers[tab.id] = tab.$url.sink { [weak self, weak tab] url in
                 if let self, let tab { self.tab(tab, willMoveTo: url) }
@@ -185,7 +145,7 @@ public final class PageAssistant: ObservableObject {
         guard let previous, let url, Self.withoutFragment(previous) != Self.withoutFragment(url) else { return }
         guard Self.site(of: previous) == Self.site(of: url) else { return forgetConversations(ofTab: tab.id) }
         readerConversations[tab.id]?.pageDidChange()
-        if question?.tabID == tab.id { closeQuestion() }
+        session?.closePageQuestions(ofTab: tab.id)
     }
 
     private func forgetConversations(ofTab id: UUID) {
@@ -194,7 +154,7 @@ public final class PageAssistant: ObservableObject {
             conversation.cancel()
             readerConversations[id] = nil
         }
-        if question?.tabID == id { closeQuestion() }
+        session?.closePageQuestions(ofTab: id)
     }
 
     /// The host, or the scheme for an address without one, such as a local file.

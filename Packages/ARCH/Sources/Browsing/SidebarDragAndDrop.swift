@@ -128,6 +128,7 @@ struct SidebarItemDrag: ViewModifier {
 /// Draws a lifted favorite or space symbol at the pointer, above the sidebar and the page. `TabDragLayer` draws lifted tabs.
 struct SidebarItemDragLayer: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var tabDrag: TabDragState
     @Environment(\.spaceTheme) private var theme
 
@@ -148,7 +149,7 @@ struct SidebarItemDragLayer: View {
         switch tabDrag.item {
         case .favorite(let id):
             if let favorite = session.favorites.first(where: { $0.id == id }) {
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == session.selectedFavoriteID, isOpen: session.hasTab(favorite))
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasTab(favorite))
                     .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
@@ -165,14 +166,14 @@ struct SidebarItemDragLayer: View {
     }
 }
 
-/// Opens links, addresses, and files that other apps drop here in new tabs of the current space, in the default engine. A ring aligned with the tab rows shows while a drop can land.
+/// Opens links, addresses, and files that other apps drop here in new tabs of the window's current space, in the default engine. A ring aligned with the tab rows shows while a drop can land.
 struct SidebarDropTarget: ViewModifier {
     /// Links and files, and text that may be an address.
     static let types: [UTType] = [.url, .plainText]
     /// The schemes a dropped address may have; others, such as `mailto:`, belong to other apps.
     private static let schemes: Set<String> = ["http", "https", "file"]
 
-    let session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
@@ -187,7 +188,7 @@ struct SidebarDropTarget: ViewModifier {
                 }
             }
             .onDrop(of: Self.types, isTargeted: $isTargeted) { providers in
-                Self.loadURLs(from: providers) { urls in urls.forEach { session.openTab(url: $0) } }
+                Self.loadURLs(from: providers) { urls in urls.forEach { windowModel.openTab(url: $0) } }
                 return true
             }
     }

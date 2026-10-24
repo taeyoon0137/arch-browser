@@ -1,4 +1,4 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. The browser window's own state and commands live in its `BrowserWindowModel`, which the session forwards to for the views, menus, and scripts that still reach them here.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. The browser window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
@@ -39,8 +39,10 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var personas: [Persona] = []
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
-    /// The state and commands of the one browser window. Created once the session's own state exists, because it reads the session.
+    /// The state and commands of the one browser window, which shows every tab on screen. Created once the session's own state exists, because it reads the session.
     private var windowModel: BrowserWindowModel!
+    /// The active window's selected tab. Now Playing and AppleScript's `active tab` follow it.
+    @Published public private(set) var focusedTabID: UUID?
     /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
     /// Downloads that finished while the library was closed. The library button shows their count.
@@ -99,13 +101,10 @@ public final class BrowserSession: ObservableObject {
         primaryEngine = primary.engineKind
         personas = snapshot.personas ?? []
         spaces = snapshot.spaces
-        currentSpaceID = snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
-        windowModel = BrowserWindowModel(session: self, currentSpaceID: currentSpaceID)
-        // Views still read the window's state through the session, so they hear of its changes here.
-        windowModel.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        windowModel = BrowserWindowModel(session: self, currentSpaceID: snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id)
         start(primary)
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
@@ -127,25 +126,28 @@ public final class BrowserSession: ObservableObject {
         case noEngineStarted
     }
 
-    // MARK: Window state mirrors
+    // MARK: Windows
 
-    /// The window's current space, mirrored for the views that still read and assign it here. Assigning it changes the window's. Nothing subscribes to its publisher.
-    @Published public var currentSpaceID: UUID {
-        didSet { if !isMirroringWindow { windowModel.currentSpaceID = currentSpaceID } }
-    }
-    /// The window's selected tab, mirrored as `currentSpaceID` is. `NowPlaying` and `PageAssistant` subscribe to its publisher. Assigning it selects the tab in the window, even the tab already selected, so that an internal page over it closes.
-    @Published public var selectedTabID: UUID? {
-        didSet { if !isMirroringWindow { windowModel.selectedTabID = selectedTabID } }
-    }
-    /// Set while the mirrors take the window's values, so that those values do not go back to the window.
-    private var isMirroringWindow = false
+    /// The browser window that page commands act on: the one that last became main, which stays the target while Settings or History is key. With one window open, that window.
+    public var activeWindow: BrowserWindowModel? { windowModel }
 
-    /// Copies the window's current space and selected tab into the mirrors. A mirror that already holds the value, as after an assignment here, does not publish it again.
-    func mirrorWindowSelection() {
-        isMirroringWindow = true
-        defer { isMirroringWindow = false }
-        if currentSpaceID != windowModel.currentSpaceID { currentSpaceID = windowModel.currentSpaceID }
-        if selectedTabID != windowModel.selectedTabID { selectedTabID = windowModel.selectedTabID }
+    /// The main window that last became main. Menu validation and other checks read it, because they must not create a window.
+    public var lastMainWindow: BrowserWindowModel? { windowModel }
+
+    /// The window that sidebar commands act on: the last main window.
+    public func sidebarTarget() -> BrowserWindowModel { windowModel }
+
+    /// The tab of `focusedTabID`.
+    public var focusedTab: Tab? { activeWindow?.selectedTab }
+
+    /// Follows a window's new selection: the active window's selected tab becomes the focused tab.
+    func windowDidSelect(_ window: BrowserWindowModel) {
+        if window === activeWindow, focusedTabID != window.selectedTabID { focusedTabID = window.selectedTabID }
+    }
+
+    /// Closes the question popovers that windows show about the tab's page, which the tab has left.
+    @MainActor func closePageQuestions(ofTab id: UUID) {
+        windowModel.closePageQuestion(ofTab: id)
     }
 
     // MARK: Engines
@@ -315,10 +317,10 @@ public final class BrowserSession: ObservableObject {
         favorites.append(Favorite(url: url, title: tab.displayTitle, personaID: tab.personaID))
     }
 
-    /// Appends, in order, the favorites whose addresses are not favorites of the current space's Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
+    /// Appends, in order, the favorites whose addresses are not favorites of the Persona of the sidebar target's current space yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
     @discardableResult
     public func addFavorites(_ candidates: [Favorite]) -> Int {
-        let personaID = windowModel.currentSpace.resolvedPersonaID
+        let personaID = sidebarTarget().currentSpace.resolvedPersonaID
         var addresses = Set(favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
         let added = candidates.filter { addresses.insert($0.url).inserted }.map { candidate in
             var favorite = candidate
@@ -380,10 +382,10 @@ public final class BrowserSession: ObservableObject {
     /// Every open tab: the spaces' tabs, then the favorites' tabs.
     public var allTabs: [Tab] { tabs + openFavoriteTabs }
 
-    /// Opens a tab in `engine`, or in the default engine when no engine is given, in the space `spaceID` or the window's current space. `select` selects it in the window.
+    /// Opens a tab in `engine`, or in the default engine when no engine is given, in the space `spaceID` or the sidebar target's current space. `select` selects it in the sidebar target. Views and menus that act on a window open tabs through `BrowserWindowModel` instead.
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
-        let spaceID = spaceID ?? windowModel.currentSpaceID
+        let spaceID = spaceID ?? sidebarTarget().currentSpaceID
         let personaID = personaID(ofSpace: spaceID)
         return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
@@ -393,17 +395,17 @@ public final class BrowserSession: ObservableObject {
         runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
     }
 
-    /// The Persona of the space `id`, or of the window's current space when no space has that ID.
+    /// The Persona of the space `id`, or of the sidebar target's current space when no space has that ID.
     private func personaID(ofSpace id: UUID) -> Persona.ID {
-        (spaces.first { $0.id == id } ?? windowModel.currentSpace).resolvedPersonaID
+        (spaces.first { $0.id == id } ?? sidebarTarget().currentSpace).resolvedPersonaID
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's first space if it has one. A tab that restores or reopens passes its saved `id`. `select` selects it in the window.
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's first space if it has one. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool) -> Tab {
         let spaceID = self.personaID(ofSpace: spaceID) == personaID ? spaceID : spaces.first { $0.resolvedPersonaID == personaID }?.id ?? spaceID
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tabs.append(tab)
-        if select { windowModel.selectedTabID = tab.id }
+        if select { sidebarTarget().selectedTabID = tab.id }
         return tab
     }
 
@@ -548,11 +550,11 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab under its own ID in its original space and folder, or the current space if the original is gone.
+    /// Reopens the newest closed tab under its own ID in its original space and folder, or the sidebar target's current space if the original is gone, and selects it in the sidebar target.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
-        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : windowModel.currentSpaceID
+        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : sidebarTarget().currentSpaceID
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
@@ -931,12 +933,12 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Now Playing
 
-    /// Shows the media of the selected or most recently audible tab in Now Playing and sends the media keys to it.
+    /// Shows the media of the focused or most recently audible tab in Now Playing and sends the media keys to it.
     private var nowPlaying: NowPlaying?
 
     // MARK: Page reader and questions
 
-    /// The page reader beside the page and the question popover over it. It follows the session's tabs once the session exists.
+    /// The conversations of the page reader and the question popover, which windows show. It follows the session's tabs once the session exists.
     public let pageAssistant = PageAssistant()
 
     // MARK: Drag and drop
@@ -1284,145 +1286,4 @@ extension BrowserSession: EngineDownloadsDelegate {
             panel.begin(completionHandler: finish)
         }
     }
-}
-
-// MARK: Window forwarding
-
-/// The window's state and commands for the views, menus, scripts, and features that still reach them through the session. Each member forwards to the window's model.
-extension BrowserSession {
-    public var currentSpace: Space { windowModel.currentSpace }
-    public var selectedTab: Tab? { windowModel.selectedTab }
-    public var selectedFavoriteID: UUID? { windowModel.selectedFavoriteID }
-    public var recentTabs: [Tab] { windowModel.recentTabs }
-    var paneTabs: [Tab] { windowModel.paneTabs }
-    var preview: PagePreview? { windowModel.preview }
-    public var devToolsDock: DevToolsDock { windowModel.devToolsDock }
-    public var internalPage: InternalPage? { windowModel.internalPage }
-    public var fullscreenTabID: UUID? { windowModel.fullscreenTabID }
-    public var regionCaptureTabID: UUID? { windowModel.regionCaptureTabID }
-    public var tabSwitcherHighlightID: UUID? { windowModel.tabSwitcherHighlightID }
-    public var isTabSwitcherVisible: Bool { windowModel.isTabSwitcherVisible }
-    public var commandPaletteGeneration: Int { windowModel.commandPaletteGeneration }
-    public var commandPaletteOrigin: CommandPaletteOrigin { windowModel.commandPaletteOrigin }
-    public var isFindBarVisible: Bool { windowModel.isFindBarVisible }
-    public var findBarFocusRequests: Int { windowModel.findBarFocusRequests }
-    public var findResult: EngineFindResult? { windowModel.findResult }
-
-    public var isSidebarVisible: Bool {
-        get { windowModel.isSidebarVisible }
-        set { windowModel.isSidebarVisible = newValue }
-    }
-    public var isLibraryVisible: Bool {
-        get { windowModel.isLibraryVisible }
-        set { windowModel.isLibraryVisible = newValue }
-    }
-    public var commandPaletteMode: CommandPaletteMode? {
-        get { windowModel.commandPaletteMode }
-        set { windowModel.commandPaletteMode = newValue }
-    }
-    public var findText: String {
-        get { windowModel.findText }
-        set { windowModel.findText = newValue }
-    }
-    public var renamingSpaceID: UUID? {
-        get { windowModel.renamingSpaceID }
-        set { windowModel.renamingSpaceID = newValue }
-    }
-    public var renamingTabID: UUID? {
-        get { windowModel.renamingTabID }
-        set { windowModel.renamingTabID = newValue }
-    }
-    public var renamingFolderID: UUID? {
-        get { windowModel.renamingFolderID }
-        set { windowModel.renamingFolderID = newValue }
-    }
-    var shareButtonView: NSView? {
-        get { windowModel.shareButtonView }
-        set { windowModel.shareButtonView = newValue }
-    }
-
-    public var canSetCurrentPageAsHome: Bool { windowModel.canSetCurrentPageAsHome }
-    public var canGoHome: Bool { windowModel.canGoHome }
-    public var canShowDeveloperTools: Bool { windowModel.canShowDeveloperTools }
-    public var isShowingDeveloperTools: Bool { windowModel.isShowingDeveloperTools }
-    public var canChooseDevToolsSide: Bool { windowModel.canChooseDevToolsSide }
-    public var canZoom: Bool { windowModel.canZoom }
-    public var canPrint: Bool { windowModel.canPrint }
-    public var canCapture: Bool { windowModel.canCapture }
-    public var canShareSelectedPage: Bool { windowModel.canShareSelectedPage }
-    public var canClearSiteData: Bool { windowModel.canClearSiteData }
-    public var canOpenSelectedTabInSplitView: Bool { windowModel.canOpenSelectedTabInSplitView }
-
-    public func addSpace() { windowModel.addSpace() }
-    public func switchToSpace(_ id: UUID) { windowModel.switchToSpace(id) }
-    public func switchToAdjacentSpace(forward: Bool) { windowModel.switchToAdjacentSpace(forward: forward) }
-    public func renameSpace(_ id: UUID, to name: String) { windowModel.renameSpace(id, to: name) }
-    public func renameTab(_ id: UUID, to name: String) { windowModel.renameTab(id, to: name) }
-    public func endRenaming(_ id: UUID) { windowModel.endRenaming(id) }
-    public func addFolder(toSpace spaceID: UUID) { windowModel.addFolder(toSpace: spaceID) }
-    public func addToNewFolder(_ tab: Tab) { windowModel.addToNewFolder(tab) }
-    public func renameFolder(_ id: UUID, to name: String) { windowModel.renameFolder(id, to: name) }
-    public func endRenamingFolder(_ id: UUID) { windowModel.endRenamingFolder(id) }
-    public func setCurrentPageAsHome(ofSpace id: UUID) { windowModel.setCurrentPageAsHome(ofSpace: id) }
-    public func goHome() { windowModel.goHome() }
-    public func navigate(to input: String) { windowModel.navigate(to: input) }
-    public func openFavorite(_ favorite: Favorite) { windowModel.openFavorite(favorite) }
-    func previewFavorite(_ favorite: Favorite) { windowModel.previewFavorite(favorite) }
-    func openPreviewInTab() { windowModel.openPreviewInTab() }
-    func closePreview() { windowModel.closePreview() }
-
-    public func closeSelectedTab() { windowModel.closeSelectedTab() }
-    public func closeOtherTabs() { windowModel.closeOtherTabs() }
-    public func selectTab(at index: Int) { windowModel.selectTab(at: index) }
-    public func selectLastTab() { windowModel.selectLastTab() }
-    public func shortcutNumber(for tab: Tab) -> Int? { windowModel.shortcutNumber(for: tab) }
-    public func selectAdjacentTab(forward: Bool) { windowModel.selectAdjacentTab(forward: forward) }
-    public func moveSelectedTab(up: Bool) { windowModel.moveSelectedTab(up: up) }
-
-    public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) { windowModel.showCommandPalette(mode, from: origin) }
-    public func dismissCommandPalette() { windowModel.dismissCommandPalette() }
-    public func submitCommandPalette(_ input: String) { windowModel.submitCommandPalette(input) }
-    public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { windowModel.focusCommandBar(from: origin) }
-    public func closeInternalPage() { windowModel.closeInternalPage() }
-    public func exitPageFullscreen() { windowModel.exitPageFullscreen() }
-    func focusPage(leaving previous: NSView? = nil) { windowModel.focusPage(leaving: previous) }
-    @MainActor public func runPluginCommand(_ command: PluginCommandRef) { windowModel.runPluginCommand(command) }
-
-    public func showFindBar() { windowModel.showFindBar() }
-    public func hideFindBar() { windowModel.hideFindBar() }
-    public func findNext() { windowModel.findNext() }
-    public func findPrevious() { windowModel.findPrevious() }
-    public func toggleSidebar() { windowModel.toggleSidebar() }
-    public func toggleLibrary() { windowModel.toggleLibrary() }
-
-    public func goBack() { windowModel.goBack() }
-    public func goForward() { windowModel.goForward() }
-    public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] { windowModel.recentBackItems(limit: limit) }
-    public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) { windowModel.go(to: item, inTab: tabID) }
-    public func reload() { windowModel.reload() }
-    public func stopLoading() { windowModel.stopLoading() }
-    public func toggleDeveloperTools() { windowModel.toggleDeveloperTools() }
-    public func zoomIn() { windowModel.zoomIn() }
-    public func zoomOut() { windowModel.zoomOut() }
-    public func resetZoom() { windowModel.resetZoom() }
-    public func printPage() { windowModel.printPage() }
-    public func exportPageAsPDF() { windowModel.exportPageAsPDF() }
-    public func captureViewport() { windowModel.captureViewport() }
-    public func captureFullPage() { windowModel.captureFullPage() }
-    public func beginRegionCapture() { windowModel.beginRegionCapture() }
-    func finishRegionCapture(_ rect: CGRect) { windowModel.finishRegionCapture(rect) }
-    func cancelRegionCapture() { windowModel.cancelRegionCapture() }
-    public func shareSelectedPage() { windowModel.shareSelectedPage() }
-    public func confirmClearSiteData() { windowModel.confirmClearSiteData() }
-
-    public func showTabSwitcher(backward: Bool) { windowModel.showTabSwitcher(backward: backward) }
-    public func moveTabSwitcherHighlight(backward: Bool) { windowModel.moveTabSwitcherHighlight(backward: backward) }
-    public func commitTabSwitcher() { windowModel.commitTabSwitcher() }
-    public func cancelTabSwitcher() { windowModel.cancelTabSwitcher() }
-
-    func isInSplitViewOnScreen(_ tab: Tab) -> Bool { windowModel.isInSplitViewOnScreen(tab) }
-    public func canOpenInSplitView(_ tab: Tab) -> Bool { windowModel.canOpenInSplitView(tab) }
-    public func openInSplitView(_ tab: Tab, at index: Int? = nil) { windowModel.openInSplitView(tab, at: index) }
-    public func openSelectedTabInSplitView() { windowModel.openSelectedTabInSplitView() }
-    func closePane(_ tab: Tab) { windowModel.closePane(tab) }
 }

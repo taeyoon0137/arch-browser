@@ -2,7 +2,9 @@
 import SwiftUI
 
 struct TabSwitcherView: View {
+    /// Observed because the tabs the switcher lists are the session's.
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Set a moment after the switcher opens, so that a quick ⌃Tab, which switches at once, does not flash it.
     @State private var isShown = false
 
@@ -13,14 +15,14 @@ struct TabSwitcherView: View {
     static let visibleRows = 10
 
     var body: some View {
-        let tabs = session.recentTabs
+        let tabs = windowModel.recentTabs
         let rows = CGFloat(min(tabs.count, Self.visibleRows))
         let panel = RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: Self.rowSpacing) {
                     ForEach(tabs) { tab in
-                        TabSwitcherRow(tab: tab, isHighlighted: tab.id == session.tabSwitcherHighlightID)
+                        TabSwitcherRow(tab: tab, isHighlighted: tab.id == windowModel.tabSwitcherHighlightID)
                             .id(tab.id)
                     }
                 }
@@ -30,8 +32,8 @@ struct TabSwitcherView: View {
             .frame(width: Self.width, height: rows * Self.rowHeight + max(0, rows - 1) * Self.rowSpacing + 2 * PaletteRowHighlight.panelInset)
             // Rows that scroll past the inset stay inside the panel's corners.
             .clipShape(panel)
-            .onAppear { if let id = session.tabSwitcherHighlightID { proxy.scrollTo(id) } }
-            .onChange(of: session.tabSwitcherHighlightID) { _, id in if let id { proxy.scrollTo(id) } }
+            .onAppear { if let id = windowModel.tabSwitcherHighlightID { proxy.scrollTo(id) } }
+            .onChange(of: windowModel.tabSwitcherHighlightID) { _, id in if let id { proxy.scrollTo(id) } }
         }
         .modifier(PaletteSurface(shape: panel))
         .scaleEffect(isShown ? 1 : 0.97)

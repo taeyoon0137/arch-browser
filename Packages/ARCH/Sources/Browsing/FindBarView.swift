@@ -2,11 +2,11 @@
 import SwiftUI
 
 struct FindBarView: View {
-    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @FocusState private var isFocused: Bool
 
     private var resultLabel: String {
-        guard !session.findText.isEmpty, let result = session.findResult else { return "" }
+        guard !windowModel.findText.isEmpty, let result = windowModel.findResult else { return "" }
         return result.numberOfMatches == 0 ? "Not found" : "\(result.activeMatchOrdinal) of \(result.numberOfMatches)"
     }
 
@@ -15,22 +15,22 @@ struct FindBarView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Find in page", text: $session.findText)
+            TextField("Find in page", text: $windowModel.findText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($isFocused)
                 .onSubmit {
-                    if NSEvent.modifierFlags.contains(.shift) { session.findPrevious() } else { session.findNext() }
+                    if NSEvent.modifierFlags.contains(.shift) { windowModel.findPrevious() } else { windowModel.findNext() }
                 }
-                .onExitCommand { session.hideFindBar() }
+                .onExitCommand { windowModel.hideFindBar() }
             Text(resultLabel)
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            SidebarIconButton(symbol: "chevron.up", label: "Previous Match", action: session.findPrevious)
-            SidebarIconButton(symbol: "chevron.down", label: "Next Match", action: session.findNext)
-            Button("Done", action: session.hideFindBar)
+            SidebarIconButton(symbol: "chevron.up", label: "Previous Match", action: windowModel.findPrevious)
+            SidebarIconButton(symbol: "chevron.down", label: "Next Match", action: windowModel.findNext)
+            Button("Done", action: windowModel.hideFindBar)
                 .font(.system(size: 12))
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -42,6 +42,6 @@ struct FindBarView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFocused = true } }
-        .onChange(of: session.findBarFocusRequests) { isFocused = true }
+        .onChange(of: windowModel.findBarFocusRequests) { isFocused = true }
     }
 }

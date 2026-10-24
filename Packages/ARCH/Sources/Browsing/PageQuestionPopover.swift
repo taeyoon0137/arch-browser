@@ -2,14 +2,14 @@
 import AI
 import SwiftUI
 
-/// Shows the popover while it is open for the selected tab and no internal page covers the tab.
+/// Shows the window's popover while it is open for the selected tab and no internal page covers the tab.
 struct PageQuestionLayer: View {
     @ObservedObject var session: BrowserSession
-    @ObservedObject var assistant: PageAssistant
+    @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
-        if let question = assistant.question, question.tabID == session.selectedTabID, session.internalPage == nil, let tab = session.selectedTab {
-            PageQuestionPopover(assistant: assistant, question: question, tab: tab, conversation: question.conversation)
+        if let question = windowModel.pageQuestion, question.tabID == windowModel.selectedTabID, windowModel.internalPage == nil, let tab = windowModel.selectedTab {
+            PageQuestionPopover(assistant: session.pageAssistant, question: question, tab: tab, conversation: question.conversation)
                 // A new question gets a fresh field.
                 .id(question.id)
         }
@@ -17,6 +17,7 @@ struct PageQuestionLayer: View {
 }
 
 private struct PageQuestionPopover: View {
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let assistant: PageAssistant
     let question: PageQuestion
     @ObservedObject var tab: Tab
@@ -34,7 +35,7 @@ private struct PageQuestionPopover: View {
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close", action: assistant.dismissQuestion)
+                SidebarIconButton(symbol: "xmark", label: "Close", action: windowModel.dismissPageQuestion)
             }
             if let selection = question.selection {
                 SelectionQuote(text: selection.text)
@@ -69,7 +70,7 @@ private struct PageQuestionPopover: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($isFieldFocused)
                 .onSubmit(send)
-                .onExitCommand(perform: assistant.dismissQuestion)
+                .onExitCommand(perform: windowModel.dismissPageQuestion)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {

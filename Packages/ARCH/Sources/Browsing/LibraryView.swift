@@ -74,15 +74,16 @@ struct LibraryToolRow: View {
 /// Opens and closes the library. While files download it shows a download symbol over their combined progress.
 struct LibraryButton: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @Environment(\.sidebarIsFloating) private var isFloating
     @State private var isHovering = false
 
     /// In the floating sidebar, the library opens in the card. Elsewhere, it also reveals a hidden sidebar.
     private func toggle() {
         if isFloating {
-            session.isLibraryVisible.toggle()
+            windowModel.isLibraryVisible.toggle()
         } else {
-            session.toggleLibrary()
+            windowModel.toggleLibrary()
         }
     }
 
@@ -121,7 +122,7 @@ struct LibraryButton: View {
                 }
             }
             .frame(width: 30, height: 28)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(session.isLibraryVisible ? 0.1 : isHovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(windowModel.isLibraryVisible ? 0.1 : isHovering ? 0.08 : 0)))
             .overlay(alignment: .topTrailing) {
                 if activeDownloads.isEmpty, !session.unseenDownloadIDs.isEmpty {
                     Text("\(session.unseenDownloadIDs.count)")
@@ -137,7 +138,7 @@ struct LibraryButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(session.isLibraryVisible ? .primary : .secondary)
+        .foregroundStyle(windowModel.isLibraryVisible ? .primary : .secondary)
         .onHover { isHovering = $0 }
         .help("Library")
         .accessibilityLabel("Library")

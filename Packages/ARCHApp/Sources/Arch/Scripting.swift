@@ -13,7 +13,8 @@ extension ArchApplication {
         return (session.openFavoriteTabs + spaceTabs).map { ScriptTab($0) }
     }
 
-    @objc var scriptActiveTab: ScriptTab? { browserSession?.selectedTab.map { ScriptTab($0) } }
+    /// The active window's selected tab.
+    @objc var scriptActiveTab: ScriptTab? { browserSession?.focusedTab.map { ScriptTab($0) } }
 
     /// Resolves `tab id "…"`. The identifier comes from the script, so it may not be text.
     @objc(valueInScriptTabsWithUniqueID:) func scriptTab(withUniqueID uniqueID: Any) -> ScriptTab? {

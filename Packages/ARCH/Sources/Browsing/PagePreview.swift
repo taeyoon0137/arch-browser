@@ -62,7 +62,7 @@ struct PagePreviewPanel: View {
     static let cornerRadius = PageFrameShape.cornerRadius + margin
     static let headerHeight: CGFloat = 40
 
-    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var preview: PagePreview
 
     var body: some View {
@@ -79,7 +79,7 @@ struct PagePreviewPanel: View {
         .overlay(panel.strokeBorder(Color(nsColor: .separatorColor)).allowsHitTesting(false))
         .contentShape(panel)
         .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
-        .background(PreviewDismissal(close: session.closePreview, ignoresEscape: { session.isTabSwitcherVisible }))
+        .background(PreviewDismissal(close: windowModel.closePreview, ignoresEscape: { windowModel.isTabSwitcherVisible }))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Preview")
         .padding(Self.inset)
@@ -112,8 +112,8 @@ struct PagePreviewPanel: View {
             .lineLimit(1)
             .help(preview.url.absoluteString)
             Spacer(minLength: 8)
-            Button("Open in Tab", action: session.openPreviewInTab)
-            SidebarIconButton(symbol: "xmark", label: "Close Preview", action: session.closePreview)
+            Button("Open in Tab", action: windowModel.openPreviewInTab)
+            SidebarIconButton(symbol: "xmark", label: "Close Preview", action: windowModel.closePreview)
         }
         .padding(.leading, 6)
         .frame(height: Self.headerHeight)

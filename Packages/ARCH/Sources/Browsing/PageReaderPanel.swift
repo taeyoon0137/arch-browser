@@ -7,13 +7,13 @@ struct PageReaderColumn: View {
     static let width: CGFloat = 340
 
     @ObservedObject var session: BrowserSession
-    @ObservedObject var assistant: PageAssistant
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
 
     var body: some View {
-        if assistant.isReaderVisible, service.isAvailable(.pageReader), session.internalPage == nil {
-            PageReaderPanel(assistant: assistant, tab: session.selectedTab)
+        if windowModel.isPageReaderVisible, service.isAvailable(.pageReader), windowModel.internalPage == nil {
+            PageReaderPanel(assistant: session.pageAssistant, tab: windowModel.selectedTab)
                 .frame(width: Self.width)
                 // The page's own margin separates it from the panel.
                 .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
@@ -25,6 +25,7 @@ struct PageReaderColumn: View {
 /// Observes the assistant, which publishes a change when a tab's conversation goes, so a tab that moved to another site shows a new one.
 private struct PageReaderPanel: View {
     @ObservedObject var assistant: PageAssistant
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let tab: Tab?
 
     var body: some View {
@@ -33,7 +34,7 @@ private struct PageReaderPanel: View {
                 Text("Page Reader")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close Page Reader", action: assistant.toggleReader)
+                SidebarIconButton(symbol: "xmark", label: "Close Page Reader", action: windowModel.togglePageReader)
             }
             .padding(.leading, 14)
             .padding(.trailing, 6)

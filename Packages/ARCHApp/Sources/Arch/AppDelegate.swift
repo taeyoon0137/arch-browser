@@ -73,7 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self?.window.toolbar?.isVisible = true
         }
         window.isMovableByWindowBackground = true
-        let hostingController = NSHostingController(rootView: BrowserWindowView(session: session))
+        // The session has one window, the sidebar target, which this window shows.
+        let windowModel = session.sidebarTarget()
+        windowModel.nsWindow = window
+        let hostingController = NSHostingController(rootView: BrowserWindowView(session: session, window: windowModel))
         hostingController.sizingOptions = []
         window.contentViewController = hostingController
         window.contentMinSize = NSSize(width: 800, height: 500)
@@ -250,45 +253,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return item
     }
 
-    @objc private func newTab() { session.showCommandPalette(.newTab) }
+    // Page commands act on the active window, and sidebar commands, such as those of the Tab and Spaces menus, on the sidebar target.
+    @objc private func newTab() { session.sidebarTarget().showCommandPalette(.newTab) }
     /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it.
     @objc private func closeTab() {
         if let key = NSApp.keyWindow, key !== window, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
-        session.closeSelectedTab()
+        session.activeWindow?.closeSelectedTab()
     }
-    @objc private func closeOtherTabs() { session.closeOtherTabs() }
+    @objc private func closeOtherTabs() { session.activeWindow?.closeOtherTabs() }
     @objc private func reopenClosedTab() { session.reopenLastClosedTab() }
-    @objc private func nextTab() { session.selectAdjacentTab(forward: true) }
-    @objc private func previousTab() { session.selectAdjacentTab(forward: false) }
-    @objc private func moveTabUp() { session.moveSelectedTab(up: true) }
-    @objc private func moveTabDown() { session.moveSelectedTab(up: false) }
-    @objc private func selectTab(_ sender: NSMenuItem) { session.selectTab(at: sender.tag - 1) }
-    @objc private func selectLastTab() { session.selectLastTab() }
-    @objc private func openLocation() { session.focusCommandBar() }
+    @objc private func nextTab() { session.sidebarTarget().selectAdjacentTab(forward: true) }
+    @objc private func previousTab() { session.sidebarTarget().selectAdjacentTab(forward: false) }
+    @objc private func moveTabUp() { session.sidebarTarget().moveSelectedTab(up: true) }
+    @objc private func moveTabDown() { session.sidebarTarget().moveSelectedTab(up: false) }
+    @objc private func selectTab(_ sender: NSMenuItem) { session.sidebarTarget().selectTab(at: sender.tag - 1) }
+    @objc private func selectLastTab() { session.sidebarTarget().selectLastTab() }
+    @objc private func openLocation() { session.activeWindow?.focusCommandBar() }
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
-    @objc private func printPage() { session.printPage() }
-    @objc private func exportAsPDF() { session.exportPageAsPDF() }
-    @objc private func sharePage() { session.shareSelectedPage() }
-    @objc private func toggleSidebar() { session.toggleSidebar() }
-    @objc private func toggleDeveloperTools() { session.toggleDeveloperTools() }
+    @objc private func printPage() { session.activeWindow?.printPage() }
+    @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
+    @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
+    @objc private func toggleSidebar() { session.sidebarTarget().toggleSidebar() }
+    @objc private func toggleDeveloperTools() { session.activeWindow?.toggleDeveloperTools() }
     @objc private func chooseDevToolsSide(_ sender: NSMenuItem) {
         guard let side = (sender.representedObject as? String).flatMap(DevToolsSide.init(rawValue:)) else { return }
-        session.devToolsDock.side = side
+        session.activeWindow?.devToolsDock.side = side
     }
-    @objc private func toggleDownloads() { session.toggleLibrary() }
-    @MainActor @objc private func togglePageReader() { session.pageAssistant.toggleReader() }
-    @objc private func reload() { session.reload() }
-    @objc private func zoomIn() { session.zoomIn() }
-    @objc private func zoomOut() { session.zoomOut() }
-    @objc private func resetZoom() { session.resetZoom() }
-    @objc private func showFindBar() { session.showFindBar() }
-    @objc private func findNext() { session.findNext() }
-    @objc private func findPrevious() { session.findPrevious() }
-    @objc private func goBack() { session.goBack() }
-    @objc private func goForward() { session.goForward() }
-    @objc private func goHome() { session.goHome() }
+    @objc private func toggleDownloads() { session.sidebarTarget().toggleLibrary() }
+    @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
+    @objc private func reload() { session.activeWindow?.reload() }
+    @objc private func zoomIn() { session.activeWindow?.zoomIn() }
+    @objc private func zoomOut() { session.activeWindow?.zoomOut() }
+    @objc private func resetZoom() { session.activeWindow?.resetZoom() }
+    @objc private func showFindBar() { session.activeWindow?.showFindBar() }
+    @objc private func findNext() { session.activeWindow?.findNext() }
+    @objc private func findPrevious() { session.activeWindow?.findPrevious() }
+    @objc private func goBack() { session.activeWindow?.goBack() }
+    @objc private func goForward() { session.activeWindow?.goForward() }
+    @objc private func goHome() { session.activeWindow?.goHome() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
-    @objc private func clearSiteData() { session.confirmClearSiteData() }
+    @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
     /// Pages chosen in the History window open as new tabs in the browser window, which comes to the front.
     @objc private func showHistory() {
@@ -301,12 +305,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         history.show()
     }
 
-    /// Lists the selected tab's previous ten pages, most recent first, between Forward and Show All History.
+    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
-        let pages = session?.recentBackItems(limit: 10) ?? []
-        guard !pages.isEmpty, let tabID = session.selectedTabID, let separator = menu.items.firstIndex(where: \.isSeparatorItem) else { return }
+        let activeWindow = session?.activeWindow
+        let pages = activeWindow?.recentBackItems(limit: 10) ?? []
+        guard !pages.isEmpty, let tabID = activeWindow?.selectedTabID, let separator = menu.items.firstIndex(where: \.isSeparatorItem) else { return }
         var index = separator + 1
         for page in pages {
             let item = NSMenuItem(title: page.title.isEmpty ? page.url.host ?? page.url.absoluteString : page.title, action: #selector(goToRecentPage(_:)), keyEquivalent: "")
@@ -324,7 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func goToRecentPage(_ sender: NSMenuItem) {
         guard let page = sender.representedObject as? RecentPage else { return }
-        session.go(to: page.item, inTab: page.tabID)
+        session.activeWindow?.go(to: page.item, inTab: page.tabID)
     }
 
     /// A History menu page and its original tab.
@@ -337,12 +342,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self.item = item
         }
     }
-    @objc private func togglePinned() { session.selectedTab.map(session.togglePinned) }
-    @objc private func addFavorite() { session.selectedTab.map(session.addFavorite) }
-    @objc private func openInSplitView() { session.openSelectedTabInSplitView() }
-    @objc private func newSpace() { session.addSpace() }
-    @objc private func nextSpace() { session.switchToAdjacentSpace(forward: true) }
-    @objc private func previousSpace() { session.switchToAdjacentSpace(forward: false) }
+    @objc private func togglePinned() { session.sidebarTarget().selectedTab.map(session.togglePinned) }
+    @objc private func addFavorite() { session.activeWindow?.selectedTab.map(session.addFavorite) }
+    @objc private func openInSplitView() { session.sidebarTarget().openSelectedTabInSplitView() }
+    @objc private func newSpace() { session.sidebarTarget().addSpace() }
+    @objc private func nextSpace() { session.sidebarTarget().switchToAdjacentSpace(forward: true) }
+    @objc private func previousSpace() { session.sidebarTarget().switchToAdjacentSpace(forward: false) }
 
     // MARK: Appearance
 
@@ -353,16 +358,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
-            return session?.canZoom == true
+            return activeWindow?.canZoom == true
         }
         if item.action == #selector(captureViewport) || item.action == #selector(captureFullPage) || item.action == #selector(captureRegion) {
-            return session?.canCapture == true
+            return activeWindow?.canCapture == true
         }
         if item.action == #selector(printPage) || item.action == #selector(exportAsPDF) {
-            return session?.canPrint == true
+            return activeWindow?.canPrint == true
         }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
@@ -371,37 +377,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return DefaultBrowser.canBecomeDefault && !DefaultBrowser.isDefault
         }
         if item.action == #selector(chooseDevToolsSide(_:)) {
-            item.state = (item.representedObject as? String) == session?.devToolsDock.side.rawValue ? .on : .off
-            return session?.canChooseDevToolsSide == true
+            item.state = (item.representedObject as? String) == activeWindow?.devToolsDock.side.rawValue ? .on : .off
+            return activeWindow?.canChooseDevToolsSide == true
         }
         if item.action == #selector(toggleDeveloperTools) {
-            item.title = session?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
-            return session?.canShowDeveloperTools == true
+            item.title = activeWindow?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
+            return activeWindow?.canShowDeveloperTools == true
         }
         if item.action == #selector(sharePage) {
-            return session?.canShareSelectedPage == true
+            return activeWindow?.canShareSelectedPage == true
         }
         if item.action == #selector(goHome) {
-            return session?.canGoHome == true
+            return activeWindow?.canGoHome == true
         }
         // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list.
         if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
-            || item.action == #selector(nextTab) || item.action == #selector(previousTab) || item.action == #selector(closeOtherTabs) {
-            return session?.selectedTab?.spaceID != nil
+            || item.action == #selector(nextTab) || item.action == #selector(previousTab) {
+            return session?.lastMainWindow?.selectedTab?.spaceID != nil
+        }
+        if item.action == #selector(closeOtherTabs) {
+            return activeWindow?.selectedTab?.spaceID != nil
         }
         if item.action == #selector(openInSplitView) {
-            return session?.canOpenSelectedTabInSplitView == true
+            return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
         }
         // Clearing site data needs a web page in front and no sheet on its window.
         if item.action == #selector(clearSiteData) {
-            return session?.canClearSiteData == true
+            return activeWindow?.canClearSiteData == true
         }
         // The page reader stays out of the menu until a provider can serve it, and opens only over a tab no internal page covers.
         if item.action == #selector(togglePageReader) {
-            let assistant = session?.pageAssistant
             item.isHidden = !PageAssistant.isReaderAvailable
-            item.title = assistant?.isReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
-            return assistant?.canToggleReader == true
+            item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
+            return activeWindow?.canTogglePageReader == true
         }
         // Import waits while another import runs or the window shows a sheet. It touches no tab, so an internal page does not disable it.
         if item.action == #selector(importBookmarksAndHistory) {
@@ -414,9 +422,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Capture
 
-    @objc private func captureViewport() { session.captureViewport() }
-    @objc private func captureFullPage() { session.captureFullPage() }
-    @objc private func captureRegion() { session.beginRegionCapture() }
+    @objc private func captureViewport() { session.activeWindow?.captureViewport() }
+    @objc private func captureFullPage() { session.activeWindow?.captureFullPage() }
+    @objc private func captureRegion() { session.activeWindow?.beginRegionCapture() }
 
     // MARK: Page fullscreen
 
@@ -424,8 +432,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
-                  let self, let session = self.session, session.fullscreenTabID != nil, session.regionCaptureTabID == nil, event.window === self.window else { return event }
-            session.exitPageFullscreen()
+                  let self, let windowModel = self.session?.activeWindow, windowModel.fullscreenTabID != nil, windowModel.regionCaptureTabID == nil, event.window === self.window else { return event }
+            windowModel.exitPageFullscreen()
             return nil
         }
     }
@@ -450,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         // A click in the page can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let session = self?.session, let view = session.selectedTab?.webContents.view, view.window === event.window,
+            if let session = self?.session, let view = session.activeWindow?.selectedTab?.webContents.view, view.window === event.window,
                view.bounds.contains(view.convert(event.locationInWindow, from: nil)) {
                 session.forgetUndoableCloses()
             }
@@ -469,35 +477,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// ⌃Tab in the browser window opens the switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
     private func installTabSwitcher() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let session = self.session else { return event }
+            guard let self, let windowModel = self.session?.activeWindow else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], event.window === self.window {
                 let backward = modifiers.contains(.shift)
-                if session.isTabSwitcherVisible {
-                    session.moveTabSwitcherHighlight(backward: backward)
+                if windowModel.isTabSwitcherVisible {
+                    windowModel.moveTabSwitcherHighlight(backward: backward)
                 } else {
-                    session.showTabSwitcher(backward: backward)
+                    windowModel.showTabSwitcher(backward: backward)
                 }
                 return nil
             }
-            guard session.isTabSwitcherVisible else { return event }
-            session.cancelTabSwitcher()
+            guard windowModel.isTabSwitcherVisible else { return event }
+            windowModel.cancelTabSwitcher()
             return event.keyCode == 53 ? nil : event
         }
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            if let session = self?.session, session.isTabSwitcherVisible, !event.modifierFlags.contains(.control) {
-                session.commitTabSwitcher()
+            if let windowModel = self?.session?.activeWindow, windowModel.isTabSwitcherVisible, !event.modifierFlags.contains(.control) {
+                windowModel.commitTabSwitcher()
             }
             return event
         }
         // A click also closes it. Monitors see no keys while a menu tracks, so a Control-click's context menu could otherwise hide Control's release.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            self?.session?.cancelTabSwitcher()
+            self?.session?.activeWindow?.cancelTabSwitcher()
             return event
         }
         // The app receives no key events while inactive, so it cannot see Control's release in another app.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.session?.cancelTabSwitcher()
+            self?.session?.activeWindow?.cancelTabSwitcher()
         }
     }
 
@@ -516,7 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
-        session.showCommandPalette(.newTab)
+        session.sidebarTarget().showCommandPalette(.newTab)
     }
 
     // MARK: Tab close log

@@ -5,6 +5,7 @@ import SwiftUI
 
 struct CommandPaletteView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let mode: CommandPaletteMode
     /// Set for the copy the window builds once at launch so the first palette the user opens is cheap to build. The copy stays hidden and takes no focus.
     var isWarmUp = false
@@ -28,7 +29,7 @@ struct CommandPaletteView: View {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return [] }
         return Array(session.allTabs.filter { tab in
-            tab.id != session.selectedTabID &&
+            tab.id != windowModel.selectedTabID &&
                 (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
     }
@@ -54,7 +55,7 @@ struct CommandPaletteView: View {
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
     private var offersAskAboutPage: Bool {
         let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return !words.isEmpty && "ask about this page".hasPrefix(words) && session.pageAssistant.canAskAboutPage
+        return !words.isEmpty && "ask about this page".hasPrefix(words) && windowModel.canAskAboutPage
     }
 
     /// The palette's distance from the window's top.
@@ -77,8 +78,8 @@ struct CommandPaletteView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 22))
                         .focused($isFocused)
-                        .onSubmit { session.submitCommandPalette(text) }
-                        .onExitCommand { session.dismissCommandPalette() }
+                        .onSubmit { windowModel.submitCommandPalette(text) }
+                        .onExitCommand { windowModel.dismissCommandPalette() }
                 }
                 .padding(.horizontal, 20)
                 .frame(height: Self.fieldHeight)
@@ -86,28 +87,28 @@ struct CommandPaletteView: View {
                 if showsResults {
                     VStack(spacing: 2) {
                         PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
-                            .paletteAction { session.submitCommandPalette(text) }
+                            .paletteAction { windowModel.submitCommandPalette(text) }
                         ForEach(pluginCommands, id: \.ref) { command in
                             PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
-                                .paletteAction { session.runPluginCommand(command.ref) }
+                                .paletteAction { windowModel.runPluginCommand(command.ref) }
                         }
                         if offersAskAboutPage {
                             PaletteRow(symbol: "sparkles", title: "Ask About This Page")
                                 .paletteAction {
-                                    session.dismissCommandPalette()
-                                    session.pageAssistant.askAboutPage()
+                                    windowModel.dismissCommandPalette()
+                                    windowModel.askAboutPage()
                                 }
                         }
                         ForEach(matchingTabs) { tab in
                             PaletteTabRow(tab: tab)
                                 .paletteAction {
-                                    session.selectedTabID = tab.id
-                                    session.dismissCommandPalette()
+                                    windowModel.selectedTabID = tab.id
+                                    windowModel.dismissCommandPalette()
                                 }
                         }
                         ForEach(historySuggestions) { entry in
                             PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
-                                .paletteAction { session.submitCommandPalette(entry.url.absoluteString) }
+                                .paletteAction { windowModel.submitCommandPalette(entry.url.absoluteString) }
                         }
                     }
                     .padding(PaletteRowHighlight.panelInset)
@@ -122,10 +123,10 @@ struct CommandPaletteView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             guard !isWarmUp else { return }
-            if mode == .editCurrent { text = session.internalPage?.address ?? session.selectedTab?.url?.absoluteString ?? "" }
+            if mode == .editCurrent { text = windowModel.internalPage?.address ?? windowModel.selectedTab?.url?.absoluteString ?? "" }
             // The arrival animation waits until the hidden first frame is on screen, so a slow first build cannot use up the animation time.
             DispatchQueue.main.async {
-                withAnimation(.paletteIn(from: session.commandPaletteOrigin)) {
+                withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) {
                     hasArrived = true
                     onArrival()
                 }

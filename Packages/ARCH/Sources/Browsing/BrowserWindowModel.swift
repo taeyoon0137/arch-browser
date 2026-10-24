@@ -1,10 +1,12 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, and the preview panel, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, engines, and persistence.
+// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, and the question popover, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the page reader's conversations, engines, and persistence.
+import AI
 import AppKit
 import ARCHEngine
 import Combine
 import Foundation
 import PDFKit
 import Plugins
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// The state of one browser window: what it shows and what the user is doing in it. Its commands read and change the user's data through the session.
@@ -12,14 +14,11 @@ public final class BrowserWindowModel: ObservableObject {
     unowned let session: BrowserSession
 
     /// The space the sidebar shows.
-    @Published public var currentSpaceID: UUID {
-        didSet { session.mirrorWindowSelection() }
-    }
+    @Published public var currentSpaceID: UUID
     /// Selecting a tab switches to its space so the sidebar and page match.
     @Published public var selectedTabID: UUID? {
         didSet {
-            // Subscribers of the session's mirror hear of the selection before its effects run.
-            session.mirrorWindowSelection()
+            session.windowDidSelect(self)
             // Selecting a tab, even the one under the page, leaves an internal page.
             internalPage = nil
             // Another tab ends the fullscreen of the page that filled the window.
@@ -35,6 +34,8 @@ public final class BrowserWindowModel: ObservableObject {
                 isFindBarVisible = false
                 findResult = nil
             }
+            // The question popover belongs to the page it opened over.
+            if oldValue != selectedTabID { MainActor.assumeIsolated { closePageQuestion() } }
             session.deferVisibleSheet()
             session.showNextSheet()
             devToolsDock.track(selectedTab?.webContents.devTools)
@@ -49,6 +50,8 @@ public final class BrowserWindowModel: ObservableObject {
     }
     /// Where the selected tab's developer tools show.
     public let devToolsDock = DevToolsDock()
+    /// The AppKit window, set when it is created. Printing, export, sharing, and Clear Site Data use it.
+    public weak var nsWindow: NSWindow?
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
@@ -407,6 +410,67 @@ public final class BrowserWindowModel: ObservableObject {
         return PluginTab(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, engine: tab.engineKind, isPinned: tab.isPinned, isSelected: true)
     }
 
+    // MARK: Page reader and questions
+
+    /// Whether the page reader shows beside the page.
+    @Published public private(set) var isPageReaderVisible = false
+    /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
+    @Published private(set) var pageQuestion: PageQuestion?
+
+    /// The reader opens beside a selected tab that no internal page covers, and closes at any time.
+    public var canTogglePageReader: Bool {
+        isPageReaderVisible || (selectedTab != nil && internalPage == nil)
+    }
+
+    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it stops every reply being written.
+    @MainActor public func togglePageReader() {
+        withAnimation(SidebarView.pageSpring) { isPageReaderVisible.toggle() }
+        if isPageReaderVisible {
+            selectedTab.map(session.pageAssistant.readerDidShow)
+        } else {
+            session.pageAssistant.stopReaderReplies()
+        }
+    }
+
+    /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that no internal page covers.
+    @MainActor var canAskAboutPage: Bool {
+        guard internalPage == nil, let url = selectedTab?.url else { return false }
+        return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
+    }
+
+    @MainActor func askAboutPage() {
+        guard canAskAboutPage, let tab = selectedTab else { return }
+        openPageQuestion(in: tab, selection: nil)
+    }
+
+    /// From the page's context menu, so the tab is the selected one.
+    @MainActor func askAboutSelection(_ text: String, in tab: Tab) {
+        guard PageAssistant.isQuestionAvailable, let url = tab.url, PageAssistant.canRead(url) else { return }
+        openPageQuestion(in: tab, selection: AISelection(pageURL: url, pageTitle: tab.pageTitle, text: text))
+    }
+
+    /// Closes the popover the user dismissed and gives the page keyboard focus again.
+    @MainActor func dismissPageQuestion() {
+        closePageQuestion()
+        focusPage()
+    }
+
+    /// Closes the popover when it is about the tab's page.
+    @MainActor func closePageQuestion(ofTab id: UUID) {
+        if pageQuestion?.tabID == id { closePageQuestion() }
+    }
+
+    @MainActor private func openPageQuestion(in tab: Tab, selection: AISelection?) {
+        pageQuestion?.conversation.cancel()
+        pageQuestion = PageQuestion(tabID: tab.id, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(forTab: tab.id))
+    }
+
+    @MainActor private func closePageQuestion() {
+        guard let pageQuestion else { return }
+        pageQuestion.conversation.cancel()
+        self.pageQuestion = nil
+    }
+
     // MARK: Find in page
 
     /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match. The bar does not open under the preview panel, whose page it would not search.
@@ -532,13 +596,13 @@ public final class BrowserWindowModel: ObservableObject {
     /// Set while the selected page renders as PDF for Print or Export as PDF, so a second request cannot start another.
     private var isRenderingPDF = false
 
-    /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it, no PDF is rendering, and its window shows no sheet.
+    /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it, no PDF is rendering, and the window shows no sheet.
     public var canPrint: Bool {
-        guard let tab = selectedTab, !isSelectedPageCovered, !isRenderingPDF else { return false }
-        return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
+        guard selectedTab != nil, !isSelectedPageCovered, !isRenderingPDF else { return false }
+        return nsWindow?.attachedSheet == nil
     }
 
-    /// Prints the selected page through the system print panel, a sheet on its window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
+    /// Prints the selected page through the system print panel, a sheet on the window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
     public func printPage() {
         renderSelectedPageAsPDF(failureMessage: "The page could not be printed.") { tab, document, window in
             guard let operation = document.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleDownToFit, autoRotate: true) else { return }
@@ -547,7 +611,7 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// Saves the selected page as a PDF file where the user chooses in a save panel on its window.
+    /// Saves the selected page as a PDF file where the user chooses in a save panel on the window.
     public func exportPageAsPDF() {
         renderSelectedPageAsPDF(failureMessage: "The page could not be exported as PDF.") { [weak self] tab, document, window in
             let panel = NSSavePanel()
@@ -566,14 +630,14 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// Renders the selected page as PDF and passes it on with the page's window while that tab is still selected; a tab the user left in the meantime drops the request. A failure shows a sheet on the tab.
+    /// Renders the selected page as PDF and passes it on with the window while that tab is still selected; a tab the user left in the meantime drops the request. A failure shows a sheet on the tab.
     private func renderSelectedPageAsPDF(failureMessage: String, then use: @escaping (Tab, PDFDocument, NSWindow) -> Void) {
         guard canPrint, let tab = selectedTab else { return }
         isRenderingPDF = true
         tab.webContents.createPDF { [weak self] result in
             guard let self else { return }
             self.isRenderingPDF = false
-            guard self.selectedTab === tab, let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
+            guard self.selectedTab === tab, let window = self.nsWindow else { return }
             if case .success(let data) = result, let document = PDFDocument(data: data) {
                 use(tab, document, window)
             } else {
@@ -671,7 +735,7 @@ public final class BrowserWindowModel: ObservableObject {
         sharePicker = picker
         if let button = shareButtonView, button.window != nil, !isLibraryVisible {
             picker.show(relativeTo: button.bounds, of: button, preferredEdge: button.isFlipped ? .maxY : .minY)
-        } else if let content = (NSApp.mainWindow ?? tab.webContents.view.window)?.contentView {
+        } else if let content = nsWindow?.contentView {
             let bounds = content.bounds
             let top = NSRect(x: bounds.midX, y: content.isFlipped ? bounds.minY : bounds.maxY - 1, width: 1, height: 1)
             picker.show(relativeTo: top, of: content, preferredEdge: content.isFlipped ? .maxY : .minY)
@@ -740,10 +804,10 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Site data
 
-    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers, and its window shows no sheet.
+    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers, and the window shows no sheet.
     public var canClearSiteData: Bool {
-        guard !isSelectedPageCovered, let tab = selectedTab, SiteDataScope(url: tab.url) != nil else { return false }
-        return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
+        guard !isSelectedPageCovered, SiteDataScope(url: selectedTab?.url) != nil else { return false }
+        return nsWindow?.attachedSheet == nil
     }
 
     /// Asks with a sheet on the selected tab before clearing the data of its page's host.

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Covers the selected page while the user chooses the region to capture. It takes the clicks, scrolling, and keys meant for the page, and leaving the window, as when another tab is selected, cancels the capture.
 struct CaptureRegionOverlay: NSViewRepresentable {
-    let session: BrowserSession
+    let windowModel: BrowserWindowModel
     /// The engine's view, whose coordinates the region is given in.
     let pageView: NSView
     /// The page frame's radius, or 0 while the page fills the window in fullscreen.
@@ -20,14 +20,14 @@ struct CaptureRegionOverlay: NSViewRepresentable {
 
     func updateNSView(_ view: SelectionView, context: Context) {
         view.layer?.cornerRadius = cornerRadius
-        view.onSelect = { [weak view, session, pageView] rect in
+        view.onSelect = { [weak view, windowModel, pageView] rect in
             guard let view else { return }
-            session.finishRegionCapture(view.convert(rect, to: pageView))
+            windowModel.finishRegionCapture(view.convert(rect, to: pageView))
         }
-        view.onCancel = { [session] in session.cancelRegionCapture() }
+        view.onCancel = { [windowModel] in windowModel.cancelRegionCapture() }
     }
 
-    // SwiftUI removes the view during an update, which must not change the session, so the cancellation follows it.
+    // SwiftUI removes the view during an update, which must not change the window's state, so the cancellation follows it.
     static func dismantleNSView(_ view: SelectionView, coordinator: ()) {
         guard let cancel = view.onCancel else { return }
         DispatchQueue.main.async(execute: cancel)

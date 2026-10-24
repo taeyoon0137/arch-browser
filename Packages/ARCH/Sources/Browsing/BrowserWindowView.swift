@@ -5,6 +5,8 @@ import SwiftUI
 
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
+    /// The window this view shows. Its subviews read it from the environment.
+    @ObservedObject var windowModel: BrowserWindowModel
     @State private var windowButtons = WindowButtonMetrics()
     /// The displayed palette mode. It stays set while the palette closes because removal transitions do not run in this window. A state change fades out the palette and its dimming, then the window removes both.
     @State private var shownPaletteMode: CommandPaletteMode?
@@ -33,8 +35,9 @@ public struct BrowserWindowView: View {
     /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
     @State private var enteredFullScreenForPage = false
 
-    public init(session: BrowserSession) {
+    public init(session: BrowserSession, window: BrowserWindowModel) {
         self.session = session
+        windowModel = window
     }
 
     /// The margin between the page and the window's edges.
@@ -47,17 +50,17 @@ public struct BrowserWindowView: View {
     static let cardCornerRadius: CGFloat = 16
 
     /// While the selected tab's page is in fullscreen, it fills the window without the sidebar or margins.
-    private var isPageFullscreen: Bool { session.fullscreenTabID != nil && session.fullscreenTabID == session.selectedTabID }
+    private var isPageFullscreen: Bool { windowModel.fullscreenTabID != nil && windowModel.fullscreenTabID == windowModel.selectedTabID }
 
     /// The sidebar's own margin is part of the gap beside it.
     private var pageMargins: EdgeInsets {
-        EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin, bottom: Self.pageMargin, trailing: Self.pageMargin)
+        EdgeInsets(top: Self.pageMargin, leading: windowModel.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin, bottom: Self.pageMargin, trailing: Self.pageMargin)
     }
 
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                if session.isSidebarVisible, !isPageFullscreen {
+                if windowModel.isSidebarVisible, !isPageFullscreen {
                     SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
                         sidebarWidth = Double(SidebarView.clampedWidth($0))
                     }
@@ -66,14 +69,14 @@ public struct BrowserWindowView: View {
                 }
                 PageAreaView(session: session, tabDrag: tabDrag, isPageFullscreen: isPageFullscreen)
                     // A preview floats over the whole page area, whatever its panes.
-                    .overlay { if let preview = session.preview { PagePreviewPanel(session: session, preview: preview) } }
+                    .overlay { if let preview = windowModel.preview { PagePreviewPanel(preview: preview) } }
                     .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
-                    .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
+                    .modifier(DevToolsDockSpace(dock: windowModel.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
                 if !isPageFullscreen {
-                    PageReaderColumn(session: session, assistant: session.pageAssistant)
+                    PageReaderColumn(session: session)
                 }
             }
-            if !session.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
+            if !windowModel.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
                 peekingSidebar
             }
             SplitDropIndicator(tabDrag: tabDrag)
@@ -83,7 +86,7 @@ public struct BrowserWindowView: View {
                 .modifier(SidebarAppearance())
             if shownPaletteMode != nil {
                 Color.black.opacity(isPaletteLeaving ? 0 : 0.15)
-                    .onTapGesture { session.dismissCommandPalette() }
+                    .onTapGesture { windowModel.dismissCommandPalette() }
                     .transition(.opacity)
             }
             // Drawing a hidden palette once at launch builds the text field, material, and fonts before the first visible palette opens. Otherwise, that palette would appear only after its arrival animation ends.
@@ -97,14 +100,15 @@ public struct BrowserWindowView: View {
                 // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
                 CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving, arrivalOffset: paletteMotion.arrival,
                                    onArrival: { addressPillPull = paletteMotion.pull })
-                    .id(session.commandPaletteGeneration)
+                    .id(windowModel.commandPaletteGeneration)
             }
-            if session.isTabSwitcherVisible {
+            if windowModel.isTabSwitcherVisible {
                 TabSwitcherView(session: session)
             }
         }
         .coordinateSpace(name: Self.coordinateSpace)
         .environmentObject(tabDrag)
+        .environmentObject(windowModel)
         .environment(\.addressPillPull, addressPillPull)
         .onPreferenceChange(AddressPillFrameKey.self) { addressPillFrame = $0 }
         .background(GeometryReader { proxy in
@@ -112,33 +116,33 @@ public struct BrowserWindowView: View {
                 .onAppear { windowSize = proxy.size }
                 .onChange(of: proxy.size) { windowSize = $1 }
         })
-        .onAppear { shownPaletteMode = session.commandPaletteMode }
-        .onChange(of: session.commandPaletteMode) { _, mode in
+        .onAppear { shownPaletteMode = windowModel.commandPaletteMode }
+        .onChange(of: windowModel.commandPaletteMode) { _, mode in
             guard mode == nil else {
                 isPaletteLeaving = false
-                paletteMotion = PaletteMotion(origin: session.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowSize.width)
+                paletteMotion = PaletteMotion(origin: windowModel.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowSize.width)
                 if paletteMotion.pull == .zero { withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero } }
-                return withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { shownPaletteMode = mode }
+                return withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) { shownPaletteMode = mode }
             }
             withAnimation(.paletteOut) { isPaletteLeaving = true }
             // The pill's contents return as the palette leaves.
             withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero }
-            let generation = session.commandPaletteGeneration
+            let generation = windowModel.commandPaletteGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {
                 // A palette reopened during this delay has a new generation and stays until it finishes closing.
-                guard session.commandPaletteGeneration == generation else { return }
+                guard windowModel.commandPaletteGeneration == generation else { return }
                 shownPaletteMode = nil
                 isPaletteLeaving = false
             }
         }
         .background(SpaceBackgroundView())
-        .modifier(SpaceThemeModifier(tint: session.currentSpace.tint))
+        .modifier(SpaceThemeModifier(tint: windowModel.currentSpace.tint))
         .background(WindowButtonsReader { windowButtons = $0 })
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
-        .animation(SidebarView.pageSpring, value: session.isSidebarVisible)
-        .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
+        .animation(SidebarView.pageSpring, value: windowModel.isSidebarVisible)
+        .animation(SidebarView.pageSpring, value: windowModel.isLibraryVisible)
         // The window buttons slide away with the sidebar and return with it or with the card. Full screen uses its own buttons.
-        .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking,
+        .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !windowModel.isSidebarVisible && !isSidebarPeeking,
                                             slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
                                             reference: windowReference))
         // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
@@ -161,10 +165,10 @@ public struct BrowserWindowView: View {
             guard notification.object as? NSWindow === windowReference.window else { return }
             recordChildWindows()
             enteredFullScreenForPage = false
-            if isPageFullscreen { session.exitPageFullscreen() }
+            if isPageFullscreen { windowModel.exitPageFullscreen() }
         }
         // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
-        .onChange(of: session.isSidebarVisible) { _, isVisible in
+        .onChange(of: windowModel.isSidebarVisible) { _, isVisible in
             peekCheck?.cancel()
             guard isVisible, isSidebarPeeking else { return isSidebarPeeking = false }
             withAnimation(SidebarView.pageSpring) { isCardDocking = true }
@@ -218,7 +222,7 @@ public struct BrowserWindowView: View {
     }
 
     private func peekSidebar() {
-        guard !session.isSidebarVisible else { return }
+        guard !windowModel.isSidebarVisible else { return }
         peekCheck?.cancel()
         if !isSidebarPeeking {
             recordChildWindows()
@@ -242,17 +246,17 @@ public struct BrowserWindowView: View {
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
-            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
-        let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || session.renamingFolderID != nil || window?.firstResponder is NSText
-        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
+            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== windowModel.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
+        let isEditingText = windowModel.renamingSpaceID != nil || windowModel.renamingTabID != nil || windowModel.renamingFolderID != nil || window?.firstResponder is NSText
+        let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
         // Close the card's library after the card disappears, so the card reopens showing the sidebar.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            guard !session.isSidebarVisible, !isSidebarPeeking, session.isLibraryVisible else { return }
+            guard !windowModel.isSidebarVisible, !isSidebarPeeking, windowModel.isLibraryVisible else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { session.isLibraryVisible = false }
+            withTransaction(transaction) { windowModel.isLibraryVisible = false }
         }
     }
 
@@ -470,6 +474,7 @@ struct SidebarView: View {
     static let pageSpring = Animation.spring(response: 0.35, dampingFraction: 0.88)
 
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let windowButtons: WindowButtonMetrics
     /// Handles a swipe past the first space to open the library.
     var librarySwipe: SidebarSwipeHandlers?
@@ -481,7 +486,7 @@ struct SidebarView: View {
     @State private var isSwipingLibrary = false
 
     private var currentIndex: Int {
-        session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+        session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
     }
 
     /// Limits a swipe to one page and resists past the first and last spaces.
@@ -491,7 +496,7 @@ struct SidebarView: View {
     }
 
     private func swipeChanged(_ travel: CGFloat) {
-        guard !session.isLibraryVisible else { return }
+        guard !windowModel.isLibraryVisible else { return }
         if let librarySwipe, isSwipingLibrary || (currentIndex == 0 && travel > 0) {
             isSwipingLibrary = true
             swipeTranslation = 0
@@ -514,7 +519,7 @@ struct SidebarView: View {
             return
         }
         // The library may have opened during the swipe; the pages go back to rest behind it.
-        guard !session.isLibraryVisible else {
+        guard !windowModel.isLibraryVisible else {
             swipeTranslation = 0
             swipePassesHalfway = false
             return
@@ -530,7 +535,7 @@ struct SidebarView: View {
         swipePassesHalfway = false
         withAnimation(Self.pageSpring) {
             swipeTranslation = 0
-            if target != currentIndex { session.switchToSpace(session.spaces[target].id) }
+            if target != currentIndex { windowModel.switchToSpace(session.spaces[target].id) }
         }
     }
 
@@ -538,11 +543,11 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Swipes over the bottom bar stay with it, so its symbols can scroll when there are many.
             VStack(alignment: .leading, spacing: 8) {
-                if let tab = session.selectedTab {
+                if let tab = windowModel.selectedTab {
                     SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
                 } else {
                     // Without a tab the controls stay in place; the address pill opens a new tab.
-                    SidebarTopRow(session: session, windowButtons: windowButtons)
+                    SidebarTopRow(windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
                 // Space pages reach the sidebar's edges to slide in from outside. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
@@ -557,16 +562,16 @@ struct SidebarView: View {
                 .padding(.top, 6)
                 .clipped()
                 .padding(.horizontal, -Self.inset)
-                .modifier(SidebarDropTarget(session: session))
+                .modifier(SidebarDropTarget())
             }
             // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
-            .background(SpaceSwipeView(isEnabled: !session.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
+            .background(SpaceSwipeView(isEnabled: !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
             SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
-        .onChange(of: session.isLibraryVisible) { isSwipingLibrary = false }
+        .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
     }
 }
 
@@ -584,6 +589,7 @@ struct SidebarColumn: View {
     static let dividerMargin: CGFloat = 8
 
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let windowButtons: WindowButtonMetrics
     let width: CGFloat
     var isFloating = false
@@ -596,7 +602,7 @@ struct SidebarColumn: View {
     private var gap: CGFloat { 2 * Self.dividerMargin }
     /// How far the library moves in: its width and the gap after it.
     private var travel: CGFloat { libraryWidth + gap }
-    private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? travel : 0) }
+    private var reveal: CGFloat { swipeReveal ?? (windowModel.isLibraryVisible ? travel : 0) }
     private var progress: CGFloat { reveal / travel }
     /// How much the docked column widens while the library is open.
     private var widening: CGFloat { isFloating ? 0 : gap + peek }
@@ -620,7 +626,7 @@ struct SidebarColumn: View {
                 .allowsHitTesting(progress == 0)
                 .accessibilityHidden(progress > 0)
                 .overlay {
-                    if session.isLibraryVisible, !isFloating {
+                    if windowModel.isLibraryVisible, !isFloating {
                         Color.clear
                             .frame(width: peek)
                             .contentShape(Rectangle())
@@ -639,7 +645,7 @@ struct SidebarColumn: View {
         // Clicks reach only what the clip shows.
         .contentShape(Rectangle())
         // A swipe over the open library or displaced sidebar closes the library.
-        .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
+        .background(SpaceSwipeView(isEnabled: windowModel.isLibraryVisible,
                                    onChange: { distance in swipeReveal = min(travel, max(0, travel + distance)) },
                                    onEnd: { distance, velocity in finishLibrarySwipe(opens: !(distance < -travel * 0.3 || velocity < -300)) }))
         // The handle covers the gap between the sidebar's controls and the page, including the sidebar's margin and the gap outside it.
@@ -650,9 +656,9 @@ struct SidebarColumn: View {
                     .offset(x: BrowserWindowView.sidebarGap - SidebarView.inset)
             }
         }
-        .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
+        .animation(SidebarView.pageSpring, value: windowModel.isLibraryVisible)
         .environment(\.sidebarWidth, width)
-        .onChange(of: session.isLibraryVisible) { swipeReveal = nil }
+        .onChange(of: windowModel.isLibraryVisible) { swipeReveal = nil }
         // On a strong tint, the sidebar's text and icons may take the other appearance to stay readable.
         .modifier(SidebarAppearance())
     }
@@ -660,7 +666,7 @@ struct SidebarColumn: View {
     private func finishLibrarySwipe(opens: Bool) {
         withAnimation(SidebarView.pageSpring) {
             swipeReveal = nil
-            session.isLibraryVisible = opens
+            windowModel.isLibraryVisible = opens
         }
     }
 }
@@ -672,7 +678,7 @@ struct SelectedTabHeaderView: View {
     let windowButtons: WindowButtonMetrics
 
     var body: some View {
-        SidebarTopRow(session: session, windowButtons: windowButtons, tab: tab)
+        SidebarTopRow(windowButtons: windowButtons, tab: tab)
         AddressPillView(session: session, tab: tab)
     }
 }
@@ -681,20 +687,20 @@ struct SelectedTabHeaderView: View {
 struct SidebarTopRow: View {
     static let height: CGFloat = 30
 
-    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let windowButtons: WindowButtonMetrics
     var tab: Tab?
 
     var body: some View {
         HStack(spacing: 4) {
-            SidebarIconButton(symbol: "sidebar.left", label: session.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", action: session.toggleSidebar)
+            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", action: windowModel.toggleSidebar)
             Spacer()
-            SidebarIconButton(symbol: "chevron.left", label: "Back", action: session.goBack).disabled(tab?.canGoBack != true)
-            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: session.goForward).disabled(tab?.canGoForward != true)
+            SidebarIconButton(symbol: "chevron.left", label: "Back", action: windowModel.goBack).disabled(tab?.canGoBack != true)
+            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: windowModel.goForward).disabled(tab?.canGoForward != true)
             if tab?.isLoading == true {
-                SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: session.stopLoading)
+                SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: windowModel.stopLoading)
             } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: session.reload).disabled(tab == nil)
+                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: windowModel.reload).disabled(tab == nil)
             }
         }
         .frame(height: Self.height)
@@ -731,6 +737,7 @@ struct SidebarIconButton: View {
 /// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The buttons at its end share the page and open the site settings. While the palette it opened is visible, the pill's contents move out toward it.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     /// `nil` when no tab is open.
     let tab: Tab?
     @Environment(\.colorScheme) private var colorScheme
@@ -741,7 +748,7 @@ struct AddressPillView: View {
 
     /// The site's host, a local file's name, or the whole address of a page without a host, such as `about:blank`.
     private var host: String {
-        if let page = session.internalPage { return page.address }
+        if let page = windowModel.internalPage { return page.address }
         guard let url else { return "Search or enter address" }
         if url.isFileURL { return url.lastPathComponent }
         guard let host = url.host, !host.isEmpty else { return url.absoluteString }
@@ -749,7 +756,7 @@ struct AddressPillView: View {
     }
 
     private var symbol: String {
-        if session.internalPage != nil { return "flag" }
+        if windowModel.internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
         if url.isFileURL { return "doc" }
         return url.scheme == "https" ? "lock.fill" : "globe"
@@ -757,7 +764,7 @@ struct AddressPillView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: { session.focusCommandBar(from: .addressPill) }) {
+            Button(action: { windowModel.focusCommandBar(from: .addressPill) }) {
                 HStack(spacing: 6) {
                     Image(systemName: symbol)
                         .font(.system(size: 11, weight: .semibold))
@@ -778,9 +785,9 @@ struct AddressPillView: View {
             .buttonStyle(.plain)
             .help(url?.absoluteString ?? "")
             .accessibilityLabel(host)
-            SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: session.shareSelectedPage)
-                .disabled(!session.canShareSelectedPage)
-                .background(ShareButtonAnchor(session: session))
+            SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
+                .disabled(!windowModel.canShareSelectedPage)
+                .background(ShareButtonAnchor(windowModel: windowModel))
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
                 .padding(.trailing, 4)
                 .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
@@ -797,23 +804,23 @@ struct AddressPillView: View {
 
 /// Marks the share button for the picker. The docked sidebar and the floating card each have one; the one that joined the window last is the one on screen.
 struct ShareButtonAnchor: NSViewRepresentable {
-    let session: BrowserSession
+    let windowModel: BrowserWindowModel
 
     func makeNSView(context: Context) -> AnchorView { AnchorView() }
 
     func updateNSView(_ view: AnchorView, context: Context) {
-        view.session = session
+        view.windowModel = windowModel
     }
 
     final class AnchorView: NSView {
         // Only joining the window registers the view, so an update of the other anchor does not take over.
-        weak var session: BrowserSession? {
-            didSet { if oldValue == nil, window != nil { session?.shareButtonView = self } }
+        weak var windowModel: BrowserWindowModel? {
+            didSet { if oldValue == nil, window != nil { windowModel?.shareButtonView = self } }
         }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if window != nil { session?.shareButtonView = self }
+            if window != nil { windowModel?.shareButtonView = self }
         }
 
         // Clicks go to the button above it.
@@ -876,6 +883,7 @@ private struct AddressPillFrameKey: PreferenceKey {
 /// The site settings popover: the engine of the current tab, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let tab: Tab?
     /// Closes the popover, so that it does not stay over the sheet it opens.
     var close: () -> Void = {}
@@ -887,9 +895,9 @@ struct SiteSettingsView: View {
                 SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
                     Button("Clear Site Data\u{2026}") {
                         close()
-                        session.confirmClearSiteData()
+                        windowModel.confirmClearSiteData()
                     }
-                    .disabled(!session.canClearSiteData)
+                    .disabled(!windowModel.canClearSiteData)
                 }
                 PageAISiteSection(tab: tab)
             }
@@ -942,19 +950,20 @@ struct SiteSettingsSection<Content: View>: View {
 /// Shows favorites shared by all spaces as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @EnvironmentObject private var tabDrag: TabDragState
     /// Each tile's frame in the window, used to find the tile under a dragged favorite.
     @State private var tileFrames: [UUID: CGRect] = [:]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
-        let selectedFavoriteID = session.selectedFavoriteID
+        let selectedFavoriteID = windowModel.selectedFavoriteID
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(session.favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasTab(favorite))
                     // The release that ends a drag does not also open the favorite.
-                    .onTapGesture { if tabDrag.item == nil { session.openFavorite(favorite) } }
-                    .accessibilityAction { session.openFavorite(favorite) }
+                    .onTapGesture { if tabDrag.item == nil { windowModel.openFavorite(favorite) } }
+                    .accessibilityAction { windowModel.openFavorite(favorite) }
                     .contextMenu {
                         Button("Close") { session.closeFavorite(favorite) }
                             .disabled(!session.hasTab(favorite))
@@ -962,7 +971,7 @@ struct FavoritesGridView: View {
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
                     .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
-                    .modifier(ShiftHoverPreview { if tabDrag.item == nil { session.previewFavorite(favorite) } })
+                    .modifier(ShiftHoverPreview { if tabDrag.item == nil { windowModel.previewFavorite(favorite) } })
             }
         }
         .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
@@ -1030,14 +1039,15 @@ struct FavoriteTileView: View {
 /// Lays out one page per space side by side and shows the current space's page. During a swipe the pages follow the fingers; a change of space slides them into place.
 struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let translation: CGFloat
     @Environment(\.sidebarWidth) private var width
 
     var body: some View {
-        let index = session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+        let index = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
         HStack(spacing: 0) {
             ForEach(session.spaces) { space in
-                let isCurrent = space.id == session.currentSpaceID
+                let isCurrent = space.id == windowModel.currentSpaceID
                 SpaceTabsView(session: session, space: space)
                     .frame(width: width)
                     // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar, or from reaching assistive apps.
@@ -1049,13 +1059,14 @@ struct SpacePagesView: View {
         .offset(x: -CGFloat(index) * width + translation)
         .frame(width: width, alignment: .leading)
         .clipped()
-        .animation(SidebarView.pageSpring, value: session.currentSpaceID)
+        .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
     }
 }
 
 /// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row. Each of the two lists starts with its folders, each followed by its tabs unless collapsed.
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
     @EnvironmentObject private var tabDrag: TabDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
@@ -1100,7 +1111,7 @@ struct SpaceTabsView: View {
     /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row.
     private func listItems(pinned: Bool) -> [Item] {
         let folders = session.folders(in: space.id, pinned: pinned).flatMap { folder in
-            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == session.selectedTabID || ($0.id == tabDrag.tabID && !tabDrag.isSettling) }
+            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == windowModel.selectedTabID || ($0.id == tabDrag.tabID && !tabDrag.isSettling) }
             return [Item.folder(folder)] + shown.map { Item.tab($0, isInFolder: true) }
         }
         return folders + session.tabsOutsideFolders(in: space.id, pinned: pinned).map { Item.tab($0, isInFolder: false) }
@@ -1125,7 +1136,7 @@ struct SpaceTabsView: View {
                         Divider().padding(.vertical, 4).padding(.horizontal, 10)
                             .background(frameReader(for: Self.pinnedListEndID))
                     case .newTab:
-                        NewTabButton(action: { session.showCommandPalette(.newTab, from: .sidebar) })
+                        NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
                             .background(frameReader(for: Self.openListEndID))
                     }
                 }
@@ -1168,7 +1179,7 @@ struct SpaceTabsView: View {
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
-                .onEnded { _ in dragEnded() }, including: session.renamingTabID == tab.id ? .subviews : .all)
+                .onEnded { _ in dragEnded() }, including: windowModel.renamingTabID == tab.id ? .subviews : .all)
     }
 
     /// Reports a tab's or folder's row frame in the window.
@@ -1192,7 +1203,7 @@ struct SpaceTabsView: View {
         setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 })
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
-        setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: session) : nil)
+        setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead.
         guard isOverList else { return }
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
@@ -1237,7 +1248,7 @@ struct SpaceTabsView: View {
         // Over the page area, the tab opens in split view, and its row returns to its slot.
         if let drop = tabDrag.splitDrop, let tab = session.tabs.first(where: { $0.id == id }) {
             withAnimation(.easeInOut(duration: 0.15)) { tabDrag.splitDrop = nil }
-            session.openInSplitView(tab, at: drop.index)
+            windowModel.openInSplitView(tab, at: drop.index)
         }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             tabDrag.isSettling = true
@@ -1343,20 +1354,21 @@ private struct TabRowFramesKey: PreferenceKey {
 
 struct TabRowView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var tab: Tab
     @ObservedObject private var commandKey = CommandKeyState.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
 
-    private var isSelected: Bool { tab.id == session.selectedTabID }
+    private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     /// Rows ignore the pointer while a tab is dragged over them.
     private var showsHover: Bool { isHovering && !isDraggingTab }
 
     private var fill: Color {
         if isSelected { return SidebarFill.selected.color(in: colorScheme) }
         // The other panes of the split view on screen show a lighter selection.
-        if session.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(0.5) }
+        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(0.5) }
         return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -1364,9 +1376,9 @@ struct TabRowView: View {
         HStack(spacing: 8) {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
-            if session.renamingTabID == tab.id {
-                SidebarNameField(session: session, placeholder: "Tab Name", name: tab.displayTitle,
-                                 onRename: { session.renameTab(tab.id, to: $0) }, onEnd: { session.endRenaming(tab.id) })
+            if windowModel.renamingTabID == tab.id {
+                SidebarNameField(placeholder: "Tab Name", name: tab.displayTitle,
+                                 onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
             } else {
                 Text(tab.displayTitle)
                     .font(.system(size: 14))
@@ -1379,7 +1391,7 @@ struct TabRowView: View {
             // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
-            } else if commandKey.showsShortcuts, let number = session.shortcutNumber(for: tab) {
+            } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
                 TabShortcutBadge(number: number)
                     .transition(.modifier(active: BlurFade(isHidden: true), identity: BlurFade(isHidden: false)))
             } else if tab.isUnread {
@@ -1395,20 +1407,20 @@ struct TabRowView: View {
         .contentShape(Rectangle())
         // The row truncates long titles, so the tooltip has the whole title and the address.
         .help([tab.displayTitle, tab.url?.absoluteString].compactMap { $0 }.joined(separator: "\n"))
-        .onTapGesture { session.selectedTabID = tab.id }
+        .onTapGesture { windowModel.selectedTabID = tab.id }
         // The first click selects the tab at once; the second starts renaming it.
-        .simultaneousGesture(TapGesture(count: 2).onEnded { session.renamingTabID = tab.id })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Rename Tab") {
-                session.selectedTabID = tab.id
-                session.renamingTabID = tab.id
+                windowModel.selectedTabID = tab.id
+                windowModel.renamingTabID = tab.id
             }
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
-            Button("Open in Split View") { session.openInSplitView(tab) }.disabled(!session.canOpenInSplitView(tab))
+            Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
             Divider()
-            Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.addToNewFolder(tab) } }
+            Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
             let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []
             if !otherFolders.isEmpty {
                 Menu("Move to Folder") {
@@ -1426,13 +1438,13 @@ struct TabRowView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
-        .accessibilityAction { session.selectedTabID = tab.id }
+        .accessibilityAction { windowModel.selectedTabID = tab.id }
     }
 }
 
 /// Edits a tab's or folder's name in place. Return or leaving the field passes the name to `onRename`, which decides what an empty name means, and Escape cancels. An unedited name changes nothing.
 struct SidebarNameField: View {
-    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let placeholder: String
     /// The current name, which the field starts with.
     let name: String
@@ -1459,7 +1471,7 @@ struct SidebarNameField: View {
                 if !focused { commit() }
             }
             // Selecting another tab or space leaves the field focused, so the name is saved here.
-            .onChange(of: session.selectedTabID) { commit() }
+            .onChange(of: windowModel.selectedTabID) { commit() }
             .onAppear {
                 initialName = name
                 draftName = initialName
@@ -1636,6 +1648,7 @@ struct NewTabButton: View {
 /// The space's symbol and name above its tabs, with a button for the space menu. Double-clicking the name renames the space in place.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
     @State private var draftName = ""
     @FocusState private var isNameFocused: Bool
@@ -1646,15 +1659,15 @@ struct SpaceHeaderView: View {
             Image(systemName: space.symbol)
                 .font(.system(size: 10))
                 .foregroundStyle(theme.symbolColor(for: space.tint))
-            if session.renamingSpaceID == space.id {
+            if windowModel.renamingSpaceID == space.id {
                 TextField("Space Name", text: $draftName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .semibold))
                     .focused($isNameFocused)
-                    .onSubmit { session.renameSpace(space.id, to: draftName) }
-                    .onExitCommand { session.renamingSpaceID = nil }
+                    .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
+                    .onExitCommand { windowModel.renamingSpaceID = nil }
                     .onChange(of: isNameFocused) { _, focused in
-                        if !focused, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+                        if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
                     }
                     .onAppear {
                         draftName = space.name
@@ -1662,14 +1675,14 @@ struct SpaceHeaderView: View {
                     }
                     // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
                     .onDisappear {
-                        if session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+                        if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
                     }
             } else {
                 Text(space.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .onTapGesture(count: 2) { session.renamingSpaceID = space.id }
+                    .onTapGesture(count: 2) { windowModel.renamingSpaceID = space.id }
             }
             Spacer(minLength: 0)
             Menu {
@@ -1690,8 +1703,8 @@ struct SpaceHeaderView: View {
         }
         .frame(height: 22)
         // Another space's page takes over the keyboard, so the name in this one is kept.
-        .onChange(of: session.currentSpaceID) { _, id in
-            if id != space.id, session.renamingSpaceID == space.id { session.renameSpace(space.id, to: draftName) }
+        .onChange(of: windowModel.currentSpaceID) { _, id in
+            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
         }
     }
 }
@@ -1699,6 +1712,7 @@ struct SpaceHeaderView: View {
 /// The space menu, shared by the button beside a space's name and the context menu of its symbol at the bottom of the sidebar.
 struct SpaceMenuItems: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
 
     private var index: Int? { session.spaces.firstIndex { $0.id == space.id } }
@@ -1706,8 +1720,8 @@ struct SpaceMenuItems: View {
 
     var body: some View {
         Button("Rename Space") {
-            session.switchToSpace(space.id)
-            session.renamingSpaceID = space.id
+            windowModel.switchToSpace(space.id)
+            windowModel.renamingSpaceID = space.id
         }
         // Automatic follows the system accent color; the others are the space's own color.
         Picker("Theme", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
@@ -1721,8 +1735,8 @@ struct SpaceMenuItems: View {
             }
         }
         Divider()
-        Button("Set Current Page as Home") { session.setCurrentPageAsHome(ofSpace: space.id) }
-            .disabled(!session.canSetCurrentPageAsHome)
+        Button("Set Current Page as Home") { windowModel.setCurrentPageAsHome(ofSpace: space.id) }
+            .disabled(!windowModel.canSetCurrentPageAsHome)
         Button("Clear Home") { session.clearHome(ofSpace: space.id) }
             .disabled(homeURL == nil)
         Divider()
@@ -1731,8 +1745,8 @@ struct SpaceMenuItems: View {
         Button("Move Right") { session.moveSpace(space.id, by: 1) }
             .disabled(index == session.spaces.count - 1)
         Divider()
-        Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.addFolder(toSpace: space.id) } }
-        Button("New Space", action: session.addSpace)
+        Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
+        Button("New Space", action: windowModel.addSpace)
         Button("Delete Space") { session.deleteSpace(space.id) }
             .disabled(session.spaces.count < 2)
     }
@@ -1741,6 +1755,7 @@ struct SpaceMenuItems: View {
 /// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. Dragging a symbol moves its space among the others; a tab dragged over another space's symbol lights it up.
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
     @EnvironmentObject private var tabDrag: TabDragState
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
@@ -1756,7 +1771,7 @@ struct SidebarBottomBar: View {
     /// Three items show at full size: the current space and its neighbors, or the three at the end nearest it. The others shrink with their distance from those three.
     private func scale(at index: Int) -> CGFloat {
         let count = session.spaces.count + 1
-        let current = session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+        let current = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
         let first = max(0, min(current - 1, count - 3))
         let distance = index < first ? first - index : max(0, index - (first + 2))
         return max(0.3, pow(0.7, CGFloat(distance)))
@@ -1766,10 +1781,10 @@ struct SidebarBottomBar: View {
     private func strip(shrinksAtEdges: Bool) -> some View {
         HStack(spacing: 2) {
             ForEach(Array(session.spaces.enumerated()), id: \.element.id) { index, space in
-                let isCurrent = space.id == session.currentSpaceID
+                let isCurrent = space.id == windowModel.currentSpaceID
                 let isTabTarget = tabDrag.targetSpaceID == space.id
                 // The release that ends a drag of the symbol does not also switch spaces.
-                Button(action: { if tabDrag.item == nil { session.switchToSpace(space.id) } }) {
+                Button(action: { if tabDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
                         .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
@@ -1786,10 +1801,10 @@ struct SidebarBottomBar: View {
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }
-            NewSpaceButton(scale: scale(at: session.spaces.count), action: session.addSpace)
+            NewSpaceButton(scale: scale(at: session.spaces.count), action: windowModel.addSpace)
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
-        .animation(SidebarView.pageSpring, value: session.currentSpaceID)
+        .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
         .animation(.easeInOut(duration: 0.15), value: session.spaces.map(\.id))
         // Let the first and last items scroll clear of the shrinking ends.
         .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
@@ -1814,8 +1829,8 @@ struct SidebarBottomBar: View {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) { strip(shrinksAtEdges: true) }
                         .coordinateSpace(name: Self.stripSpace)
-                        .onAppear { proxy.scrollTo(session.currentSpaceID, anchor: .center) }
-                        .onChange(of: session.currentSpaceID) { _, id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                        .onAppear { proxy.scrollTo(windowModel.currentSpaceID, anchor: .center) }
+                        .onChange(of: windowModel.currentSpaceID) { _, id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
                 }
             }
             .frame(maxWidth: groupWidth)
