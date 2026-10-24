@@ -86,6 +86,9 @@ git config core.hooksPath .githooks
 - [`docs/plan.md`](../docs/plan.md): read this first for goals, approach, current state, working rules, build steps, engine plan, and next steps.
 - [`docs/engine-protocol.md`](../docs/engine-protocol.md): the protocols in `ARCHEngine`, adapter modules, capability tiers, and engine switching.
 - [`docs/features.md`](../docs/features.md): planned features with the implementation approach and status of each.
+- [`docs/sync.md`](../docs/sync.md): the sync design, with CloudKit record types, conflict handling, offline behavior, and what never syncs.
+- [`docs/plugins.md`](../docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
+- [`docs/ai.md`](../docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
 
 <a id="scripts"></a>
 
@@ -100,7 +103,7 @@ git config core.hooksPath .githooks
 | Command | Description |
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. |
-| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, and the app icon. It runs `scripts/opaque_icon.swift` to prepare the icon. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 
 <a id="repository-structure"></a>

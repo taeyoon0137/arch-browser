@@ -48,7 +48,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 11 | Command bar (URLs, search, commands, tab switching) | Custom implementation. AppKit text completion shows suggestions from local history and bookmarks, plus public search engine endpoints. No engine autocomplete is used | None | in progress |
 | 12 | Site Search | Custom implementation with a local search engine list | None | not started |
 | 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | in progress |
-| 14 | Back, forward, reload, zoom | `WKWebView` and CEF back-forward lists; the History menu lists the selected tab's previous ten pages | Navigation | in progress |
+| 14 | Back, forward, reload, zoom | `WKWebView` and CEF back-forward lists; the History menu lists the selected tab's previous ten pages; View ▸ Actual Size, Zoom In, and Zoom Out set `pageZoom` on WebKit and the CEF zoom level on Chromium, with the factor remembered per host in `UserDefaults` | Navigation | complete |
 | 15 | Find in page | `WKWebView.find(_:configuration:)` with match counts from a script on WebKit; CEF's find on Chromium | Find | complete |
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
 | 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | complete |
@@ -63,17 +63,17 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 20 | Media controls and picture-in-picture (PiP) | Both engines use system PiP. WebKit has it built in. The Chromium engine routes PiP to AVKit through a patched CEF build so it matches the macOS experience (needs verification). `MPNowPlayingInfoCenter` for media controls (needs verification) | Media sessions | not started |
 | 21 | Download management | `WKDownload`, `NSSavePanel` | Downloads | in progress |
 | 22 | Capture (region, full page) and screenshot storage | `WKWebView.takeSnapshot`, `createPDF`, ScreenCaptureKit | Capture | in progress |
-| 25 | PDF viewing and printing | Built-in WebKit PDF support, `NSPrintOperation` | PDF | in progress |
+| 25 | PDF viewing and printing | Built-in WebKit PDF support. Printing and Export as PDF go through `createPDF`, PDFKit's `printOperation(for:scalingMode:autoRotate:)` as a sheet, and `NSSavePanel` on both engines; PDF viewing remains | PDF | in progress |
 | 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | in progress |
 | 27 | Fullscreen and sad tabs (crash recovery) | Element fullscreen in WebKit's own window; on Chromium, CEF's fullscreen requests with the window's full screen; a notice with Reload after a renderer quits | Renderer termination | complete |
 | 28 | Favicons and theme colors | Custom favicon collection; `WKWebView.themeColor` on WebKit and the `theme-color` meta read in the renderer process on Chromium | None | complete |
-| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage | Cookies and history | in progress |
+| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage, shown in a History window (an AppKit window hosting SwiftUI with `NSSearchToolbarItem`) with search, row deletion, and range clearing | Cookies and history | in progress |
 
 ## 4. Creation and Sharing
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 32 | Share menu and sharing settings | `NSSharingServicePicker` | None | not started |
+| 32 | Share menu and sharing settings | `NSSharingServicePicker` from the address pill's share button and File ▸ Share…, with the page's address, and its title and icon through `NSPreviewRepresentingActivityItem`; the title becomes the subject for services such as Mail. Sharing settings are the system's own | None | complete |
 | 33 | Import (bookmarks, history, passwords) | Custom parsing of browser files. Apple Passwords handles password imports | None | not started |
 | 34 | Home button, badges, tooltips | Custom implementation | None | not started |
 
@@ -81,22 +81,22 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 35 | Sidebar and settings sync | CloudKit private database | None | not started |
+| 35 | Sidebar and settings sync | CloudKit private database through `CKSyncEngine` (macOS 14+); design in `docs/sync.md` | None | not started |
 | 36 | Preferences window | Custom implementation using the `Settings` package | None | in progress |
 | 37 | Automatic updates | Omitted. Builds are manual. Reconsider later | None | not started |
 | 38 | Accounts | None. Arch needs no account | None | not started |
 | 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines as plugins (row 50); each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). On Chromium, 1Password's Universal Autofill can read a page once it asks for the accessibility tree (see Private APIs); the user has yet to check it. A WebKit tab does not get Apple Passwords AutoFill without an extension; the user checked this on macOS 27 | Extensions, accessibility | not started |
 | 40 | Web notifications and push | `UserNotifications` for local notifications only. Remote push is omitted | None | not started |
-| 41 | AppleScript | Custom `NSScriptCommand` implementation | None | not started |
+| 41 | AppleScript | `Arch.sdef` with the Cocoa Standard Suite, `open location`, and tabs with their identifier, name, and URL, read through key-value coding on the application; `open location` arrives through `application(_:open:)` | None | complete |
 | 42 | Sound effects | `NSSound`. The user has yet to decide whether to offer sound effects. App icon choice is not offered for now | None | not started |
 
 ## 6. Extensions and Developer Tools
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 44 | Extensions | The same Chrome-format (Manifest V3) extensions on both engines, installed once as plugins (row 50): `WKWebExtensionController` on WebKit (macOS 15.4+), CEF Chrome style on Chromium. On macOS, CEF uses Alloy style whenever the browser has a parent view, so Chrome style needs CEF-owned windows or a patched build (VI.1) | Extensions | not started |
+| 44 | Extensions | The same Manifest V3 extensions on both engines, installed once per Persona as plugins (row 50, `docs/plugins.md`), with each engine running its own copy and storage: `WKWebExtensionController` on WebKit (macOS 15.4+), CEF Chrome style on Chromium. On macOS, CEF uses Alloy style whenever the browser has a parent view, so Chrome style needs CEF-owned windows or a patched build (VI.1) | Extensions | not started |
 | 45 | DevTools | Chromium DevTools in their own window behind one menu item and shortcut. CEF 156's public API cannot place them inside the browser window: a CEF check stops `ShowDevTools` with child window info. Next, attach the tools window beside the page as a child window (II.14); docking inside the window needs a CEF patch (VI.3). WebKit allows inspection from the browser bundled with macOS (`isInspectable`); its inspector inside the app needs private API behind flags (IV.16) | DevTools | complete |
-| 50 | Plugins | Arch's own plugin system has more capabilities than browser extensions: plugins add sidebar items, palette commands, menus, settings, and page scripts on both engines. Built-in plugins ship with the app, and future features can ship as built-in plugins. Browser extensions (row 44) are one kind of plugin. Plugins are installed per Persona | None | not started |
+| 50 | Plugins | Arch's own plugin system, designed in `docs/plugins.md`: built-in Swift plugins, script plugins that run in a sandboxed WebKit web view, and web extensions (row 44) as one kind. Plugins add sidebar items, palette commands, menus, shortcuts, settings, panels, and page scripts on both engines. Built-in plugins ship with the app, and future features can ship as built-in plugins. Installed plugins, their grants, storage, and Keychain items belong to one Persona | None | not started |
 | 51 | Flags page (`flags://`) | One flag for all private APIs, one for each private API, and one for each feature that uses one. Each API's availability is checked quietly at launch and before use | Private APIs | complete |
 
 ## 7. AI
@@ -105,7 +105,7 @@ Arch ships no model or provider account. All AI features use one AI interface. T
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 43 | AI interface and providers | One provider-neutral interface. Providers use API keys kept in the Keychain or command-line tools signed in through the built-in terminal (row 56). The provider and model are chosen per feature | None | not started |
+| 43 | AI interface and providers | One provider-neutral interface designed in `docs/ai.md`. Providers use API keys kept in the Keychain or command-line tools signed in through the built-in terminal (row 56). The provider and model are chosen per feature, with up to two fallbacks | None | not started |
 | 52 | Page reader | A side panel that summarizes the current page and answers follow-up questions | Page text | not started |
 | 53 | Questions in the page | Questions about the page or a selection, with answers in a popover beside the page | Page text | not started |
 | 54 | AI hooks | Features subscribe to events such as page loads, downloads, and new tabs; the first hooks name tabs and rename downloaded files | None | not started |
