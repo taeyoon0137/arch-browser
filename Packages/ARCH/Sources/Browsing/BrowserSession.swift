@@ -943,6 +943,30 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    // MARK: Sharing
+
+    /// The share button in the address pill, set when it joins the window.
+    weak var shareButtonView: NSView?
+    /// The picker holds its delegate weakly, so the last one stays here until the next share.
+    private var sharePicker: PageSharePicker?
+
+    /// Whether the selected tab shows a page to share. An internal page has nothing to share.
+    public var canShareSelectedPage: Bool { internalPage == nil && selectedTab?.url != nil }
+
+    /// Shows the system share picker for the selected tab's address and title, below the share button, or from the top of the window while the sidebar or the library hides the button.
+    public func shareSelectedPage() {
+        guard internalPage == nil, let tab = selectedTab, let url = tab.url else { return }
+        let picker = PageSharePicker(url: url, title: tab.pageTitle, icon: tab.favicon)
+        sharePicker = picker
+        if let button = shareButtonView, button.window != nil, !isLibraryVisible {
+            picker.show(relativeTo: button.bounds, of: button, preferredEdge: button.isFlipped ? .maxY : .minY)
+        } else if let content = (NSApp.mainWindow ?? tab.webContents.view.window)?.contentView {
+            let bounds = content.bounds
+            let top = NSRect(x: bounds.midX, y: content.isFlipped ? bounds.minY : bounds.maxY - 1, width: 1, height: 1)
+            picker.show(relativeTo: top, of: content, preferredEdge: content.isFlipped ? .maxY : .minY)
+        }
+    }
+
     // MARK: Persistence
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {

@@ -723,7 +723,7 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The button at its end opens the site settings. While the palette it opened is visible, the pill's contents move out toward it.
+/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The buttons at its end share the page and open the site settings. While the palette it opened is visible, the pill's contents move out toward it.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
     /// `nil` when no tab is open.
@@ -762,13 +762,16 @@ struct AddressPillView: View {
                 .padding(.leading, 10)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
                 .offset(pull)
-                // The contents leave through the pill's edges without crossing the site settings button. Only the contents are clipped, so the focus ring stays visible.
+                // The contents leave through the pill's edges without crossing the buttons at its end. Only the contents are clipped, so the focus ring stays visible.
                 .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(url?.absoluteString ?? "")
             .accessibilityLabel(host)
+            SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: session.shareSelectedPage)
+                .disabled(!session.canShareSelectedPage)
+                .background(ShareButtonAnchor(session: session))
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
                 .padding(.trailing, 4)
                 .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
@@ -780,6 +783,53 @@ struct AddressPillView: View {
         .background(GeometryReader { proxy in
             Color.clear.preference(key: AddressPillFrameKey.self, value: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))
         })
+    }
+}
+
+/// Marks the share button for the picker. The docked sidebar and the floating card each have one; the one that joined the window last is the one on screen.
+struct ShareButtonAnchor: NSViewRepresentable {
+    let session: BrowserSession
+
+    func makeNSView(context: Context) -> AnchorView { AnchorView() }
+
+    func updateNSView(_ view: AnchorView, context: Context) {
+        view.session = session
+    }
+
+    final class AnchorView: NSView {
+        // Only joining the window registers the view, so an update of the other anchor does not take over.
+        weak var session: BrowserSession? {
+            didSet { if oldValue == nil, window != nil { session?.shareButtonView = self } }
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { session?.shareButtonView = self }
+        }
+
+        // Clicks go to the button above it.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// The system share picker for one page. Its preview shows the page's title and icon, and services that take a subject, such as Mail, get the title.
+final class PageSharePicker: NSObject, NSSharingServicePickerDelegate {
+    private let picker: NSSharingServicePicker
+    private let title: String
+
+    init(url: URL, title: String, icon: NSImage?) {
+        self.title = title
+        picker = NSSharingServicePicker(items: [NSPreviewRepresentingActivityItem(item: url as NSURL, title: title, image: nil, icon: icon)])
+        super.init()
+        picker.delegate = self
+    }
+
+    func show(relativeTo rect: NSRect, of view: NSView, preferredEdge: NSRectEdge) {
+        picker.show(relativeTo: rect, of: view, preferredEdge: preferredEdge)
+    }
+
+    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        service?.subject = title
     }
 }
 

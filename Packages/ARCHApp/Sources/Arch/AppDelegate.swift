@@ -126,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
@@ -235,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
     @objc private func printPage() { session.printPage() }
     @objc private func exportAsPDF() { session.exportPageAsPDF() }
+    @objc private func sharePage() { session.shareSelectedPage() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
     @objc private func showDeveloperTools() { session.showDeveloperTools() }
     @objc private func toggleDownloads() { session.toggleLibrary() }
@@ -311,7 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return session?.canZoom == true
@@ -327,6 +330,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(showDeveloperTools) {
             return session?.canShowDeveloperTools == true
+        }
+        if item.action == #selector(sharePage) {
+            return session?.canShareSelectedPage == true
         }
         return true
     }
