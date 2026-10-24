@@ -25,15 +25,20 @@ struct InternalPageView: View {
 
     var body: some View {
         switch page {
-        case .flags: FlagsPageView(flags: PrivateAPIFlags.shared, onClose: session.closeInternalPage)
+        case .flags: FlagsPageView(session: session, flags: PrivateAPIFlags.shared)
         }
     }
 }
 
 /// The switch for all private APIs, then each private API with whether this system has it, then each feature that uses them.
 struct FlagsPageView: View {
+    @ObservedObject var session: BrowserSession
     @ObservedObject var flags: PrivateAPIFlags
-    let onClose: () -> Void
+
+    /// Escape closes the page only while no field above it, such as the palette's or the find bar's, needs Escape.
+    private var closesOnEscape: Bool {
+        session.commandPaletteMode == nil && !session.isFindBarVisible && session.renamingSpaceID == nil && session.renamingTabID == nil
+    }
 
     var body: some View {
         ScrollView {
@@ -42,8 +47,8 @@ struct FlagsPageView: View {
                     Text("Flags")
                         .font(.system(size: 26, weight: .bold))
                     Spacer()
-                    Button("Close", action: onClose)
-                        .keyboardShortcut(.cancelAction)
+                    Button("Close", action: session.closeInternalPage)
+                        .keyboardShortcut(closesOnEscape ? .cancelAction : nil)
                 }
                 Text("Private APIs are parts of macOS and the engines that are not documented for apps. Arch uses one only while its flags are on and the running system has it; otherwise the feature falls back or stays hidden.")
                     .foregroundStyle(.secondary)

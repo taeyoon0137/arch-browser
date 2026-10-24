@@ -453,7 +453,9 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// An internal page is what the user sees, so it closes instead of the tab under it.
     public func closeSelectedTab() {
+        if internalPage != nil { return closeInternalPage() }
         selectedTab.map(requestCloseTab)
     }
 
@@ -614,6 +616,7 @@ public final class BrowserSession: ObservableObject {
 
     public func closeInternalPage() {
         internalPage = nil
+        focusPage()
     }
 
     /// Ends the fullscreen of the page that fills the window, as Escape does.
@@ -626,7 +629,12 @@ public final class BrowserSession: ObservableObject {
     /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a new tab's view is in the window.
     private func focusPage() {
         DispatchQueue.main.async { [weak self] in
-            guard let view = self?.selectedTab?.webContents.view, let window = view.window else { return }
+            guard let self, let view = self.selectedTab?.webContents.view, let window = view.window else { return }
+            // Keys must not reach a page an internal page covers.
+            guard self.internalPage == nil else {
+                window.makeFirstResponder(nil)
+                return
+            }
             window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.first)
         }
     }
@@ -806,8 +814,15 @@ public final class BrowserSession: ObservableObject {
         return ListFormatter.localizedString(byJoining: phrases)
     }
 
-    public func goBack() { selectedTab?.webContents.navigationController.goBack() }
-    public func goForward() { selectedTab?.webContents.navigationController.goForward() }
+    // Going to another page leaves an internal page, and reloading does not reach the page under it.
+    public func goBack() {
+        internalPage = nil
+        selectedTab?.webContents.navigationController.goBack()
+    }
+    public func goForward() {
+        internalPage = nil
+        selectedTab?.webContents.navigationController.goForward()
+    }
     /// The selected tab's earlier pages, most recent first, for the History menu.
     public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] {
         guard let list = selectedTab?.webContents.navigationController.backForwardList else { return [] }
@@ -816,9 +831,13 @@ public final class BrowserSession: ObservableObject {
     /// Pages keep running while the menu is open. Use an item only in its original tab, while that tab is selected.
     public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) {
         guard let tab = selectedTab, tab.id == tabID else { return }
+        internalPage = nil
         tab.webContents.navigationController.go(to: item)
     }
-    public func reload() { selectedTab?.webContents.navigationController.reload() }
+    public func reload() {
+        guard internalPage == nil else { return }
+        selectedTab?.webContents.navigationController.reload()
+    }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
     /// Whether the selected tab's engine offers developer tools.
     public var canShowDeveloperTools: Bool { selectedTab?.webContents.devTools != nil }

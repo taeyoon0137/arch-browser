@@ -36,6 +36,7 @@ struct CommandPaletteView: View {
     private var actionLabel: String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return mode == .newTab ? "Open a new tab" : "Enter an address or search" }
+        if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
         if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(url.host ?? trimmed)" }
         return "Search for \"\(trimmed)\""
     }
