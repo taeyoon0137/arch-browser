@@ -22,7 +22,7 @@
 |---|---|---|
 | `Engine` | `kind`, `capabilities`, `makeApplication` | - |
 | `EngineApplication` | `run`, `tryToTerminate`, create/load/delete/query browser contexts, `createBrowser`, `restoreBrowser`, `setBlockLists`, `setExcludedDomains` | `WKWebsiteDataStore`, `WKContentRuleListStore` |
-| `EngineBrowserContext` | `id`, `type`, `userVisibleName`, `history`, `downloads`, `preferences`, optional `extensions` | `WKWebsiteDataStore`. WebKit has no browsing history store; a custom store is required |
+| `EngineBrowserContext` | `id`, `type`, `userVisibleName`, `history`, `downloads`, `preferences`, optional `extensions`, `setRememberedPermission` (sets the answer an engine itself keeps for an origin's permission; the default does nothing, for engines that keep none) | `WKWebsiteDataStore`. WebKit has no browsing history store; a custom store is required |
 | `EngineHistory` | `query`, `mostVisited`, `delete`, `deleteAll` | Custom store, not implemented |
 | `EnginePreferences` | `downloadFilePath`, `promptForDownloadPath`, `searchSuggestEnabled`, `notificationPermissionRequestsEnabled`. Password and card storage settings are excluded | Value types |
 | `EngineBrowser` | `createWebContents`, `takeOwnership`, `tryToClose`, get/set/delete cookies, `removeCookies(where:)`, `removeSiteData(for:)` (stored data other than cookies for origins), `window` | Per-window container, `WKHTTPCookieStore`, `WKWebsiteDataStore.removeData` |
