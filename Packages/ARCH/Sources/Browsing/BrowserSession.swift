@@ -3,6 +3,8 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
+import PDFKit
+import UniformTypeIdentifiers
 
 /// One engine's running pieces: its application, the profile, and the browser that owns its tabs' web contents.
 final class EngineRuntime {
@@ -106,6 +108,8 @@ public final class BrowserSession: ObservableObject {
     /// Sheets that tabs asked for, oldest first. They wait while their tab is not selected.
     private var pendingSheets: [UUID: [PendingSheet]] = [:]
     private var visibleSheet: (tabID: UUID, alert: NSAlert, isPageDialog: Bool)?
+    /// Set while the selected page renders as PDF for Print or Export as PDF, so a second request cannot start another.
+    private var isRenderingPDF = false
     /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
     public var isQuitting = false {
         didSet {
@@ -883,6 +887,60 @@ public final class BrowserSession: ObservableObject {
         let factors = UserDefaults.standard.dictionary(forKey: Self.zoomFactorsKey) as? [String: Double]
         let factor = tab.webContents.url?.host.flatMap { factors?[$0] } ?? 1
         if abs(tab.webContents.zoomFactor - factor) > 0.001 { tab.webContents.zoomFactor = factor }
+    }
+
+    // MARK: Printing
+
+    /// Whether Print and Export as PDF can act: a page is selected with no internal page over it, no PDF is rendering, and its window shows no sheet.
+    public var canPrint: Bool {
+        guard let tab = selectedTab, internalPage == nil, !isRenderingPDF else { return false }
+        return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
+    }
+
+    /// Prints the selected page through the system print panel, a sheet on its window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
+    public func printPage() {
+        renderSelectedPageAsPDF(failureMessage: "The page could not be printed.") { tab, document, window in
+            guard let operation = document.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleDownToFit, autoRotate: true) else { return }
+            operation.jobTitle = tab.displayTitle
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        }
+    }
+
+    /// Saves the selected page as a PDF file where the user chooses in a save panel on its window.
+    public func exportPageAsPDF() {
+        renderSelectedPageAsPDF(failureMessage: "The page could not be exported as PDF.") { [weak self] tab, document, window in
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.pdf]
+            // A slash would name a folder, and a colon shows as a slash in the Finder.
+            panel.nameFieldStringValue = tab.displayTitle.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + ".pdf"
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let url = panel.url else { return }
+                if !document.write(to: url) {
+                    let alert = NSAlert()
+                    alert.messageText = "The PDF could not be saved."
+                    alert.informativeText = url.path
+                    self?.enqueueSheet(alert, for: tab) { _ in }
+                }
+            }
+        }
+    }
+
+    /// Renders the selected page as PDF and passes it on with the page's window while that tab is still selected; a tab the user left in the meantime drops the request. A failure shows a sheet on the tab.
+    private func renderSelectedPageAsPDF(failureMessage: String, then use: @escaping (Tab, PDFDocument, NSWindow) -> Void) {
+        guard canPrint, let tab = selectedTab else { return }
+        isRenderingPDF = true
+        tab.webContents.createPDF { [weak self] result in
+            guard let self else { return }
+            self.isRenderingPDF = false
+            guard self.selectedTab === tab, let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
+            if case .success(let data) = result, let document = PDFDocument(data: data) {
+                use(tab, document, window)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = failureMessage
+                self.enqueueSheet(alert, for: tab) { _ in }
+            }
+        }
     }
 
     // MARK: Persistence

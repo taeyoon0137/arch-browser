@@ -183,6 +183,24 @@ final class CookieObserver: NSObject, WKHTTPCookieStoreObserver {
     }
 }
 
+/// A PDF that a print operation saves to a temporary file. It reads the file, removes it, and reports once.
+final class PDFPrintJob: NSObject {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("arch-\(UUID().uuidString).pdf")
+    private let completion: (Result<Data, Error>) -> Void
+
+    init(completion: @escaping (Result<Data, Error>) -> Void) {
+        self.completion = completion
+    }
+
+    /// `contextInfo` holds the retain that keeps the job alive while the operation runs; it is released last.
+    @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        let data = success ? try? Data(contentsOf: file) : nil
+        try? FileManager.default.removeItem(at: file)
+        completion(data.map { .success($0) } ?? .failure(WebKitWebContents.PDFError.exportFailed))
+        if let contextInfo { Unmanaged<PDFPrintJob>.fromOpaque(contextInfo).release() }
+    }
+}
+
 /// One `WKWebView` per tab.
 public final class WebKitWebContents: NSObject, EngineWebContents {
     public let engineKind: EngineKind = .webKit
@@ -366,8 +384,24 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             self.webView.takeSnapshot(with: configuration) { image, _ in completion(image) }
         }
     }
+    public enum PDFError: Error {
+        case exportFailed
+    }
+    /// Renders a paginated PDF on the system's default paper with the page's print styles, as Chromium does. WebKit's print operation saves it without a panel and runs modal for the window, because `run()` never finishes for a web view. `createPDF` draws the whole page as one tall page, so it serves only a page outside a window.
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
-        webView.createPDF { completion($0) }
+        guard let window = webView.window else {
+            webView.createPDF { completion($0) }
+            return
+        }
+        let job = PDFPrintJob(completion: completion)
+        let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
+        printInfo.jobDisposition = .save
+        printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = job.file
+        let operation = webView.printOperation(with: printInfo)
+        operation.showsPrintPanel = false
+        operation.showsProgressPanel = false
+        operation.view?.frame = webView.bounds
+        operation.runModal(for: window, delegate: job, didRun: #selector(PDFPrintJob.printOperationDidRun(_:success:contextInfo:)), contextInfo: Unmanaged.passRetained(job).toOpaque())
     }
     /// Runs the system print panel. The operation's view has no initial size, so it takes the page's bounds first.
     public func print() {

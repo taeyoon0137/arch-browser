@@ -1555,7 +1555,11 @@ private:
         return;
     }
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"arch-%@.pdf", NSUUID.UUID.UUIDString]];
+    // CEF lays out on US Letter by default. Use the system's default paper, in inches, as WebKit's PDF and the print panel do.
+    NSSize paper = NSPrintInfo.sharedPrintInfo.paperSize;
     CefPdfPrintSettings settings;
+    settings.paper_width = paper.width / 72.0;
+    settings.paper_height = paper.height / 72.0;
     _browser->GetHost()->PrintToPDF(CefString(path.UTF8String), settings, new BridgePdfCallback(completion));
 }
 

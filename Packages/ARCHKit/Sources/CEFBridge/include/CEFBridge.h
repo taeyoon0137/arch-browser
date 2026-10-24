@@ -202,7 +202,7 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)stopFinding;
 /// Opens the current page's system print dialog.
 - (void)print;
-/// Renders the current page as PDF data. Passes `nil` if printing fails or no browser exists.
+/// Renders the current page as PDF data on the system's default paper size. Passes `nil` if printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
 /// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport

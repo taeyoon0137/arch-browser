@@ -256,7 +256,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.captureScreenshot(beyondViewport: true) { completion($0.flatMap(NSImage.init(data:))) }
     }
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
-        browser?.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
+        guard let browser else { return completion(.failure(PDFError.exportFailed)) }
+        browser.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
     }
     public func print() { browser?.print() }
     public func exitFullscreen() {

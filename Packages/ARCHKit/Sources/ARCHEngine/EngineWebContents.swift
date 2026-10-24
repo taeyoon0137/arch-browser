@@ -106,6 +106,7 @@ public protocol EngineWebContents: AnyObject {
     func removeStylesheet(identifier: String)
     func captureViewport(completion: @escaping (NSImage?) -> Void)
     func captureFullPage(completion: @escaping (NSImage?) -> Void)
+    /// Renders the page as a paginated PDF on the system's default paper with the page's print styles, for printing and export.
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void)
     func print()
     func exitFullscreen()

@@ -125,6 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
 
         let editMenu = NSMenu(title: "Edit")
@@ -223,6 +227,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func selectTab(_ sender: NSMenuItem) { session.selectTab(at: sender.tag - 1) }
     @objc private func selectLastTab() { session.selectLastTab() }
     @objc private func openLocation() { session.focusCommandBar() }
+    // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
+    @objc private func printPage() { session.printPage() }
+    @objc private func exportAsPDF() { session.exportPageAsPDF() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
     @objc private func showDeveloperTools() { session.showDeveloperTools() }
     @objc private func toggleDownloads() { session.toggleLibrary() }
@@ -288,10 +295,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return session?.canZoom == true
+        }
+        if item.action == #selector(printPage) || item.action == #selector(exportAsPDF) {
+            return session?.canPrint == true
         }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
