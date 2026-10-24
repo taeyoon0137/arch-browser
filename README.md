@@ -50,12 +50,12 @@ The core goals are:
 - Use Chromium packaged through the Chromium Embedded Framework (CEF) as the primary engine. Use WebKit as the secondary engine. Support both through one engine protocol. Allow engine switching per profile and per tab.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. On both engines, use macOS system frameworks for every part of the platform user experience.
 - Run no servers. Use iCloud or other replacements for sync and other features that need a server.
+- Offer AI features through providers the user connects using an API key or a signed-in command-line tool. The user chooses a provider and model for each feature. Ship no model or account.
 
 Out of scope:
 
 - Our own hosted services, including accounts, sync servers, and telemetry.
 - A built-in password or payment manager.
-- All AI features.
 - Public distribution. The project is for internal use.
 
 <a id="getting-started"></a>

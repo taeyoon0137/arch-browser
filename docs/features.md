@@ -23,6 +23,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | Sync | CloudKit |
 | Automation | AppleScript; App Intents (needs verification) |
 | Appearance | System appearance and accent color |
+| API keys | Keychain Services |
 
 ## 1. Windows, Sidebar, and Tabs
 
@@ -98,12 +99,24 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 50 | Plugins | Arch's own plugin system has more capabilities than browser extensions: plugins add sidebar items, palette commands, menus, settings, and page scripts on both engines. Built-in plugins ship with the app, and future features can ship as built-in plugins. Browser extensions (row 44) are one kind of plugin. Plugins are installed per Persona | None | not started |
 | 51 | Flags page (`flags://`) | One flag for all private APIs, one for each private API, and one for each feature that uses one. Each API's availability is checked quietly at launch and before use | Private APIs | not started |
 
-## 7. Exclusions
+## 7. AI
+
+Arch ships no model or provider account. All AI features use one AI interface. The user chooses a provider and model for each feature.
+
+| # | Feature | Implementation | Engine dependency | Status |
+|---|---|---|---|---|
+| 43 | AI interface and providers | One provider-neutral interface. Providers use API keys kept in the Keychain or command-line tools signed in through the built-in terminal (row 56). The provider and model are chosen per feature | None | not started |
+| 52 | Page reader | A side panel that summarizes the current page and answers follow-up questions | Page text | not started |
+| 53 | Questions in the page | Questions about the page or a selection, with answers in a popover beside the page | Page text | not started |
+| 54 | AI hooks | Features subscribe to events such as page loads, downloads, and new tabs; the first hooks name tabs and rename downloaded files | None | not started |
+| 55 | Features that AI adds at run time | AI writes plugins (row 50) that the user reviews, enables, and removes | None | not started |
+| 56 | Built-in terminal | A terminal panel backed by a pseudo-terminal for running and signing in to AI command-line tools | None | not started |
+
+## 8. Exclusions
 
 | # | Feature | Handling |
 |---|---|---|
 | 23 | Ad and tracker blocking | Excluded. An extension (row 44) can provide it |
-| 43 | AI features | Excluded entirely from this implementation. No AI code or extension point for AI |
 | 46 | Telemetry, crash reports, remote feature flags | None. Arch collects no usage data and has no remote flags. Local flags for private APIs are on `flags://` (row 51) |
 | 24 | Translation | Excluded. Neither engine offers page translation to embedding apps; translation can return if one does |
 | 30 | Site customizations (per-site CSS, JavaScript, and color changes) | Excluded. Browsers do not commonly provide this feature |

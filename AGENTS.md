@@ -10,7 +10,7 @@ Follow these instructions when working in the Arch repository. Before starting, 
 
 ## Repository role
 
-Arch is a sidebar-first macOS browser with its own implementation. It runs on Chromium through the Chromium Embedded Framework (CEF) as the primary engine with WebKit as a secondary engine. It runs no servers. It includes no AI features.
+Arch is a sidebar-first macOS browser with its own implementation. It runs on Chromium through the Chromium Embedded Framework (CEF) as the primary engine with WebKit as a secondary engine. It runs no servers. It ships no AI model or provider account; AI features use providers the user connects.
 
 - The repository contains the engine abstraction, the WebKit adapter, and the Chromium adapter built on CEF. It also contains `Browsing`, the first feature module, and the `Arch` app shell. `docs/plan.md` lists what each part supports.
 - For implementation decisions, read `docs/plan.md` first. It covers the goals, approach, current state, working rules, and next steps.
@@ -37,7 +37,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 - Write new code for each feature. Start from a row in `docs/features.md` and build the smallest module that delivers it.
 - Design type names, module boundaries, method signatures, and file layout for Arch. A row in `docs/features.md` describes what a feature does, not how to build it.
 - Add engine protocol members only when a feature needs them.
-- This implementation excludes AI features. Do not add AI code or extension points for AI.
+- All AI features use Arch's AI interface, a single provider-neutral API; no feature calls a provider directly. The user connects providers using an API key for a service they subscribe to or a command-line tool signed in through the built-in terminal, and chooses a provider and model for each feature. API keys stay in the Keychain and go only to their provider.
 
 ## Files and sources of truth
 

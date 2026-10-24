@@ -5,11 +5,11 @@ This plan gives the context needed to continue work in another session, on anoth
 ## Goals
 
 - Build a sidebar-first macOS browser with its own implementation. `docs/features.md` lists every planned feature and its status.
-- Run no servers of our own. Use alternatives such as iCloud for features that need servers, including sync (`docs/features.md`, sections 5 and 7).
+- Run no servers of our own. Use alternatives such as iCloud for features that need servers, including sync (`docs/features.md`, sections 5 and 8).
 - Give both engines the same experience. Context menus, dialogs, sheets, find, downloads, extensions, and tools use the app's own interface and work alike whatever a tab's engine; only engine-drawn surfaces such as popups may differ. `docs/features.md` notes any feature an engine cannot support and why.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. Features use macOS facilities by default on both engines so Arch fits macOS as closely as possible. Follow the Platform integration table in `docs/features.md`.
 - Prefer public APIs. Use private APIs only behind flags on `flags://`, with a quick runtime availability check for each API (see Decisions).
-- Exclude all AI features. This implementation contains no AI code or extension point for AI.
+- Offer AI features through one AI interface. The user connects providers they subscribe to using an API key or a command-line tool in the built-in terminal, and chooses a provider and model for each feature. Arch ships no model or provider account.
 - Use ARCH prefixes throughout: `ARCH*` for packages, `Arch` for the app module, and `ARCHKit` for the core layer.
 - The browser is for internal use. No distribution is planned. Manage replacement names, images, fonts, and similar items outside this repository.
 
@@ -18,7 +18,7 @@ This plan gives the context needed to continue work in another session, on anoth
 - Write new code for each feature. Start from a row in `docs/features.md`. Design the smallest module that delivers the feature and add it to `Package.swift`.
 - Design type names, module boundaries, method signatures, and file layout for Arch. A row in `docs/features.md` describes what a feature does, not how to build it.
 - Add engine protocol members only when a feature needs them. The current protocols are a starting point, not a list of requirements to implement.
-- AI is out of scope. For features that combine AI and non-AI capabilities, keep only the non-AI part.
+- Build AI features on the AI interface and plugin system so built-in features, hooks, and features that AI adds at run time use the same calls.
 - The sidebar holds navigation, the address field, favorites, and tabs grouped by space. The window background shows the current space's tint. Nothing sits above the page. Only the code is written anew.
 - Use the system framework whenever macOS provides the user experience. Do not build or retain an engine-specific version; for example, picture in picture on Chromium uses AVKit. Keep Chromium's existing native integrations. Route the remaining engine events to these frameworks and disable the engine's equivalent user interface.
 
@@ -64,7 +64,7 @@ scripts/opaque_icon.swift                   Makes the icon opaque for the system
 
 1. Write new code for each feature, with interfaces, names, and layout designed for Arch.
 2. Maintain `Package.swift` by hand. Add one target per new module.
-3. Exclude all AI features. Do not add AI code or extension points for AI.
+3. Route every AI call through the AI interface. No feature calls a provider directly.
 4. Write documentation, comments, and commit messages in English.
 5. Document the current state only. Do not include a change history. When a queue task finishes, remove its row and fold the result into Current State and `docs/features.md` in the same commit.
 6. Stage by path (`git add <paths>`) and keep one purpose per commit. Queue tasks use the `Task(<ID>):` subject; other work uses the prefixes in `.githooks/commit-msg`.
@@ -127,7 +127,7 @@ Each task carries the reasoning it needs, so that work can be split across model
 Rules for every tier:
 
 1. Take tasks at or below your tier. Read the files the task names before editing, and keep to them. If the task needs a file, a protocol member, or a decision it does not list, stop, write the blocker into the task row (`blocked: …`), and leave the code unchanged.
-2. Respect the order within a phase and the dependencies in the task text. Phases I and II run before III to V; VI is independent.
+2. Respect the order within a phase and the dependencies in the task text. Phases I and II run before III to V and VII; VI is independent, and VII builds on V.11.
 3. One task per commit with the `Task(<ID>):` subject, staged by path. Run `swift build` for every code change and `scripts/bundle_app.sh` plus a launch when the task says "from the bundle".
 4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit, then go through the After each task list in `AGENTS.md`.
 5. Verification steps use a fresh Application Support folder unless the step says otherwise.
@@ -208,6 +208,20 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 | VI.2 | Picture-in-picture through AVKit for the Chromium engine (`AVPictureInPictureController` fed from decoded video frames) in the patched build. | high | bridge, `ChromiumEngine.swift` | Row 20 complete |
 | VI.3 | DevTools docked inside the window on Chromium: patch CEF to let DevTools dock for a CEF-managed browser (CEF's Chrome patch disables docking for them). Host the docked tools in the page area, replacing II.14's child window. | high | outside this repository, bridge | The tools dock right, bottom, or left inside the window and undock to their own window |
 
+### Phase VII: AI
+
+These tasks build AI features on one AI interface (VII.1) and the plugin system (V.11). Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
+
+| ID | Task | Reasoning | Files | Done when |
+|---|---|---|---|---|
+| VII.1 | Write an AI interface design note in a new `docs/ai.md`. Cover a provider-neutral API with typed requests (text, page content, selections, files), streamed replies, tool calls, and cancellation; provider kinds (an HTTP API with a key kept in the Keychain or a command-line tool run with the user's subscription); a routing table mapping each feature and hook to a provider and model, with a fallback; the page data each feature may send, with per-site exclusions; errors, rate limits, and cost display. Features, hooks, and runtime features all use this API. | high | `docs/ai.md` | The note covers providers, routing, page access, hooks, and runtime features |
+| VII.2 | AI module and API-key providers: implement the interface, common message APIs with a configurable base URL, Keychain storage, and a Settings ▸ AI section where users connect providers and assign a provider and model to each feature. | high | new `AI` module, `Preferences` | Row 43 complete for API keys; a test feature streams a reply |
+| VII.3 | Built-in terminal and command-line providers: build a terminal panel backed by a pseudo-terminal where the user installs and signs in to an AI command-line tool. Add a provider kind that runs the tool without a window for each request. | high | new `Terminal` module, `AI` | Row 56 complete; a request through a signed-in tool returns a reply |
+| VII.4 | Page reader: a side panel that reads and summarizes the current page and answers follow-up questions. Add an engine protocol member that returns readable page text on both engines. | high | engines, `AI`, `Browsing` | Row 52 complete |
+| VII.5 | Questions in the page: ask about the page or a selection from the palette or context menu, with answers in a popover beside the page. | medium | `AI`, `Browsing` | Row 53 complete |
+| VII.6 | AI hooks: features subscribe through the interface to events such as a finished page load, a finished download, and a new tab. The first hooks name tabs from their pages and rename downloaded files; each can be switched off and routed to its own model. | high | `AI`, `Browsing` | Row 54 complete |
+| VII.7 | Features that AI adds at run time: AI writes a plugin (V.11) from a request. The plugin declares the permissions it needs; the user reviews and enables it and can remove it. | high | `AI`, `Plugins` | Row 55 complete |
+
 ## Decisions
 
 - History visits: one visit per page change per tab. A reload, a repeated load of the same URL in the same tab, and the initial load of a restored tab do not add visits. The palette ranks by visit count, so pages that reload often would otherwise crowd out typed destinations. A hash change counts as a visit because its address is one the user may revisit.
@@ -226,3 +240,4 @@ These tasks extend `BridgeClient` in `CEFBridge.mm`, the `ARCHCEFBrowserDelegate
 - A Persona owns its spaces and keeps cookies, sessions, site storage, and installed plugins separate. Favorites stay alive across spaces within their Persona.
 - Arch has its own plugin system with more capabilities than browser extensions. It includes built-in plugins for later features. WebKit extensions and extensions for Google's browser run as one kind of plugin; password managers such as 1Password come as plugins.
 - Chromium DevTools first attach beside the page as a child window (II.14); docking inside the window needs a CEF patch (VI.3). WebKit inspection inside the app needs private API behind flags (IV.16); until then, `isInspectable` lets the browser bundled with macOS inspect WebKit tabs.
+- AI features use providers the user connects through an API key or a command-line tool signed in through the built-in terminal. Providers are chosen per feature; Arch ships no model or provider account. All AI features, hooks, and features that AI adds at run time use one AI interface (VII.1).
