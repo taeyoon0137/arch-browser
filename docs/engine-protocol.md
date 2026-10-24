@@ -44,7 +44,7 @@
 | `devTools` | CEF's developer tools in a window the adapter reports through `EngineDevTools.window`, which the app places beside the page; a panel cannot be chosen | None: the adapter only sets `isInspectable`, because opening the inspector needs a private API |
 | `pdfController` | Planned | Built-in PDF support |
 | `importSources` | Planned | None |
-| `notifications` | Planned | None |
+| `notifications` | Chromium's own macOS notification service shows pages' notifications; the permission request reaches the delegate (needs verification) | None: no public API; `Notification.requestPermission()` resolves to `denied` |
 | `accessibilityTree` | Planned | None |
 | `tabGroups` | Planned | None |
 | `translation` | Planned | Translation framework (macOS 15+, needs verification) |

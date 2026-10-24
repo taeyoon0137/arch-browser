@@ -36,7 +36,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 5 | Split View | Custom implementation | None | not started |
 | 6 | Small browser window | Custom implementation | None | not started |
 | 7 | Multiple windows and window restoration | Custom implementation using `WKWebView.interactionState` | Session restoration | not started |
-| 8 | Tab switcher and tab close log | Custom implementation | None | not started |
+| 8 | Tab switcher and tab close log | Custom implementation: a ⌃Tab overlay of the current space's tabs in most-recently-used order, driven by local key monitors so it works on both engines; an in-memory close log with each close's reason and crash counts in a debug window under View ▸ Developer | None | complete |
 | 9 | Personas: each has separate cookies, sessions, site data, and installed plugins; each space belongs to a Persona | `WKWebsiteDataStore(forIdentifier:)` on WebKit; one `CefRequestContext` with its own cache path per Persona on Chromium | Profiles | not started |
 | 10 | Window themes and appearance (light, dark, automatic) | SwiftUI and AppKit appearance APIs | None | in progress |
 | 48 | Engine per tab: WebKit or Chromium, switchable from the address bar's site settings, inherited by tabs a page opens, with cookies shared between the engines | Both engine adapters in one session; cookies copied between `WKHTTPCookieStore` and the Chromium cookie manager | Cookies | complete |
@@ -61,7 +61,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 19 | Previews (link previews on hover) | Custom implementation with a secondary `WKWebView` window | Navigation | not started |
 | 20 | Media controls and picture-in-picture (PiP) | Both engines use system PiP. WebKit has it built in. The Chromium engine routes PiP to AVKit through a patched CEF build so it matches the macOS experience (needs verification). `MPNowPlayingInfoCenter` for media controls (needs verification) | Media sessions | not started |
-| 21 | Download management | `WKDownload`, `NSSavePanel` | Downloads | in progress |
+| 21 | Download management | `WKDownload`, `NSSavePanel`; the downloads folder and whether to ask where to save come from Settings ▸ General | Downloads | in progress |
 | 22 | Capture (region, full page) and screenshot storage | `WKWebView.takeSnapshot`, `createPDF`, ScreenCaptureKit | Capture | in progress |
 | 25 | PDF viewing and printing | Built-in WebKit PDF support. Printing and Export as PDF go through `createPDF`, PDFKit's `printOperation(for:scalingMode:autoRotate:)` as a sheet, and `NSSavePanel` on both engines; PDF viewing remains | PDF | in progress |
 | 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | in progress |
@@ -75,16 +75,16 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 32 | Share menu and sharing settings | `NSSharingServicePicker` from the address pill's share button and File ▸ Share…, with the page's address, and its title and icon through `NSPreviewRepresentingActivityItem`; the title becomes the subject for services such as Mail. Sharing settings are the system's own | None | complete |
 | 33 | Import (bookmarks, history, passwords) | Custom parsing of browser files. Apple Passwords handles password imports | None | not started |
-| 34 | Home button, badges, tooltips | Custom implementation | None | not started |
+| 34 | Home button, badges, tooltips | A per-space home page set from the space menu, stored with the space in `session.json`, and opened in the selected tab with History ▸ Home (⇧⌘H); a speaker badge on tab rows while the page plays sound; a dot on tabs a page opened in the background until the user selects them; tab row tooltips with the full title and address. The sidebar has no home button | None | complete |
 
 ## 5. Accounts, Sync, and Settings
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
 | 35 | Sidebar and settings sync | CloudKit private database through `CKSyncEngine` (macOS 14+); design in `docs/sync.md` | None | not started |
-| 36 | Preferences window | Custom implementation using the `Settings` package | None | in progress |
+| 36 | Preferences window | An AppKit window with `NSTabViewController` toolbar sections in the `.preference` toolbar style, each a SwiftUI grouped form: General (default browser, default engine, search engine, downloads folder, ask where to save), Sidebar (archive delay), and Appearance. Shortcuts (row 13) and Websites (row 26) add their sections | None | in progress |
 | 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines as plugins (row 50); each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). On Chromium, 1Password's Universal Autofill can read a page once it asks for the accessibility tree (see Private APIs); the user has yet to check it. A WebKit tab does not get Apple Passwords AutoFill without an extension; the user checked this on macOS 27 | Extensions, accessibility | not started |
-| 40 | Web notifications and push | `UserNotifications` for local notifications only. Remote push is omitted | None | not started |
+| 40 | Web notifications and push | `UserNotifications` for local notifications: a download that finishes while Arch is not active posts one, and clicking it reveals the file in the Finder; the first finished download asks for permission. On Chromium, CEF 156 sends a page's permission request to `CefPermissionHandler::OnShowPermissionPrompt`, which Arch's permission sheet answers, but its public API has no callback that hands the notification itself to the app; the framework's own macOS notification service posts it through `UserNotifications` (needs verification). WebKit has no public API: `WKUIDelegate` has no notification callback, and on macOS 27 a page sees `Notification`, but `Notification.requestPermission()` resolves to `denied` without asking the app and `PushManager` is undefined. Remote push is omitted | Permissions | in progress |
 | 41 | AppleScript | `Arch.sdef` with the Cocoa Standard Suite, `open location`, and tabs with their identifier, name, and URL, read through key-value coding on the application; `open location` arrives through `application(_:open:)` | None | complete |
 | 42 | Sound effects | `NSSound`. The user has yet to decide whether to offer sound effects. App icon choice is not offered for now | None | not started |
 
