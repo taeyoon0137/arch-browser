@@ -67,7 +67,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 26 | Site permissions | `WKUIDelegate` permission callbacks, custom storage | Permissions | in progress |
 | 27 | Fullscreen and sad tabs (crash recovery) | Element fullscreen in WebKit's own window; on Chromium, CEF's fullscreen requests with the window's full screen; a notice with Reload after a renderer quits | Renderer termination | complete |
 | 28 | Favicons and theme colors | Custom favicon collection; `WKWebView.themeColor` on WebKit and the `theme-color` meta read in the renderer process on Chromium | None | complete |
-| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Browsing history uses custom storage, shown in a History window (an AppKit window hosting SwiftUI with `NSSearchToolbarItem`) with search, row deletion, and range clearing | Cookies and history | in progress |
+| 29 | Cookies, site data, browsing history | `WKHTTPCookieStore` and `WKWebsiteDataStore`. Clear Site Data, from the History menu and the site settings popover, removes the current host's cookies from both engines together, then WebKit's data records for its registrable domain and Chromium's storage for its origins through the DevTools protocol's `Storage.clearDataForOrigin` in a hidden browser, and reloads the site's tabs. Browsing history uses custom storage, shown in a History window (an AppKit window hosting SwiftUI with `NSSearchToolbarItem`) with search, row deletion, and range clearing | Cookies and history | complete |
 
 ## 4. Creation and Sharing
 
