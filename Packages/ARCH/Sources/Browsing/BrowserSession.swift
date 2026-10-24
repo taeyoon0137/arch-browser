@@ -328,8 +328,8 @@ public final class BrowserSession: ObservableObject {
 
     /// Opens a tab in `engine`, or in the default engine when no engine is given.
     @discardableResult
-    public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil) -> Tab {
-        let webContents = runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL))
+    public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
+        let webContents = runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
         return adopt(webContents, spaceID: spaceID ?? currentSpaceID, pinned: pinned, select: select)
     }
 
@@ -355,8 +355,11 @@ public final class BrowserSession: ObservableObject {
             if let self, let tab { self.selectedTabID = tab.id }
         }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
+        // Saving after each load keeps the page state that a crash would otherwise lose.
         tab.didFinishLoad = { [weak self, weak tab] in
-            if let self, let tab { self.cookieSync.scheduleCopy(from: tab.engineKind) }
+            guard let self, let tab else { return }
+            self.cookieSync.scheduleCopy(from: tab.engineKind)
+            self.scheduleSave()
         }
         // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
         tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
@@ -857,7 +860,7 @@ public final class BrowserSession: ObservableObject {
                 closedTabs.append(record)
                 continue
             }
-            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine)
+            let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine, state: record.state)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
             tab.isRestored = true
@@ -887,7 +890,7 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind) },
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
                         selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
     }
 }

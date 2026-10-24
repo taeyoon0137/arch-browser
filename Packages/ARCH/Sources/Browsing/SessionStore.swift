@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine. Files without a version are version 1.
-    static let currentVersion = 2
+    /// Version 2 adds each tab's engine, and version 3 its restorable page state. Files without a version are version 1.
+    static let currentVersion = 3
 
     struct TabRecord: Codable {
         var spaceID: UUID
@@ -17,6 +17,8 @@ struct SessionSnapshot: Codable {
         var lastActivatedAt: Date?
         /// `nil` in version 1 files; such a tab opens in the default engine.
         var engine: EngineKind?
+        /// The engine's restorable page state, such as WebKit's back-forward list. `nil` for engines that keep none, in closed-tab records, and in files before version 3.
+        var state: Data?
     }
 
     var version: Int?

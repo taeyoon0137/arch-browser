@@ -108,8 +108,6 @@ public final class ChromiumBrowser: EngineBrowser {
         ownedWebContents.append(webContents)
         return webContents
     }
-    public func canRestoreWebContents(sessionID: String) -> Bool { false }
-    public func restoreWebContents(sessionID: String) -> (any EngineWebContents)? { nil }
     public func takeOwnership(of webContents: any EngineWebContents) {
         guard let webContents = webContents as? ChromiumWebContents, !ownedWebContents.contains(where: { $0 === webContents }) else { return }
         ownedWebContents.append(webContents)
@@ -205,6 +203,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var favicon: NSImage?
     public var loadProgress: Double { isLoading ? 0.5 : 1 }
     public private(set) var themeColor: NSColor?
+    /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
+    public var restorableState: Data? { nil }
     public var selectedText: String? { nil }
     public private(set) var isFullscreen = false
     public var mediaSession: any EngineMediaSession { fatalError("not implemented") }

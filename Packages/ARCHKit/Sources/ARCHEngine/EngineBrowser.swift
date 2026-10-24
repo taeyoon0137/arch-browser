@@ -32,11 +32,10 @@ public struct EngineCookie: Hashable, Sendable {
 
 public protocol EngineBrowserDelegate: AnyObject {
     func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool)
-    func browser(_ browser: any EngineBrowser, didRestoreWebContents webContents: any EngineWebContents, sessionID: String)
     func browser(_ browser: any EngineBrowser, didChangeFullscreenState isFullscreen: Bool)
 }
 
-/// A container for one window. Creates and restores web contents. Manages cookies.
+/// A container for one window. Creates web contents, which restore a page's state from their configuration. Manages cookies.
 public protocol EngineBrowser: AnyObject {
     var sessionID: String { get }
     var context: any EngineBrowserContext { get }
@@ -44,8 +43,6 @@ public protocol EngineBrowser: AnyObject {
     var delegate: (any EngineBrowserDelegate)? { get set }
 
     func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents
-    func canRestoreWebContents(sessionID: String) -> Bool
-    func restoreWebContents(sessionID: String) -> (any EngineWebContents)?
     func takeOwnership(of webContents: any EngineWebContents)
     /// Releases a tab after the user interface closes it so the engine can tear it down.
     func closeWebContents(_ webContents: any EngineWebContents)
@@ -62,6 +59,5 @@ public protocol EngineBrowser: AnyObject {
 
 public extension EngineBrowserDelegate {
     func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool) {}
-    func browser(_ browser: any EngineBrowser, didRestoreWebContents webContents: any EngineWebContents, sessionID: String) {}
     func browser(_ browser: any EngineBrowser, didChangeFullscreenState isFullscreen: Bool) {}
 }

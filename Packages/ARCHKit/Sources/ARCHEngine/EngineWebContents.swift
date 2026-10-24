@@ -12,10 +12,13 @@ public struct EngineWebContentsConfiguration: Sendable {
     public var forcedViewSize: CGSize?
     /// Per-tab engine selection. nil uses the profile default.
     public var engineOverride: EngineKind?
+    /// Page state that an earlier web contents of the same engine reported as `restorableState`. The engine restores it in place of loading `initialURL` when it can.
+    public var restorableState: Data?
     public init(initialURL: URL? = nil, initiallyHidden: Bool = false, initiallyMuted: Bool = false, disallowAutoplay: Bool = false,
                 disallowContextMenus: Bool = false, disallowDownloads: Bool = false, transparentBackground: Bool = false,
-                forcedViewSize: CGSize? = nil, engineOverride: EngineKind? = nil) {
+                forcedViewSize: CGSize? = nil, engineOverride: EngineKind? = nil, restorableState: Data? = nil) {
         self.initialURL = initialURL
+        self.restorableState = restorableState
         self.initiallyHidden = initiallyHidden
         self.initiallyMuted = initiallyMuted
         self.disallowAutoplay = disallowAutoplay
@@ -79,6 +82,8 @@ public protocol EngineWebContents: AnyObject {
     var canGoBack: Bool { get }
     var canGoForward: Bool { get }
     var themeColor: NSColor? { get }
+    /// The page's state, such as its back-forward list, as opaque data the same engine restores through `EngineWebContentsConfiguration.restorableState`. `nil` when the engine cannot restore it.
+    var restorableState: Data? { get }
     var selectedText: String? { get }
     var zoomFactor: Double { get set }
     var visibility: EngineWebContentsVisibility { get set }

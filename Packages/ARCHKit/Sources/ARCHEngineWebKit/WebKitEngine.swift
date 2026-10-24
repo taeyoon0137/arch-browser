@@ -119,8 +119,6 @@ public final class WebKitBrowser: EngineBrowser {
         ownedWebContents.append(webContents)
         return webContents
     }
-    public func canRestoreWebContents(sessionID: String) -> Bool { false }
-    public func restoreWebContents(sessionID: String) -> (any EngineWebContents)? { nil }
     public func takeOwnership(of webContents: any EngineWebContents) {
         guard let webContents = webContents as? WebKitWebContents, !ownedWebContents.contains(where: { $0 === webContents }) else { return }
         ownedWebContents.append(webContents)
@@ -226,7 +224,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         installBridge()
         installContextMenu()
         allowInspection()
-        if let url = configuration.initialURL {
+        // Restoring loads the current entry; a state WebKit cannot read leaves the list empty, and the page loads its address instead.
+        if let state = configuration.restorableState {
+            webView.interactionState = state
+        }
+        if webView.backForwardList.currentItem == nil, let url = configuration.initialURL {
             webView.load(URLRequest(url: url))
         }
     }
@@ -252,6 +254,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var canGoBack: Bool { webView.canGoBack }
     public var canGoForward: Bool { webView.canGoForward }
     public var themeColor: NSColor? { webView.themeColor }
+    /// WebKit's interaction state holds the back-forward list and each page's position.
+    public var restorableState: Data? { webView.interactionState as? Data }
     public var selectedText: String? { nil }
     public var zoomFactor: Double {
         get { webView.pageZoom }
