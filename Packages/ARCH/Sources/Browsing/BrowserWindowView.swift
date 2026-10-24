@@ -103,6 +103,9 @@ public struct BrowserWindowView: View {
                                    onArrival: { addressPillPull = paletteMotion.pull })
                     .id(session.commandPaletteGeneration)
             }
+            if session.isTabSwitcherVisible {
+                TabSwitcherView(session: session)
+            }
         }
         .coordinateSpace(name: Self.coordinateSpace)
         .environmentObject(tabDrag)

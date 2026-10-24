@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.mainMenu = makeMainMenu()
         installUndoCloseShortcut()
         installFullscreenEscape()
+        installTabSwitcher()
         // Engines register their private APIs when they start; the checks run without delaying launch.
         PrivateAPIFlags.shared.checkInBackground()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -173,6 +174,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for side in DevToolsSide.allCases {
             developerMenu.addItem(withTitle: side.title, action: #selector(chooseDevToolsSide(_:)), keyEquivalent: "").representedObject = side.rawValue
         }
+        developerMenu.addItem(.separator())
+        developerMenu.addItem(withTitle: "Show Tab Close Log", action: #selector(showTabCloseLog), keyEquivalent: "")
         viewMenu.addItem(submenu(developerMenu, title: "Developer"))
         let appearanceMenu = NSMenu(title: "Appearance")
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
@@ -229,9 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func newTab() { session.showCommandPalette(.newTab) }
-    /// ⌘W closes the History window when it is in front, not a tab behind it.
+    /// ⌘W closes the History window or the tab close log when it is in front, not a tab behind it.
     @objc private func closeTab() {
-        if let history = NSApp.keyWindow, history.windowController is HistoryWindowController { return history.performClose(nil) }
+        if let key = NSApp.keyWindow, key.windowController is HistoryWindowController || key.windowController is TabCloseLogWindowController { return key.performClose(nil) }
         session.closeSelectedTab()
     }
     @objc private func closeOtherTabs() { session.closeOtherTabs() }
@@ -401,6 +404,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard let key = event.charactersIgnoringModifiers, key.unicodeScalars.allSatisfy(\.isASCII) else { return event.keyCode == keyCode }
         return key.lowercased() == letter
     }
+
+    // MARK: Tab switcher
+
+    /// ⌃Tab in the browser window opens the switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
+    private func installTabSwitcher() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let session = self.session else { return event }
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], event.window === self.window {
+                let backward = modifiers.contains(.shift)
+                if session.isTabSwitcherVisible {
+                    session.moveTabSwitcherHighlight(backward: backward)
+                } else {
+                    session.showTabSwitcher(backward: backward)
+                }
+                return nil
+            }
+            guard session.isTabSwitcherVisible else { return event }
+            session.cancelTabSwitcher()
+            return event.keyCode == 53 ? nil : event
+        }
+        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            if let session = self?.session, session.isTabSwitcherVisible, !event.modifierFlags.contains(.control) {
+                session.commitTabSwitcher()
+            }
+            return event
+        }
+        // A click also closes it. Monitors see no keys while a menu tracks, so a Control-click's context menu could otherwise hide Control's release.
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.session?.cancelTabSwitcher()
+            return event
+        }
+        // The app receives no key events while inactive, so it cannot see Control's release in another app.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.session?.cancelTabSwitcher()
+        }
+    }
+
+    // MARK: Tab close log
+
+    private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog)
+
+    @objc private func showTabCloseLog() { closeLogWindow.show() }
 
     // MARK: Default browser
 

@@ -40,6 +40,7 @@ public final class BrowserSession: ObservableObject {
             // Another tab ends the fullscreen of the page that filled the window.
             if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
             selectedTab?.lastActivatedAt = Date()
+            recordActivation()
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
             // Switching tabs ends the search because it belongs to one page.
             if isFindBarVisible, oldValue != selectedTabID {
@@ -355,7 +356,7 @@ public final class BrowserSession: ObservableObject {
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
             guard let self, let tab, self.tabs.contains(where: { $0.id == tab.id }) else { return }
-            self.closeTab(tab)
+            self.closeTab(tab, reason: tab.hasCrashed ? .crash : .page)
             self.undoableCloseCount = 0
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
@@ -381,7 +382,7 @@ public final class BrowserSession: ObservableObject {
                 self.downloadOnlyTabIDs.insert(tab.id)
             } else {
                 DispatchQueue.main.async { [weak self, weak tab] in
-                    if let self, let tab { self.closeTab(tab, remember: false) }
+                    if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
                 }
             }
         }
@@ -452,9 +453,10 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
-    public func closeTab(_ tab: Tab, remember: Bool = true) {
+    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening. `reason` goes to the tab close log.
+    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        recordClose(of: tab, reason: reason)
         if fullscreenTabID == tab.id { fullscreenTabID = nil }
         cancelSheets(for: tab)
         tabs.remove(at: index)
@@ -557,7 +559,7 @@ public final class BrowserSession: ObservableObject {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
         selectedTab?.lastActivatedAt = Date()
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
-            closeTab(tab)
+            closeTab(tab, reason: .archive)
             undoableCloseCount = 0
         }
     }
@@ -1004,6 +1006,72 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    // MARK: Tab switcher
+
+    /// Tab identifiers in the order the tabs were last selected, most recent first. Tabs not selected since launch are missing.
+    private var activationOrder: [UUID] = []
+    /// The tab the switcher highlights, which releasing Control selects. `nil` while the switcher is hidden.
+    @Published public private(set) var tabSwitcherHighlightID: UUID?
+
+    public var isTabSwitcherVisible: Bool { tabSwitcherHighlightID != nil }
+
+    /// The current space's tabs, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
+    public var recentTabs: [Tab] {
+        let spaceTabs = tabs.filter { $0.spaceID == currentSpaceID }
+        let selected = activationOrder.compactMap { id in spaceTabs.first { $0.id == id } }
+        let selectedIDs = Set(activationOrder)
+        return selected + spaceTabs.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }
+    }
+
+    private func recordActivation() {
+        guard let id = selectedTabID else { return }
+        activationOrder.removeAll { $0 == id }
+        activationOrder.insert(id, at: 0)
+    }
+
+    /// Opens the switcher on the tab selected before the current one, or on the least recent tab when going backward. The current space needs a second tab.
+    public func showTabSwitcher(backward: Bool) {
+        let recent = recentTabs
+        guard recent.count > 1 else { return }
+        let others = recent.filter { $0.id != selectedTabID }
+        tabSwitcherHighlightID = (backward ? others.last : others.first)?.id
+    }
+
+    /// Moves the highlight to the next less recent tab, or toward the current one when going backward, wrapping at either end.
+    public func moveTabSwitcherHighlight(backward: Bool) {
+        guard let id = tabSwitcherHighlightID else { return }
+        let recent = recentTabs
+        guard !recent.isEmpty else { return cancelTabSwitcher() }
+        // A highlighted tab that closed meanwhile counts as the first.
+        let index = recent.firstIndex { $0.id == id } ?? 0
+        tabSwitcherHighlightID = recent[(index + (backward ? recent.count - 1 : 1)) % recent.count].id
+    }
+
+    /// Selects the highlighted tab and gives its page keyboard focus. An open command palette closes, as when the palette's own tab row is chosen.
+    public func commitTabSwitcher() {
+        guard let id = tabSwitcherHighlightID else { return }
+        tabSwitcherHighlightID = nil
+        guard tabs.contains(where: { $0.id == id }) else { return }
+        selectedTabID = id
+        if commandPaletteMode != nil { dismissCommandPalette() } else { focusPage() }
+    }
+
+    /// Closes the switcher and keeps the selected tab.
+    public func cancelTabSwitcher() {
+        if tabSwitcherHighlightID != nil { tabSwitcherHighlightID = nil }
+    }
+
+    // MARK: Tab close log
+
+    /// Why each tab closed this launch, for the tab close log window.
+    public let closeLog = TabCloseLog()
+
+    /// Logs a closing tab with its crash count and the engines' total, and drops it from the switcher's order.
+    private func recordClose(of tab: Tab, reason: TabCloseReason) {
+        activationOrder.removeAll { $0 == tab.id }
+        closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount))
+    }
+
     // MARK: Persistence
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
@@ -1014,6 +1082,7 @@ public final class BrowserSession: ObservableObject {
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
             if !record.isPinned, let cutoff, let last = record.lastActivatedAt, last < cutoff {
                 closedTabs.append(record)
+                closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine, state: record.state)
@@ -1093,7 +1162,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         // The engine is still choosing the file's destination, so the tabs close once that callback returns.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            for tab in self.tabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false) }
+            for tab in self.tabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false, reason: .download) }
         }
     }
 

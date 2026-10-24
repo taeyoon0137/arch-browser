@@ -1,0 +1,78 @@
+// The tab switcher floats over the window while Control stays down after ⌃Tab. It lists the current space's tabs, most recently selected first, and highlights the tab that releasing Control selects.
+import SwiftUI
+
+struct TabSwitcherView: View {
+    @ObservedObject var session: BrowserSession
+    /// Set a moment after the switcher opens, so that a quick ⌃Tab, which switches at once, does not flash it.
+    @State private var isShown = false
+
+    static let width: CGFloat = 440
+    static let rowHeight: CGFloat = 36
+    static let rowSpacing: CGFloat = 2
+    /// Beyond this many tabs, the list scrolls to keep the highlighted tab in view.
+    static let visibleRows = 10
+
+    var body: some View {
+        let tabs = session.recentTabs
+        let rows = CGFloat(min(tabs.count, Self.visibleRows))
+        let panel = RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: Self.rowSpacing) {
+                    ForEach(tabs) { tab in
+                        TabSwitcherRow(tab: tab, isHighlighted: tab.id == session.tabSwitcherHighlightID)
+                            .id(tab.id)
+                    }
+                }
+                .padding(PaletteRowHighlight.panelInset)
+            }
+            .scrollDisabled(tabs.count <= Self.visibleRows)
+            .frame(width: Self.width, height: rows * Self.rowHeight + max(0, rows - 1) * Self.rowSpacing + 2 * PaletteRowHighlight.panelInset)
+            // Rows that scroll past the inset stay inside the panel's corners.
+            .clipShape(panel)
+            .onAppear { if let id = session.tabSwitcherHighlightID { proxy.scrollTo(id) } }
+            .onChange(of: session.tabSwitcherHighlightID) { id in if let id { proxy.scrollTo(id) } }
+        }
+        .modifier(PaletteSurface(shape: panel))
+        .scaleEffect(isShown ? 1 : 0.97)
+        .opacity(isShown ? 1 : 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The switcher follows the keyboard only; Control-clicks go on to the page as context clicks.
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tab Switcher")
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeOut(duration: 0.12)) { isShown = true }
+            }
+        }
+    }
+}
+
+private struct TabSwitcherRow: View {
+    @ObservedObject var tab: Tab
+    let isHighlighted: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            TabIconView(tab: tab)
+                .frame(width: 18, height: 18)
+            Text(tab.displayTitle)
+                .font(.system(size: 14))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if let host = tab.url?.host {
+                Text(host)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: TabSwitcherView.rowHeight)
+        .background(RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius - PaletteRowHighlight.panelInset, style: .continuous)
+            .fill(isHighlighted ? Color.accentColor.opacity(0.24) : .clear))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    }
+}
