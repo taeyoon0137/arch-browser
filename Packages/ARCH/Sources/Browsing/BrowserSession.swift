@@ -853,6 +853,8 @@ public enum CommandPaletteOrigin {
     case keyboard
     /// A control in the sidebar: the palette comes in from the sidebar's side.
     case sidebar
+    /// The address pill: the palette comes out of the pill, and the pill's contents move toward it.
+    case addressPill
 }
 
 extension BrowserSession: EngineApplicationDelegate {

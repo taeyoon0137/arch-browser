@@ -11,6 +11,13 @@ public struct BrowserWindowView: View {
     @State private var isPaletteLeaving = false
     /// Set after the hidden warm-up palette is drawn.
     @State private var isPaletteWarm = false
+    /// The palette's entry motion, fixed when it opens.
+    @State private var paletteMotion = PaletteMotion()
+    /// How far the address pill's contents have moved toward the palette.
+    @State private var addressPillPull = CGSize.zero
+    /// The address pill's frame in the window.
+    @State private var addressPillFrame: CGRect?
+    @State private var windowSize = CGSize.zero
     /// The sidebar's width, set by dragging its trailing edge.
     @AppStorage(SidebarView.widthKey) private var sidebarWidth = Double(SidebarView.defaultWidth)
     /// Set while the hidden sidebar floats over the page.
@@ -77,19 +84,31 @@ public struct BrowserWindowView: View {
             }
             if let mode = shownPaletteMode {
                 // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
-                CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving)
+                CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving, arrivalOffset: paletteMotion.arrival,
+                                   onArrival: { addressPillPull = paletteMotion.pull })
                     .id(session.commandPaletteGeneration)
             }
         }
         .coordinateSpace(name: Self.coordinateSpace)
         .environmentObject(tabDrag)
+        .environment(\.addressPillPull, addressPillPull)
+        .onPreferenceChange(AddressPillFrameKey.self) { addressPillFrame = $0 }
+        .background(GeometryReader { proxy in
+            Color.clear
+                .onAppear { windowSize = proxy.size }
+                .onChange(of: proxy.size) { windowSize = $0 }
+        })
         .onAppear { shownPaletteMode = session.commandPaletteMode }
         .onChange(of: session.commandPaletteMode) { mode in
             guard mode == nil else {
                 isPaletteLeaving = false
+                paletteMotion = PaletteMotion(origin: session.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowSize.width)
+                if paletteMotion.pull == .zero { withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero } }
                 return withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { shownPaletteMode = mode }
             }
             withAnimation(.paletteOut) { isPaletteLeaving = true }
+            // The pill's contents return as the palette leaves.
+            withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero }
             let generation = session.commandPaletteGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {
                 // A palette reopened during this delay has a new generation and stays until it finishes closing.
@@ -175,7 +194,7 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window does not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window does not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
@@ -676,12 +695,13 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The button at its end opens the site settings.
+/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The button at its end opens the site settings. While the palette it opened is visible, the pill's contents move out toward it.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
     /// `nil` when no tab is open.
     let tab: Tab?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.addressPillPull) private var pull
     @State private var isShowingSiteSettings = false
 
     private var url: URL? { tab?.url }
@@ -698,7 +718,7 @@ struct AddressPillView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: { session.focusCommandBar(from: .sidebar) }) {
+            Button(action: { session.focusCommandBar(from: .addressPill) }) {
                 HStack(spacing: 6) {
                     Image(systemName: symbol)
                         .font(.system(size: 11, weight: .semibold))
@@ -711,6 +731,9 @@ struct AddressPillView: View {
                 }
                 .padding(.leading, 10)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+                .offset(pull)
+                // The contents leave through the pill's edges without crossing the site settings button. Only the contents are clipped, so the focus ring stays visible.
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -724,6 +747,40 @@ struct AddressPillView: View {
         }
         .font(.system(size: 14))
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: AddressPillFrameKey.self, value: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))
+        })
+    }
+}
+
+/// The palette's entry motion: where it starts and how far the address pill's contents move toward it.
+struct PaletteMotion {
+    var arrival = CommandPaletteAppearance.offset(from: .keyboard)
+    var pull = CGSize.zero
+
+    init() {}
+
+    /// From the address pill, the palette moves along the line from the pill's center to the search field's center. The pill's contents move in the same direction until they leave the pill.
+    init(origin: CommandPaletteOrigin, pill: CGRect?, windowWidth: CGFloat) {
+        guard origin == .addressPill, let pill, windowWidth > 0 else {
+            arrival = CommandPaletteAppearance.offset(from: origin)
+            return
+        }
+        let dx = windowWidth / 2 - pill.midX
+        let dy = CommandPaletteView.top + CommandPaletteView.fieldHeight / 2 - pill.midY
+        let length = max((dx * dx + dy * dy).squareRoot(), 1)
+        let (ux, uy) = (dx / length, dy / length)
+        arrival = CGSize(width: -ux * 40, height: -uy * 40)
+        let travel = min(pill.width / max(abs(ux), 0.01), pill.height / max(abs(uy), 0.01))
+        pull = CGSize(width: ux * travel, height: uy * travel)
+    }
+}
+
+private struct AddressPillFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
     }
 }
 
@@ -1530,6 +1587,10 @@ private struct IsDraggingTabKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct AddressPillPullKey: EnvironmentKey {
+    static let defaultValue = CGSize.zero
+}
+
 extension EnvironmentValues {
     /// The sidebar width used to lay out the space pages and bottom bar.
     var sidebarWidth: CGFloat {
@@ -1547,6 +1608,12 @@ extension EnvironmentValues {
     var isDraggingTab: Bool {
         get { self[IsDraggingTabKey.self] }
         set { self[IsDraggingTabKey.self] = newValue }
+    }
+
+    /// How far the address pill's contents have moved toward the palette it opened.
+    var addressPillPull: CGSize {
+        get { self[AddressPillPullKey.self] }
+        set { self[AddressPillPullKey.self] = newValue }
     }
 }
 
