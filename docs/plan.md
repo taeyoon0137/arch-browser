@@ -69,7 +69,7 @@ scripts/opaque_icon.swift                   Makes the icon opaque for the system
 6. Stage by path (`git add <paths>`) and keep one purpose per commit. Queue tasks use the `Task(<ID>):` subject; other work uses the prefixes in `.githooks/commit-msg`.
 7. Work on `main`. Branches named `cloud/…` or `sync/…` move work between machines; delete them after use.
 8. Never record the code-signing identity, its team identifier, or a signed bundle in the repository, the documents, or a report. `build/` stays ignored.
-9. Before the final `Docs:` commit of a batch, run a prose pass over the comments and documents the batch added with the `prose-writing` skills (Codex without a model flag; confirm the model and reasoning level in its startup output), then review the result.
+9. Before the final `Docs:` commit of a batch, have Codex rewrite the batch's added comments and document text through its CLI (`codex exec` without a model flag; confirm the model and reasoning level in its startup output). Ask it to add no information, preserve meaning, and remove empty wording, then review its changes.
 10. Report a check as passed only after running it.
 
 ## Build Procedure
@@ -134,7 +134,7 @@ Rules for every tier:
 | ID | Task | Reasoning | Files | Done when |
 |---|---|---|---|---|
 | I.4 | Confirm the default-browser registration. The app registers only `http`; the claim that this also covers `https` is unverified. After choosing Set as Default from the bundle, check the `https` handler with `NSWorkspace.shared.urlForApplication(toOpen:)`. If it is not Arch, also call `setDefaultApplication(at:toOpenURLsWithScheme: "https")` and update the comment. | low | `AppDelegate.swift` | Both schemes resolve to the bundle; the menu item disables |
-| I.6 | Prose pass over the comments added by the first feature batch (commits `3eb7953..c2a4a96`) with the `prose-writing` skills, then a `Docs:` commit after review. blocked: the `prose-writing` and `prose-writing-codex` skills are not installed on the current Mac. | low | Files in that range | Comments read as plain prose; build still passes |
+| I.6 | Prose pass over the comments added by the first feature batch (commits `3eb7953..c2a4a96`) using Codex as described in Working Rule 9, then a `Docs:` commit after review. | low | Files in that range | Comments read as plain prose; build still passes |
 | I.7 | Remove the `use-mock-keychain` switch once the bundle is signed with a stable personal identity. Blocked until that identity exists on the build Mac. | low | `CEFBridge.mm` | A login cookie survives two launches without a keychain prompt |
 
 ### Phase II: Chromium engine gaps
