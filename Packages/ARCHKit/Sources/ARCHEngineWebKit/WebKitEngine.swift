@@ -203,7 +203,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
     private(set) var suppressesDialogs = false
 
-    /// The version and engine tokens a full browser on this system appends to its user agent. `WKWebView` leaves them out, and some sites then send pages made for old browsers. The system's WebKit carries the system's version number.
+    /// Version and engine tokens a full browser on this system adds to its user agent. `WKWebView` omits them, so some sites send pages for old browsers. The system's WebKit uses the system's version number.
     static let applicationNameForUserAgent: String = {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return "Version/\(version.majorVersion).\(version.minorVersion) Safari/605.1.15"
@@ -405,7 +405,7 @@ public final class WebKitNavigationController: EngineNavigationController {
         contents?.dismissDialogBeforeNavigation()
         webView.goForward()
     }
-    // WebKit loads any item it is given, even one from another web view's list.
+    // WebKit loads any item, even one from another web view's list.
     public func go(to item: any EngineBackForwardListItem) {
         guard let item = (item as? WebKitBackForwardListItem)?.item,
               webView.backForwardList.backList.contains(item) || webView.backForwardList.forwardList.contains(item) else { return }

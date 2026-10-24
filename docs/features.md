@@ -48,7 +48,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 11 | Command bar (URLs, search, commands, tab switching) | Custom implementation. AppKit text completion shows suggestions from local history and bookmarks, plus public search engine endpoints. No engine autocomplete is used | None | in progress |
 | 12 | Site Search | Custom implementation with a local search engine list | None | not started |
 | 13 | Keyboard shortcuts and global shortcuts | AppKit events, `NSEvent.addGlobalMonitorForEvents` | None | in progress |
-| 14 | Back, forward, reload, zoom | `WKWebView` and CEF back-forward lists; the History menu lists the selected tab's last ten earlier pages | Navigation | in progress |
+| 14 | Back, forward, reload, zoom | `WKWebView` and CEF back-forward lists; the History menu lists the selected tab's previous ten pages | Navigation | in progress |
 | 15 | Find in page | `WKWebView.find(_:configuration:)` | Find | in progress |
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
 | 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | in progress |

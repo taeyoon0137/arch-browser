@@ -8,9 +8,9 @@ public struct BrowserWindowView: View {
     @State private var windowButtons = WindowButtonMetrics()
     /// The sidebar's width, set by dragging its trailing edge.
     @AppStorage(SidebarView.widthKey) private var sidebarWidth = Double(SidebarView.defaultWidth)
-    /// Set while the hidden sidebar is out over the page.
+    /// Set while the hidden sidebar floats over the page.
     @State private var isSidebarPeeking = false
-    /// The next check of whether the peeking sidebar should stay out.
+    /// The next check of whether the floating sidebar should stay visible.
     @State private var peekCheck: DispatchWorkItem?
     @State private var windowReference = WindowReference()
 
@@ -55,7 +55,7 @@ public struct BrowserWindowView: View {
                     .transition(.commandPaletteDimming(from: session.commandPaletteOrigin))
             }
             if let mode = session.commandPaletteMode {
-                // Each opening gets its own view, so a palette reopened while the last one leaves starts fresh: typed text reset and the field focused.
+                // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
                 CommandPaletteView(session: session, mode: mode)
                     .id(session.commandPaletteGeneration)
                     .transition(.commandPalette(from: session.commandPaletteOrigin))
@@ -65,15 +65,15 @@ public struct BrowserWindowView: View {
         .animation(.paletteIn(from: session.commandPaletteOrigin), value: session.commandPaletteMode)
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
-        // Hiding or showing the sidebar, or the library pushing it aside, slides it and widens or narrows the page.
+        // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
         .animation(SidebarView.pageSpring, value: session.isSidebarVisible)
         .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
-        // The window buttons sit on the sidebar, so they hide with it and come back while it peeks. Full screen keeps its own.
+        // The window buttons hide with the sidebar and return when it peeks. Full screen uses its own buttons.
         .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking, reference: windowReference))
         .onChange(of: session.isSidebarVisible) { isVisible in
             peekCheck?.cancel()
             isSidebarPeeking = false
-            // Hidden from under the pointer, the sidebar comes back out over the page once it has slid away.
+            // If hidden under the pointer, the sidebar floats over the page after sliding away.
             if !isVisible, isPointerOverSidebar {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { if !session.isSidebarVisible { peekSidebar() } }
             }
@@ -82,10 +82,10 @@ public struct BrowserWindowView: View {
         .frame(minWidth: 800, minHeight: 500)
     }
 
-    /// With the sidebar hidden, a strip along the window's leading edge brings it out over the page as a card.
+    /// A strip along the window's leading edge reveals the hidden sidebar as a card over the page.
     private var peekingSidebar: some View {
         let width = SidebarView.clampedWidth(sidebarWidth)
-        // The window buttons keep their place, so the card's top edge sits one sidebar margin above the top row on their line, and the row moves by the card's offset.
+        // The window buttons stay fixed. The card starts one sidebar margin above their row, which shifts by the card's offset.
         let hasButtons = windowButtons.trailingEdge != nil
         let top = hasButtons ? max(0, windowButtons.centerY - SidebarTopRow.height / 2 - SidebarView.inset) : Self.pageMargin
         let buttons = hasButtons ? WindowButtonMetrics(centerY: windowButtons.centerY - top, trailingEdge: windowButtons.trailingEdge.map { $0 - Self.pageMargin }) : windowButtons
@@ -121,14 +121,14 @@ public struct BrowserWindowView: View {
         scheduleCheckOfPeek()
     }
 
-    // The pointer is checked rather than tracked, because a card that slides in under the pointer gets no hover until the pointer leaves it.
+    // Check rather than track the pointer: a card sliding under it gets no hover until the pointer leaves.
     private func scheduleCheckOfPeek() {
         let work = DispatchWorkItem { checkPeek() }
         peekCheck = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card out while the pointer is over it, while text in it is being edited, or while a menu, popover, or sheet opened from it, or the command palette, is open. In full screen the window's toolbar lives in a child window, which does not count.
+    /// Keeps the card visible while hovered, while its text is edited, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window does not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
@@ -137,7 +137,7 @@ public struct BrowserWindowView: View {
         let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
-        // A library opened in the card goes with it, once the card is out of sight, so the card comes back with the sidebar.
+        // Close the card's library after the card disappears, so the card reopens showing the sidebar.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             guard !session.isSidebarVisible, !isSidebarPeeking, session.isLibraryVisible else { return }
             var transaction = Transaction()
@@ -146,7 +146,7 @@ public struct BrowserWindowView: View {
         }
     }
 
-    /// Whether the pointer is within the window over the sidebar's place along its leading edge.
+    /// Whether the pointer is inside the window over the sidebar's area along its leading edge.
     private var isPointerOverSidebar: Bool {
         guard let window = windowReference.window, let content = window.contentView else { return false }
         let point = window.mouseLocationOutsideOfEventStream
@@ -154,12 +154,12 @@ public struct BrowserWindowView: View {
     }
 }
 
-/// Holds the window for code that runs outside the view's updates.
+/// Holds the window for code outside view updates.
 final class WindowReference {
     weak var window: NSWindow?
 }
 
-/// Hides or shows the window's close, minimize, and zoom buttons, and records the window in `reference`.
+/// Shows or hides the window's close, minimize, and zoom buttons and records the window in `reference`.
 struct WindowButtonsVisibility: NSViewRepresentable {
     let isHidden: Bool
     let reference: WindowReference
@@ -258,7 +258,7 @@ struct PageCrashNoticeView: View {
     }
 }
 
-/// Fills the page frame: the window background under a page, or, when no tab is open, the window's material and the space's tint a little darker than the sidebar.
+/// Fills the page frame: the window background under a page, or, with no tab open, the window material and space tint, slightly darker than the sidebar.
 struct PageBackgroundView: View {
     let isEmpty: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -317,13 +317,13 @@ struct SidebarView: View {
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
-    /// Takes a swipe past the first space, which brings the library in. The floating sidebar has none.
+    /// Handles a swipe past the first space to open the library.
     var librarySwipe: SidebarSwipeHandlers?
     @Environment(\.sidebarWidth) private var width
     /// How far the space pages follow the fingers during a swipe, in points.
     @State private var swipeTranslation: CGFloat = 0
     @State private var swipePassesHalfway = false
-    /// Set while the current swipe moves the library rather than the space pages.
+    /// Set while a swipe moves the library instead of the space pages.
     @State private var isSwipingLibrary = false
 
     private var currentIndex: Int {
@@ -391,7 +391,7 @@ struct SidebarView: View {
                     SidebarTopRow(session: session, windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
-                // The space pages reach the sidebar's edges so that they slide in from outside it. The clip comes before the negative margin, which would otherwise move it in to the margin's line and cut a lifted tab's shadow.
+                // Space pages reach the sidebar's edges to slide in from outside. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
                 VStack(alignment: .leading, spacing: 8) {
                     if !session.favorites.isEmpty {
                         FavoritesGridView(session: session)
@@ -404,24 +404,24 @@ struct SidebarView: View {
                 .clipped()
                 .padding(.horizontal, -Self.inset)
             }
-            // The swipe area reaches the sidebar's edges and the gap above the bar. It rests while the library has pushed the sidebar aside, because its area then reaches over the page.
+            // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
             .background(SpaceSwipeView(isEnabled: !session.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
             SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
-        // The library may open or close by menu or shortcut during a swipe; the swipe then lets go of it.
+        // Opening or closing the library by menu or shortcut releases it from any current swipe.
         .onChange(of: session.isLibraryVisible) { _ in isSwipingLibrary = false }
     }
 }
 
-/// Receives a swipe that the sidebar hands on: the travel while the fingers move, then the travel and the velocity when they lift.
+/// Receives a swipe from the sidebar: travel while the fingers move, then travel and velocity when they lift.
 struct SidebarSwipeHandlers {
     let changed: (CGFloat) -> Void
     let ended: (CGFloat, CGFloat) -> Void
 }
 
-/// The sidebar with the library to its left. Opening the library pushes the whole sidebar aside. Docked, the column widens by `libraryPeek`, the library takes the sidebar's width, set off by a line, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back. Floating, the library takes the whole card.
+/// The library opens to the sidebar's left and pushes it aside. When docked, the column widens by `libraryPeek`. The library takes the sidebar's width, with a dividing line; the sidebar's first `libraryPeek` points stay visible, dimmed and still, until a click or swipe brings it back. When floating, the library fills the card.
 struct SidebarColumn: View {
     /// About a quarter of the narrowest sidebar.
     static let libraryPeek: CGFloat = 60
@@ -431,7 +431,7 @@ struct SidebarColumn: View {
     let width: CGFloat
     var isFloating = false
     var onResize: (CGFloat) -> Void = { _ in }
-    /// How far a swipe has brought the library in, from 0 to the library's width, while the fingers are down.
+    /// How far a swipe has opened the library, from 0 to its width, while the fingers are down.
     @State private var swipeReveal: CGFloat?
 
     private var libraryWidth: CGFloat { width }
@@ -445,7 +445,7 @@ struct SidebarColumn: View {
                 .frame(width: libraryWidth)
                 .allowsHitTesting(progress > 0)
                 .accessibilityHidden(progress == 0)
-                // The line runs beside the library's contents, between its title row and its button row.
+                // The line runs beside the library's contents, from below the window buttons' row to above the button row.
                 .overlay(alignment: .trailing) {
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
                         .padding(.top, windowButtons.centerY + SidebarTopRow.height / 2 + 8)
@@ -477,11 +477,11 @@ struct SidebarColumn: View {
         .clipped()
         // Clicks reach only what the clip shows.
         .contentShape(Rectangle())
-        // A swipe over the open library or the pushed sidebar takes the library away again.
+        // A swipe over the open library or displaced sidebar closes the library.
         .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
                                    onChange: { travel in swipeReveal = min(libraryWidth, max(0, libraryWidth + travel)) },
                                    onEnd: { travel, velocity in finishLibrarySwipe(opens: !(travel < -libraryWidth * 0.3 || velocity < -300)) }))
-        // The handle covers the gap between the sidebar's controls and the page: the sidebar's own margin and the part of the gap outside it.
+        // The handle covers the gap between the sidebar's controls and the page, including the sidebar's margin and the gap outside it.
         .overlay(alignment: .trailing) {
             if progress == 0, !isFloating {
                 SidebarResizeHandle(width: width, onResize: onResize)
@@ -760,16 +760,16 @@ struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     let space: Space
     @Environment(\.colorScheme) private var colorScheme
-    /// The tab being dragged to a new place, while the drag lasts and while it settles.
+    /// The tab being dragged or settling into place.
     @State private var drag: TabDrag?
-    /// Set while a row's drag gesture is under way. It resets on its own when the gesture is cancelled, as when its row goes away.
+    /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
-    /// Each tab row's frame in the list, for finding the row under the pointer and the place a dropped tab settles into.
+    /// Each tab row's frame in the list, used to find the row under the pointer and the dropped tab's destination.
     @State private var rowFrames: [UUID: CGRect] = [:]
 
     private static let coordinateSpace = "SpaceTabs"
 
-    /// One row of the list. The pinned and the open tabs share one list, so a tab keeps its row, and its drag, when it crosses between them.
+    /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them.
     private enum Item: Identifiable {
         case tab(Tab)
         case divider
@@ -788,9 +788,9 @@ struct SpaceTabsView: View {
         let id: UUID
         /// The pointer's height in the list.
         var pointerY: CGFloat
-        /// How far below the row's top the pointer took hold of it.
+        /// The distance below the row's top where the drag started.
         let grabOffset: CGFloat
-        /// Set once the pointer lets go, while the row moves into its place.
+        /// Set after release, while the row moves into place.
         var isSettling = false
     }
 
@@ -818,12 +818,12 @@ struct SpaceTabsView: View {
                     }
                 }
             }
-            // The margin sits inside the scroll view, which clips at its edges, so a lifted row's shadow has room at the sides.
+            // The scroll view clips at its edges. Keeping the margin inside it leaves room for a lifted row's shadow.
             .padding(.horizontal, SidebarView.inset)
             .environment(\.isDraggingTab, drag != nil)
             .coordinateSpace(name: Self.coordinateSpace)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
-            // A cancelled gesture never reports its end, so the drag is dropped once the gesture is gone and nothing is settling.
+            // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
             .onChange(of: isDragGestureActive) { isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
@@ -835,7 +835,7 @@ struct SpaceTabsView: View {
         .scrollIndicators(.never)
     }
 
-    /// While its tab is dragged, a row leaves an empty, dimmed place in the list.
+    /// A dragged tab leaves an empty, dimmed slot in the list.
     private func row(for tab: Tab) -> some View {
         let isDragged = drag?.id == tab.id
         return TabRowView(session: session, tab: tab)
@@ -854,7 +854,7 @@ struct SpaceTabsView: View {
                 .onEnded { _ in dragEnded() })
     }
 
-    /// The dragged tab follows the pointer above the list. On release it moves into its place before the list shows it there.
+    /// The dragged tab follows the pointer above the list. On release, it settles into place before reappearing in the list.
     @ViewBuilder private var draggedRow: some View {
         if let drag, let tab = session.tabs.first(where: { $0.id == drag.id }), let frame = rowFrames[drag.id] {
             TabRowView(session: session, tab: tab)
@@ -872,7 +872,7 @@ struct SpaceTabsView: View {
             drag = TabDrag(id: tab.id, pointerY: value.location.y, grabOffset: value.startLocation.y - (rowFrames[tab.id]?.minY ?? value.startLocation.y))
         }
         drag?.pointerY = value.location.y
-        // The row under the pointer gives up its place to the dragged tab, with a light haptic for each new place.
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
         guard let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id].map { ($0.minY...$0.maxY).contains(value.location.y) } == true }) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
@@ -903,7 +903,7 @@ struct TabRowView: View {
     @State private var isHovering = false
 
     private var isSelected: Bool { tab.id == session.selectedTabID }
-    /// Rows a dragged tab passes over do not react to the pointer.
+    /// Rows ignore the pointer while a tab is dragged over them.
     private var showsHover: Bool { isHovering && !isDraggingTab }
 
     private var fill: Color {
@@ -919,7 +919,7 @@ struct TabRowView: View {
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 0)
-            // The close button comes first under the pointer; otherwise holding Command shows the row's ⌘-number shortcut in its place.
+            // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
             } else if commandKey.showsShortcuts, let number = session.shortcutNumber(for: tab) {
@@ -975,7 +975,7 @@ struct BlurFade: ViewModifier {
     }
 }
 
-/// Follows whether Command alone is held while the app is active. The shortcut numbers show once it has been held for a moment, so a quick ⌘-shortcut does not flash them, and go as soon as it is released.
+/// Tracks whether Command alone is held while the app is active. Shortcut numbers appear after a brief hold, so quick ⌘-shortcuts do not flash them, and disappear on release.
 final class CommandKeyState: ObservableObject {
     static let shared = CommandKeyState()
     @Published private(set) var showsShortcuts = false
@@ -986,11 +986,11 @@ final class CommandKeyState: ObservableObject {
             self?.setDown(Self.isCommandAlone(event.modifierFlags))
             return event
         }
-        // The app gets no key events while another app is active, so a release there would go unseen.
+        // The app receives no key events while inactive, so it cannot detect a release in another app.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.setDown(false)
         }
-        // Modifier changes while a menu tracks reach no monitor, so the keys are read again when it closes.
+        // Monitors receive no modifier changes while a menu tracks. Read the keys again when it closes.
         NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
             self?.setDown(Self.isCommandAlone(NSEvent.modifierFlags))
         }
@@ -1186,14 +1186,14 @@ struct SidebarBottomBar: View {
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
 
-    /// The widest the symbols and the new space button may grow together while staying centered: each side keeps room for the 30-point library button and its gap, so the group never reaches it.
+    /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
 
-    /// The width each symbol and the new space button take, close enough that the row reads as one group.
+    /// Width shared by each symbol and the new space button, keeping the row visually grouped.
     fileprivate static let itemWidth: CGFloat = 18
     private static let stripSpace = "SpaceStrip"
 
-    /// The symbols followed by the new space button. When the row scrolls, each item shrinks toward the ends of the strip, so nothing shows cut off there.
+    /// The symbols followed by the new space button. When scrolling, items shrink toward the strip's ends so none appears cut off.
     private func strip(shrinksAtEdges: Bool) -> some View {
         HStack(spacing: 2) {
             ForEach(session.spaces) { space in
@@ -1216,7 +1216,7 @@ struct SidebarBottomBar: View {
             NewSpaceButton(action: session.addSpace)
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
-        // In the scrolling strip the first and last items can scroll clear of the shrinking ends.
+        // Let the first and last items scroll clear of the shrinking ends.
         .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
     }
 
@@ -1226,7 +1226,7 @@ struct SidebarBottomBar: View {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
             }
-            // The symbols and the new space button are centered as one group, as if the library button were not there. Too many to fit scroll sideways together instead of covering the library button or widening the sidebar.
+            // Center the symbols and new space button as one group, ignoring the library button. If they do not fit, scroll them together without covering the library button or widening the sidebar.
             ViewThatFits(in: .horizontal) {
                 strip(shrinksAtEdges: false)
                 ScrollViewReader { proxy in
@@ -1237,14 +1237,14 @@ struct SidebarBottomBar: View {
                 }
             }
             .frame(maxWidth: groupWidth)
-            // An optical correction beside the page: the group looks centered 2 points right of the true center. The floating sidebar keeps the true center.
+            // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
             .offset(x: isFloating ? 0 : 2)
         }
         .frame(height: 28)
     }
 }
 
-/// Scales an item of a scrolling strip down from three items before either end of the strip, to nothing at the end itself.
+/// Shrinks a scrolling item starting three items from either end of the strip, reaching zero at the end.
 private struct EdgeShrink: ViewModifier {
     static let distance = 3 * (SidebarBottomBar.itemWidth + 2)
 
@@ -1266,7 +1266,7 @@ private struct EdgeShrink: ViewModifier {
     }
 }
 
-/// A small, dim plus, so the new space button reads as part of the row of symbols rather than as a toolbar button.
+/// A small, dim plus makes the new space button look like part of the symbols row rather than a toolbar button.
 private struct NewSpaceButton: View {
     let action: () -> Void
     @State private var isHovering = false
@@ -1299,13 +1299,13 @@ private struct IsDraggingTabKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// The sidebar's current width, which the space pages and the bottom bar lay out against.
+    /// The sidebar width used to lay out the space pages and bottom bar.
     var sidebarWidth: CGFloat {
         get { self[SidebarWidthKey.self] }
         set { self[SidebarWidthKey.self] = newValue }
     }
 
-    /// Set inside the sidebar that peeks out over the page while the sidebar is hidden.
+    /// Set inside the hidden sidebar while it floats over the page.
     var sidebarIsFloating: Bool {
         get { self[SidebarIsFloatingKey.self] }
         set { self[SidebarIsFloatingKey.self] = newValue }
@@ -1318,7 +1318,7 @@ extension EnvironmentValues {
     }
 }
 
-/// The strip along the sidebar's trailing edge. It shows the resize pointer, and dragging it reports the width the sidebar would have.
+/// A strip along the sidebar's trailing edge that shows the resize pointer and reports the new width during a drag.
 struct SidebarResizeHandle: NSViewRepresentable {
     let width: CGFloat
     let onResize: (CGFloat) -> Void
@@ -1333,7 +1333,7 @@ struct SidebarResizeHandle: NSViewRepresentable {
     final class HandleView: NSView {
         var width: CGFloat = 0
         var onResize: ((CGFloat) -> Void)?
-        /// Where the drag started in the window, and the width then.
+        /// The starting position in the window and sidebar width.
         private var dragStart: (x: CGFloat, width: CGFloat)?
 
         // A drag here resizes the sidebar instead of moving the window.

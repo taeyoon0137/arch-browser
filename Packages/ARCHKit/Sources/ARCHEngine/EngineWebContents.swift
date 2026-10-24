@@ -61,7 +61,7 @@ public protocol EngineNavigationController: AnyObject {
     func stop()
     func goBack()
     func goForward()
-    /// Loads an earlier or later page from this controller's own list. Nothing happens for the current page or an item from another list.
+    /// Loads an earlier or later page from this controller's list. Ignores the current page and items from other lists.
     func go(to item: any EngineBackForwardListItem)
 }
 

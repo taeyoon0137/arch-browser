@@ -275,7 +275,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     fileprivate func stop() { browser?.stopLoading() }
     fileprivate func goBack() { browser?.goBack() }
     fileprivate func goForward() { browser?.goForward() }
-    /// The back-forward list, oldest first, and the current page's index in it, or -1 without pages.
+    /// The back-forward list, oldest first, and the current page's index, or -1 if empty.
     fileprivate var navigationEntries: (entries: [ARCHCEFNavigationEntry], current: Int) {
         guard let browser else { return ([], -1) }
         return (browser.navigationEntries, browser.currentNavigationEntryIndex)
@@ -504,7 +504,7 @@ public final class ChromiumNavigationController: EngineNavigationController {
     }
 }
 
-/// One page in a Chromium tab's back-forward list. Its index places it in the list it was read from, and its URL tells whether the entry is still there.
+/// A page in a Chromium tab's back-forward list. Its index records its position when read; its URL shows whether the entry is still there.
 final class ChromiumBackForwardListItem: EngineBackForwardListItem {
     weak var owner: ChromiumWebContents?
     let index: Int
@@ -521,7 +521,7 @@ final class ChromiumBackForwardListItem: EngineBackForwardListItem {
     }
 }
 
-/// Reads the browser's list from CEF on every access, as the WebKit list reads `WKBackForwardList`.
+/// Reads CEF's list on each access, as the WebKit list reads `WKBackForwardList`.
 final class ChromiumBackForwardList: EngineBackForwardList {
     private unowned let webContents: ChromiumWebContents
 

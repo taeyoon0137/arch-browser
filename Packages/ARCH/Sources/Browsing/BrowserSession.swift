@@ -48,7 +48,7 @@ public final class BrowserSession: ObservableObject {
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
-    /// Counts the palette's openings, including a change of mode, so each one gets a fresh view.
+    /// Counts palette openings and mode changes so each gets a fresh view.
     @Published public private(set) var commandPaletteGeneration = 0
     /// Where the open palette came from, which sets the direction it appears from.
     @Published public private(set) var commandPaletteOrigin = CommandPaletteOrigin.keyboard
@@ -445,7 +445,7 @@ public final class BrowserSession: ObservableObject {
         if let last = orderedTabs.last { selectedTabID = last.id }
     }
 
-    /// The number of the ⌘-number shortcut that selects `tab`: 1 to 8 for the current space's first eight tabs, 9 for its last tab after those.
+    /// The ⌘-number shortcut for `tab`: 1 to 8 for the current space's first eight tabs, or 9 for its last tab beyond those.
     public func shortcutNumber(for tab: Tab) -> Int? {
         let ordered = orderedTabs
         guard let index = ordered.firstIndex(where: { $0.id == tab.id }) else { return nil }
@@ -469,7 +469,7 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place in the target's list, taking the target's space and pinned state, so a tab can cross between the pinned and open lists. Within one list a tab coming from above lands below the target, so it passes the row it was dragged over.
+    /// Moves a dragged tab to `target`'s place and adopts its space and pinned state, allowing moves between pinned and open lists. Within a list, dragging from above places the tab below the target.
     public func moveTab(_ id: UUID, to target: Tab) {
         guard id != target.id, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
@@ -749,7 +749,7 @@ public final class BrowserSession: ObservableObject {
         guard let list = selectedTab?.webContents.navigationController.backForwardList else { return [] }
         return Array(list.backList.reversed().prefix(limit))
     }
-    /// Pages keep running while the menu is open, so the item goes only to the tab it was read from, and only while that tab is still selected.
+    /// Pages keep running while the menu is open. Use an item only in its original tab, while that tab is selected.
     public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) {
         guard let tab = selectedTab, tab.id == tabID else { return }
         tab.webContents.navigationController.go(to: item)

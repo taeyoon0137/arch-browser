@@ -7,7 +7,7 @@ struct CommandPaletteView: View {
     let mode: CommandPaletteMode
     @State private var text = ""
     @FocusState private var isFocused: Bool
-    /// Turned on as the palette appears, so its arrival animates like any change of state.
+    /// Set as the palette appears to animate its arrival as a state change.
     @State private var hasArrived = false
 
     private var matchingTabs: [Tab] {
@@ -96,7 +96,7 @@ struct CommandPaletteAppearance: ViewModifier {
 }
 
 extension Animation {
-    /// Something that appears arrives fast and slows to a stop. A shortcut brings the palette in twice as fast as a sidebar control.
+    /// Something that appears arrives fast and slows to a stop. A shortcut opens the palette twice as fast as a sidebar control.
     static func paletteIn(from origin: CommandPaletteOrigin) -> Animation {
         .timingCurve(0.16, 1, 0.3, 1, duration: origin == .sidebar ? 0.32 : 0.16)
     }
@@ -105,7 +105,7 @@ extension Animation {
 }
 
 extension AnyTransition {
-    /// The palette animates its own arrival, because a transition fades and sharpens the palette's contents without moving them. Leaving needs no movement.
+    /// The palette animates its own arrival because a transition fades and sharpens its contents without moving them. Leaving needs no movement.
     static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
         let offset = CommandPaletteAppearance.offset(from: origin)
         let appearance = AnyTransition.modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))

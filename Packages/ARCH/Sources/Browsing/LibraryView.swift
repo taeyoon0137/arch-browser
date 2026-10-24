@@ -1,7 +1,7 @@
-// The library opens from the button at the bottom left and pushes the sidebar aside. It lists downloads at the top and other tools at the bottom. The button shows download progress while files download and a badge for the finished downloads the user has not seen.
+// The bottom-left button opens the library and pushes the sidebar aside. It lists downloads at the top and other tools at the bottom. The button shows download progress while files download and a badge for the finished downloads the user has not seen.
 import SwiftUI
 
-/// The library in its own column: room for the window buttons, the library itself, and the library button in the place it has in the sidebar, so it stays under the pointer.
+/// A library column with room for the window buttons. The library button stays in its sidebar position, under the pointer.
 struct LibraryPanel: View {
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
@@ -77,7 +77,7 @@ struct LibraryButton: View {
     @Environment(\.sidebarIsFloating) private var isFloating
     @State private var isHovering = false
 
-    /// In the floating sidebar the library opens in the card; elsewhere it also brings back a hidden sidebar.
+    /// In the floating sidebar, the library opens in the card. Elsewhere, it also reveals a hidden sidebar.
     private func toggle() {
         if isFloating {
             session.isLibraryVisible.toggle()

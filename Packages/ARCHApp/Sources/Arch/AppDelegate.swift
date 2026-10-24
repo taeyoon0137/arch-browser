@@ -216,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func goForward() { session.goForward() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
 
-    /// Puts the selected tab's last ten earlier pages, most recent first, between Forward and Clear History.
+    /// Lists the selected tab's previous ten pages, most recent first, between Forward and Clear History.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
@@ -242,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.go(to: page.item, inTab: page.tabID)
     }
 
-    /// A History menu page and the tab it was read from.
+    /// A History menu page and its original tab.
     private final class RecentPage {
         let tabID: UUID
         let item: any EngineBackForwardListItem

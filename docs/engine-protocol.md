@@ -14,7 +14,7 @@
 | `ARCHEngineWebKit` | `Packages/ARCHKit/Sources/ARCHEngineWebKit` | `WKWebView` adapter. Secondary and debug engine | `ARCHEngine`, WebKit |
 | `ARCHEngineChromium` | `Packages/ARCHKit/Sources/ARCHEngineChromium` | Primary engine. Swift adapter over the `CEFBridge` Objective-C++ target. The embedded browser uses Alloy style, which CEF requires for embedding in a client view. Chrome style requires a CEF Views window. Support for Chrome style is evaluated separately. Chrome extensions depend on Chrome style. Build steps: `docs/plan.md` | `ARCHEngine`, `CEFBridge`, CEF framework |
 
-- The engine modules and `CEFBridge` are declared by hand in `Package.swift`.
+- The engine modules and `CEFBridge` are declared manually in `Package.swift`.
 
 ## Tier 1: protocols implemented by both engines
 
@@ -70,9 +70,9 @@ Chromium-specific UI callbacks, including translation bubbles, extension install
 
 ## Current state and next steps
 
-Both adapters build and run in the app. `docs/plan.md` Current State lists what each adapter implements and which protocol members are still stubs. Its Work Queue holds the remaining engine gaps in Phase II and the changes that need a source build of CEF in Phase VI.
+Both adapters build and run in the app. `docs/plan.md` Current State lists each adapter's implemented members and remaining stubs. Its Work Queue lists engine gaps in Phase II and changes requiring a CEF source build in Phase VI.
 
-The adapters keep these rules beyond the member signatures:
+These adapter rules supplement the member signatures:
 
-- `go(to:)` loads an earlier or later page from the same controller's back-forward list. It ignores the current page and items read from another tab's list, so an item that outlived its menu cannot load a different page.
-- The Chromium adapter calls the DevTools protocol only where CEF has no other route, because an attached DevTools client stays until the browser closes and stops Chromium from timing out a hung page (`docs/plan.md`, Decisions).
+- `go(to:)` loads an earlier or later page from the same controller's back-forward list. It ignores the current page and items from another tab's list, so an item kept after its menu closes cannot load a different page.
+- The Chromium adapter calls the DevTools protocol only when CEF has no other route. An attached DevTools client stays until the browser closes and prevents Chromium from timing out a hung page (`docs/plan.md`, Decisions).

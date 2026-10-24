@@ -471,7 +471,7 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 namespace {
 
-// CEF visits the entries at once when asked on the UI thread, which is the main thread here.
+// CEF visits entries synchronously on the UI thread, which is the main thread here.
 class NavigationEntryCollector : public CefNavigationEntryVisitor {
 public:
     bool Visit(CefRefPtr<CefNavigationEntry> entry, bool current, int index, int total) override {
@@ -1390,7 +1390,7 @@ private:
     return collector->Entries();
 }
 
-// Asking for the current entry alone numbers it 0, so the whole list is read to find its place.
+// Requesting only the current entry gives it index 0, so read the whole list to find its position.
 - (NSInteger)currentNavigationEntryIndex {
     if (!_browser) {
         return -1;
@@ -1404,7 +1404,7 @@ private:
     _mainFrameNavigationPending = pending;
 }
 
-// Chromium drops the oldest entries once a tab has 50, and the rest move down, so the entry must still have the URL the caller read.
+// Once a tab has 50 entries, Chromium drops the oldest and shifts the rest, so check that the entry still has the URL the caller read.
 - (BOOL)entryAtIndex:(NSInteger)index hasURL:(NSString *)url currentIndex:(NSInteger *)current {
     CefRefPtr<NavigationEntryCollector> collector = new NavigationEntryCollector;
     _browser->GetHost()->GetNavigationEntries(collector, false);
@@ -1413,14 +1413,14 @@ private:
     return *current >= 0 && index != *current && index >= 0 && index < (NSInteger)entries.count && [entries[index].url isEqualToString:url];
 }
 
-// CEF has no call for a list index, and the DevTools protocol's call would leave a debugger attached to the tab, which stops Chromium from timing out a hung page. The page's own `history.go` makes the move instead.
+// CEF has no call to navigate to a list index. The DevTools protocol's call would leave a debugger attached to the tab, preventing Chromium from timing out hung pages. Use the page's `history.go` instead.
 - (void)goToNavigationEntryAtIndex:(NSInteger)index url:(NSString *)url {
     NSInteger current = -1;
     if (!_browser || ![self entryAtIndex:index hasURL:url currentIndex:&current]) {
         return;
     }
     [self dismissPendingDialog];
-    // Chromium ignores a page's history request while another main frame navigation is under way. Stopping it also takes a pending back or forward entry out of the current place, so the list is read again.
+    // Chromium ignores page history requests during another main frame navigation. Stopping it also removes a pending back or forward entry from the current position, so read the list again.
     if (_mainFrameNavigationPending) {
         _browser->StopLoad();
         if (![self entryAtIndex:index hasURL:url currentIndex:&current]) {
