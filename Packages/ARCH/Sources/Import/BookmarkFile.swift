@@ -3,7 +3,7 @@ import Browsing
 import Foundation
 
 enum BookmarkFile {
-    /// Netscape bookmark HTML, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name.
+    /// HTML bookmark files, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name.
     static func netscapeFavorites(from data: Data) -> [Favorite] {
         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252) ?? ""
         return anchorPattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in

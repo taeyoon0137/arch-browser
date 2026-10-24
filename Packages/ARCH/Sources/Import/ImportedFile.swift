@@ -1,4 +1,4 @@
-// Reads one file that Import accepts: exported bookmarks as Netscape bookmark HTML, Chromium-format Bookmarks JSON, or a WebKit-format Bookmarks.plist, or a Chromium-format History database. The contents decide the format, since a History database has no extension.
+// Reads one file that Import accepts: exported bookmarks as an HTML bookmark file, Chromium-format Bookmarks JSON, or a WebKit-format Bookmarks.plist, or a Chromium-format History database. The contents decide the format, since a History database has no extension.
 import Browsing
 import Foundation
 import History
