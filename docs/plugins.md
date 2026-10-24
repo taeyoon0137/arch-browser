@@ -68,7 +68,7 @@ A script plugin's `plugin.json`:
 | `id` | Reverse-DNS identifier, at most 128 characters of letters, digits, `-`, and `.`. A later install with the same `id` in the same Persona is an update |
 | `apiVersion` | The plugin API version the package targets. The app supports versions up to `PluginManifest.apiVersion` |
 | `permissions` | Capabilities from the permission table below |
-| `sites` | Match patterns for the pages the plugin's page scripts and page calls may reach |
+| `sites` | Match patterns (see below) for the pages the plugin's page scripts and page calls may reach |
 | `siteAccess` | `listedSites` (every page that matches `sites`) or `whenInvoked` (only the selected tab's site after the user runs one of the plugin's commands there) |
 | `network` | Hosts the plugin may fetch from through `arch.net.fetch` |
 | `events` | Events that start the plugin's background code |
@@ -76,6 +76,20 @@ A script plugin's `plugin.json`:
 | `contributes` | Commands, menu items, sidebar items, settings, a settings page, and page scripts |
 
 Symbols use SF Symbols names, so plugins need no image files. A package may still carry an `icon` image for its Settings row.
+
+### Match patterns
+
+`sites` and a page script's `matches` and `excludes` hold match patterns. A pattern is `<scheme>://<host><path>` or `<all_urls>`, which equals `*://*/*`.
+
+| Part | Rule |
+|---|---|
+| Scheme | `http`, `https`, or `*` for both. Patterns reach web pages only, never local files or internal pages |
+| Host | `*` for every host, a name such as `example.com` for that host only, or `*.example.com` for that host and its subdomains. A name is dot-separated labels of ASCII letters, digits, and `-`; an internationalized name uses its `xn--` form. A pattern has no port and covers every port of its host |
+| Path | Starts with `/`. Each `*` matches any run of characters. The path is compared with the address's percent-encoded path and query, without the fragment, so `/search*` covers `/search?q=arch` |
+
+- Schemes and hosts ignore case; paths do not.
+- Text that breaks these rules throws `PluginError.invalidMatchPattern` with the text.
+- Without `tabs`, a plugin still sees the title and address of a tab whose page its granted sites cover.
 
 ## Contributions
 
@@ -167,7 +181,9 @@ A page script is a JavaScript or CSS file from the plugin's package that runs in
   <plugin id>/storage.json      Key-value storage, written atomically after changes settle
 ```
 
-- `storage.json` holds `PluginValue`s up to 5 MB per plugin; a write past the limit throws `quotaExceeded`. Settings values live in the same file under a reserved prefix.
+- `<persona id>` is the Persona's UUID as `UUID.uuidString` writes it, so the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. The app gives `PluginManager` its Application Support folder, and the manager derives the Persona's folder from it.
+- `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; removals and writes that do not grow it always succeed. Settings values live in the same file under a reserved prefix.
+- Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing or unreadable file counts as empty. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
 - Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`.
 - Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
 - Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
@@ -267,7 +283,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
 
 public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible {
     public static var allSites: MatchPattern { get }
-    /// `scheme://host/path` with `*` wildcards, or `<all_urls>`.
+    /// `scheme://host/path` with `*` wildcards, or `<all_urls>`, under the rules in Match patterns. Throws `PluginError.invalidMatchPattern`.
     public init(_ pattern: String) throws
     public func matches(_ url: URL) -> Bool
     public var description: String { get }
@@ -552,6 +568,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidPackage(String)
     case unsupportedAPIVersion(Int)
     case permissionDenied(PluginPermission?)
+    case invalidMatchPattern(String)
     case siteNotGranted(URL)
     case networkHostNotGranted(String)
     case quotaExceeded
@@ -634,6 +651,7 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var plugins: [InstalledPlugin]
     @Published public private(set) var contributions: PluginContributionIndex
 
+    /// `directory` is the app's Application Support folder; the Persona's plugins live in `Plugins/<persona id>/` inside it.
     public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type],
                 runtimes: [any PluginRuntime], browser: any PluginBrowserHost)
 

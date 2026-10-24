@@ -763,7 +763,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Creates the plugin manager with the built-in plugins the app ships. The app calls it once at launch.
     @MainActor public func loadPlugins(builtIns: [any BuiltInPlugin.Type]) {
-        plugins = PluginManager(persona: Persona.defaultID, builtIns: builtIns)
+        plugins = PluginManager(persona: Persona.defaultID, directory: userDataDirectory, builtIns: builtIns)
     }
 
     // MARK: Downloads

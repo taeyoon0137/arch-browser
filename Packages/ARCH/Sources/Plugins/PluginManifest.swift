@@ -10,10 +10,17 @@ public struct PluginID: RawRepresentable, Hashable, Sendable {
 
     /// Fails for anything but dot-separated labels of letters, digits, and `-`, fewer than two labels, or more than 128 characters. Empty labels fail, so an identifier is never `.` or `..` when it names a folder.
     public init?(rawValue: String) {
-        let labels = rawValue.split(separator: ".", omittingEmptySubsequences: false)
-        guard rawValue.count <= 128, labels.count >= 2,
-              labels.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } }) else { return nil }
+        guard rawValue.count <= 128, rawValue.isDomainName, rawValue.contains(".") else { return nil }
         self.rawValue = rawValue
+    }
+}
+
+extension StringProtocol {
+    /// Whether the text is dot-separated labels of ASCII letters, digits, and `-`, none of them empty.
+    var isDomainName: Bool {
+        split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+            !label.isEmpty && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        }
     }
 }
 
@@ -25,14 +32,17 @@ public struct PluginManifest: Hashable, Sendable {
     /// What the plugin does, in one sentence.
     public var summary: String
     public var permissions: Set<PluginPermission>
+    /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
+    public var sites: [MatchPattern]
     public var contributions: PluginContributions
 
-    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], contributions: PluginContributions) {
+    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [], contributions: PluginContributions) {
         self.id = id
         self.name = name
         self.version = version
         self.summary = summary
         self.permissions = permissions
+        self.sites = sites
         self.contributions = contributions
     }
 }
@@ -48,9 +58,16 @@ public enum PluginPermission: String, Hashable, Sendable {
 /// What the user granted a plugin: a subset of what its manifest asks for. `PluginContext` checks every call against it.
 public struct PluginGrant: Hashable, Sendable {
     public var permissions: Set<PluginPermission>
+    public var sites: [MatchPattern]
 
     /// Everything the manifest asks for. Built-in plugins get this grant.
     public init(requestedBy manifest: PluginManifest) {
         permissions = manifest.permissions
+        sites = manifest.sites
+    }
+
+    /// Whether the granted sites cover the page at `url`.
+    func covers(_ url: URL) -> Bool {
+        sites.contains { $0.matches(url) }
     }
 }
