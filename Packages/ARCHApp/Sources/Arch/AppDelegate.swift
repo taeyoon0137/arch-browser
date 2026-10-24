@@ -6,6 +6,7 @@ import ARCHEngineWebKit
 import ARCHPrivateAPI
 import Browsing
 import History
+import Import
 import Preferences
 import SwiftUI
 
@@ -134,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
@@ -374,6 +376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(clearSiteData) {
             return session?.canClearSiteData == true
         }
+        // Import waits while another import runs or the window shows a sheet. It touches no tab, so an internal page does not disable it.
+        if item.action == #selector(importBookmarksAndHistory) {
+            return window.map { importController.canImport(in: $0) } ?? false
+        }
         return true
     }
 
@@ -473,6 +479,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog)
 
     @objc private func showTabCloseLog() { closeLogWindow.show() }
+
+    // MARK: Import
+
+    private lazy var importController = ImportController(session: session)
+
+    @objc private func importBookmarksAndHistory() { importController.chooseFiles(in: window) }
 
     // MARK: Default browser
 

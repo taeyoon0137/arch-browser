@@ -37,6 +37,7 @@ let package = Package(
         .library(name: "Browsing", targets: ["Browsing"]),
         .library(name: "Preferences", targets: ["Preferences"]),
         .library(name: "History", targets: ["History"]),
+        .library(name: "Import", targets: ["Import"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
     ],
@@ -60,8 +61,9 @@ let package = Package(
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing"], path: "Packages/ARCH/Sources/Preferences"),
+        .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
     ],
     cxxLanguageStandard: .cxx20

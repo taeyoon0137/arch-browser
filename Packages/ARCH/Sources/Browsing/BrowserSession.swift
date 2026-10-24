@@ -352,6 +352,15 @@ public final class BrowserSession: ObservableObject {
         favorites.append(Favorite(url: url, title: tab.displayTitle))
     }
 
+    /// Appends, in order, the favorites whose addresses are not favorites yet, and returns how many it added. Import uses it for bookmarks.
+    @discardableResult
+    public func addFavorites(_ candidates: [Favorite]) -> Int {
+        var addresses = Set(favorites.map(\.url))
+        let added = candidates.filter { addresses.insert($0.url).inserted }
+        favorites += added
+        return added.count
+    }
+
     public func removeFavorite(_ favorite: Favorite) {
         favorites.removeAll { $0.id == favorite.id }
     }

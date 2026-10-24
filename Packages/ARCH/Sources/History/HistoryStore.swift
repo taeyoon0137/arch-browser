@@ -50,6 +50,21 @@ public final class HistoryStore {
         }
     }
 
+    /// Adds pages read from another app's history. A page already in the store keeps its title unless that is empty, and takes the later last visit and the larger visit count, so importing the same file again changes nothing. Each batch commits on its own, so suggestions wait for one batch at most.
+    public func importEntries(_ entries: [HistoryEntry]) {
+        for start in stride(from: 0, to: entries.count, by: 1_000) {
+            let batch = entries[start..<min(start + 1_000, entries.count)]
+            queue.async {
+                self.execute("BEGIN")
+                for entry in batch {
+                    self.execute("INSERT INTO visits (url, title, visit_count, last_visit) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(url) DO UPDATE SET visit_count = MAX(visits.visit_count, excluded.visit_count), last_visit = MAX(visits.last_visit, excluded.last_visit), title = CASE WHEN visits.title = '' THEN excluded.title ELSE visits.title END",
+                                 bindings: [.text(entry.url.absoluteString), .text(entry.title), .integer(entry.visitCount), .double(entry.lastVisit.timeIntervalSince1970)])
+                }
+                self.execute("COMMIT")
+            }
+        }
+    }
+
     /// Returns entries whose URL or title contains `query`, most visited first. Returns no entries for an empty query.
     public func suggestions(for query: String, limit: Int) -> [HistoryEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
