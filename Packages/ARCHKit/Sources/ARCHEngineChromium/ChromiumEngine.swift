@@ -250,10 +250,20 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.executeJavaScript("document.getElementById('arch-style-\(identifier)')?.remove();")
     }
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
-        browser?.captureScreenshot(beyondViewport: false) { completion($0.flatMap(NSImage.init(data:))) }
+        captureScreenshot(beyondViewport: false, completion: completion)
     }
     public func captureFullPage(completion: @escaping (NSImage?) -> Void) {
-        browser?.captureScreenshot(beyondViewport: true) { completion($0.flatMap(NSImage.init(data:))) }
+        captureScreenshot(beyondViewport: true, completion: completion)
+    }
+    /// The DevTools protocol captures in device pixels. The image's size is in points, as AppKit images and WebKit's snapshots are.
+    private func captureScreenshot(beyondViewport: Bool, completion: @escaping (NSImage?) -> Void) {
+        guard let browser else { return completion(nil) }
+        let scale = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        browser.captureScreenshot(beyondViewport: beyondViewport) { data in
+            guard let data, let image = NSImage(data: data), let pixels = image.representations.first else { return completion(nil) }
+            image.size = NSSize(width: CGFloat(pixels.pixelsWide) / scale, height: CGFloat(pixels.pixelsHigh) / scale)
+            completion(image)
+        }
     }
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         guard let browser else { return completion(.failure(PDFError.exportFailed)) }

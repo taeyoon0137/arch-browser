@@ -71,6 +71,11 @@ public struct BrowserWindowView: View {
                                 .clipShape(PageFrameShape())
                         }
                     }
+                    .overlay {
+                        if let tab = session.selectedTab, session.regionCaptureTabID == tab.id, session.internalPage == nil {
+                            CaptureRegionOverlay(session: session, pageView: tab.webContents.view, cornerRadius: isPageFullscreen ? 0 : PageFrameShape.cornerRadius)
+                        }
+                    }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(isPageFullscreen ? 0 : 0.08)).allowsHitTesting(false))
                     .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
                     .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))

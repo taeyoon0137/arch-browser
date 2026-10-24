@@ -374,15 +374,36 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         webView.takeSnapshot(with: nil) { image, _ in completion(image) }
     }
-    /// Measures the document, then snapshots it in full from its top-left corner instead of the current scroll position.
+    /// `takeSnapshot` draws only what is on screen and leaves the rest of a larger rectangle blank, so the whole page comes from `createPDF`, which draws the document from its top-left corner at the current zoom as one page. The page is drawn off the main thread at the window's backing scale, or lower when a side would otherwise pass `maximumCaptureSide` pixels.
     public func captureFullPage(completion: @escaping (NSImage?) -> Void) {
-        let script = "[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.scrollX, window.scrollY]"
-        webView.evaluateJavaScript(script) { [weak self] value, _ in
-            guard let self, let metrics = value as? [Double], metrics.count == 4 else { return completion(nil) }
-            let configuration = WKSnapshotConfiguration()
-            configuration.rect = CGRect(x: -metrics[2], y: -metrics[3], width: metrics[0], height: metrics[1])
-            self.webView.takeSnapshot(with: configuration) { image, _ in completion(image) }
+        let scale = webView.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        webView.createPDF { result in
+            guard case .success(let data) = result else { return completion(nil) }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let image = Self.image(fromPDF: data, scale: scale)
+                DispatchQueue.main.async { completion(image) }
+            }
         }
+    }
+    /// The longest side, in pixels, of a full-page capture.
+    private static let maximumCaptureSide: CGFloat = 16_384
+    /// Draws the first page of a PDF over white at `scale` pixels per point. The image's size is the page's size in points.
+    private static func image(fromPDF data: Data, scale: CGFloat) -> NSImage? {
+        guard let provider = CGDataProvider(data: data as CFData), let page = CGPDFDocument(provider)?.page(at: 1) else { return nil }
+        let box = page.getBoxRect(.mediaBox)
+        guard box.width >= 1, box.height >= 1 else { return nil }
+        let scale = min(scale, maximumCaptureSide / box.width, maximumCaptureSide / box.height)
+        let width = Int((box.width * scale).rounded(.up))
+        let height = Int((box.height * scale).rounded(.up))
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -box.minX, y: -box.minY)
+        context.drawPDFPage(page)
+        return context.makeImage().map { NSImage(cgImage: $0, size: box.size) }
     }
     public enum PDFError: Error {
         case exportFailed

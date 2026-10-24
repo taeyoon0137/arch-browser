@@ -1019,6 +1019,76 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    // MARK: Capture
+
+    /// The tab whose page shows the region capture overlay, from Capture Region until the user drags out a region or cancels.
+    @Published public private(set) var regionCaptureTabID: UUID?
+
+    /// Whether the capture commands can act: a page is selected and no internal page covers it.
+    public var canCapture: Bool { selectedTab != nil && internalPage == nil }
+
+    /// Saves the visible part of the selected page as a PNG file in the captures folder and shows it in the Finder.
+    public func captureViewport() {
+        guard canCapture, let tab = selectedTab else { return }
+        tab.webContents.captureViewport { [weak self] in self?.saveCapture($0, of: tab) }
+    }
+
+    /// Saves the whole selected page, including the parts scrolled out of view, as a PNG file in the captures folder and shows it in the Finder.
+    public func captureFullPage() {
+        guard canCapture, let tab = selectedTab else { return }
+        tab.webContents.captureFullPage { [weak self] in self?.saveCapture($0, of: tab) }
+    }
+
+    /// Covers the selected page with an overlay where the user drags out the region to capture.
+    public func beginRegionCapture() {
+        guard canCapture, let tab = selectedTab else { return }
+        regionCaptureTabID = tab.id
+    }
+
+    /// Captures the visible part of the page and keeps the region the user dragged out, given in the page view's coordinates.
+    func finishRegionCapture(_ rect: CGRect) {
+        guard let tab = selectedTab, tab.id == regionCaptureTabID else { return cancelRegionCapture() }
+        regionCaptureTabID = nil
+        focusPage()
+        let view = tab.webContents.view
+        let bounds = view.bounds
+        let isFlipped = view.isFlipped
+        tab.webContents.captureViewport { [weak self] image in
+            self?.saveCapture(image.flatMap { PageCapture.crop($0, to: rect, of: bounds, isFlipped: isFlipped) }, of: tab)
+        }
+    }
+
+    /// Removes the region capture overlay without capturing.
+    func cancelRegionCapture() {
+        guard regionCaptureTabID != nil else { return }
+        regionCaptureTabID = nil
+        focusPage()
+    }
+
+    /// Writes a capture to the captures folder and shows the file in the Finder. Encoding a long page takes a moment, so it runs off the main thread. A capture that failed or could not be written shows a sheet on its tab, if the tab is still open.
+    private func saveCapture(_ image: NSImage?, of tab: Tab) {
+        guard let image else { return showCaptureFailure("The page could not be captured.", for: tab) }
+        let title = tab.displayTitle
+        let date = Date()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result { try PageCapture.save(image, title: title, date: date) }
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let file): NSWorkspace.shared.activateFileViewerSelecting([file])
+                case .failure(let error): self?.showCaptureFailure("The capture could not be saved.", detail: error.localizedDescription, for: tab)
+                }
+            }
+        }
+    }
+
+    private func showCaptureFailure(_ message: String, detail: String? = nil, for tab: Tab) {
+        guard tabs.contains(where: { $0 === tab }) else { return }
+        let alert = NSAlert()
+        alert.messageText = message
+        if let detail { alert.informativeText = detail }
+        enqueueSheet(alert, for: tab) { _ in }
+    }
+
     // MARK: Sharing
 
     /// The share button in the address pill, set when it joins the window.

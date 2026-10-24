@@ -168,6 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         zoomInWithoutShift.allowsKeyEquivalentWhenHidden = true
         viewMenu.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
         viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Capture Viewport", action: #selector(captureViewport), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Capture Full Page", action: #selector(captureFullPage), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Capture Region\u{2026}", action: #selector(captureRegion), keyEquivalent: "")
+        viewMenu.addItem(.separator())
         let developerMenu = NSMenu(title: "Developer")
         developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(toggleDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
         developerMenu.addItem(.separator())
@@ -333,10 +337,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page over the tab.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page over the tab. Capturing needs a selected tab that no internal page covers.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return session?.canZoom == true
+        }
+        if item.action == #selector(captureViewport) || item.action == #selector(captureFullPage) || item.action == #selector(captureRegion) {
+            return session?.canCapture == true
         }
         if item.action == #selector(printPage) || item.action == #selector(exportAsPDF) {
             return session?.canPrint == true
@@ -365,13 +372,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func showSettings() { PreferencesWindowController.shared.show() }
 
+    // MARK: Capture
+
+    @objc private func captureViewport() { session.captureViewport() }
+    @objc private func captureFullPage() { session.captureFullPage() }
+    @objc private func captureRegion() { session.beginRegionCapture() }
+
     // MARK: Page fullscreen
 
-    /// A page that fills the window in fullscreen leaves it on Escape, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself.
+    /// A page that fills the window in fullscreen leaves it on Escape, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first.
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
-                  let self, let session = self.session, session.fullscreenTabID != nil, event.window === self.window else { return event }
+                  let self, let session = self.session, session.fullscreenTabID != nil, session.regionCaptureTabID == nil, event.window === self.window else { return event }
             session.exitPageFullscreen()
             return nil
         }
