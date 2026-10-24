@@ -789,6 +789,7 @@ private struct TabRowFramesKey: PreferenceKey {
 struct TabRowView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
+    @ObservedObject private var commandKey = CommandKeyState.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
@@ -810,8 +811,11 @@ struct TabRowView: View {
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            // The close button comes first under the pointer; otherwise holding Command shows the row's ⌘-number shortcut in its place.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }
+            } else if commandKey.isDown, let number = session.shortcutNumber(for: tab) {
+                TabShortcutBadge(number: number)
             }
         }
         .padding(.leading, 10)
@@ -833,6 +837,38 @@ struct TabRowView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { session.selectedTabID = tab.id }
+    }
+}
+
+/// The number of a tab's ⌘-number shortcut, shown in the close button's place.
+struct TabShortcutBadge: View {
+    let number: Int
+
+    var body: some View {
+        Text("\(number)")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(width: 18, height: 18)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.08)))
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Follows whether Command alone is held while the app is active.
+final class CommandKeyState: ObservableObject {
+    static let shared = CommandKeyState()
+    @Published private(set) var isDown = false
+
+    private init() {
+        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.isDown = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            return event
+        }
+        // The app gets no key events while another app is active, so a release there would go unseen.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isDown = false
+        }
     }
 }
 

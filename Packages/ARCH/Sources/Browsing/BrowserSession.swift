@@ -443,6 +443,14 @@ public final class BrowserSession: ObservableObject {
         if let last = orderedTabs.last { selectedTabID = last.id }
     }
 
+    /// The number of the ⌘-number shortcut that selects `tab`: 1 to 8 for the current space's first eight tabs, 9 for its last tab after those.
+    public func shortcutNumber(for tab: Tab) -> Int? {
+        let ordered = orderedTabs
+        guard let index = ordered.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        if index < 8 { return index + 1 }
+        return index == ordered.count - 1 ? 9 : nil
+    }
+
     public func selectAdjacentTab(forward: Bool) {
         let ordered = orderedTabs
         guard let index = ordered.firstIndex(where: { $0.id == selectedTabID }) else { return }
