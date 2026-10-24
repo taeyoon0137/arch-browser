@@ -147,6 +147,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
         let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
+        viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
+        // A hidden twin takes ⌘=, so zooming in needs no Shift where + shares a key with =.
+        let zoomInWithoutShift = viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "=")
+        zoomInWithoutShift.isHidden = true
+        zoomInWithoutShift.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
+        viewMenu.addItem(.separator())
         let developerMenu = NSMenu(title: "Developer")
         developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(showDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
         viewMenu.addItem(submenu(developerMenu, title: "Developer"))
@@ -218,6 +227,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func showDeveloperTools() { session.showDeveloperTools() }
     @objc private func toggleDownloads() { session.toggleLibrary() }
     @objc private func reload() { session.reload() }
+    @objc private func zoomIn() { session.zoomIn() }
+    @objc private func zoomOut() { session.zoomOut() }
+    @objc private func resetZoom() { session.resetZoom() }
     @objc private func showFindBar() { session.showFindBar() }
     @objc private func findNext() { session.findNext() }
     @objc private func findPrevious() { session.findPrevious() }
@@ -276,8 +288,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
+            return session?.canZoom == true
+        }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }

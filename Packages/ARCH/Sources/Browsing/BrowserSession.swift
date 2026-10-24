@@ -356,10 +356,12 @@ public final class BrowserSession: ObservableObject {
         }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         // Saving after each load keeps the page state that a crash would otherwise lose.
+        // The page takes its host's remembered zoom.
         tab.didFinishLoad = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.cookieSync.scheduleCopy(from: tab.engineKind)
             self.scheduleSave()
+            self.applyZoom(to: tab)
         }
         // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
         tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
@@ -847,6 +849,41 @@ public final class BrowserSession: ObservableObject {
     public func showDeveloperTools() { selectedTab?.webContents.devTools?.open() }
     public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
+
+    // MARK: Zoom
+
+    /// The factors that zooming in and out steps through, alike on both engines.
+    private static let zoomFactors: [Double] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    /// Each host's zoom factor other than 1, as a `UserDefaults` dictionary keyed by host.
+    private static let zoomFactorsKey = "ARCHZoomFactorsByHost"
+
+    /// Zooming needs a selected tab that no internal page covers.
+    public var canZoom: Bool { selectedTab != nil && internalPage == nil }
+
+    public func zoomIn() { changeZoom { current in Self.zoomFactors.first { $0 > current + 0.01 } } }
+    public func zoomOut() { changeZoom { current in Self.zoomFactors.last { $0 < current - 0.01 } } }
+    public func resetZoom() { changeZoom { _ in 1 } }
+
+    /// Sets the selected tab's zoom from its current factor and remembers it for the page's host, so that the host's other open tabs follow. A page without a host keeps the factor until its next load.
+    private func changeZoom(_ next: (Double) -> Double?) {
+        guard canZoom, let tab = selectedTab, let factor = next(tab.webContents.zoomFactor) else { return }
+        guard let host = tab.webContents.url?.host else {
+            tab.webContents.zoomFactor = factor
+            return
+        }
+        let defaults = UserDefaults.standard
+        var factors = defaults.dictionary(forKey: Self.zoomFactorsKey) as? [String: Double] ?? [:]
+        factors[host] = abs(factor - 1) < 0.001 ? nil : factor
+        defaults.set(factors, forKey: Self.zoomFactorsKey)
+        for tab in tabs where tab.webContents.url?.host == host { applyZoom(to: tab) }
+    }
+
+    /// Gives a tab its host's remembered zoom factor, or 1 for a host without one.
+    private func applyZoom(to tab: Tab) {
+        let factors = UserDefaults.standard.dictionary(forKey: Self.zoomFactorsKey) as? [String: Double]
+        let factor = tab.webContents.url?.host.flatMap { factors?[$0] } ?? 1
+        if abs(tab.webContents.zoomFactor - factor) > 0.001 { tab.webContents.zoomFactor = factor }
+    }
 
     // MARK: Persistence
 
