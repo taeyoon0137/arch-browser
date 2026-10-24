@@ -29,7 +29,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
-| 1 | Sidebar (collapse, expand, show on hover) | Custom AppKit and SwiftUI implementation | None | in progress |
+| 1 | Sidebar (collapse, expand, resize, show on hover) | Custom AppKit and SwiftUI implementation | None | in progress |
 | 2 | Spaces (create, switch, swipe, color themes) | Custom implementation with SwiftUI gradients for themes | None | in progress |
 | 3 | Pinned tabs, favorites, tabs, automatic archiving | Custom implementation with local storage | Session restoration | in progress |
 | 4 | Folders and tab groups | Custom implementation | None | not started |

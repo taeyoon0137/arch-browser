@@ -6,6 +6,8 @@ import SwiftUI
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
     @State private var windowButtons = WindowButtonMetrics()
+    /// The sidebar's width, set by dragging its trailing edge.
+    @AppStorage(SidebarView.widthKey) private var sidebarWidth = Double(SidebarView.defaultWidth)
 
     public init(session: BrowserSession) {
         self.session = session
@@ -26,8 +28,16 @@ public struct BrowserWindowView: View {
         ZStack {
             HStack(spacing: 0) {
                 if session.isSidebarVisible {
+                    let width = SidebarView.clampedWidth(sidebarWidth)
                     SidebarView(session: session, windowButtons: windowButtons)
-                        .frame(width: SidebarView.width)
+                        .frame(width: width)
+                        // The handle covers the gap between the sidebar's controls and the page: the sidebar's own margin and the part of the gap outside it.
+                        .overlay(alignment: .trailing) {
+                            SidebarResizeHandle(width: width) { sidebarWidth = Double(SidebarView.clampedWidth($0)) }
+                                .frame(width: Self.sidebarGap)
+                                .offset(x: Self.sidebarGap - SidebarView.inset)
+                        }
+                        .environment(\.sidebarWidth, width)
                 }
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
@@ -185,7 +195,13 @@ extension SpaceTint {
 }
 
 struct SidebarView: View {
-    static let width: CGFloat = 250
+    static let defaultWidth: CGFloat = 250
+    /// The top row needs about 235 points: the window buttons end 79 points in, and its four buttons, gaps, and spacer take 144 more inside the margins.
+    static let minWidth: CGFloat = 240
+    /// Leaves the page at least as wide as the sidebar in the smallest window.
+    static let maxWidth: CGFloat = 400
+    static let widthKey = "ARCHSidebarWidth"
+    static func clampedWidth(_ width: Double) -> CGFloat { min(max(CGFloat(width), minWidth), maxWidth) }
     /// The margin between the sidebar's edges and its controls.
     static let inset: CGFloat = 6
     /// Spring that settles the space pages after a swipe or a change of space.
@@ -193,6 +209,7 @@ struct SidebarView: View {
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
+    @Environment(\.sidebarWidth) private var width
     /// How far the space pages follow the fingers during a swipe, in points.
     @State private var swipeTranslation: CGFloat = 0
     @State private var swipePassesHalfway = false
@@ -204,13 +221,13 @@ struct SidebarView: View {
     /// Limits a swipe to one page and resists past the first and last spaces.
     private func pageTranslation(for travel: CGFloat) -> CGFloat {
         let hasPage = travel > 0 ? currentIndex > 0 : currentIndex < session.spaces.count - 1
-        return hasPage ? max(-Self.width, min(Self.width, travel)) : travel / 4
+        return hasPage ? max(-width, min(width, travel)) : travel / 4
     }
 
     private func swipeChanged(_ travel: CGFloat) {
         guard !session.isLibraryVisible else { return }
         swipeTranslation = pageTranslation(for: travel)
-        let passesHalfway = abs(swipeTranslation) > Self.width / 2
+        let passesHalfway = abs(swipeTranslation) > width / 2
         if passesHalfway != swipePassesHalfway {
             swipePassesHalfway = passesHalfway
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -228,9 +245,9 @@ struct SidebarView: View {
         let translation = pageTranslation(for: travel)
         let isFling = abs(velocity) > 300
         var target = currentIndex
-        if translation < 0, translation < -Self.width * 0.3 || (isFling && velocity < 0), currentIndex < session.spaces.count - 1 {
+        if translation < 0, translation < -width * 0.3 || (isFling && velocity < 0), currentIndex < session.spaces.count - 1 {
             target += 1
-        } else if translation > 0, translation > Self.width * 0.3 || (isFling && velocity > 0), currentIndex > 0 {
+        } else if translation > 0, translation > width * 0.3 || (isFling && velocity > 0), currentIndex > 0 {
             target -= 1
         }
         swipePassesHalfway = false
@@ -514,6 +531,7 @@ struct FavoriteTileView: View {
 struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
     let translation: CGFloat
+    @Environment(\.sidebarWidth) private var width
 
     var body: some View {
         let index = session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
@@ -522,14 +540,14 @@ struct SpacePagesView: View {
                 let isCurrent = space.id == session.currentSpaceID
                 SpaceTabsView(session: session, space: space)
                     .padding(.horizontal, SidebarView.inset)
-                    .frame(width: SidebarView.width)
+                    .frame(width: width)
                     // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar.
                     .allowsHitTesting(isCurrent)
                     .accessibilityHidden(!isCurrent)
             }
         }
-        .offset(x: -CGFloat(index) * SidebarView.width + translation)
-        .frame(width: SidebarView.width, alignment: .leading)
+        .offset(x: -CGFloat(index) * width + translation)
+        .frame(width: width, alignment: .leading)
         .clipped()
         .animation(SidebarView.pageSpring, value: session.currentSpaceID)
     }
@@ -778,9 +796,10 @@ struct SpaceMenuItems: View {
 /// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them.
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
+    @Environment(\.sidebarWidth) private var width
 
     /// The widest the symbols and the new space button may grow together while staying centered: each side keeps room for the 30-point library button and its gap, so the group never reaches it.
-    private static let groupWidth = SidebarView.width - 2 * SidebarView.inset - 2 * (30 + 4)
+    private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
 
     private var symbols: some View {
         HStack(spacing: 4) {
@@ -822,7 +841,7 @@ struct SidebarBottomBar: View {
                 }
                 NewSpaceButton(action: session.addSpace)
             }
-            .frame(maxWidth: Self.groupWidth)
+            .frame(maxWidth: groupWidth)
             // An optical correction: the group looks centered 4 points right of the true center.
             .offset(x: 4)
         }
@@ -847,5 +866,57 @@ private struct NewSpaceButton: View {
         .onHover { isHovering = $0 }
         .help("New Space")
         .accessibilityLabel("New Space")
+    }
+}
+
+private struct SidebarWidthKey: EnvironmentKey {
+    static let defaultValue = SidebarView.defaultWidth
+}
+
+extension EnvironmentValues {
+    /// The sidebar's current width, which the space pages and the bottom bar lay out against.
+    var sidebarWidth: CGFloat {
+        get { self[SidebarWidthKey.self] }
+        set { self[SidebarWidthKey.self] = newValue }
+    }
+}
+
+/// The strip along the sidebar's trailing edge. It shows the resize pointer, and dragging it reports the width the sidebar would have.
+struct SidebarResizeHandle: NSViewRepresentable {
+    let width: CGFloat
+    let onResize: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> HandleView { HandleView() }
+
+    func updateNSView(_ view: HandleView, context: Context) {
+        view.width = width
+        view.onResize = onResize
+    }
+
+    final class HandleView: NSView {
+        var width: CGFloat = 0
+        var onResize: ((CGFloat) -> Void)?
+        /// Where the drag started in the window, and the width then.
+        private var dragStart: (x: CGFloat, width: CGFloat)?
+
+        // A drag here resizes the sidebar instead of moving the window.
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            dragStart = (event.locationInWindow.x, width)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStart else { return }
+            onResize?(dragStart.width + event.locationInWindow.x - dragStart.x)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStart = nil
+        }
     }
 }
