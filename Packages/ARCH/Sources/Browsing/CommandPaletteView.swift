@@ -1,4 +1,4 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching open tabs to switch to and matching pages from history.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching open tabs to switch to and matching pages from history. Text that starts with a site search keyword and a space searches that site.
 import History
 import SwiftUI
 
@@ -37,6 +37,10 @@ struct CommandPaletteView: View {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return mode == .newTab ? "Open a new tab" : "Enter an address or search" }
         if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
+        // The session reads the untrimmed text the same way, so a keyword and a space are enough.
+        if let search = SiteSearchStore.shared.match(text) {
+            return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \"\(search.query)\""
+        }
         if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(url.host ?? trimmed)" }
         return "Search for \"\(trimmed)\""
     }

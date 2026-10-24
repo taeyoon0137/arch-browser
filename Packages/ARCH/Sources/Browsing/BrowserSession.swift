@@ -634,8 +634,9 @@ public final class BrowserSession: ObservableObject {
         return nil
     }
 
-    /// Returns the input URL, a web search URL for other text, or `nil` for empty text.
+    /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, or `nil` for empty text.
     static func destination(forInput input: String) -> URL? {
+        if let search = SiteSearchStore.shared.match(input) { return search.shortcut.resultsURL(for: search.query) }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         if let url = url(forInput: text) { return url }

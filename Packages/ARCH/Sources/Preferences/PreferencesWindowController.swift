@@ -1,4 +1,4 @@
-// Settings window with a toolbar of sections in the system's settings layout: General, Sidebar, and Appearance, saved in `UserDefaults`.
+// Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, and Appearance. Site Search saves its shortcuts in their own file; the others save in `UserDefaults`.
 import AppKit
 import SwiftUI
 
@@ -44,6 +44,7 @@ public final class PreferencesWindowController: NSWindowController {
         let sections = NSTabViewController()
         sections.tabStyle = .toolbar
         sections.addTabViewItem(Self.section("General", symbol: "gearshape", GeneralSection()))
+        sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection()))
         sections.addTabViewItem(Self.section("Sidebar", symbol: "sidebar.left", SidebarSection()))
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
         let window = NSWindow(contentViewController: sections)
