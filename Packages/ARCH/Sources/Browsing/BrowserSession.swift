@@ -922,6 +922,8 @@ public final class BrowserSession: ObservableObject {
     /// Whether the selected tab's engine offers developer tools.
     public var canShowDeveloperTools: Bool { selectedTab?.webContents.devTools != nil }
     public var isShowingDeveloperTools: Bool { selectedTab?.webContents.devTools?.isOpen == true }
+    /// Whether the docking side applies to the selected tab's tools. Tools that dock inside the page have their own controls.
+    public var canChooseDevToolsSide: Bool { selectedTab?.webContents.devTools?.isPlacedByApp == true }
     public func toggleDeveloperTools() {
         guard let devTools = selectedTab?.webContents.devTools else { return }
         devToolsDock.track(devTools)

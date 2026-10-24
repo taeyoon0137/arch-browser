@@ -128,6 +128,8 @@ public protocol EngineDevTools: AnyObject {
     var isOpen: Bool { get }
     /// The window the tools show in while they are open, for the app to place beside the page.
     var window: NSWindow? { get }
+    /// Whether the app chooses where the tools go. An engine that attaches its tools inside the page's view returns false; its tools have their own docking controls.
+    var isPlacedByApp: Bool { get }
     /// Called when the tools open in a window or close.
     var didChangeWindow: (() -> Void)? { get set }
     func open()

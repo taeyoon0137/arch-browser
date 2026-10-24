@@ -358,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(chooseDevToolsSide(_:)) {
             item.state = (item.representedObject as? String) == session?.devToolsDock.side.rawValue ? .on : .off
+            return session?.canChooseDevToolsSide == true
         }
         if item.action == #selector(toggleDeveloperTools) {
             item.title = session?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"

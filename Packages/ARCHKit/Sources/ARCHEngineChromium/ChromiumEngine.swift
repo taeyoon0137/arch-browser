@@ -591,6 +591,7 @@ final class ChromiumDevTools: EngineDevTools {
     private unowned let webContents: ChromiumWebContents
     private(set) var window: NSWindow?
     var didChangeWindow: (() -> Void)?
+    var isPlacedByApp: Bool { true }
 
     init(webContents: ChromiumWebContents) {
         self.webContents = webContents

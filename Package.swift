@@ -43,7 +43,7 @@ let package = Package(
     targets: [
         .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine"),
         .target(name: "ARCHPrivateAPI", path: "Packages/ARCHKit/Sources/ARCHPrivateAPI"),
-        .target(name: "ARCHEngineWebKit", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Sources/ARCHEngineWebKit"),
+        .target(name: "ARCHEngineWebKit", dependencies: ["ARCHEngine", "ARCHPrivateAPI"], path: "Packages/ARCHKit/Sources/ARCHEngineWebKit"),
         .target(
             name: "CEFBridge",
             path: "Packages/ARCHKit/Sources/CEFBridge",

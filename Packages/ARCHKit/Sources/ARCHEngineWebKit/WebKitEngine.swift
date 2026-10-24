@@ -11,7 +11,9 @@ public final class WebKitEngine: Engine {
     public init() {}
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
-        WebKitApplication(configuration: configuration)
+        // The engine starts on the main thread, where the flags live.
+        MainActor.assumeIsolated { WebKitInspectorAPI.register() }
+        return WebKitApplication(configuration: configuration)
     }
 }
 
@@ -262,7 +264,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
+        if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
         self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
+        self.view = WebKitPageView(webView: webView)
         super.init()
         installBridge()
         installContextMenu()
@@ -283,6 +287,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.context = context
         self.allowsDownloads = true
         self.webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
+        self.view = WebKitPageView(webView: webView)
         super.init()
         installBridge()
         installContextMenu()
@@ -290,7 +295,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         allowInspection()
     }
 
-    public var view: NSView { webView }
+    /// The web view inside a view that also holds the Web Inspector once it attaches.
+    public let view: NSView
     public var url: URL? { webView.url }
     public var title: String { webView.title ?? "" }
     public private(set) var favicon: NSImage?
@@ -463,9 +469,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var closingStopsDownloads: Bool { false }
     /// WebKit has no public way to run `beforeunload` handlers.
     public func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
-    public var devTools: (any EngineDevTools)? { nil }
+    /// The Web Inspector inside the app while its private API flags allow it; otherwise none.
+    public var devTools: (any EngineDevTools)? { WebKitInspectorAPI.isAllowed ? inspector : nil }
+    private lazy var inspector = WebKitDevTools(webView: webView)
 
-    /// Lets the system's web inspector attach to the page. Opening the inspector from the app needs a private API, so the app offers no developer tools on this engine.
+    /// Lets the system's browser inspect the page, which keeps working when the Web Inspector inside the app is off.
     private func allowInspection() {
         if #available(macOS 13.3, *) { webView.isInspectable = true }
     }
