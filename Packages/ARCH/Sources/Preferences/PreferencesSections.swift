@@ -111,9 +111,10 @@ struct SidebarSection: View {
     }
 }
 
-/// The app's appearance: the system's, light, or dark.
+/// The app's appearance (the system's, light, or dark) and how strongly the current space's tint washes the window.
 struct AppearanceSection: View {
     @AppStorage(AppearanceSetting.defaultsKey) private var appearance = AppearanceSetting.system
+    @AppStorage(TintStrength.defaultsKey) private var tintStrength = TintStrength.subtle
 
     var body: some View {
         Form {
@@ -123,6 +124,11 @@ struct AppearanceSection: View {
                 }
             }
             .onChange(of: appearance) { NSApp.appearance = $0.appearance }
+            Picker("Space tint", selection: $tintStrength) {
+                ForEach(TintStrength.allCases, id: \.self) { strength in
+                    Text(strength.title)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)

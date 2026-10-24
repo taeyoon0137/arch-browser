@@ -23,8 +23,10 @@ public struct Space: Identifiable, Codable, Hashable {
     }
 }
 
+/// A space's theme: a tint color, or Automatic for the accent color chosen in System Settings. `session.json` stores the raw value, so Automatic needs no new snapshot version.
 public enum SpaceTint: String, Codable, CaseIterable {
     case blue, purple, pink, orange, green, teal, gray
+    case automatic
 }
 
 public struct Favorite: Identifiable, Codable, Hashable {

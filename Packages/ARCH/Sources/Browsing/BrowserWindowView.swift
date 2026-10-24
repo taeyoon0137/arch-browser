@@ -1,4 +1,4 @@
-// Main window content. The system's translucent window material fills the window with a faint wash of the current space's tint. The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs or the library, and the library button with the space switcher. The page fills the remaining space with nothing above it.
+// Main window content. The system's translucent window material fills the window with a wash of the current space's tint (`SpaceTheme.swift`). The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs or the library, and the library button with the space switcher. The page fills the remaining space with nothing above it.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -86,6 +86,7 @@ public struct BrowserWindowView: View {
                 peekingSidebar
             }
             TabDragLayer(session: session, tabDrag: tabDrag)
+                .modifier(SidebarAppearance())
             if session.isFindBarVisible {
                 FindBarView(session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -142,7 +143,8 @@ public struct BrowserWindowView: View {
                 isPaletteLeaving = false
             }
         }
-        .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
+        .background(SpaceBackgroundView())
+        .modifier(SpaceThemeModifier(tint: session.currentSpace.tint))
         .background(WindowButtonsReader { windowButtons = $0 })
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
         .animation(SidebarView.pageSpring, value: session.isSidebarVisible)
@@ -210,7 +212,7 @@ public struct BrowserWindowView: View {
                     .background {
                         ZStack {
                             RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(isCardDocking ? 0 : 0.25), radius: 16, y: 4)
-                            SpaceBackgroundView(tint: session.currentSpace.tint.color, cornerRadius: Self.cardCornerRadius)
+                            SpaceBackgroundView(cornerRadius: Self.cardCornerRadius)
                         }
                     }
                     .overlay(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).strokeBorder(Color.primary.opacity(isCardDocking ? 0 : 0.08)).allowsHitTesting(false))
@@ -371,18 +373,18 @@ struct PageFrameShape: InsettableShape {
     }
 }
 
-/// Shows the system's translucent window material, the one Apple's own sidebars use, under a faint wash of the space's tint.
+/// Shows the system's translucent window material, the one Apple's own sidebars use, under a wash of the current space's tint at the theme's strength.
 struct SpaceBackgroundView: View {
-    let tint: Color
     var cornerRadius: CGFloat = 0
+    @Environment(\.spaceTheme) private var theme
 
     var body: some View {
         ZStack {
             WindowMaterialView(cornerRadius: cornerRadius)
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(LinearGradient(colors: [tint.opacity(0.08), tint.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: [theme.tint.opacity(theme.strength.opacities.start), theme.tint.opacity(theme.strength.opacities.end)], startPoint: .topLeading, endPoint: .bottomTrailing))
         }
-        .animation(.easeInOut(duration: 0.25), value: tint)
+        .animation(.easeInOut(duration: 0.25), value: theme)
     }
 }
 
@@ -460,20 +462,6 @@ enum SidebarFill {
         case (.hover, _): return .black.opacity(0.04)
         case (.selected, .dark): return .white.opacity(0.13)
         case (.selected, _): return .white.opacity(0.8)
-        }
-    }
-}
-
-extension SpaceTint {
-    var color: Color {
-        switch self {
-        case .blue: return .blue
-        case .purple: return .purple
-        case .pink: return .pink
-        case .orange: return .orange
-        case .green: return .green
-        case .teal: return .teal
-        case .gray: return .gray
         }
     }
 }
@@ -674,6 +662,8 @@ struct SidebarColumn: View {
         .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
         .environment(\.sidebarWidth, width)
         .onChange(of: session.isLibraryVisible) { _ in swipeReveal = nil }
+        // On a strong tint, the sidebar's text and icons may take the other appearance to stay readable.
+        .modifier(SidebarAppearance())
     }
 
     private func finishLibrarySwipe(opens: Bool) {
@@ -1511,12 +1501,13 @@ struct SpaceHeaderView: View {
     let space: Space
     @State private var draftName = ""
     @FocusState private var isNameFocused: Bool
+    @Environment(\.spaceTheme) private var theme
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: space.symbol)
                 .font(.system(size: 10))
-                .foregroundStyle(space.tint.color)
+                .foregroundStyle(theme.symbolColor(for: space.tint))
             if session.renamingSpaceID == space.id {
                 TextField("Space Name", text: $draftName)
                     .textFieldStyle(.plain)
@@ -1580,9 +1571,10 @@ struct SpaceMenuItems: View {
             session.switchToSpace(space.id)
             session.renamingSpaceID = space.id
         }
-        Picker("Color", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
-            ForEach(SpaceTint.allCases, id: \.self) { tint in
-                Text(tint.rawValue.capitalized).tag(tint)
+        // Automatic follows the system accent color; the others are the space's own color.
+        Picker("Theme", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
+            ForEach([SpaceTint.automatic] + SpaceTint.colors, id: \.self) { tint in
+                Text(tint.title).tag(tint)
             }
         }
         Picker("Icon", selection: Binding(get: { space.symbol }, set: { session.setSymbol($0, ofSpace: space.id) })) {
@@ -1612,6 +1604,7 @@ struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
+    @Environment(\.spaceTheme) private var theme
 
     /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
@@ -1637,7 +1630,7 @@ struct SidebarBottomBar: View {
                 Button(action: { session.switchToSpace(space.id) }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
-                        .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
+                        .foregroundStyle(isCurrent ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
                         .scaleEffect(scale(at: index))
                         .frame(width: Self.itemWidth, height: 26)
                         .contentShape(Rectangle())

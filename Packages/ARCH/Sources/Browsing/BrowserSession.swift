@@ -237,7 +237,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     public func addSpace() {
-        let tint = SpaceTint.allCases[spaces.count % SpaceTint.allCases.count]
+        let tint = SpaceTint.colors[spaces.count % SpaceTint.colors.count]
         // The lowest number no space uses, so names do not repeat after a deletion.
         let number = (1...).first { number in !spaces.contains { $0.name == "Space \(number)" } }!
         let space = Space(name: "Space \(number)", tint: tint)
