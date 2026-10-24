@@ -71,6 +71,8 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var unseenDownloadIDs: Set<String> = []
     /// The space whose name is being edited in the sidebar.
     @Published public var renamingSpaceID: UUID?
+    /// The tab whose name is being edited in the sidebar.
+    @Published public var renamingTabID: UUID?
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
     /// The last 100 closed or archived tabs, oldest first. The newest reopens first.
@@ -240,6 +242,21 @@ public final class BrowserSession: ObservableObject {
         renamingSpaceID = nil
     }
 
+    /// An empty name or the page's own title restores the page's title.
+    public func renameTab(_ id: UUID, to name: String) {
+        if let tab = tabs.first(where: { $0.id == id }) {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            tab.customTitle = trimmed.isEmpty || trimmed == tab.pageTitle ? nil : trimmed
+            scheduleSave()
+        }
+        endRenaming(id)
+    }
+
+    /// Does not interrupt renaming another tab that may have started meanwhile.
+    public func endRenaming(_ id: UUID) {
+        if renamingTabID == id { renamingTabID = nil }
+    }
+
     public func setTint(_ tint: SpaceTint, ofSpace id: UUID) {
         updateSpace(id) { $0.tint = tint }
     }
@@ -400,7 +417,7 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         retire(tab.webContents)
         if remember {
-            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, isPinned: tab.isPinned, engine: tab.engineKind))
+            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
         if selectedTabID == tab.id {
@@ -427,7 +444,7 @@ public final class BrowserSession: ObservableObject {
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine)
+        openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine).customTitle = record.customTitle
     }
 
     /// The current space's tabs in sidebar order: pinned first, then open.
@@ -776,6 +793,7 @@ public final class BrowserSession: ObservableObject {
             }
             let tab = openTab(url: record.url, in: record.spaceID, pinned: record.isPinned, select: false, engine: record.engine)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
+            tab.customTitle = record.customTitle
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
@@ -803,7 +821,7 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind) },
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind) },
                         selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
     }
 }

@@ -20,6 +20,7 @@ public struct BrowserWindowView: View {
     /// The next check of whether the floating sidebar should stay visible.
     @State private var peekCheck: DispatchWorkItem?
     @State private var windowReference = WindowReference()
+    @StateObject private var tabDrag = TabDragState()
 
     public init(session: BrowserSession) {
         self.session = session
@@ -55,6 +56,7 @@ public struct BrowserWindowView: View {
             if !session.isSidebarVisible || isSidebarPeeking {
                 peekingSidebar
             }
+            TabDragLayer(session: session, tabDrag: tabDrag)
             if session.isFindBarVisible {
                 FindBarView(session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -79,6 +81,8 @@ public struct BrowserWindowView: View {
                     .id(session.commandPaletteGeneration)
             }
         }
+        .coordinateSpace(name: Self.coordinateSpace)
+        .environmentObject(tabDrag)
         .onAppear { shownPaletteMode = session.commandPaletteMode }
         .onChange(of: session.commandPaletteMode) { mode in
             guard mode == nil else {
@@ -176,8 +180,8 @@ public struct BrowserWindowView: View {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
             || (window?.childWindows ?? []).contains { $0.isVisible && !NSStringFromClass(type(of: $0)).contains("FullScreen") }
-        let isEditingText = session.renamingSpaceID != nil || window?.firstResponder is NSText
-        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
+        let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || window?.firstResponder is NSText
+        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.tabID != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
         // Close the card's library after the card disappears, so the card reopens showing the sidebar.
@@ -862,19 +866,22 @@ struct SpacePagesView: View {
     }
 }
 
-/// Shows a space's pinned tabs first, followed by the new tab row and the remaining tabs.
+/// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row.
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     let space: Space
-    @Environment(\.colorScheme) private var colorScheme
-    /// The tab being dragged or settling into place.
-    @State private var drag: TabDrag?
+    @EnvironmentObject private var tabDrag: TabDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
-    /// Each tab row's frame in the list, used to find the row under the pointer and the dropped tab's destination.
+    /// Each tab row's frame in the window, used to find the row under the pointer and the dropped tab's destination.
     @State private var rowFrames: [UUID: CGRect] = [:]
+    /// The visible part of the list in the window. Rows scrolled out of sight lie outside it.
+    @State private var listFrame = CGRect.zero
+    /// Identifies this list as the owner of a drag it started, since each space and the floating card has its own list.
+    @State private var dragOwner = UUID()
 
-    private static let coordinateSpace = "SpaceTabs"
+    /// How long the lifted row's shadow and the slot's dimming take to appear and disappear.
+    private static let liftDuration = 0.4
 
     /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them.
     private enum Item: Identifiable {
@@ -891,20 +898,10 @@ struct SpaceTabsView: View {
         }
     }
 
-    private struct TabDrag {
-        let id: UUID
-        /// The pointer's height in the list.
-        var pointerY: CGFloat
-        /// The distance below the row's top where the drag started.
-        let grabOffset: CGFloat
-        /// Set after release, while the row moves into place.
-        var isSettling = false
-    }
-
     private var items: [Item] {
         let pinned = session.tabs(in: space.id, pinned: true)
         let open = session.tabs(in: space.id, pinned: false)
-        return pinned.map(Item.tab) + (pinned.isEmpty ? [] : [.divider]) + [.newTab] + open.map(Item.tab)
+        return pinned.map(Item.tab) + (pinned.isEmpty ? [] : [.divider]) + open.map(Item.tab) + [.newTab]
     }
 
     var body: some View {
@@ -925,71 +922,134 @@ struct SpaceTabsView: View {
                     }
                 }
             }
-            // The scroll view clips at its edges. Keeping the margin inside it leaves room for a lifted row's shadow.
+            // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
-            .environment(\.isDraggingTab, drag != nil)
-            .coordinateSpace(name: Self.coordinateSpace)
+            .environment(\.isDraggingTab, tabDrag.tabID != nil)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
             .onChange(of: isDragGestureActive) { isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
-                    if !isDragGestureActive, drag?.isSettling == false { drag = nil }
+                    if !isDragGestureActive, !tabDrag.isSettling { tabDrag.end(ownedBy: dragOwner) }
                 }
             }
-            .overlay(alignment: .topLeading) { draggedRow }
         }
         .scrollIndicators(.never)
+        .background(GeometryReader { proxy in
+            let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+            Color.clear
+                .onAppear { listFrame = frame }
+                .onChange(of: frame) { listFrame = $0 }
+        })
+        // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
+        .onDisappear { tabDrag.end(ownedBy: dragOwner) }
     }
 
     /// A dragged tab leaves an empty, dimmed slot in the list.
     private func row(for tab: Tab) -> some View {
-        let isDragged = drag?.id == tab.id
+        let isDragged = tabDrag.tabID == tab.id
         return TabRowView(session: session, tab: tab)
             .opacity(isDragged ? 0 : 1)
             .background {
                 if isDragged {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06))
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(tabDrag.isLifted ? 0.06 : 0))
                 }
             }
             .background(GeometryReader { proxy in
-                Color.clear.preference(key: TabRowFramesKey.self, value: [tab.id: proxy.frame(in: .named(Self.coordinateSpace))])
+                Color.clear.preference(key: TabRowFramesKey.self, value: [tab.id: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
             })
-            .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.coordinateSpace))
+            // Dragging in the name field selects text instead.
+            .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
-                .onEnded { _ in dragEnded() })
+                .onEnded { _ in dragEnded() }, including: session.renamingTabID == tab.id ? .subviews : .all)
     }
 
-    /// The dragged tab follows the pointer above the list. On release, it settles into place before reappearing in the list.
-    @ViewBuilder private var draggedRow: some View {
-        if let drag, let tab = session.tabs.first(where: { $0.id == drag.id }), let frame = rowFrames[drag.id] {
-            TabRowView(session: session, tab: tab)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)))
-                .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
-                .frame(width: frame.width)
-                .offset(x: frame.minX, y: drag.isSettling ? frame.minY : drag.pointerY - drag.grabOffset)
-                .allowsHitTesting(false)
-        }
-    }
-
+    /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
-        guard drag?.isSettling != true else { return }
-        if drag?.id != tab.id {
-            drag = TabDrag(id: tab.id, pointerY: value.location.y, grabOffset: value.startLocation.y - (rowFrames[tab.id]?.minY ?? value.startLocation.y))
+        guard !tabDrag.isSettling, tabDrag.tabID == nil || (tabDrag.tabID == tab.id && tabDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
+        if tabDrag.tabID == nil {
+            tabDrag.begin(tab.id, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
+            // The row appears without a shadow, which then fades in.
+            DispatchQueue.main.async { withAnimation(.easeInOut(duration: Self.liftDuration)) { tabDrag.isLifted = true } }
         }
-        drag?.pointerY = value.location.y
+        tabDrag.move(to: value.location)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
-        guard let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id].map { ($0.minY...$0.maxY).contains(value.location.y) } == true }) else { return }
+        guard listFrame.contains(value.location),
+              let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id]?.contains(value.location) == true }) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
+    /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
     private func dragEnded() {
-        guard drag != nil else { return }
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { drag?.isSettling = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { drag = nil }
+        guard tabDrag.owner == dragOwner, let id = tabDrag.tabID, let slot = rowFrames[id] else { return tabDrag.end(ownedBy: dragOwner) }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            tabDrag.isSettling = true
+            tabDrag.frame = slot
+        }
+        withAnimation(.easeInOut(duration: Self.liftDuration)) { tabDrag.isLifted = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.liftDuration) { [owner = dragOwner] in tabDrag.end(ownedBy: owner) }
+    }
+}
+
+/// The tab row lifted by a drag. The window draws it above the sidebar and the page, so it can follow the pointer out of the list.
+final class TabDragState: ObservableObject {
+    /// The dragged tab.
+    @Published private(set) var tabID: UUID?
+    /// The lifted row's frame in the window.
+    @Published var frame: CGRect = .zero
+    /// Set after release, while the row returns to its slot.
+    @Published var isSettling = false
+    /// Shows the lifted row's shadow and backing and the slot's dimming.
+    @Published var isLifted = false
+    /// The list that started the drag.
+    private(set) var owner: UUID?
+    /// The pointer's position in the row when the drag started.
+    private var grabOffset: CGSize = .zero
+
+    func begin(_ id: UUID, frame: CGRect, grabbedAt point: CGPoint, owner: UUID) {
+        tabID = id
+        self.owner = owner
+        self.frame = frame
+        grabOffset = CGSize(width: point.x - frame.minX, height: point.y - frame.minY)
+    }
+
+    func move(to point: CGPoint) {
+        frame.origin = CGPoint(x: point.x - grabOffset.width, y: point.y - grabOffset.height)
+    }
+
+    /// Ends the drag if `owner` started it, so a list cannot end another list's drag.
+    func end(ownedBy owner: UUID) {
+        guard self.owner == owner else { return }
+        tabID = nil
+        self.owner = nil
+        isSettling = false
+        isLifted = false
+    }
+}
+
+/// Draws the lifted tab row at the pointer.
+struct TabDragLayer: View {
+    @ObservedObject var session: BrowserSession
+    @ObservedObject var tabDrag: TabDragState
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let id = tabDrag.tabID, let tab = session.tabs.first(where: { $0.id == id }) {
+            // Over the page the row needs a backing of its own.
+            TabRowView(session: session, tab: tab)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(tabDrag.isLifted ? 1 : 0))
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
+                .shadow(color: .black.opacity(tabDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                .environment(\.isDraggingTab, true)
+                .frame(width: tabDrag.frame.width, height: tabDrag.frame.height)
+                .offset(x: tabDrag.frame.minX, y: tabDrag.frame.minY)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -1022,9 +1082,13 @@ struct TabRowView: View {
         HStack(spacing: 8) {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
-            Text(tab.displayTitle)
-                .font(.system(size: 14))
-                .lineLimit(1)
+            if session.renamingTabID == tab.id {
+                TabNameField(session: session, tab: tab)
+            } else {
+                Text(tab.displayTitle)
+                    .font(.system(size: 14))
+                    .lineLimit(1)
+            }
             Spacer(minLength: 0)
             // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place.
             if showsHover {
@@ -1042,8 +1106,14 @@ struct TabRowView: View {
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
         .onTapGesture { session.selectedTabID = tab.id }
+        // The first click selects the tab at once; the second starts renaming it.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { session.renamingTabID = tab.id })
         .onHover { isHovering = $0 }
         .contextMenu {
+            Button("Rename Tab") {
+                session.selectedTabID = tab.id
+                session.renamingTabID = tab.id
+            }
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
             Divider()
@@ -1053,6 +1123,48 @@ struct TabRowView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { session.selectedTabID = tab.id }
+    }
+}
+
+/// Edits a tab's name in place. Return or leaving the field keeps the name, and Escape cancels. An empty name returns the tab to its page's title, and an unedited name changes nothing.
+struct TabNameField: View {
+    @ObservedObject var session: BrowserSession
+    @ObservedObject var tab: Tab
+    @State private var draftName = ""
+    /// The name the field opened with.
+    @State private var initialName = ""
+    @State private var isCancelled = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField("Tab Name", text: $draftName)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .focused($isFocused)
+            .onSubmit(commit)
+            .onExitCommand {
+                isCancelled = true
+                session.endRenaming(tab.id)
+            }
+            .onChange(of: isFocused) { focused in
+                if !focused { commit() }
+            }
+            // Selecting another tab or space leaves the field focused, so the name is saved here.
+            .onChange(of: session.selectedTabID) { _ in commit() }
+            .onAppear {
+                initialName = tab.displayTitle
+                draftName = initialName
+                DispatchQueue.main.async { isFocused = true }
+            }
+            // Hiding the sidebar or opening the library removes the field without moving focus.
+            .onDisappear(perform: commit)
+    }
+
+    /// Keeps the typed name even when renaming has moved on to another tab.
+    private func commit() {
+        guard !isCancelled else { return }
+        if draftName == initialName { return session.endRenaming(tab.id) }
+        session.renameTab(tab.id, to: draftName)
     }
 }
 

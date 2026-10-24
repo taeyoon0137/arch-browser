@@ -14,6 +14,8 @@ public final class Tab: ObservableObject, Identifiable {
     /// The session updates this on tab selection. Archiving closes unpinned tabs whose dates are too old.
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
+    /// The name the user gave the tab, shown in place of the page's title. The session sets it.
+    @Published public internal(set) var customTitle: String?
     @Published public private(set) var url: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
@@ -68,7 +70,10 @@ public final class Tab: ObservableObject, Identifiable {
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
 
-    public var displayTitle: String {
+    public var displayTitle: String { customTitle ?? pageTitle }
+
+    /// The page's title, or its host if it has no title.
+    public var pageTitle: String {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }

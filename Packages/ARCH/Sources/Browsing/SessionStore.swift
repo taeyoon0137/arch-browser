@@ -10,6 +10,8 @@ struct SessionSnapshot: Codable {
         var spaceID: UUID
         var url: URL?
         var title: String
+        /// The user's tab name. `nil` when the tab shows its page's title or the file predates tab renaming.
+        var customTitle: String?
         var isPinned: Bool
         /// `nil` in closed-tab records and in files written before activation tracking.
         var lastActivatedAt: Date?
