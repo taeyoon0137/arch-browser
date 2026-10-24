@@ -53,7 +53,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
 | 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | complete |
 | 18 | Drag and drop (tabs, links, files) | AppKit drag APIs | None | in progress |
-| 49 | Page context menus | One menu built by the app on both engines: Chromium through `CefContextMenuHandler::RunContextMenu`, WebKit through `willOpenMenu(_:with:)` with the engine's own spelling and editing items kept. WebKit keeps its own menu for menus a page element provides and for elements in closed shadow roots. Inspect Element waits for DevTools (row 45) | Context menus | in progress |
+| 49 | Page context menus | One menu built by the app on both engines: Chromium through `CefContextMenuHandler::RunContextMenu`, with spelling suggestions from `NSSpellChecker` in the system's preferred languages if the profile's spelling language has none, and WebKit through `willOpenMenu(_:with:)` with the engine's own spelling and editing items kept. WebKit keeps its own menu for menus a page element provides and for elements in closed shadow roots. Inspect Element waits for DevTools (row 45) | Context menus | in progress |
 
 ## 3. Content and Media
 

@@ -351,18 +351,31 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate?.webContentsDidClose(self)
     }
 
+    /// Chromium asks the system spell checker for suggestions only in the profile's spelling language. That language offers none for words in other languages, such as an English word when the system language is Korean. Try the system's preferred languages in order instead.
+    private static func systemSpellingSuggestions(for word: String) -> [String] {
+        let range = NSRange(location: 0, length: (word as NSString).length)
+        for identifier in Locale.preferredLanguages {
+            let language = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
+            if let guesses = NSSpellChecker.shared.guesses(forWordRange: range, in: word, language: language, inSpellDocumentWithTag: 0), !guesses.isEmpty {
+                return guesses
+            }
+        }
+        return []
+    }
+
     /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click.
     public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
         guard let uiDelegate, view.window != nil else { return completion() }
         let menu = NSMenu()
         menu.autoenablesItems = false
         if !params.misspelledWord.isEmpty {
-            for word in params.spellingSuggestions {
+            let suggestions = params.spellingSuggestions.isEmpty ? Self.systemSpellingSuggestions(for: params.misspelledWord) : params.spellingSuggestions
+            for word in suggestions {
                 let item = engineMenuItem(word, EngineContextMenuItem.spellingSuggestion, #selector(replaceMisspellingFromMenu(_:)), isEnabled: true)
                 item.representedObject = word
                 menu.addItem(item)
             }
-            if params.spellingSuggestions.isEmpty {
+            if suggestions.isEmpty {
                 menu.addItem(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
             }
         }
