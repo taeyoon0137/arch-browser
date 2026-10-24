@@ -65,6 +65,8 @@ public struct BrowserWindowView: View {
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
                 PageAreaView(session: session, tabDrag: tabDrag, isPageFullscreen: isPageFullscreen)
+                    // A preview floats over the whole page area, whatever its panes.
+                    .overlay { if let preview = session.preview { PagePreviewPanel(session: session, preview: preview) } }
                     .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
                     .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
                 if !isPageFullscreen {
@@ -937,7 +939,7 @@ struct SiteSettingsSection<Content: View>: View {
     }
 }
 
-/// Shows favorites shared by all spaces as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others.
+/// Shows favorites shared by all spaces as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var tabDrag: TabDragState
@@ -960,6 +962,7 @@ struct FavoritesGridView: View {
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
                     .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
+                    .modifier(ShiftHoverPreview { if tabDrag.item == nil { session.previewFavorite(favorite) } })
             }
         }
         .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }

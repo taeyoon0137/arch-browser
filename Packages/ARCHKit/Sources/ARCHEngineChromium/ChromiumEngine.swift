@@ -403,6 +403,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         return true
     }
+    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine. No other navigation asks the delegate.
+    public func cefBrowserShouldOpenNewWindow(withURL url: String) -> Bool {
+        guard let navigationDelegate, let target = URL(engineString: url) else { return true }
+        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow
+    }
     public func cefBrowserDidRequestPopup(withURL url: String) {
         let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)

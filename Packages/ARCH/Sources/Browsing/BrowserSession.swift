@@ -433,6 +433,61 @@ public final class BrowserSession: ObservableObject {
         closeWhenPageAgrees(tab, then: didEnd)
     }
 
+    // MARK: Previews
+
+    /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
+    @Published private(set) var preview: PagePreview?
+
+    /// Previews a favorite in the default engine, which opening the favorite would use.
+    func previewFavorite(_ favorite: Favorite) {
+        showPreview(of: favorite.url, engine: defaultEngine)
+    }
+
+    /// Shows `url` in the panel, in place of any other preview, in a web contents of `engine` that no tab owns. A preview that opened with the same address stays as it is. The page cannot download, so closing the panel always closes the page at once.
+    private func showPreview(of url: URL, engine: EngineKind) {
+        guard preview?.openedURL != url else { return }
+        closePreview()
+        let webContents = runtime(for: engine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
+        let preview = PagePreview(webContents: webContents, openedURL: url)
+        // A page the preview opens, as for a link to a new window, becomes a selected tab in the current space and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
+        preview.openNewTab = { [weak self, weak preview] popup in
+            guard let self else { return }
+            self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
+            _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
+            DispatchQueue.main.async { [weak self] in
+                if let self, let preview, self.preview === preview { self.closePreview() }
+            }
+        }
+        // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
+        let previewEngine = webContents.engineKind
+        preview.requestPermission = { [weak self] request, completion in
+            completion(false)
+            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: previewEngine) }
+        }
+        preview.didClose = { [weak self] in self?.closePreview() }
+        self.preview = preview
+    }
+
+    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the same engine with its page focused, and closes the panel.
+    func openPreviewInTab() {
+        guard let preview else { return }
+        closePreview()
+        openTab(url: preview.url, engine: preview.webContents.engineKind)
+        focusPage()
+    }
+
+    /// Closes the panel and its page. Keyboard focus returns to the selected tab's page when it was in the panel.
+    func closePreview() {
+        guard let preview else { return }
+        self.preview = nil
+        let view = preview.webContents.view
+        let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
+        // The page stops reporting to the panel before it closes.
+        preview.webContents.uiDelegate = nil
+        retire(preview.webContents)
+        if hadFocus { focusPage() }
+    }
+
     // MARK: Tabs
 
     public var selectedTab: Tab? {
@@ -524,6 +579,11 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
         }
+        // A web link the user clicks with Shift opens in the preview panel, in the page's engine.
+        tab.previewLink = { [weak self, weak tab] url in
+            guard let self, let tab else { return }
+            self.showPreview(of: url, engine: tab.engineKind)
+        }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
@@ -603,8 +663,9 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// An internal page is what the user sees, so it closes instead of the tab under it.
+    /// The preview panel or an internal page is what the user sees, so it closes instead of the tab under it.
     public func closeSelectedTab() {
+        if preview != nil { return closePreview() }
         if internalPage != nil { return closeInternalPage() }
         selectedTab.map(requestCloseTab)
     }

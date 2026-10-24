@@ -146,6 +146,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
+/// Asks whether a link the user clicked with Shift, which Chromium opens in a new window, may open. Return NO to stop it; with YES it opens as an Alloy style browser opens it: in this browser or, for a link to a new browsing context, as a popup.
+- (BOOL)cefBrowserShouldOpenNewWindowWithURL:(NSString *)url;
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
 - (BOOL)cefBrowserShouldDownloadURL:(NSString *)url hasDocument:(BOOL)hasDocument;

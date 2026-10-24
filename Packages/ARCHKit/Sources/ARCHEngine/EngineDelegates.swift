@@ -5,6 +5,7 @@ public enum EngineNavigationDisposition: String, Codable, Sendable {
     case currentTab
     case newForegroundTab
     case newBackgroundTab
+    /// Where browsers open a link the user clicked with Shift. Both engines report such a link to the navigation delegate with this disposition.
     case newWindow
     case newPopup
 }
@@ -83,6 +84,7 @@ public struct EngineContextMenuElement: Sendable {
     }
 }
 
+/// Decides whether a navigation goes ahead. The WebKit engine asks about every navigation; the Chromium engine asks only about links the user clicked with Shift (`newWindow`).
 public protocol EngineWebContentsNavigationDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy
 }

@@ -49,11 +49,19 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             decisionHandler(allowed)
             return
         }
-        let disposition: EngineNavigationDisposition = navigationAction.targetFrame == nil ? .newForegroundTab : .currentTab
-        let action = EngineNavigationAction(url: url, disposition: disposition,
+        let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
                                             isUserInitiated: navigationAction.navigationType == .linkActivated,
                                             referrer: (navigationAction.value(forKey: "sourceFrame") as? WKFrameInfo)?.request.url)
         decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? allowed : .cancel)
+    }
+
+    /// A link clicked with Shift and without Command asks for a new window, as Chromium reads the click, so both engines report it alike. A link marked for download is not one. Other navigations open in place or, without a target frame, in a new tab.
+    private static func disposition(of navigationAction: WKNavigationAction) -> EngineNavigationDisposition {
+        let modifiers = navigationAction.modifierFlags
+        if navigationAction.navigationType == .linkActivated, !navigationAction.shouldPerformDownload, modifiers.contains(.shift), !modifiers.contains(.command) {
+            return .newWindow
+        }
+        return navigationAction.targetFrame == nil ? .newForegroundTab : .currentTab
     }
 
     /// Downloads responses WebKit cannot render or that are served as attachments.

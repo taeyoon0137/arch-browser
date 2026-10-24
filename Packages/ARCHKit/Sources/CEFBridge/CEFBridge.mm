@@ -1018,6 +1018,7 @@ private:
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
+- (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
@@ -1217,6 +1218,12 @@ public:
         return cancel;
     }
 
+    // Chromium opens a link the user clicked with Shift in a new window, which an Alloy style browser loads in place instead, so the app decides first. Returning true stops the link.
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &target_url,
+                          CefRequestHandler::WindowOpenDisposition target_disposition, bool user_gesture) override {
+        return owner_ != nil && ![owner_ handleMayOpenURL:ToNSString(target_url) disposition:target_disposition userGesture:user_gesture];
+    }
+
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
                                    const CefString &error_string) override {
         [owner_ handleRenderProcessTerminated];
@@ -1264,7 +1271,8 @@ public:
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
-        if (![owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
+        if ([owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] &&
+            ![owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             [owner_ handlePopup:url];
         }
         return true;
@@ -1607,6 +1615,15 @@ private:
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
     return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url userGesture:userGesture];
+}
+
+// Only a link the user clicked with Shift, which Chromium gives the new window disposition, asks the delegate. Every other link may open.
+- (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
+    if (disposition != CEF_WOD_NEW_WINDOW || !userGesture) {
+        return YES;
+    }
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    return delegate == nil || [delegate cefBrowserShouldOpenNewWindowWithURL:url];
 }
 
 - (void)handlePopup:(NSString *)url {

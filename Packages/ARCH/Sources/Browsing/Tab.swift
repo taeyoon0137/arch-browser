@@ -50,6 +50,8 @@ public final class Tab: ObservableObject, Identifiable {
     var openURLInNewTab: ((URL) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
     var askAboutSelection: ((String) -> Void)?
+    /// The session sets this callback to show a web link the user clicked with Shift in the preview panel instead of opening it.
+    var previewLink: ((URL) -> Void)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
     var didChangeFullscreen: ((Bool) -> Void)?
     /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
@@ -76,6 +78,7 @@ public final class Tab: ObservableObject, Identifiable {
         self.canGoForward = webContents.canGoForward
         self.favicon = webContents.favicon
         webContents.uiDelegate = self
+        webContents.navigationDelegate = self
     }
 
     /// The engine that renders the tab.
@@ -138,8 +141,10 @@ extension Tab: EngineWebContentsUIDelegate {
     /// Swaps in a web contents from another engine. The old one stops reporting to the tab before the session closes it, and the tab keeps its title, address, and icon until the new page reports its own.
     func replaceWebContents(with replacement: any EngineWebContents) {
         webContents.uiDelegate = nil
+        webContents.navigationDelegate = nil
         webContents = replacement
         replacement.uiDelegate = self
+        replacement.navigationDelegate = self
         isLoading = replacement.isLoading
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
@@ -354,6 +359,19 @@ extension Tab: EngineWebContentsUIDelegate {
     private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard let presentAlert else { return completion(.cancel) }
         presentAlert(alert, isPageDialog, completion)
+    }
+}
+
+// MARK: Link previews
+
+extension Tab: EngineWebContentsNavigationDelegate {
+    /// A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
+    public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
+        guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
+              let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
+        let url = action.url
+        DispatchQueue.main.async { previewLink(url) }
+        return .cancel
     }
 }
 
