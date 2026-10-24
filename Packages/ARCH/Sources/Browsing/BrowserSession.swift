@@ -33,6 +33,8 @@ public final class BrowserSession: ObservableObject {
     /// Selecting a tab switches to its space so the sidebar and page match.
     @Published public var selectedTabID: UUID? {
         didSet {
+            // Selecting a tab, even the one under the page, leaves an internal page.
+            internalPage = nil
             selectedTab?.lastActivatedAt = Date()
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
             // Switching tabs ends the search because it belongs to one page.
@@ -46,6 +48,8 @@ public final class BrowserSession: ObservableObject {
         }
     }
     @Published public var isSidebarVisible = true
+    /// The internal page covering the page area, opened by its address from the command palette.
+    @Published public private(set) var internalPage: InternalPage?
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Counts palette openings and mode changes so each gets a fresh view.
@@ -586,11 +590,17 @@ public final class BrowserSession: ObservableObject {
             commandPaletteMode = nil
             focusPage()
         }
+        if let page = InternalPage(address: input) { return internalPage = page }
         guard let mode = commandPaletteMode, let url = Self.destination(forInput: input) else { return }
+        internalPage = nil
         switch mode {
         case .editCurrent where selectedTab != nil: navigate(to: input)
         case .editCurrent, .newTab: openTab(url: url)
         }
+    }
+
+    public func closeInternalPage() {
+        internalPage = nil
     }
 
     /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a new tab's view is in the window.

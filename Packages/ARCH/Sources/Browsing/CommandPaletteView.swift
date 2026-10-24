@@ -94,7 +94,7 @@ struct CommandPaletteView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             guard !isWarmUp else { return }
-            if mode == .editCurrent { text = session.selectedTab?.url?.absoluteString ?? "" }
+            if mode == .editCurrent { text = session.internalPage?.address ?? session.selectedTab?.url?.absoluteString ?? "" }
             // The arrival animation waits until the hidden first frame is on screen, so a slow first build cannot use up the animation time.
             DispatchQueue.main.async {
                 withAnimation(.paletteIn(from: session.commandPaletteOrigin)) {

@@ -117,6 +117,7 @@ arch-browser
 │       ├── ARCHEngine/             # Engine protocols, registry, and selection
 │       ├── ARCHEngineChromium/     # Chromium adapter using CEF
 │       ├── ARCHEngineWebKit/       # WebKit adapter
+│       ├── ARCHPrivateAPI/         # Private API registry and flags
 │       └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
 ├── docs/                           # Design documents
 ├── resources/                      # README source, hero images, and app icon

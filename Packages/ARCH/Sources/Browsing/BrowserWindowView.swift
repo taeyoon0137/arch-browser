@@ -55,6 +55,12 @@ public struct BrowserWindowView: View {
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
                     .overlay { if let tab = session.selectedTab { PageCrashNoticeView(tab: tab) } }
+                    .overlay {
+                        if let page = session.internalPage {
+                            InternalPageView(session: session, page: page)
+                                .clipShape(PageFrameShape())
+                        }
+                    }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
                     // The sidebar's own margin is part of the gap beside it.
                     .padding(EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
@@ -707,11 +713,13 @@ struct AddressPillView: View {
     private var url: URL? { tab?.url }
 
     private var host: String {
+        if let page = session.internalPage { return page.address }
         guard let host = url?.host else { return "Search or enter address" }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     private var symbol: String {
+        if session.internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
         return url.scheme == "https" ? "lock.fill" : "globe"
     }

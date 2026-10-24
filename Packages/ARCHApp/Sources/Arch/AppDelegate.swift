@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import ARCHEngineChromium
 import ARCHEngineWebKit
+import ARCHPrivateAPI
 import Browsing
 import History
 import Preferences
@@ -40,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = AppearanceSetting.current.appearance
         NSApp.mainMenu = makeMainMenu()
         installUndoCloseShortcut()
+        // Engines register their private APIs when they start; the checks run without delaying launch.
+        PrivateAPIFlags.shared.checkInBackground()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)

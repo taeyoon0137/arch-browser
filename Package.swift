@@ -31,6 +31,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "ARCHEngine", targets: ["ARCHEngine"]),
+        .library(name: "ARCHPrivateAPI", targets: ["ARCHPrivateAPI"]),
         .library(name: "ARCHEngineWebKit", targets: ["ARCHEngineWebKit"]),
         .library(name: "ARCHEngineChromium", targets: ["ARCHEngineChromium"]),
         .library(name: "Browsing", targets: ["Browsing"]),
@@ -41,6 +42,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine"),
+        .target(name: "ARCHPrivateAPI", path: "Packages/ARCHKit/Sources/ARCHPrivateAPI"),
         .target(name: "ARCHEngineWebKit", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Sources/ARCHEngineWebKit"),
         .target(
             name: "CEFBridge",
@@ -56,9 +58,9 @@ let package = Package(
         ),
         .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .target(name: "Browsing", dependencies: ["ARCHEngine", "History"], path: "Packages/ARCH/Sources/Browsing"),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "Preferences", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Preferences"),
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
     ],
     cxxLanguageStandard: .cxx20
