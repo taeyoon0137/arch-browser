@@ -20,16 +20,13 @@ final class PluginStorageFile: PluginStorage {
         var size: Int
     }
 
-    /// A missing or unreadable file counts as empty, and the first change replaces it.
     init(fileURL: URL) {
         self.fileURL = fileURL
-        if let data = try? Data(contentsOf: fileURL), let values = try? JSONDecoder().decode([String: PluginValue].self, from: data) {
-            for (key, value) in values {
-                // Values read from JSON always encode again.
-                let entry = Entry(value: value, size: (try? Self.size(of: value, forKey: key)) ?? 0)
-                entries[key] = entry
-                size += entry.size
-            }
+        for (key, value) in Self.values(at: fileURL) {
+            // Values read from the file always encode again.
+            let entry = Entry(value: value, size: (try? Self.size(of: value, forKey: key)) ?? 0)
+            entries[key] = entry
+            size += entry.size
         }
         // A change made just before quitting still reaches the file.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
@@ -41,7 +38,7 @@ final class PluginStorageFile: PluginStorage {
         entries[key]?.value
     }
 
-    /// Writes that do not grow the storage always succeed.
+    /// Only a write that grows the storage can exceed the quota.
     func setValue(_ value: PluginValue?, forKey key: String) throws {
         let oldSize = entries[key]?.size ?? 0
         let newSize = try value.map { try Self.size(of: $0, forKey: key) } ?? 0
@@ -60,6 +57,7 @@ final class PluginStorageFile: PluginStorage {
         guard let pendingSave else { return }
         pendingSave.cancel()
         self.pendingSave = nil
+        // Every entry encodes, since `size(of:forKey:)` checked each value where the file holds it.
         guard let data = try? Self.encoder.encode(entries.mapValues(\.value)) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: fileURL, options: .atomic)
@@ -75,7 +73,16 @@ final class PluginStorageFile: PluginStorage {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// The values in the file. A missing file has none. A file that does not decode has none either and moves to `storage.unreadable.json` beside it, replacing an older one, so the first change does not overwrite it.
+    private static func values(at fileURL: URL) -> [String: PluginValue] {
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
+        if let values = try? JSONDecoder().decode([String: PluginValue].self, from: data) { return values }
+        _ = try? FileManager.default.replaceItemAt(fileURL.deletingLastPathComponent().appendingPathComponent("storage.unreadable.json"), withItemAt: fileURL)
+        return [:]
+    }
+
+    /// Encodes the value inside an array, one level down as in the file's object, so that it throws for a value nested too deep for the file, and leaves out the brackets.
     private static func size(of value: PluginValue, forKey key: String) throws -> Int {
-        try key.utf8.count + encoder.encode(value).count
+        try key.utf8.count + encoder.encode([value]).count - 2
     }
 }

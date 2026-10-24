@@ -17,6 +17,11 @@ import Testing
             #expect(PluginID(rawValue: id) == nil, "\(id)")
         }
     }
+
+    @Test func ignoresCase() {
+        #expect(PluginID(rawValue: "Org.Example.Notes")?.rawValue == "org.example.notes")
+        #expect(PluginID(rawValue: "Org.Example.Notes") == PluginID(rawValue: "org.example.notes"))
+    }
 }
 
 @Suite struct MatchPatternTests {
@@ -173,14 +178,28 @@ import Testing
         #expect(storage.allKeys().isEmpty)
     }
 
-    @Test func startsEmptyFromAnUnreadableFile() throws {
-        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
-        try Data("not json".utf8).write(to: fileURL)
+    @Test func refusesValuesNestedDeeperThanTheFileHolds() throws {
         let storage = PluginStorageFile(fileURL: fileURL)
+        #expect(throws: EncodingError.self) { try storage.setValue(nested(511), forKey: "deep") }
         #expect(storage.allKeys().isEmpty)
-        try storage.setValue(.number(1), forKey: "a")
+        try storage.setValue(nested(510), forKey: "deep")
         storage.saveChanges()
-        #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "a") == .number(1))
+        #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "deep") == nested(510))
+    }
+
+    @Test func movesAnUnreadableFileAside() throws {
+        let copyURL = folder.url.appendingPathComponent("storage.unreadable.json")
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        // The second file's copy replaces the first one's.
+        for text in [#"{"a": 1e400}"#, "not json"] {
+            try Data(text.utf8).write(to: fileURL)
+            let storage = PluginStorageFile(fileURL: fileURL)
+            #expect(storage.allKeys().isEmpty)
+            try storage.setValue(.number(1), forKey: "a")
+            storage.saveChanges()
+            #expect(try Data(contentsOf: copyURL) == Data(text.utf8))
+            #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "a") == .number(1))
+        }
     }
 }
 
@@ -304,6 +323,11 @@ import Testing
 private func installed(_ id: String, name: String, commands: [PluginCommand], isEnabled: Bool = true) -> InstalledPlugin {
     let manifest = PluginManifest(id: PluginID(rawValue: id)!, name: name, version: "1", summary: "", contributions: PluginContributions(commands: commands))
     return InstalledPlugin(manifest: manifest, grant: PluginGrant(requestedBy: manifest), isEnabled: isEnabled)
+}
+
+/// `depth` arrays, each holding the next, around `null`.
+private func nested(_ depth: Int) -> PluginValue {
+    (0..<depth).reduce(PluginValue.null) { value, _ in .array([value]) }
 }
 
 /// A folder of its own for one test's files, removed when the test ends.

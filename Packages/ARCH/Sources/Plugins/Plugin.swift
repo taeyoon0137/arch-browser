@@ -120,7 +120,7 @@ extension PluginValue: Codable {
 @MainActor
 public protocol PluginStorage: AnyObject {
     func value(forKey key: String) -> PluginValue?
-    /// nil removes the key. Throws `PluginError.quotaExceeded` when the storage would grow past its limit, and an encoding error for a number JSON cannot hold, such as infinity; the storage then keeps its previous value.
+    /// nil removes the key. Throws `PluginError.quotaExceeded` when the storage would grow past its limit, and an encoding error for a value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep; the storage then keeps its previous value.
     func setValue(_ value: PluginValue?, forKey key: String) throws
     /// In ascending order.
     func allKeys() -> [String]

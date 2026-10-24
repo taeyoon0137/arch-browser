@@ -4,14 +4,14 @@ import Foundation
 /// Identifies a Persona, which owns its installed plugins. Until each Persona has plugins of its own, the session gives every plugin the default Persona.
 public typealias PersonaID = UUID
 
-/// A reverse-DNS identifier, such as `local.arch.browser.page-address`.
+/// A reverse-DNS identifier, such as `local.arch.browser.page-address`. It is lowercase, so identifiers that differ only in case name one plugin, as they name one folder on a volume that ignores case.
 public struct PluginID: RawRepresentable, Hashable, Sendable {
     public let rawValue: String
 
-    /// Fails for anything but dot-separated labels of letters, digits, and `-`, fewer than two labels, or more than 128 characters. Empty labels fail, so an identifier is never `.` or `..` when it names a folder.
+    /// Fails for anything but dot-separated labels of letters, digits, and `-`, fewer than two labels, or more than 128 characters. Empty labels fail, so an identifier is never `.` or `..` when it names a folder. Lowercases the letters.
     public init?(rawValue: String) {
         guard rawValue.count <= 128, rawValue.isDomainName, rawValue.contains(".") else { return nil }
-        self.rawValue = rawValue
+        self.rawValue = rawValue.lowercased()
     }
 }
 

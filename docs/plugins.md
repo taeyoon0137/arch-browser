@@ -65,7 +65,7 @@ A script plugin's `plugin.json`:
 
 | Field | Meaning |
 |---|---|
-| `id` | Reverse-DNS identifier, at most 128 characters of letters, digits, `-`, and `.`. A later install with the same `id` in the same Persona is an update |
+| `id` | Reverse-DNS identifier, at most 128 characters of letters, digits, `-`, and `.`. Arch lowercases it, so identifiers that differ only in case name one plugin and one folder. A later install with the same `id` in the same Persona is an update |
 | `apiVersion` | The plugin API version the package targets. The app supports versions up to `PluginManifest.apiVersion` |
 | `permissions` | Capabilities from the permission table below |
 | `sites` | Match patterns (see below) for the pages the plugin's page scripts and page calls may reach |
@@ -179,11 +179,12 @@ A page script is a JavaScript or CSS file from the plugin's package that runs in
   plugins.json                  Installed plugins: manifest, origin, grant, enabled state, install date
   <plugin id>/package/          The installed package (script and web extension plugins)
   <plugin id>/storage.json      Key-value storage, written atomically after changes settle
+  <plugin id>/storage.unreadable.json  The last storage.json that did not decode
 ```
 
 - `<persona id>` is the Persona's UUID as `UUID.uuidString` writes it, so the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. The app gives `PluginManager` its Application Support folder, and the manager derives the Persona's folder from it.
-- `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; removals and writes that do not grow it always succeed. Settings values live in the same file under a reserved prefix.
-- Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing or unreadable file counts as empty. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
+- `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; the limit never refuses removals and writes that do not grow it. A value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep, throws an encoding error, so every value the storage accepts reaches the file. Settings values live in the same file under a reserved prefix.
+- Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing file counts as empty. A file that does not decode moves to `storage.unreadable.json`, replacing an older one, and the plugin starts empty, so its first change does not overwrite the old data. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
 - Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`.
 - Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
 - Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
@@ -243,7 +244,7 @@ public typealias PersonaID = UUID
 
 public struct PluginID: RawRepresentable, Hashable, Codable, Sendable {
     public let rawValue: String
-    /// Fails for anything but letters, digits, `-`, and `.`, or more than 128 characters.
+    /// Fails for anything but letters, digits, `-`, and `.`, or more than 128 characters. Lowercases the letters.
     public init?(rawValue: String)
 }
 
