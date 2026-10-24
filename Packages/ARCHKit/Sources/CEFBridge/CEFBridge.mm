@@ -406,6 +406,8 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 @interface ARCHCEFBrowser ()
 - (void)applyAccessibilityState;
+/// Whether CEF still has the browser, from its creation until `OnBeforeClose`.
+@property (nonatomic, readonly) BOOL isOpen;
 @end
 
 @implementation ARCHCEFRuntime
@@ -459,7 +461,25 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
         return;
     }
     gInitialized = false;
+    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashes once Chrome-style developer tools have opened. The closes run CEF's work for at most two seconds.
+    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
+        [browser close];
+    }
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while ([self hasOpenBrowsers] && deadline.timeIntervalSinceNow > 0) {
+        CefDoMessageLoopWork();
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
     CefShutdown();
+}
+
++ (BOOL)hasOpenBrowsers {
+    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
+        if (browser.isOpen) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 + (int)runHelperWithArgc:(int)argc argv:(char **)argv {
@@ -1669,6 +1689,10 @@ private:
     CefRefPtr<CefFrame> frame = _browser->GetMainFrame();
     // A page can declare its own global `history`, but not `window`.
     frame->ExecuteJavaScript(CefString("window.history.go(" + std::to_string(index - current) + ")"), frame->GetURL(), 0);
+}
+
+- (BOOL)isOpen {
+    return _browser != nullptr;
 }
 
 - (void)close {
