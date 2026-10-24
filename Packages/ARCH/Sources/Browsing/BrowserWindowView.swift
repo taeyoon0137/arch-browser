@@ -672,7 +672,7 @@ struct SiteSettingsSection<Content: View>: View {
     }
 }
 
-/// Shows favorites as a grid of site icons. All spaces share the same favorites.
+/// Shows favorites shared by all spaces as a grid of site icons.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)

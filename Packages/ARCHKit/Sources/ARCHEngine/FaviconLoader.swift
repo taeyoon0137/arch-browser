@@ -1,4 +1,4 @@
-// Downloads site icons for the engine adapters and caches them in memory by icon URL. Concurrent requests for the same URL share one download. Failures are not cached. Icons from data URLs are decoded without caching. A full 200-entry cache is cleared before another icon is cached.
+// Downloads site icons for engine adapters and caches them in memory by icon URL. Concurrent requests for the same URL share one download. Failures are not cached. Icons from data URLs are decoded without caching. Clears a full 200-entry cache before caching another icon.
 import AppKit
 import Foundation
 
@@ -6,7 +6,7 @@ public enum FaviconLoader {
     private static var cache: [URL: NSImage] = [:]
     private static var pending: [URL: [(NSImage?) -> Void]] = [:]
 
-    /// Call on the main thread because the cache is not synchronized. Calls `completion` on the main thread with the image or `nil` if downloading or decoding fails. For cached images, `completion` runs synchronously.
+    /// Call on the main thread; the cache is not synchronized. Calls `completion` on the main thread with the image or `nil` if downloading or decoding fails. For cached images, `completion` runs synchronously.
     public static func load(_ url: URL, completion: @escaping (NSImage?) -> Void) {
         if let image = cache[url] {
             completion(image)
@@ -29,7 +29,7 @@ public enum FaviconLoader {
         }.resume()
     }
 
-    /// The conventional icon URL for a page whose document declares no icon.
+    /// The usual icon URL for a page that declares no icon.
     public static func defaultIconURL(for pageURL: URL) -> URL? {
         guard pageURL.scheme?.hasPrefix("http") == true, pageURL.host != nil,
               var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false) else { return nil }

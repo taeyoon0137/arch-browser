@@ -134,7 +134,6 @@ Rules for every tier:
 | ID | Task | Reasoning | Files | Done when |
 |---|---|---|---|---|
 | I.4 | Confirm the default-browser registration. The app registers only `http`; the claim that this also covers `https` is unverified. After choosing Set as Default from the bundle, check the `https` handler with `NSWorkspace.shared.urlForApplication(toOpen:)`. If it is not Arch, also call `setDefaultApplication(at:toOpenURLsWithScheme: "https")` and update the comment. | low | `AppDelegate.swift` | Both schemes resolve to the bundle; the menu item disables |
-| I.6 | Prose pass over the comments added by the first feature batch (commits `3eb7953..c2a4a96`) using Codex as described in Working Rule 9, then a `Docs:` commit after review. | low | Files in that range | Comments read as plain prose; build still passes |
 | I.7 | Remove the `use-mock-keychain` switch once the bundle is signed with a stable personal identity. Blocked until that identity exists on the build Mac. | low | `CEFBridge.mm` | A login cookie survives two launches without a keychain prompt |
 
 ### Phase II: Chromium engine gaps

@@ -161,7 +161,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public var visibility: EngineWebContentsVisibility = .visible
-    /// Chromium scales the page by 1.2 per zoom level, and level 0 is the default size.
+    /// Chromium scales the page by 1.2 per zoom level; level 0 is the default size.
     public var zoomFactor: Double {
         get { browser.map { pow(1.2, $0.zoomLevel) } ?? 1 }
         set { browser?.zoomLevel = log(newValue) / log(1.2) }
@@ -216,14 +216,14 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
             completion(EngineFindResult(activeMatchOrdinal: 0, numberOfMatches: 0))
             return
         }
-        // CEF restarts the search when the text or case sensitivity changes; a repeated request only advances the active match.
+        // CEF restarts the search if the text or case sensitivity changes; otherwise, it advances the active match.
         let findNext = lastFind?.text == text && lastFind?.matchCase == matchCase
         lastFind = (text, matchCase, forward)
         if !findNext {
             lastActiveMatchOrdinal = 0
             didSelectFirstMatch = false
         }
-        // A request that arrives before the previous final result replaces it, because Chromium cancels the superseded search.
+        // A request arriving before the previous final result replaces it because Chromium cancels the previous search.
         findCompletion = completion
         browser?.findText(text, forward: forward, matchCase: matchCase, findNext: findNext)
     }
@@ -308,7 +308,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
         let pageURL = url
         FaviconLoader.load(iconURL) { [weak self] image in
-            // Ignore icons that finish loading after the tab navigates to another page.
+            // Ignore icons loaded after the tab navigates to another page.
             guard let self, let image, self.url == pageURL else { return }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)

@@ -1,9 +1,9 @@
-// `WKDownload` adapter for the `ARCHEngine` download protocols. One list per browser context.
+// Adapts `WKDownload` to the `ARCHEngine` download protocols, with one list per browser context.
 import ARCHEngine
 import Foundation
 import WebKit
 
-/// Every download started from the context's tabs. An item stays listed until `remove()`.
+/// Lists all downloads started from the context's tabs. Items stay listed until `remove()`.
 public final class WebKitDownloads: EngineDownloads {
     public weak var delegate: (any EngineDownloadsDelegate)?
     public private(set) var items: [any EngineDownloadItem] = []
@@ -19,7 +19,7 @@ public final class WebKitDownloads: EngineDownloads {
         self.context = context
     }
 
-    /// Wraps a download WebKit has just started and announces it.
+    /// Wraps and announces a new WebKit download.
     func add(_ download: WKDownload, from webView: WKWebView) {
         let item = WebKitDownloadItem(download: download, webView: webView, owner: self)
         items.append(item)
@@ -31,7 +31,7 @@ public final class WebKitDownloads: EngineDownloads {
         delegate?.downloads(self, didRemove: item)
     }
 
-    /// The destination when no delegate picks one: the preferred folder or `~/Downloads`, with a name that does not collide. WebKit refuses to overwrite.
+    /// When no delegate picks a destination, uses the preferred folder or `~/Downloads` with an unused name. WebKit refuses to overwrite files.
     func defaultDestination(for filename: String) -> URL {
         let directory = context.preferences.downloadFilePath
             ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
@@ -143,7 +143,7 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        // A pause or cancel already recorded its own state before WebKit reports the interruption.
+        // Pausing or cancelling sets the state before WebKit reports the interruption.
         guard state == .inProgress else { return }
         self.resumeData = resumeData
         setState(.failed)

@@ -30,7 +30,7 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
     @Published public var currentSpaceID: UUID
-    /// Selecting a tab also switches to its space so the sidebar and page show the same space.
+    /// Selecting a tab switches to its space so the sidebar and page match.
     @Published public var selectedTabID: UUID? {
         didSet {
             selectedTab?.lastActivatedAt = Date()
@@ -73,7 +73,7 @@ public final class BrowserSession: ObservableObject {
     @Published public var renamingSpaceID: UUID?
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
-    /// The last 100 closed or archived tabs, oldest first. Reopening takes the newest.
+    /// The last 100 closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
 
@@ -284,7 +284,7 @@ public final class BrowserSession: ObservableObject {
         favorites.removeAll { $0.id == favorite.id }
     }
 
-    /// Reuses an open tab for the same site in the current space. Opens a new tab if none matches.
+    /// Reuses an open tab for the same site in the current space, or opens a new tab.
     public func openFavorite(_ favorite: Favorite) {
         if let host = favorite.url.host, let existing = tabs.first(where: { $0.spaceID == currentSpaceID && $0.url?.host == host }) {
             selectedTabID = existing.id
@@ -352,7 +352,7 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
         }
-        // The session republishes changes to the selected tab so views that read the tab through the session refresh.
+        // The session republishes changes to the selected tab so views that read it through the session refresh.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self, weak tab] _ in
             guard let self else { return }
             if tab?.id == self.selectedTabID { self.objectWillChange.send() }
@@ -413,7 +413,7 @@ public final class BrowserSession: ObservableObject {
         selectedTab.map(requestCloseTab)
     }
 
-    /// Keeps pinned tabs and the selected tab; closes the rest of the selected tab's space.
+    /// Closes other tabs in the selected tab's space, keeping pinned tabs.
     public func closeOtherTabs() {
         guard let selected = selectedTab else { return }
         for tab in tabs where tab.spaceID == selected.spaceID && !tab.isPinned && tab.id != selected.id {
@@ -423,7 +423,7 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Restores the newest closed tab into its space, or the current space when that space is gone.
+    /// Reopens the newest closed tab in its original space, or the current space if the original is gone.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
@@ -459,7 +459,7 @@ public final class BrowserSession: ObservableObject {
         selectedTabID = ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count].id
     }
 
-    /// Swaps the selected tab with its neighbor in its own list, pinned or open, within its space.
+    /// Swaps the selected tab with its neighbor in the same space and pinned or open list.
     public func moveSelectedTab(up: Bool) {
         guard let selected = selectedTab, let index = tabs.firstIndex(where: { $0.id == selected.id }) else { return }
         let siblings = tabs(in: selected.spaceID, pinned: selected.isPinned)
@@ -483,7 +483,7 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Closes unpinned tabs not activated within `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
+    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
         selectedTab?.lastActivatedAt = Date()
@@ -500,7 +500,7 @@ public final class BrowserSession: ObservableObject {
         return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }
 
-    /// The tab stores the pinned flag. The session republishes the change for views that group tabs by this flag.
+    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it.
     public func togglePinned(_ tab: Tab) {
         objectWillChange.send()
         tab.isPinned.toggle()
@@ -517,7 +517,7 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Returns a URL only for a full URL with a scheme and host, or a dotted host without spaces. Adds `https://` to a dotted host.
+    /// Accepts only a full URL with a scheme and host, or a dotted host without spaces. Adds `https://` to a dotted host.
     public static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let parsed = URL(string: text), parsed.scheme != nil, parsed.host != nil { return parsed }
@@ -525,7 +525,7 @@ public final class BrowserSession: ObservableObject {
         return nil
     }
 
-    /// Returns the input URL or, if the text is not a URL, a web search URL. Returns `nil` for empty text.
+    /// Returns the input URL, a web search URL for other text, or `nil` for empty text.
     static func destination(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
@@ -559,7 +559,7 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a newly opened tab's view is in the window.
+    /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a new tab's view is in the window.
     private func focusPage() {
         DispatchQueue.main.async { [weak self] in
             guard let view = self?.selectedTab?.webContents.view, let window = view.window else { return }
@@ -763,7 +763,7 @@ public final class BrowserSession: ObservableObject {
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
         guard let snapshot else { return }
-        // Stale unpinned records are archived here, before any web contents exists for them.
+        // Archive stale unpinned records before they have web contents.
         let cutoff = Self.archiveCutoff(now: Date())
         var selected: Tab?
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {

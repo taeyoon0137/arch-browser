@@ -108,7 +108,7 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)cefBrowserDidChangeURL:(NSString *)url;
 - (void)cefBrowserDidChangeLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
-/// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks the last report for that request.
+/// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks its last report.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
@@ -176,7 +176,7 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 @property (nonatomic, readonly) NSInteger currentNavigationEntryIndex;
 @property (nonatomic, readonly, copy) NSString *currentURL;
 @property (nonatomic, readonly, copy) NSString *title;
-/// Chromium's zoom level. 0 is the default size; each level scales the page by a factor of 1.2.
+/// Chromium's zoom level: 0 is the default size; each level scales the page by 1.2.
 @property (nonatomic) double zoomLevel;
 /// Whether the page may start downloads. Defaults to `YES`.
 @property (nonatomic) BOOL allowsDownloads;
@@ -188,13 +188,13 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)goForward;
 - (void)executeJavaScript:(NSString *)script;
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
-/// Ends the current search and keeps the active match selected.
+/// Ends the search and leaves the active match selected.
 - (void)stopFinding;
-/// Opens the system print dialog for the current page.
+/// Opens the current page's system print dialog.
 - (void)print;
-/// Renders the current page to PDF data. Passes `nil` when printing fails or no browser exists.
+/// Renders the current page as PDF data. Passes `nil` if printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
-/// Captures the page as PNG data through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
+/// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
 - (void)close;

@@ -55,7 +55,7 @@ public final class WebKitApplication: EngineApplication {
         self.delegate?.application(self, didCreateBrowser: browser)
         return browser
     }
-    /// Counts web content process terminations across every tab and reports the running total.
+    /// Counts web content process terminations across all tabs and reports the total.
     func rendererDidCrash() {
         rendererCrashCount += 1
         delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
@@ -286,7 +286,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         webView.takeSnapshot(with: nil) { image, _ in completion(image) }
     }
-    /// Measures the document, then snapshots that whole area from its top-left corner instead of the current scroll position.
+    /// Measures the document, then snapshots it in full from its top-left corner instead of the current scroll position.
     public func captureFullPage(completion: @escaping (NSImage?) -> Void) {
         let script = "[document.documentElement.scrollWidth, document.documentElement.scrollHeight, window.scrollX, window.scrollY]"
         webView.evaluateJavaScript(script) { [weak self] value, _ in
@@ -299,7 +299,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {
         webView.createPDF { completion($0) }
     }
-    /// Runs the system print panel. The operation's view starts without a size, so it takes the page's bounds first.
+    /// Runs the system print panel. The operation's view has no initial size, so it takes the page's bounds first.
     public func print() {
         let operation = webView.printOperation(with: NSPrintInfo.shared)
         operation.view?.frame = webView.bounds
@@ -319,7 +319,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var devTools: (any EngineDevTools)? { nil }
     public var thumbnails: (any EngineThumbnails)? { nil }
 
-    /// Clears the previous icon first. Reads the page's declared icon, falls back to `/favicon.ico`, and publishes the result through the UI delegate.
+    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate.
     func refreshFavicon() {
         guard let pageURL = webView.url else { return }
         if favicon != nil {
@@ -332,7 +332,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             let declared = (value as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
             guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
             FaviconLoader.load(iconURL) { [weak self] image in
-                // Ignore icons that arrive after the tab navigates to another page.
+                // Ignore icons received after the tab navigates to another page.
                 guard let self, let image, self.webView.url == pageURL else { return }
                 self.favicon = image
                 self.uiDelegate?.webContentsDidChangeFavicon(self)
@@ -427,7 +427,7 @@ final class WebKitBackForwardList: EngineBackForwardList {
     var currentItem: (any EngineBackForwardListItem)? { webView.backForwardList.currentItem.map(WebKitBackForwardListItem.init) }
 }
 
-/// A `WKBackForwardListItem` behind the engine item protocol. `go(to:)` unwraps it.
+/// Wraps a `WKBackForwardListItem` in the engine item protocol. `go(to:)` unwraps it.
 final class WebKitBackForwardListItem: EngineBackForwardListItem {
     let item: WKBackForwardListItem
 

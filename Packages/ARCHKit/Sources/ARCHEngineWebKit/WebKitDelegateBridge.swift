@@ -43,7 +43,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             owner.uiDelegate?.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
             return
         }
-        // A link marked for download starts one instead of a navigation once the page policy allows it.
+        // Downloads a link marked for download instead of navigating, if the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         guard let url = navigationAction.request.url, let delegate = owner.navigationDelegate else {
             decisionHandler(allowed)
@@ -56,7 +56,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? allowed : .cancel)
     }
 
-    /// A response WebKit cannot render, or one served as an attachment, becomes a download.
+    /// Downloads responses WebKit cannot render or that are served as attachments.
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
         guard navigationResponse.canShowMIMEType, !disposition.lowercased().hasPrefix("attachment") else {
@@ -118,7 +118,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    /// The tab goes blank until a reload relaunches the process. The application tallies the crash.
+    /// The tab stays blank until a reload restarts the process. The application counts the crash.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         owner.uiDelegate?.webContentsProcessDidTerminate(owner)
         owner.context.application?.rendererDidCrash()

@@ -879,7 +879,7 @@ private:
     IMPLEMENT_REFCOUNTING(BridgeClient);
 };
 
-// Reads the finished PDF into memory and removes the temporary file CEF wrote.
+// Reads the finished PDF into memory, then removes CEF's temporary file.
 class BridgePdfCallback : public CefPdfPrintCallback {
 public:
     explicit BridgePdfCallback(void (^completion)(NSData *_Nullable)) : completion_(completion) {}
@@ -896,7 +896,7 @@ private:
     IMPLEMENT_REFCOUNTING(BridgePdfCallback);
 };
 
-// Resolves screenshot requests by the message id that `ExecuteDevToolsMethod` assigned.
+// Resolves screenshot requests using the message ID from `ExecuteDevToolsMethod`.
 class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
 public:
     void Expect(int messageID, void (^completion)(NSData *_Nullable)) { pending_[messageID] = completion; }

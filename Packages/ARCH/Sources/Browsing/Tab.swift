@@ -11,7 +11,7 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var webContents: any EngineWebContents
     @Published public var spaceID: UUID
     @Published public var isPinned: Bool
-    /// The session updates this when the tab is selected. Archiving closes unpinned tabs whose date is too old.
+    /// The session updates this on tab selection. Archiving closes unpinned tabs whose dates are too old.
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
     @Published public private(set) var url: URL?
@@ -25,7 +25,7 @@ public final class Tab: ObservableObject, Identifiable {
     public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
-    /// The session sets this callback to remove the tab when its page closes itself with `window.close()`.
+    /// Removes the tab when its page closes itself with `window.close()`. Set by the session.
     var didClose: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.
     var didFinishLoad: (() -> Void)?

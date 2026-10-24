@@ -1,4 +1,4 @@
-// Spaces group tabs in the sidebar. Favorites are site shortcuts shared by every space. `symbol` is an SF Symbol name.
+// Spaces group sidebar tabs. Favorites are site shortcuts shared by all spaces. `symbol` is an SF Symbol name.
 import Foundation
 
 public struct Space: Identifiable, Codable, Hashable {

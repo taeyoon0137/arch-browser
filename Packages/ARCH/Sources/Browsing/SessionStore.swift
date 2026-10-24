@@ -1,4 +1,4 @@
-// Saves and restores sidebar state (spaces, favorites, tabs, closed tabs, and selection) in one JSON file, `session.json`. The session supplies the directory: the app's Application Support folder.
+// Saves and restores sidebar state (spaces, favorites, tabs, closed tabs, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
 import ARCHEngine
 import Foundation
 
@@ -24,7 +24,7 @@ struct SessionSnapshot: Codable {
     var favorites: [Favorite]
     var tabs: [TabRecord]
     var selectedTabIndex: Int?
-    /// The most recently closed tabs, oldest first. Optional so files written before this field decode.
+    /// Recently closed tabs, oldest first. Optional so older files without this field still decode.
     var closedTabs: [TabRecord]?
 }
 
@@ -41,7 +41,7 @@ final class SessionStore {
         return try? JSONDecoder().decode(SessionSnapshot.self, from: data)
     }
 
-    /// Combines rapid changes, such as a burst of tab updates, into one file write. Runs the `snapshot` closure when writing, not when scheduling the save.
+    /// Combines rapid changes, such as tab updates, into one file write. Runs the `snapshot` closure when writing, not when scheduling.
     func scheduleSave(_ snapshot: @escaping () -> SessionSnapshot) {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [fileURL] in
