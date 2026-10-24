@@ -8,8 +8,11 @@ import History
 import Preferences
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     private var session: BrowserSession!
+    /// Lists the selected tab's recent pages each time it opens.
+    private var historyMenu: NSMenu?
+    private static let recentPageTag = 9_100
     private var window: NSWindow!
     /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
@@ -180,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
         historyMenu.addItem(.separator())
         historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
+        historyMenu.delegate = self
+        self.historyMenu = historyMenu
         mainMenu.addItem(submenu(historyMenu, title: "History"))
         return mainMenu
     }
@@ -210,6 +215,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func goBack() { session.goBack() }
     @objc private func goForward() { session.goForward() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
+
+    /// Puts the selected tab's last ten earlier pages, most recent first, between Forward and Clear History.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === historyMenu else { return }
+        for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
+        let pages = session?.recentBackItems(limit: 10) ?? []
+        guard !pages.isEmpty, let tabID = session.selectedTabID, let separator = menu.items.firstIndex(where: \.isSeparatorItem) else { return }
+        var index = separator + 1
+        for page in pages {
+            let item = NSMenuItem(title: page.title.isEmpty ? page.url.host ?? page.url.absoluteString : page.title, action: #selector(goToRecentPage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = RecentPage(tabID: tabID, item: page)
+            item.toolTip = page.url.absoluteString
+            item.tag = Self.recentPageTag
+            menu.insertItem(item, at: index)
+            index += 1
+        }
+        let end = NSMenuItem.separator()
+        end.tag = Self.recentPageTag
+        menu.insertItem(end, at: index)
+    }
+
+    @objc private func goToRecentPage(_ sender: NSMenuItem) {
+        guard let page = sender.representedObject as? RecentPage else { return }
+        session.go(to: page.item, inTab: page.tabID)
+    }
+
+    /// A History menu page and the tab it was read from.
+    private final class RecentPage {
+        let tabID: UUID
+        let item: any EngineBackForwardListItem
+
+        init(tabID: UUID, item: any EngineBackForwardListItem) {
+            self.tabID = tabID
+            self.item = item
+        }
+    }
     @objc private func togglePinned() { session.selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.selectedTab.map(session.addFavorite) }
     @objc private func newSpace() { session.addSpace() }

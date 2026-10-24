@@ -275,6 +275,12 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     fileprivate func stop() { browser?.stopLoading() }
     fileprivate func goBack() { browser?.goBack() }
     fileprivate func goForward() { browser?.goForward() }
+    /// The back-forward list, oldest first, and the current page's index in it, or -1 without pages.
+    fileprivate var navigationEntries: (entries: [ARCHCEFNavigationEntry], current: Int) {
+        guard let browser else { return ([], -1) }
+        return (browser.navigationEntries, browser.currentNavigationEntryIndex)
+    }
+    fileprivate func goToNavigationEntry(at index: Int, url: String) { browser?.goToNavigationEntry(at: index, url: url) }
 }
 
 extension ChromiumWebContents: ARCHCEFBrowserDelegate {
@@ -485,14 +491,65 @@ public final class ChromiumNavigationController: EngineNavigationController {
         self.webContents = webContents
     }
 
-    public var backForwardList: any EngineBackForwardList { fatalError("not implemented") }
+    public lazy var backForwardList: any EngineBackForwardList = ChromiumBackForwardList(webContents: webContents)
     public func load(_ request: URLRequest) { webContents.load(request) }
     public func reload() { webContents.reload() }
     public func reloadWithoutCache() { webContents.reloadWithoutCache() }
     public func stop() { webContents.stop() }
     public func goBack() { webContents.goBack() }
     public func goForward() { webContents.goForward() }
-    public func go(to item: any EngineBackForwardListItem) { fatalError("not implemented") }
+    public func go(to item: any EngineBackForwardListItem) {
+        guard let item = item as? ChromiumBackForwardListItem, item.owner === webContents else { return }
+        webContents.goToNavigationEntry(at: item.index, url: item.entryURL)
+    }
+}
+
+/// One page in a Chromium tab's back-forward list. Its index places it in the list it was read from, and its URL tells whether the entry is still there.
+final class ChromiumBackForwardListItem: EngineBackForwardListItem {
+    weak var owner: ChromiumWebContents?
+    let index: Int
+    let entryURL: String
+    let url: URL
+    let title: String
+
+    init(_ entry: ARCHCEFNavigationEntry, owner: ChromiumWebContents) {
+        self.owner = owner
+        index = entry.index
+        entryURL = entry.url
+        url = URL(engineString: entry.url) ?? URL(string: "about:blank")!
+        title = entry.title
+    }
+}
+
+/// Reads the browser's list from CEF on every access, as the WebKit list reads `WKBackForwardList`.
+final class ChromiumBackForwardList: EngineBackForwardList {
+    private unowned let webContents: ChromiumWebContents
+
+    init(webContents: ChromiumWebContents) {
+        self.webContents = webContents
+    }
+
+    private var snapshot: (items: [ChromiumBackForwardListItem], current: Int) {
+        let (entries, current) = webContents.navigationEntries
+        return (entries.map { ChromiumBackForwardListItem($0, owner: webContents) }, current)
+    }
+
+    var backList: [any EngineBackForwardListItem] {
+        let (items, current) = snapshot
+        guard current > 0, current <= items.count else { return [] }
+        return Array(items[..<current])
+    }
+
+    var forwardList: [any EngineBackForwardListItem] {
+        let (items, current) = snapshot
+        guard current >= 0, current + 1 < items.count else { return [] }
+        return Array(items[(current + 1)...])
+    }
+
+    var currentItem: (any EngineBackForwardListItem)? {
+        let (items, current) = snapshot
+        return items.indices.contains(current) ? items[current] : nil
+    }
 }
 
 /// `URLAuthenticationChallenge` needs a sender. The Chromium adapter answers through the CEF callback instead, so these calls do nothing.

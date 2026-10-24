@@ -398,10 +398,12 @@ public final class WebKitNavigationController: EngineNavigationController {
         contents?.dismissDialogBeforeNavigation()
         webView.goForward()
     }
+    // WebKit loads any item it is given, even one from another web view's list.
     public func go(to item: any EngineBackForwardListItem) {
-        guard let item = item as? WebKitBackForwardListItem else { return }
+        guard let item = (item as? WebKitBackForwardListItem)?.item,
+              webView.backForwardList.backList.contains(item) || webView.backForwardList.forwardList.contains(item) else { return }
         contents?.dismissDialogBeforeNavigation()
-        webView.go(to: item.item)
+        webView.go(to: item)
     }
 }
 

@@ -719,6 +719,16 @@ public final class BrowserSession: ObservableObject {
 
     public func goBack() { selectedTab?.webContents.navigationController.goBack() }
     public func goForward() { selectedTab?.webContents.navigationController.goForward() }
+    /// The selected tab's earlier pages, most recent first, for the History menu.
+    public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] {
+        guard let list = selectedTab?.webContents.navigationController.backForwardList else { return [] }
+        return Array(list.backList.reversed().prefix(limit))
+    }
+    /// Pages keep running while the menu is open, so the item goes only to the tab it was read from, and only while that tab is still selected.
+    public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) {
+        guard let tab = selectedTab, tab.id == tabID else { return }
+        tab.webContents.navigationController.go(to: item)
+    }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
     public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }

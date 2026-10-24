@@ -78,6 +78,14 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandSelectAll = 1 << 3,
 };
 
+/// One page in a browser's back-forward list.
+@interface ARCHCEFNavigationEntry : NSObject
+/// The page's place in the list, from 0 for the oldest.
+@property (nonatomic, readonly) NSInteger index;
+@property (nonatomic, readonly, copy) NSString *url;
+@property (nonatomic, readonly, copy) NSString *title;
+@end
+
 /// What a context menu opened on, copied from CEF, whose own object lasts only for its callback.
 @interface ARCHCEFContextMenuParams : NSObject
 /// Where the menu opens, in the coordinates of the browser's parent view.
@@ -162,6 +170,10 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 @property (nonatomic, readonly) BOOL isLoading;
 @property (nonatomic, readonly) BOOL canGoBack;
 @property (nonatomic, readonly) BOOL canGoForward;
+/// The back-forward list, oldest first, read from CEF on each access.
+@property (nonatomic, readonly) NSArray<ARCHCEFNavigationEntry *> *navigationEntries;
+/// The current page's index in `navigationEntries`, or -1 without pages.
+@property (nonatomic, readonly) NSInteger currentNavigationEntryIndex;
 @property (nonatomic, readonly, copy) NSString *currentURL;
 @property (nonatomic, readonly, copy) NSString *title;
 /// Chromium's zoom level. 0 is the default size; each level scales the page by a factor of 1.2.
@@ -188,6 +200,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)close;
 /// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
 - (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;
+/// Loads the page at `index` in the back-forward list. Nothing happens for the current page, an index outside the list, or an entry whose URL is no longer `url`.
+- (void)goToNavigationEntryAtIndex:(NSInteger)index url:(NSString *)url NS_SWIFT_NAME(goToNavigationEntry(at:url:));
 /// Runs one edit command in the frame the last context menu opened on, or in the focused frame once that frame is gone.
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
 /// Replaces the selected misspelled word with `word`.

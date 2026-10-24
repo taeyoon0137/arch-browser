@@ -448,6 +448,51 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 @end
 
+#pragma mark - Navigation entries
+
+@interface ARCHCEFNavigationEntry ()
+- (instancetype)initWithIndex:(NSInteger)index url:(NSString *)url title:(NSString *)title;
+@end
+
+@implementation ARCHCEFNavigationEntry
+
+- (instancetype)initWithIndex:(NSInteger)index url:(NSString *)url title:(NSString *)title {
+    self = [super init];
+    if (!self) {
+        return nil;
+    }
+    _index = index;
+    _url = [url copy];
+    _title = [title copy];
+    return self;
+}
+
+@end
+
+namespace {
+
+// CEF visits the entries at once when asked on the UI thread, which is the main thread here.
+class NavigationEntryCollector : public CefNavigationEntryVisitor {
+public:
+    bool Visit(CefRefPtr<CefNavigationEntry> entry, bool current, int index, int total) override {
+        [entries_ addObject:[[ARCHCEFNavigationEntry alloc] initWithIndex:index url:ToNSString(entry->GetURL()) title:ToNSString(entry->GetTitle())]];
+        if (current) {
+            current_ = index;
+        }
+        return true;
+    }
+
+    NSArray<ARCHCEFNavigationEntry *> *Entries() const { return entries_; }
+    int Current() const { return current_; }
+
+private:
+    NSMutableArray<ARCHCEFNavigationEntry *> *entries_ = [NSMutableArray array];
+    int current_ = -1;
+    IMPLEMENT_REFCOUNTING(NavigationEntryCollector);
+};
+
+}  // namespace
+
 #pragma mark - Context menu
 
 @interface ARCHCEFContextMenuParams ()
@@ -527,6 +572,7 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handlePopup:(NSString *)url;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
+- (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
 - (void)handleBeforeDownload:(ARCHCEFDownload *)download
@@ -718,7 +764,11 @@ public:
     // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's.
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool user_gesture,
                         bool is_redirect) override {
-        return owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL()) userGesture:user_gesture];
+        bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL()) userGesture:user_gesture];
+        if (!cancel && frame->IsMain()) {
+            [owner_ handleMainFrameNavigationPending:YES];
+        }
+        return cancel;
     }
 
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
@@ -798,7 +848,17 @@ public:
     }
 
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
+        if (!isLoading) {
+            [owner_ handleMainFrameNavigationPending:NO];
+        }
         [owner_ handleLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+    }
+
+    // CEF calls this once a navigation commits.
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override {
+        if (frame->IsMain()) {
+            [owner_ handleMainFrameNavigationPending:NO];
+        }
     }
 
     void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString> &icon_urls) override {
@@ -883,6 +943,8 @@ private:
     CefRefPtr<CefFrame> _contextMenuFrame;
     /// Set while a context menu is open. It ends CEF's request exactly once.
     void (^_pendingContextMenu)(void);
+    /// Set from the start of a main frame navigation until it commits or loading ends.
+    BOOL _mainFrameNavigationPending;
 }
 
 @synthesize browserView = _browserView;
@@ -1317,6 +1379,57 @@ private:
         return;
     }
     _devToolsObserver->Expect(messageID, completion);
+}
+
+- (NSArray<ARCHCEFNavigationEntry *> *)navigationEntries {
+    if (!_browser) {
+        return @[];
+    }
+    CefRefPtr<NavigationEntryCollector> collector = new NavigationEntryCollector;
+    _browser->GetHost()->GetNavigationEntries(collector, false);
+    return collector->Entries();
+}
+
+// Asking for the current entry alone numbers it 0, so the whole list is read to find its place.
+- (NSInteger)currentNavigationEntryIndex {
+    if (!_browser) {
+        return -1;
+    }
+    CefRefPtr<NavigationEntryCollector> collector = new NavigationEntryCollector;
+    _browser->GetHost()->GetNavigationEntries(collector, false);
+    return collector->Current();
+}
+
+- (void)handleMainFrameNavigationPending:(BOOL)pending {
+    _mainFrameNavigationPending = pending;
+}
+
+// Chromium drops the oldest entries once a tab has 50, and the rest move down, so the entry must still have the URL the caller read.
+- (BOOL)entryAtIndex:(NSInteger)index hasURL:(NSString *)url currentIndex:(NSInteger *)current {
+    CefRefPtr<NavigationEntryCollector> collector = new NavigationEntryCollector;
+    _browser->GetHost()->GetNavigationEntries(collector, false);
+    NSArray<ARCHCEFNavigationEntry *> *entries = collector->Entries();
+    *current = collector->Current();
+    return *current >= 0 && index != *current && index >= 0 && index < (NSInteger)entries.count && [entries[index].url isEqualToString:url];
+}
+
+// CEF has no call for a list index, and the DevTools protocol's call would leave a debugger attached to the tab, which stops Chromium from timing out a hung page. The page's own `history.go` makes the move instead.
+- (void)goToNavigationEntryAtIndex:(NSInteger)index url:(NSString *)url {
+    NSInteger current = -1;
+    if (!_browser || ![self entryAtIndex:index hasURL:url currentIndex:&current]) {
+        return;
+    }
+    [self dismissPendingDialog];
+    // Chromium ignores a page's history request while another main frame navigation is under way. Stopping it also takes a pending back or forward entry out of the current place, so the list is read again.
+    if (_mainFrameNavigationPending) {
+        _browser->StopLoad();
+        if (![self entryAtIndex:index hasURL:url currentIndex:&current]) {
+            return;
+        }
+    }
+    CefRefPtr<CefFrame> frame = _browser->GetMainFrame();
+    // A page can declare its own global `history`, but not `window`.
+    frame->ExecuteJavaScript(CefString("window.history.go(" + std::to_string(index - current) + ")"), frame->GetURL(), 0);
 }
 
 - (void)close {
