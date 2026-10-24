@@ -1,18 +1,15 @@
 // The library opens from the button at the bottom left and pushes the sidebar aside. It lists downloads at the top and other tools at the bottom. The button shows download progress while files download and a badge for the finished downloads the user has not seen.
 import SwiftUI
 
-/// The library in its own column: a title level with the window buttons, the library itself, and the library button in the place it has in the sidebar, so it stays under the pointer.
+/// The library in its own column: room for the window buttons, the library itself, and the library button in the place it has in the sidebar, so it stays under the pointer.
 struct LibraryPanel: View {
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Library")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Color.clear
                 .frame(height: SidebarTopRow.height)
-                .padding(.leading, (windowButtons.trailingEdge ?? 0) + 4)
                 .padding(.top, max(0, windowButtons.centerY - SidebarTopRow.height / 2))
             LibraryView(session: session)
                 .padding(.top, 6)

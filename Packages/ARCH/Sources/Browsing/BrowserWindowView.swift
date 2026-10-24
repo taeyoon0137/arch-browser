@@ -409,12 +409,10 @@ struct SidebarSwipeHandlers {
     let ended: (CGFloat, CGFloat) -> Void
 }
 
-/// The docked sidebar with the library to its left. Opening the library pushes the whole sidebar aside: the library, a little narrower than the sidebar and set off by a line, takes the column's leading part, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back.
+/// The docked sidebar with the library to its left. Opening the library pushes the whole sidebar aside: the column widens by `libraryPeek`, the library takes the sidebar's width, set off by a line, and the pushed sidebar keeps its first `libraryPeek` points in view, dimmed and still, until a click or a swipe brings it back.
 struct SidebarColumn: View {
     /// About a quarter of the narrowest sidebar.
     static let libraryPeek: CGFloat = 60
-    /// How much narrower than the sidebar the library is.
-    static let libraryNarrowing: CGFloat = 30
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
@@ -423,7 +421,7 @@ struct SidebarColumn: View {
     /// How far a swipe has brought the library in, from 0 to the library's width, while the fingers are down.
     @State private var swipeReveal: CGFloat?
 
-    private var libraryWidth: CGFloat { width - Self.libraryNarrowing }
+    private var libraryWidth: CGFloat { width }
     private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? libraryWidth : 0) }
     private var progress: CGFloat { reveal / libraryWidth }
 
@@ -431,8 +429,11 @@ struct SidebarColumn: View {
         HStack(spacing: 0) {
             LibraryPanel(session: session, windowButtons: windowButtons)
                 .frame(width: libraryWidth)
+                // The line runs beside the library's contents, between its title row and its button row.
                 .overlay(alignment: .trailing) {
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
+                        .padding(.top, windowButtons.centerY + SidebarTopRow.height / 2 + 8)
+                        .padding(.bottom, 10 + 28 + 8)
                 }
             SidebarView(session: session, windowButtons: windowButtons,
                         librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(libraryWidth, max(0, $0)) },
@@ -454,8 +455,7 @@ struct SidebarColumn: View {
                 }
         }
         .offset(x: reveal - libraryWidth)
-        // Closed, the column is the sidebar; open, it is the library and the pushed sidebar's visible part.
-        .frame(width: width + (libraryWidth + Self.libraryPeek - width) * progress, alignment: .leading)
+        .frame(width: width + Self.libraryPeek * progress, alignment: .leading)
         .clipped()
         // A swipe over the open library or the pushed sidebar takes the library away again.
         .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
