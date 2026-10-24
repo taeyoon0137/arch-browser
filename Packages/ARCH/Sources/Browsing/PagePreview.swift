@@ -3,7 +3,7 @@ import AppKit
 import ARCHEngine
 import SwiftUI
 
-/// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to the session. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing.
+/// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to its window. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing.
 final class PagePreview: ObservableObject {
     let webContents: any EngineWebContents
     /// The Persona whose profile the page uses, as the tab or favorite it came from does.
@@ -14,11 +14,11 @@ final class PagePreview: ObservableObject {
     /// The page's address, which follows the page as the user moves around in it.
     @Published private(set) var url: URL
     @Published private(set) var isLoading: Bool
-    /// The session sets this callback to open a page that the previewed page opens, such as a link to a new window, as a tab.
+    /// The window that shows the preview sets this callback to open a page that the previewed page opens, such as a link to a new window, as a tab.
     var openNewTab: ((any EngineWebContents) -> Void)?
-    /// The session sets this callback to answer the page's permission requests. Without it every request is denied.
+    /// The window that shows the preview sets this callback to answer the page's permission requests. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to close the panel when the page closes itself.
+    /// The window that shows the preview sets this callback to close the panel when the page closes itself.
     var didClose: (() -> Void)?
 
     init(webContents: any EngineWebContents, personaID: Persona.ID, openedURL: URL) {

@@ -80,7 +80,7 @@ public final class PageAssistant: ObservableObject {
         summarize(tab)
     }
 
-    /// Stops every reply being written, as when a window's reader hides.
+    /// Stops every reply being written, as when no window shows the reader any more.
     func stopReaderReplies() {
         readerConversations.values.forEach { $0.cancel() }
     }
@@ -127,10 +127,10 @@ public final class PageAssistant: ObservableObject {
             forgetConversations(ofTab: id)
         }
         for tab in tabs where tabObservers[tab.id] == nil {
-            // The page's context menu opens over the active window's selected tab.
+            // The page's context menu opens in the window that shows the tab, which need not be the active one.
             tab.askAboutSelection = { [weak self, weak tab] text in
                 guard let self, let tab else { return }
-                MainActor.assumeIsolated { self.session?.activeWindow?.askAboutSelection(text, in: tab) }
+                MainActor.assumeIsolated { self.session?.window(showing: tab)?.askAboutSelection(text, in: tab) }
             }
             tabObservers[tab.id] = tab.$url.sink { [weak self, weak tab] url in
                 if let self, let tab { self.tab(tab, willMoveTo: url) }

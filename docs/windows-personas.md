@@ -556,7 +556,7 @@ Sync (V.9)
 
 AI (VII)
 - `ai.json`, its routes, exclusions, limits, and usage stay app-wide, as `docs/ai.md` states.
-- The page reader panel (VII.4) and the question popovers (VII.5) are window state on `BrowserWindowModel` and act on the active window's selected tab. Hook events (VII.6) carry the tab's Persona, so they reach that Persona's plugin manager. AI-written plugins (VII.7) install into the active window's Persona.
+- The page reader panel (VII.4) and the question popovers (VII.5) are window state on `BrowserWindowModel` and act on the active window's selected tab; Ask About Selection opens the popover in the window that shows the tab. Hook events (VII.6) carry the tab's Persona, so they reach that Persona's plugin manager. AI-written plugins (VII.7) install into the active window's Persona.
 
 Live favorites (III.13)
 - A favorite and its live tab belong to one Persona. The live tab follows window rule 1: selecting a favorite whose tab another window shows moves the tab here. It stays alive, hidden, while its window shows another Persona's space. Whether the live tab keeps a `spaceID` is III.13's choice; if it leaves space lists, III.13 extends `isListedInSidebar`.
@@ -637,12 +637,12 @@ Coordination
    - New check: `grep -rn "session\.\(selectedTabID\|currentSpaceID\|isSidebarVisible\|isLibraryVisible\|internalPage\|commandPalette\|isFindBarVisible\|findText\|renaming\|fullscreenTabID\|devToolsDock\)" Packages` finds nothing.
 
 8. III.6.4 Rules for several windows, still with one window on screen (bundle)
-   - Files: new `TabSheetQueue.swift`; `BrowserWindowModel.swift` (the rule 2 order, the fallback, the activation order per window), `BrowserSession.swift` (`release`, automatic selection that skips shown tabs, the archive exemption, routing of popups, `requestSelection`, and fullscreen, `window(for:)`), `DevToolsDock.swift` (`DevToolsDockSettings`, the `track` guard, `isExcludedFromWindowsMenu`), `AppDelegate.swift` (monitors by `event.window`; the side menu sets the shared settings).
+   - Files: new `TabSheetQueue.swift`; `BrowserWindowModel.swift` (the rule 2 order, the fallback, the activation order per window), `BrowserSession.swift` (`release`, automatic selection that skips shown tabs, the archive exemption, routing of popups, `requestSelection`, and fullscreen through `window(showing:)`, which Ask About Selection already uses, `window(for:)`), `DevToolsDock.swift` (`DevToolsDockSettings`, the `track` guard, `isExcludedFromWindowsMenu`), `AppDelegate.swift` (monitors by `event.window`; the side menu sets the shared settings).
    - Re-check: 6, 7, 12 (a side change applies at once), 13, 15, 21, 29; Clear Site Data's sheet (24) and a capture failure sheet still show.
    - New checks: a JavaScript `alert` in a background tab waits until the tab is selected, then shows on the window. Closing a background Chromium tab with a `beforeunload` handler through Close Other Tabs brings it forward with its sheet. A popup from the selected tab is selected; one from a background tab opens unread.
 
 9. III.6.5 Window controller and multiple windows (bundle)
-   - Files: new `BrowserWindowController.swift`; `BrowserSession.swift` (`openWindow`, `restoreWindows`, `windowDidBecomeMain`, `windowWillClose`, the teardown order, the last main window's record in memory), `AppDelegate.swift` (window building removed; New Window, Close Window, and the Window menu after `installShortcuts()`; tabbing off; reopen handling; the targets of the global shortcut, History, Import, and the prompt), `Scripting.swift`.
+   - Files: new `BrowserWindowController.swift`; `BrowserSession.swift` (`openWindow`, `restoreWindows`, `windowDidBecomeMain`, which also updates the focused tab, `windowWillClose`, the teardown order, the last main window's record in memory, and `window(showing:)`, `closePageQuestions(ofTab:)`, and `pageReaderDidHide` over every window), `AppDelegate.swift` (window building removed; New Window, Close Window, and the Window menu after `installShortcuts()`; tabbing off; reopen handling; the targets of the global shortcut, History, Import, and the prompt), `Scripting.swift`.
    - Launch order in `AppDelegate`: register the engines, create the session, set `NSWindow.allowsAutomaticWindowTabbing = false`, build the menus, install the monitors and shortcuts, set `NSApp.windowsMenu`, call `session.restoreWindows()`, open pending links, `ARCH_START_URL`, or a new tab in the sidebar target, activate, and prompt for the default browser on the front main window.
    - Re-check: 4, 5, 9, 12, 16, 18, 20, 26, 28.
    - New checks:

@@ -17,10 +17,10 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public var isPinned: Bool
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
-    /// The session updates this on tab selection. Archiving closes unpinned tabs whose dates are too old.
+    /// The window that selects the tab updates this. Archiving closes unpinned tabs whose dates are too old.
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
-    /// The name the user gave the tab, shown in place of the page's title. The session sets it.
+    /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
     @Published public internal(set) var customTitle: String?
     @Published public private(set) var url: URL?
     @Published public private(set) var isLoading: Bool
@@ -29,7 +29,7 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
-    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets and clears it.
+    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it.
     @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false

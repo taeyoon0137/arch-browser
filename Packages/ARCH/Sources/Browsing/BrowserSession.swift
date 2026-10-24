@@ -137,12 +137,28 @@ public final class BrowserSession: ObservableObject {
     /// The window that sidebar commands act on: the last main window.
     public func sidebarTarget() -> BrowserWindowModel { windowModel }
 
-    /// The tab of `focusedTabID`.
-    public var focusedTab: Tab? { activeWindow?.selectedTab }
+    /// The window that shows the tab, as its selected tab or a pane of its split view, or nil while no window shows it.
+    func window(showing tab: Tab) -> BrowserWindowModel? {
+        windowModel.paneTabs.contains { $0 === tab } ? windowModel : nil
+    }
 
-    /// Follows a window's new selection: the active window's selected tab becomes the focused tab.
+    /// The tab of `focusedTabID`.
+    public var focusedTab: Tab? { allTabs.first { $0.id == focusedTabID } }
+
+    /// Follows a window's new selection.
     func windowDidSelect(_ window: BrowserWindowModel) {
-        if window === activeWindow, focusedTabID != window.selectedTabID { focusedTabID = window.selectedTabID }
+        if window === activeWindow { updateFocusedTab() }
+    }
+
+    /// Makes the active window's selected tab the focused tab. Every change of the active window or of its selection goes through here, so `focusedTabID` publishes each one.
+    private func updateFocusedTab() {
+        let id = activeWindow?.selectedTabID
+        if focusedTabID != id { focusedTabID = id }
+    }
+
+    /// Stops the page reader's replies after a window's reader hides. With several windows, the replies about the tabs that window shows stop, and every reply stops once no window shows the reader; with one window, every reply stops.
+    @MainActor func pageReaderDidHide() {
+        pageAssistant.stopReaderReplies()
     }
 
     /// Closes the question popovers that windows show about the tab's page, which the tab has left.

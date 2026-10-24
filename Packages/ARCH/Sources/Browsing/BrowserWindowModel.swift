@@ -422,13 +422,13 @@ public final class BrowserWindowModel: ObservableObject {
         isPageReaderVisible || (selectedTab != nil && internalPage == nil)
     }
 
-    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it stops every reply being written.
+    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`).
     @MainActor public func togglePageReader() {
         withAnimation(SidebarView.pageSpring) { isPageReaderVisible.toggle() }
         if isPageReaderVisible {
             selectedTab.map(session.pageAssistant.readerDidShow)
         } else {
-            session.pageAssistant.stopReaderReplies()
+            session.pageReaderDidHide()
         }
     }
 
@@ -443,7 +443,7 @@ public final class BrowserWindowModel: ObservableObject {
         openPageQuestion(in: tab, selection: nil)
     }
 
-    /// From the page's context menu, so the tab is the selected one.
+    /// From the page's context menu, so the tab is this window's selected tab: a click in another pane selects that pane's tab first.
     @MainActor func askAboutSelection(_ text: String, in tab: Tab) {
         guard PageAssistant.isQuestionAvailable, let url = tab.url, PageAssistant.canRead(url) else { return }
         openPageQuestion(in: tab, selection: AISelection(pageURL: url, pageTitle: tab.pageTitle, text: text))
