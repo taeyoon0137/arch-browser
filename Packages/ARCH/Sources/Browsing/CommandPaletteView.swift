@@ -5,6 +5,10 @@ import SwiftUI
 struct CommandPaletteView: View {
     @ObservedObject var session: BrowserSession
     let mode: CommandPaletteMode
+    /// Set for the copy the window builds once at launch so the first palette the user opens is cheap to build. The copy stays hidden and takes no focus.
+    var isWarmUp = false
+    /// Set while the palette closes, before the window removes it.
+    var isLeaving = false
     @State private var text = ""
     @FocusState private var isFocused: Bool
     /// Set as the palette appears to animate its arrival as a state change.
@@ -66,12 +70,17 @@ struct CommandPaletteView: View {
         .frame(width: 560)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
-        .modifier(CommandPaletteAppearance(offset: CommandPaletteAppearance.offset(from: session.commandPaletteOrigin), isHidden: !hasArrived))
+        .modifier(CommandPaletteAppearance(offset: CommandPaletteAppearance.offset(from: session.commandPaletteOrigin), isHidden: !hasArrived || isLeaving))
+        .allowsHitTesting(!isLeaving)
         .padding(.top, 120)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
+            guard !isWarmUp else { return }
             if mode == .editCurrent { text = session.selectedTab?.url?.absoluteString ?? "" }
-            withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { hasArrived = true }
+            // The arrival animation waits until the hidden first frame is on screen, so a slow first build cannot use up the animation time.
+            DispatchQueue.main.async {
+                withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { hasArrived = true }
+            }
             DispatchQueue.main.async { isFocused = true }
         }
     }
@@ -101,21 +110,8 @@ extension Animation {
         .timingCurve(0.16, 1, 0.3, 1, duration: origin == .sidebar ? 0.32 : 0.16)
     }
     /// Something that leaves starts slowly and speeds away.
-    static let paletteOut = Animation.timingCurve(0.7, 0, 0.84, 0, duration: 0.2)
-}
-
-extension AnyTransition {
-    /// The palette animates its own arrival because a transition fades and sharpens its contents without moving them. Leaving needs no movement.
-    static func commandPalette(from origin: CommandPaletteOrigin) -> AnyTransition {
-        let offset = CommandPaletteAppearance.offset(from: origin)
-        let appearance = AnyTransition.modifier(active: CommandPaletteAppearance(offset: offset, isHidden: true), identity: CommandPaletteAppearance(offset: offset, isHidden: false))
-        return .asymmetric(insertion: .identity, removal: appearance.animation(.paletteOut))
-    }
-
-    /// The dimming behind the palette follows the palette's timing.
-    static func commandPaletteDimming(from origin: CommandPaletteOrigin) -> AnyTransition {
-        .asymmetric(insertion: .opacity.animation(.paletteIn(from: origin)), removal: .opacity.animation(.paletteOut))
-    }
+    static let paletteOut = Animation.timingCurve(0.7, 0, 0.84, 0, duration: paletteOutDuration)
+    static let paletteOutDuration = 0.2
 }
 
 struct PaletteRow: View {

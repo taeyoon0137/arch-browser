@@ -6,6 +6,11 @@ import SwiftUI
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
     @State private var windowButtons = WindowButtonMetrics()
+    /// The displayed palette mode. It stays set while the palette closes because removal transitions do not run in this window. A state change fades out the palette and its dimming, then the window removes both.
+    @State private var shownPaletteMode: CommandPaletteMode?
+    @State private var isPaletteLeaving = false
+    /// Set after the hidden warm-up palette is drawn.
+    @State private var isPaletteWarm = false
     /// The sidebar's width, set by dragging its trailing edge.
     @AppStorage(SidebarView.widthKey) private var sidebarWidth = Double(SidebarView.defaultWidth)
     /// Set while the hidden sidebar floats over the page.
@@ -49,20 +54,39 @@ public struct BrowserWindowView: View {
                     .padding(.top, 20)
                     .padding(.trailing, 24)
             }
-            if session.commandPaletteMode != nil {
-                Color.black.opacity(0.15)
+            if shownPaletteMode != nil {
+                Color.black.opacity(isPaletteLeaving ? 0 : 0.15)
                     .onTapGesture { session.dismissCommandPalette() }
-                    .transition(.commandPaletteDimming(from: session.commandPaletteOrigin))
+                    .transition(.opacity)
             }
-            if let mode = session.commandPaletteMode {
+            // Drawing a hidden palette once at launch builds the text field, material, and fonts before the first visible palette opens. Otherwise, that palette would appear only after its arrival animation ends.
+            if !isPaletteWarm {
+                CommandPaletteView(session: session, mode: .newTab, isWarmUp: true)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { isPaletteWarm = true } }
+            }
+            if let mode = shownPaletteMode {
                 // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
-                CommandPaletteView(session: session, mode: mode)
+                CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving)
                     .id(session.commandPaletteGeneration)
-                    .transition(.commandPalette(from: session.commandPaletteOrigin))
             }
         }
-        // The transitions carry their own timing; this makes every palette change animate.
-        .animation(.paletteIn(from: session.commandPaletteOrigin), value: session.commandPaletteMode)
+        .onAppear { shownPaletteMode = session.commandPaletteMode }
+        .onChange(of: session.commandPaletteMode) { mode in
+            guard mode == nil else {
+                isPaletteLeaving = false
+                return withAnimation(.paletteIn(from: session.commandPaletteOrigin)) { shownPaletteMode = mode }
+            }
+            withAnimation(.paletteOut) { isPaletteLeaving = true }
+            let generation = session.commandPaletteGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {
+                // A palette reopened during this delay has a new generation and stays until it finishes closing.
+                guard session.commandPaletteGeneration == generation else { return }
+                shownPaletteMode = nil
+                isPaletteLeaving = false
+            }
+        }
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
