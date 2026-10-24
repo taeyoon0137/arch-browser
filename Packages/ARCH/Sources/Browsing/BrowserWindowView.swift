@@ -15,6 +15,8 @@ public struct BrowserWindowView: View {
     @AppStorage(SidebarView.widthKey) private var sidebarWidth = Double(SidebarView.defaultWidth)
     /// Set while the hidden sidebar floats over the page.
     @State private var isSidebarPeeking = false
+    /// Set while the card docks: it stays above the narrowing page, then gives way to the docked sidebar beneath it.
+    @State private var isCardDocking = false
     /// The next check of whether the floating sidebar should stay visible.
     @State private var peekCheck: DispatchWorkItem?
     @State private var windowReference = WindowReference()
@@ -27,6 +29,10 @@ public struct BrowserWindowView: View {
     static let pageMargin: CGFloat = 8
     /// The space between the sidebar's controls and the page.
     static let sidebarGap: CGFloat = 8
+    /// The window's coordinate space, shared by the tab rows and the lifted row that follows a drag.
+    static let coordinateSpace = "BrowserWindow"
+    /// The floating card's corners match the window's own 16-point corners rather than the page's.
+    static let cardCornerRadius: CGFloat = 16
 
     public var body: some View {
         ZStack {
@@ -35,7 +41,8 @@ public struct BrowserWindowView: View {
                     SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
                         sidebarWidth = Double(SidebarView.clampedWidth($0))
                     }
-                    .transition(.move(edge: .leading))
+                    // Docking the floating card keeps the sidebar where the card was; only the page resizes.
+                    .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
                 WebContentsHostView(contentView: session.selectedTab?.webContents.view)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
@@ -45,7 +52,7 @@ public struct BrowserWindowView: View {
                     .padding(EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
                                         bottom: Self.pageMargin, trailing: Self.pageMargin))
             }
-            if !session.isSidebarVisible {
+            if !session.isSidebarVisible || isSidebarPeeking {
                 peekingSidebar
             }
             if session.isFindBarVisible {
@@ -92,14 +99,22 @@ public struct BrowserWindowView: View {
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
         .animation(SidebarView.pageSpring, value: session.isSidebarVisible)
         .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
-        // The window buttons hide with the sidebar and return when it peeks. Full screen uses its own buttons.
-        .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking, reference: windowReference))
+        // The window buttons slide away with the sidebar and return with it or with the card. Full screen uses its own buttons.
+        .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking,
+                                            slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
+                                            reference: windowReference))
+        // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
         .onChange(of: session.isSidebarVisible) { isVisible in
             peekCheck?.cancel()
-            isSidebarPeeking = false
-            // If hidden under the pointer, the sidebar floats over the page after sliding away.
-            if !isVisible, isPointerOverSidebar {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { if !session.isSidebarVisible { peekSidebar() } }
+            guard isVisible, isSidebarPeeking else { return isSidebarPeeking = false }
+            withAnimation(SidebarView.pageSpring) { isCardDocking = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    isSidebarPeeking = false
+                    isCardDocking = false
+                }
             }
         }
         .ignoresSafeArea()
@@ -109,35 +124,39 @@ public struct BrowserWindowView: View {
     /// A strip along the window's leading edge reveals the hidden sidebar as a card over the page.
     private var peekingSidebar: some View {
         let width = SidebarView.clampedWidth(sidebarWidth)
-        // The window buttons stay fixed. The card starts one sidebar margin above their row, which shifts by the card's offset.
+        // At rest the window buttons keep their place. The card starts one sidebar margin above their row, which shifts by the card's offset. While docking, the card takes the docked sidebar's metrics.
         let hasButtons = windowButtons.trailingEdge != nil
-        let top = hasButtons ? max(0, windowButtons.centerY - SidebarTopRow.height / 2 - SidebarView.inset) : Self.pageMargin
-        let buttons = hasButtons ? WindowButtonMetrics(centerY: windowButtons.centerY - top, trailingEdge: windowButtons.trailingEdge.map { $0 - Self.pageMargin }) : windowButtons
+        let leading = isCardDocking ? 0 : Self.pageMargin
+        let top = hasButtons ? max(0, windowButtons.centerY - SidebarTopRow.height / 2 - SidebarView.inset) : leading
+        let buttons = hasButtons ? WindowButtonMetrics(centerY: windowButtons.centerY - top, trailingEdge: windowButtons.trailingEdge.map { $0 - leading }) : windowButtons
         return ZStack(alignment: .leading) {
             Color.clear
                 .frame(width: Self.pageMargin)
                 .contentShape(Rectangle())
                 .onHover { if $0 { peekSidebar() } }
             if isSidebarPeeking {
+                // While docking, the card moves to the docked sidebar's place and loses its shadow and edge.
                 SidebarColumn(session: session, windowButtons: buttons, width: width, isFloating: true)
                     .background {
                         ZStack {
-                            PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(0.25), radius: 16, y: 4)
-                            SpaceBackgroundView(tint: session.currentSpace.tint.color, cornerRadius: PageFrameShape.cornerRadius)
+                            RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(isCardDocking ? 0 : 0.25), radius: 16, y: 4)
+                            SpaceBackgroundView(tint: session.currentSpace.tint.color, cornerRadius: Self.cardCornerRadius)
                         }
                     }
-                    .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
-                    .contentShape(PageFrameShape())
-                    .padding(EdgeInsets(top: top, leading: Self.pageMargin, bottom: Self.pageMargin, trailing: 0))
+                    .overlay(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).strokeBorder(Color.primary.opacity(isCardDocking ? 0 : 0.08)).allowsHitTesting(false))
+                    .contentShape(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous))
+                    .padding(EdgeInsets(top: top, leading: leading, bottom: leading, trailing: 0))
                     .environment(\.sidebarWidth, width)
                     .environment(\.sidebarIsFloating, true)
-                    .transition(.move(edge: .leading))
+                    // The window buttons travel the same distance.
+                    .transition(.offset(x: -(width + Self.pageMargin)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private func peekSidebar() {
+        guard !session.isSidebarVisible else { return }
         peekCheck?.cancel()
         if !isSidebarPeeking {
             withAnimation(SidebarView.pageSpring) { isSidebarPeeking = true }
@@ -183,21 +202,79 @@ final class WindowReference {
     weak var window: NSWindow?
 }
 
-/// Shows or hides the window's close, minimize, and zoom buttons and records the window in `reference`.
+/// Shows or hides the window's close, minimize, and zoom buttons and records the window in `reference`. On macOS 15 and later, the buttons use the sidebar's spring to slide `slideDistance` points toward the leading side as they hide and back as they appear. At rest, they stay where AppKit placed them.
 struct WindowButtonsVisibility: NSViewRepresentable {
     let isHidden: Bool
+    /// `nil` shows and hides the buttons in place.
+    let slideDistance: CGFloat?
     let reference: WindowReference
+
+    private static let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+
+    final class Coordinator {
+        var isHidden: Bool?
+        /// The buttons' resting positions, recorded while they slide.
+        var restingOrigins: [NSWindow.ButtonType: NSPoint] = [:]
+        /// Counts slides so an earlier slide's completion does not affect a later slide.
+        var generation = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
         let isHidden = isHidden
+        let slideDistance = slideDistance
         let reference = reference
+        let coordinator = context.coordinator
         // The view has no window during its first update.
         DispatchQueue.main.async {
             reference.window = view.window
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                view.window?.standardWindowButton(type)?.isHidden = isHidden
+            guard let window = view.window else { return }
+            let buttons = Self.types.compactMap { type in window.standardWindowButton(type).map { (type, $0) } }
+            let wasHidden = coordinator.isHidden
+            coordinator.isHidden = isHidden
+            // An update that changes nothing does not interrupt a slide.
+            if wasHidden == isHidden, slideDistance != nil, !coordinator.restingOrigins.isEmpty { return }
+            guard let wasHidden, wasHidden != isHidden, let distance = slideDistance, #available(macOS 15, *) else {
+                // A slide in progress must not apply its final state afterwards.
+                coordinator.generation += 1
+                for (type, button) in buttons {
+                    if let origin = coordinator.restingOrigins[type] { button.setFrameOrigin(origin) }
+                    button.isHidden = isHidden
+                }
+                coordinator.restingOrigins = [:]
+                return
+            }
+            if coordinator.restingOrigins.isEmpty {
+                for (type, button) in buttons { coordinator.restingOrigins[type] = button.frame.origin }
+            }
+            coordinator.generation += 1
+            let generation = coordinator.generation
+            let origins = coordinator.restingOrigins
+            func origin(of type: NSWindow.ButtonType, hidden: Bool) -> NSPoint? {
+                origins[type].map { hidden ? NSPoint(x: $0.x - distance, y: $0.y) : $0 }
+            }
+            // Appearing buttons start out of sight. Showing a button lays out the title bar again and resets every button's position, so they move only after all are shown.
+            let appearing = buttons.filter { !isHidden && $0.1.isHidden }
+            appearing.forEach { $0.1.isHidden = false }
+            for (type, button) in appearing {
+                if let start = origin(of: type, hidden: true) { button.setFrameOrigin(start) }
+            }
+            NSAnimationContext.animate(SidebarView.pageSpring) {
+                for (type, button) in buttons {
+                    if let end = origin(of: type, hidden: isHidden) { button.animator().setFrameOrigin(end) }
+                }
+            } completion: {
+                guard coordinator.generation == generation else { return }
+                for (type, button) in buttons {
+                    button.isHidden = isHidden
+                    if let rest = origins[type] { button.setFrameOrigin(rest) }
+                }
+                coordinator.restingOrigins = [:]
+                // A resize during the slide measured the buttons away from their resting positions.
+                NotificationCenter.default.post(name: WindowButtonsReaderView.buttonsDidSettleNotification, object: window)
             }
         }
     }
@@ -445,10 +522,12 @@ struct SidebarSwipeHandlers {
     let ended: (CGFloat, CGFloat) -> Void
 }
 
-/// The library opens to the sidebar's left and pushes it aside. When docked, the column widens by `libraryPeek`. The library takes the sidebar's width, with a dividing line; the sidebar's first `libraryPeek` points stay visible, dimmed and still, until a click or swipe brings it back. When floating, the library fills the card.
+/// The library opens to the sidebar's left and pushes it aside. When docked, the column widens by `libraryPeek` and the gap around the dividing line. The library takes the sidebar's width; the sidebar's first `libraryPeek` points stay visible, dimmed and still, until a click or swipe brings it back. When floating, the library fills the card.
 struct SidebarColumn: View {
     /// About a quarter of the narrowest sidebar.
     static let libraryPeek: CGFloat = 60
+    /// The space on each side of the line between the library and the sidebar, beyond their own margins.
+    static let dividerMargin: CGFloat = 8
 
     @ObservedObject var session: BrowserSession
     let windowButtons: WindowButtonMetrics
@@ -460,8 +539,13 @@ struct SidebarColumn: View {
 
     private var libraryWidth: CGFloat { width }
     private var peek: CGFloat { isFloating ? 0 : Self.libraryPeek }
-    private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? libraryWidth : 0) }
-    private var progress: CGFloat { reveal / libraryWidth }
+    private var gap: CGFloat { 2 * Self.dividerMargin }
+    /// How far the library moves in: its width and the gap after it.
+    private var travel: CGFloat { libraryWidth + gap }
+    private var reveal: CGFloat { swipeReveal ?? (session.isLibraryVisible ? travel : 0) }
+    private var progress: CGFloat { reveal / travel }
+    /// How much the docked column widens while the library is open.
+    private var widening: CGFloat { isFloating ? 0 : gap + peek }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -469,15 +553,14 @@ struct SidebarColumn: View {
                 .frame(width: libraryWidth)
                 .allowsHitTesting(progress > 0)
                 .accessibilityHidden(progress == 0)
-                // The line runs beside the library's contents, from below the window buttons' row to above the button row.
-                .overlay(alignment: .trailing) {
-                    Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
-                        .padding(.top, windowButtons.centerY + SidebarTopRow.height / 2 + 8)
-                        .padding(.bottom, 10 + 28 + 8)
-                }
+            // The line sits in the middle of the gap, from below the window buttons' row to above the button row.
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
+                .padding(.top, windowButtons.centerY + SidebarTopRow.height / 2 + 8)
+                .padding(.bottom, 10 + 28 + 8)
+                .frame(width: gap)
             SidebarView(session: session, windowButtons: windowButtons,
-                        librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(libraryWidth, max(0, $0)) },
-                                                           ended: { travel, velocity in finishLibrarySwipe(opens: travel > libraryWidth * 0.3 || velocity > 300) }))
+                        librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(travel, max(0, $0)) },
+                                                           ended: { distance, velocity in finishLibrarySwipe(opens: distance > travel * 0.3 || velocity > 300) }))
                 .frame(width: width)
                 .opacity(1 - 0.5 * progress)
                 .allowsHitTesting(progress == 0)
@@ -496,15 +579,15 @@ struct SidebarColumn: View {
                     }
                 }
         }
-        .offset(x: reveal - libraryWidth)
-        .frame(width: width + peek * progress, alignment: .leading)
+        .offset(x: reveal - travel)
+        .frame(width: width + widening * progress, alignment: .leading)
         .clipped()
         // Clicks reach only what the clip shows.
         .contentShape(Rectangle())
         // A swipe over the open library or displaced sidebar closes the library.
         .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
-                                   onChange: { travel in swipeReveal = min(libraryWidth, max(0, libraryWidth + travel)) },
-                                   onEnd: { travel, velocity in finishLibrarySwipe(opens: !(travel < -libraryWidth * 0.3 || velocity < -300)) }))
+                                   onChange: { distance in swipeReveal = min(travel, max(0, travel + distance)) },
+                                   onEnd: { distance, velocity in finishLibrarySwipe(opens: !(distance < -travel * 0.3 || velocity < -300)) }))
         // The handle covers the gap between the sidebar's controls and the page, including the sidebar's margin and the gap outside it.
         .overlay(alignment: .trailing) {
             if progress == 0, !isFloating {
@@ -1037,7 +1120,7 @@ final class CommandKeyState: ObservableObject {
             withAnimation(.easeOut(duration: 0.18)) { self?.showsShortcuts = true }
         }
         pendingShow = show
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: show)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: show)
     }
 }
 
@@ -1217,15 +1300,25 @@ struct SidebarBottomBar: View {
     fileprivate static let itemWidth: CGFloat = 18
     private static let stripSpace = "SpaceStrip"
 
-    /// The symbols followed by the new space button. When scrolling, items shrink toward the strip's ends so none appears cut off.
+    /// Three items show at full size: the current space and its neighbors, or the three at the end nearest it. The others shrink with their distance from those three.
+    private func scale(at index: Int) -> CGFloat {
+        let count = session.spaces.count + 1
+        let current = session.spaces.firstIndex { $0.id == session.currentSpaceID } ?? 0
+        let first = max(0, min(current - 1, count - 3))
+        let distance = index < first ? first - index : max(0, index - (first + 2))
+        return max(0.3, pow(0.7, CGFloat(distance)))
+    }
+
+    /// The symbols followed by the new space button. When scrolling, items also shrink toward the strip's ends so none appears cut off.
     private func strip(shrinksAtEdges: Bool) -> some View {
         HStack(spacing: 2) {
-            ForEach(session.spaces) { space in
+            ForEach(Array(session.spaces.enumerated()), id: \.element.id) { index, space in
                 let isCurrent = space.id == session.currentSpaceID
                 Button(action: { session.switchToSpace(space.id) }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
                         .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
+                        .scaleEffect(scale(at: index))
                         .frame(width: Self.itemWidth, height: 26)
                         .contentShape(Rectangle())
                 }
@@ -1237,9 +1330,10 @@ struct SidebarBottomBar: View {
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }
-            NewSpaceButton(action: session.addSpace)
+            NewSpaceButton(scale: scale(at: session.spaces.count), action: session.addSpace)
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
+        .animation(SidebarView.pageSpring, value: session.currentSpaceID)
         // Let the first and last items scroll clear of the shrinking ends.
         .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
     }
@@ -1292,6 +1386,7 @@ private struct EdgeShrink: ViewModifier {
 
 /// A small, dim plus makes the new space button look like part of the symbols row rather than a toolbar button.
 private struct NewSpaceButton: View {
+    let scale: CGFloat
     let action: () -> Void
     @State private var isHovering = false
 
@@ -1300,6 +1395,7 @@ private struct NewSpaceButton: View {
             Image(systemName: "plus")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Color.secondary.opacity(isHovering ? 1 : 0.6))
+                .scaleEffect(scale)
                 .frame(width: SidebarBottomBar.itemWidth, height: 26)
                 .contentShape(Rectangle())
         }

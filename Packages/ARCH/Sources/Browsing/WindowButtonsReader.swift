@@ -25,6 +25,9 @@ struct WindowButtonsReader: NSViewRepresentable {
 }
 
 final class WindowButtonsReaderView: NSView {
+    /// Posted with the window when its buttons finish sliding with the sidebar.
+    static let buttonsDidSettleNotification = Notification.Name("ARCHWindowButtonsDidSettle")
+
     var onChange: ((WindowButtonMetrics) -> Void)?
     private var observers: [NSObjectProtocol] = []
     private var lastMetrics: WindowButtonMetrics?
@@ -41,6 +44,7 @@ final class WindowButtonsReaderView: NSView {
             self?.report(WindowButtonMetrics(trailingEdge: nil))
         })
         observers.append(center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in self?.measure() })
+        observers.append(center.addObserver(forName: Self.buttonsDidSettleNotification, object: window, queue: .main) { [weak self] _ in self?.measure() })
         // The app shows its toolbar again after leaving full screen, which moves the buttons, so the measurement waits for that layout.
         observers.append(center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
             DispatchQueue.main.async {
