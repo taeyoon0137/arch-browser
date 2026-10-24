@@ -54,8 +54,9 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 - Do not add unrequested abstractions, dependencies, or configuration.
 - Treat existing modifications as intentional. Do not revert them.
 - Do not create graphic assets. Leave placeholders for the user to fill.
-- Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. On both engines, use macOS system frameworks for every feature that is part of the platform user experience. Follow the Platform integration table in `docs/features.md`.
-- Use only public APIs. Do not call undocumented classes, selectors, functions, or keys of system frameworks, even through runtime lookups. When an engine cannot provide a feature through public APIs, leave the feature out on that engine and record the reason in its row in `docs/features.md`. A required feature that neither engine can provide through public APIs needs the user's decision.
+- Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. By default, features use macOS facilities on both engines; for example, picture in picture uses AVKit rather than an engine's implementation. Follow the Platform integration table in `docs/features.md`.
+- Prefer public APIs. Use a private API (an undocumented class, selector, function, or key in a system framework or engine) only behind flags on `flags://`: one for all private APIs, one for each private API, and one for each feature that uses one. Check each private API's availability quietly and quickly, in the background or just before use. If a feature's private API is unavailable or switched off, the feature falls back to its public behavior or stays hidden. List every private API in the Private APIs section of `docs/features.md`.
+- You may fork the Chromium (CEF) or WebKit source when a feature needs it. Keep each patch small and list it in `docs/plan.md`.
 
 ## Language
 
@@ -84,7 +85,7 @@ Check each item before reporting a task as finished:
 ## Security and record keeping
 
 - Never commit secrets, tokens, credentials, or private keys.
-- Do not add analytics, crash reporting, feature flag, or update services, or their identifiers and keys.
+- Do not add analytics, crash reporting, remote feature flag, or update services, or their identifiers and keys. Local flags on the `flags://` page are allowed.
 - Do not add trailers such as `Co-Authored-By`, agent or model names, or "generated with" notes unless the user asks.
 
 ## Commits
