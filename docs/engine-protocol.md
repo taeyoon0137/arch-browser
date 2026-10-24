@@ -42,7 +42,7 @@
 | Capability | Chromium | WebKit |
 |---|---|---|
 | `extensions` (Chrome extensions) | Planned | None |
-| `devTools` | Planned | Web Inspector (`isInspectable`); protocol not implemented |
+| `devTools` | Planned | None: the adapter only sets `isInspectable`, because opening the inspector needs a private API |
 | `pdfController` | Planned | Built-in PDF support |
 | `importSources` | Planned | None |
 | `notifications` | Planned | None |
