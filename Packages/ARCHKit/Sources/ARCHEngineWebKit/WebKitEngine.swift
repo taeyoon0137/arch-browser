@@ -200,6 +200,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     var observers: [any EngineWebContentsNavigationObserver] = []
     /// Gives the dialog the page waits on its safe answer. Set while an `alert`, `confirm`, or `prompt` dialog is open.
     private var dismissPendingDialog: (() -> Void)?
+    /// The last search and the position of its active match, kept for when the page's selection cannot place the match.
+    private var findQuery: String?
+    private var findOrdinal = 0
     /// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
     private(set) var suppressesDialogs = false
 
@@ -261,15 +264,69 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         observers.removeAll { $0 === observer }
     }
 
+    /// WebKit's find reports only whether a match exists. Once it selects the match, a script counts the matches in the page's visible text and places the selected one among them.
     public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
         let configuration = WKFindConfiguration()
         configuration.backwards = !forward
         configuration.caseSensitive = matchCase
-        webView.find(text, configuration: configuration) { result in
-            completion(EngineFindResult(activeMatchOrdinal: result.matchFound ? 1 : 0, numberOfMatches: result.matchFound ? 1 : 0))
+        webView.find(text, configuration: configuration) { [weak self] result in
+            guard let self, result.matchFound else {
+                self?.findQuery = nil
+                return completion(EngineFindResult(activeMatchOrdinal: 0, numberOfMatches: 0))
+            }
+            self.countMatches(of: text, matchCase: matchCase) { count, position in
+                // WebKit found a match the script may not see, such as one in a frame, so the count is at least one.
+                let count = max(count, 1)
+                let isSameSearch = self.findQuery == text
+                let ordinal = position ?? (isSameSearch ? (forward ? self.findOrdinal % count + 1 : (self.findOrdinal + count - 2) % count + 1) : (forward ? 1 : count))
+                self.findQuery = text
+                self.findOrdinal = min(ordinal, count)
+                completion(EngineFindResult(activeMatchOrdinal: self.findOrdinal, numberOfMatches: count))
+            }
         }
     }
-    public func stopFind() {}
+
+    public func stopFind() {
+        findQuery = nil
+    }
+
+    /// Counts the matches in the text of visible elements, as find sees the page, and returns the position of the match that starts at the selection, or `nil` when the selection lies outside that text. It runs in its own script world, out of the page's reach.
+    private func countMatches(of text: String, matchCase: Bool, completion: @escaping (Int, Int?) -> Void) {
+        guard let query = try? JSONSerialization.data(withJSONObject: [text]), let queryJSON = String(data: query, encoding: .utf8) else { return completion(0, nil) }
+        let script = """
+        (() => {
+          const [query] = \(queryJSON);
+          const fold = (s) => \(matchCase ? "s" : "s.toLocaleLowerCase()");
+          const needle = fold(query);
+          const root = document.body || document.documentElement;
+          if (!needle || !root) return [0, -1];
+          const selection = getSelection();
+          const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode(node) {
+            const parent = node.parentElement;
+            if (!parent || parent.closest("script, style, noscript, template")) return NodeFilter.FILTER_REJECT;
+            return parent.checkVisibility && !parent.checkVisibility() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          } });
+          let text = "", mark = -1;
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (range && node === range.startContainer) mark = text.length + range.startOffset;
+            text += node.data;
+          }
+          const haystack = fold(text);
+          let count = 0, position = -1;
+          for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + needle.length)) {
+            count += 1;
+            if (mark >= 0 && position < 0 && i >= mark) position = count;
+          }
+          return [count, position];
+        })()
+        """
+        webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+            guard case .success(let value) = result, let numbers = value as? [NSNumber], numbers.count == 2 else { return completion(0, nil) }
+            let position = numbers[1].intValue
+            completion(numbers[0].intValue, position > 0 ? position : nil)
+        }
+    }
     public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
         webView.evaluateJavaScript(script) { value, error in
             completion(error.map { .failure($0) } ?? .success(value))
