@@ -59,24 +59,31 @@ public final class ChromiumApplication: EngineApplication {
     public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
     public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
     public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
-        let browser = ChromiumBrowser(sessionID: UUID().uuidString, context: context, delegate: delegate, window: window)
+        let browser = ChromiumBrowser(sessionID: UUID().uuidString, context: Self.chromiumContext(context), delegate: delegate, window: window)
         self.delegate?.application(self, didCreateBrowser: browser)
         return browser
     }
     public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) {
-        completion(ChromiumBrowser(sessionID: sessionID, context: context, delegate: delegate, window: nil))
+        completion(ChromiumBrowser(sessionID: sessionID, context: Self.chromiumContext(context), delegate: delegate, window: nil))
+    }
+    private static func chromiumContext(_ context: any EngineBrowserContext) -> ChromiumBrowserContext {
+        guard let context = context as? ChromiumBrowserContext else {
+            preconditionFailure("Chromium browsers require a Chromium browser context")
+        }
+        return context
     }
     public func setBlockLists(_ lists: [URL]) { fatalError("not implemented") }
     public func setExcludedDomains(_ domains: [String]) { fatalError("not implemented") }
 }
 
-/// All regular contexts share a single CEF cache directory until per-profile request contexts are added.
+/// One profile, whose request context keeps its cookies, site storage, caches, and permission answers. Every context uses CEF's global request context until Personas get storage of their own.
 public final class ChromiumBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
     public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
+    let requestContext = ARCHCEFRequestContext.global
 
     init(attributes: EngineBrowserContextAttributes) {
         self.attributes = attributes
@@ -105,28 +112,32 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
         case false?: .block
         case nil: .ask
         }
-        ARCHCEFPermissionStore.setSetting(setting, forPermissions: permission, origin: origin.absoluteString)
+        requestContext.setPermissionSetting(setting, forPermissions: permission, origin: origin.absoluteString)
     }
 }
 
+/// The tabs of one context. Cookies and site data go through the context's request context.
 public final class ChromiumBrowser: EngineBrowser {
     public let sessionID: String
-    public let context: any EngineBrowserContext
+    let chromiumContext: ChromiumBrowserContext
     public weak var window: NSWindow?
     public weak var delegate: (any EngineBrowserDelegate)?
     private var ownedWebContents: [ChromiumWebContents] = []
     /// CEF does not report cookie changes, so this is never called.
     public var cookiesDidChange: (() -> Void)?
 
-    init(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
+    init(sessionID: String, context: ChromiumBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
         self.sessionID = sessionID
-        self.context = context
+        self.chromiumContext = context
         self.delegate = delegate
         self.window = window
     }
 
+    public var context: any EngineBrowserContext { chromiumContext }
+    private var requestContext: ARCHCEFRequestContext { chromiumContext.requestContext }
+
     public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
-        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, context: context as? ChromiumBrowserContext, configuration: configuration)
+        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, context: chromiumContext, requestContext: requestContext, configuration: configuration)
         ownedWebContents.append(webContents)
         return webContents
     }
@@ -143,30 +154,29 @@ public final class ChromiumBrowser: EngineBrowser {
         ownedWebContents.removeAll()
         completion(true)
     }
-    /// Every browser shares CEF's global cookie manager.
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
-        ARCHCEFCookieStore.visitAllCookies { cookies in
+        requestContext.visitAllCookies { cookies in
             completion(cookies.map { EngineCookie(name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, expires: $0.expires, isSecure: $0.secure, isHTTPOnly: $0.httpOnly) })
         }
     }
     public func setCookie(_ cookie: EngineCookie, for url: URL) {
-        ARCHCEFCookieStore.setCookie(Self.bridgeCookie(cookie), forURL: url.absoluteString)
+        requestContext.setCookie(Self.bridgeCookie(cookie), forURL: url.absoluteString)
     }
     public func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
         let addressed = cookies.compactMap { cookie in cookie.originURL.map { (Self.bridgeCookie(cookie), $0.absoluteString) } }
-        ARCHCEFCookieStore.setCookies(addressed.map(\.0), forURLs: addressed.map(\.1), completion: completion)
+        requestContext.setCookies(addressed.map(\.0), forURLs: addressed.map(\.1), completion: completion)
     }
     public func removeCookie(named name: String, for url: URL) {
-        ARCHCEFCookieStore.deleteCookies(forURL: url.absoluteString, name: name)
+        requestContext.deleteCookies(forURL: url.absoluteString, name: name)
     }
     public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
-        ARCHCEFSiteData.deleteCookies(passingTest: { cookie in
+        requestContext.deleteCookies(passingTest: { cookie in
             shouldRemove(EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, isSecure: cookie.secure, isHTTPOnly: cookie.httpOnly))
         }, completion: completion)
     }
     /// Chromium keeps this data by origin. The bridge clears it in a hidden browser, so no tab keeps the DevTools client it needs.
     public func removeSiteData(for origins: [URL], completion: @escaping () -> Void) {
-        ARCHCEFSiteData.clearStorage(forOrigins: origins.map(\.absoluteString), completion: completion)
+        requestContext.clearStorage(forOrigins: origins.map(\.absoluteString), completion: completion)
     }
     private static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
         let value = ARCHCEFCookie()
@@ -202,6 +212,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var canGoForward = false
     private var browser: ARCHCEFBrowser?
     private weak var context: ChromiumBrowserContext?
+    /// The profile the page loads in. Popups load in the same one.
+    private let requestContext: ARCHCEFRequestContext
     private var observers: [any EngineWebContentsNavigationObserver] = []
     private var pendingURL: URL?
     private var findCompletion: ((EngineFindResult) -> Void)?
@@ -216,14 +228,15 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var contextMenu: NSMenu?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
-    init(sessionID: String, context: ChromiumBrowserContext?, configuration: EngineWebContentsConfiguration) {
+    init(sessionID: String, context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
         self.sessionID = sessionID
         self.context = context
+        self.requestContext = requestContext
         self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         self.view.wantsLayer = true
         self.url = configuration.initialURL
         super.init()
-        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", delegate: self)
+        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", requestContext: requestContext, delegate: self)
         browser?.allowsDownloads = !configuration.disallowDownloads
     }
 
@@ -413,7 +426,8 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow
     }
     public func cefBrowserDidRequestPopup(withURL url: String) {
-        let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
+        let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, requestContext: requestContext,
+                                        configuration: EngineWebContentsConfiguration(initialURL: URL(string: url)))
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
     }
     public func cefBrowserDidClose() {

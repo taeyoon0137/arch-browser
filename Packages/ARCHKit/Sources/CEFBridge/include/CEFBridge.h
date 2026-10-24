@@ -35,12 +35,6 @@ typedef NS_ENUM(NSInteger, ARCHCEFPermissionSetting) {
     ARCHCEFPermissionSettingBlock,
 };
 
-/// The answers Chromium's profile keeps from its own permission prompt, which it gives without asking again. Use after `ARCHCEFRuntime` initializes.
-@interface ARCHCEFPermissionStore : NSObject
-/// Sets the answer kept for `origin` and each of `permissions` that the prompt can ask for. Screen capture never reaches the prompt, so nothing is kept for it.
-+ (void)setSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin;
-@end
-
 /// A cookie as the bridge passes it between Swift and CEF's cookie manager.
 @interface ARCHCEFCookie : NSObject
 @property (nonatomic, copy) NSString *name;
@@ -53,25 +47,26 @@ typedef NS_ENUM(NSInteger, ARCHCEFPermissionSetting) {
 @property (nonatomic) BOOL httpOnly;
 @end
 
-/// CEF's global cookie manager, which every browser in the app shares. Use after `ARCHCEFRuntime` initializes.
-@interface ARCHCEFCookieStore : NSObject
+/// A Chromium profile: cookies, site storage, caches, and the permission answers it keeps. Browsers of different contexts never share a render process. Until `ARCHCEFRuntime` initializes and once it begins to shut down, calls change nothing and completions still run.
+@interface ARCHCEFRequestContext : NSObject
+/// The global context, whose profile is `Default` under the root cache path. Ready once the runtime initializes.
+@property (class, nonatomic, readonly) ARCHCEFRequestContext *globalContext;
+- (instancetype)init NS_UNAVAILABLE;
 /// Calls `completion` once on the main thread with every stored cookie, or with none when the store cannot be read.
-+ (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *cookies))completion;
+- (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *cookies))completion;
 /// Stores `cookie` as if `url` had set it. The URL must belong to the cookie's domain.
-+ (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url;
+- (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url;
 /// Stores each cookie as if the URL at the same index had set it, then calls `completion` once on the main thread.
-+ (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion;
+- (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion;
 /// Deletes the cookies named `name` that `url` would send.
-+ (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name;
-@end
-
-/// Removes a site's data from CEF's global request context, which every browser in the app shares. Use after `ARCHCEFRuntime` initializes.
-@interface ARCHCEFSiteData : NSObject
+- (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name;
 /// Deletes every stored cookie that `test` accepts, then calls `completion` once on the main thread after the store has applied the deletions. `test` runs on the main thread.
-+ (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *cookie))test
+- (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *cookie))test
                       completion:(void (^)(void))completion NS_SWIFT_NAME(deleteCookies(passingTest:completion:));
-/// Clears what each origin, such as `https://example.com`, stores besides cookies: local storage, IndexedDB, Cache Storage, service workers, and file systems. The DevTools protocol's `Storage.clearDataForOrigin` runs in a hidden browser that closes afterwards, so no tab keeps a DevTools client. Calls `completion` once on the main thread.
-+ (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion NS_SWIFT_NAME(clearStorage(forOrigins:completion:));
+/// Clears what each origin, such as `https://example.com`, stores besides cookies: local storage, IndexedDB, Cache Storage, service workers, and file systems. The DevTools protocol's `Storage.clearDataForOrigin` runs in a hidden browser of this context that closes afterwards, so no tab keeps a DevTools client. Calls `completion` once on the main thread.
+- (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion NS_SWIFT_NAME(clearStorage(forOrigins:completion:));
+/// Sets the answer the profile keeps from Chromium's own permission prompt, which it gives without asking again, for `origin` and each of `permissions` that the prompt can ask for. Screen capture never reaches the prompt, so nothing is kept for it.
+- (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin;
 @end
 
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
@@ -211,8 +206,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 
 /// One browser embedded as a child of `parentView`. CEF adds its own view inside `parentView`.
 @interface ARCHCEFBrowser : NSObject
+/// Creates the browser in `requestContext`, whose profile the page loads in.
 - (instancetype)initWithParentView:(NSView *)parentView
                                url:(NSString *)url
+                    requestContext:(ARCHCEFRequestContext *)requestContext
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;
 @property (nonatomic, readonly, nullable) NSView *browserView;
 /// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops such downloads when the browser closes, and only this browser can resume an interrupted one.

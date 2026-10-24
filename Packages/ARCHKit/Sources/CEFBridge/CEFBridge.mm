@@ -364,7 +364,7 @@ private:
 
 }  // namespace
 
-#pragma mark - Runtime
+#pragma mark - Cookies
 
 @implementation ARCHCEFCookie
 @end
@@ -456,49 +456,6 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 }  // namespace
 
-@implementation ARCHCEFCookieStore
-
-+ (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {
-    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-    CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
-    if (manager) {
-        manager->VisitAllCookies(collector);
-    }
-}
-
-+ (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
-    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-    if (!manager) {
-        return;
-    }
-    manager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
-}
-
-+ (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
-    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-    NSUInteger count = MIN(cookies.count, urls.count);
-    if (!manager || count == 0) {
-        dispatch_async(dispatch_get_main_queue(), completion);
-        return;
-    }
-    CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
-    for (NSUInteger index = 0; index < count; index++) {
-        // A cookie CEF refuses never calls back, so it counts as finished at once.
-        if (!manager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
-            callback->Finish();
-        }
-    }
-}
-
-+ (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
-    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-    if (manager) {
-        manager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
-    }
-}
-
-@end
-
 #pragma mark - Site data
 
 namespace {
@@ -517,22 +474,13 @@ class CookieFlushCallback : public CefCompletionCallback {
     IMPLEMENT_REFCOUNTING(CookieFlushCallback);
 };
 
-// Deletes the cookies a test accepts as CEF visits them. Once CEF releases the visitor, which also happens when the store has no cookies or cannot be read, it flushes the store; the flush runs after the deletions, so its end reports them applied.
+// Deletes the cookies a test accepts as CEF visits them, and reports once CEF releases the visitor, which also happens when the store has no cookies or cannot be read.
 class CookieDeleter : public CefCookieVisitor {
   public:
     CookieDeleter(BOOL (^test)(ARCHCEFCookie *), void (^completion)(void)) : test_([test copy]), completion_([completion copy]) {}
 
-    ~CookieDeleter() override {
-        void (^completion)(void) = completion_;
-        // CEF releases the visitor inside its own call, so the flush starts on the next turn of the main run loop.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-            CefRefPtr<CookieFlushCallback> callback = new CookieFlushCallback(completion);
-            if (manager) {
-                manager->FlushStore(callback);
-            }
-        });
-    }
+    // CEF releases the visitor inside its own call, so the report waits for the next turn of the main run loop.
+    ~CookieDeleter() override { dispatch_async(dispatch_get_main_queue(), completion_); }
 
     bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
         ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
@@ -641,18 +589,101 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 
 }  // namespace
 
-@implementation ARCHCEFSiteData
+#pragma mark - Request context
 
-+ (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *))test completion:(void (^)(void))completion {
-    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
-    CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, completion);
-    if (manager) {
-        manager->VisitAllCookies(deleter);
+@interface ARCHCEFRequestContext ()
+/// Creates the object before CEF has a context for it.
+- (instancetype)initWithoutContext;
+/// Gives the object CEF's context and that context's cookie manager.
+- (void)attachContext:(CefRefPtr<CefRequestContext>)context;
+/// Releases the CEF objects. Calls after that change nothing.
+- (void)detachContext;
+/// The context for browsers of this profile, or null without one.
+- (CefRefPtr<CefRequestContext>)cefContext;
+@end
+
+@implementation ARCHCEFRequestContext {
+    CefRefPtr<CefRequestContext> _context;
+    CefRefPtr<CefCookieManager> _cookieManager;
+}
+
++ (ARCHCEFRequestContext *)globalContext {
+    static ARCHCEFRequestContext *globalContext;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ globalContext = [[ARCHCEFRequestContext alloc] initWithoutContext]; });
+    return globalContext;
+}
+
+- (instancetype)initWithoutContext {
+    return [super init];
+}
+
+- (void)attachContext:(CefRefPtr<CefRequestContext>)context {
+    _context = context;
+    _cookieManager = context ? context->GetCookieManager(nullptr) : nullptr;
+}
+
+- (void)detachContext {
+    _cookieManager = nullptr;
+    _context = nullptr;
+}
+
+- (CefRefPtr<CefRequestContext>)cefContext {
+    return _context;
+}
+
+- (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {
+    CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
+    if (_cookieManager) {
+        _cookieManager->VisitAllCookies(collector);
     }
 }
 
-+ (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion {
-    if (!gInitialized || origins.count == 0) {
+- (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
+    if (_cookieManager) {
+        _cookieManager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
+    }
+}
+
+- (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
+    NSUInteger count = MIN(cookies.count, urls.count);
+    if (!_cookieManager || count == 0) {
+        dispatch_async(dispatch_get_main_queue(), completion);
+        return;
+    }
+    CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
+    for (NSUInteger index = 0; index < count; index++) {
+        // A cookie CEF refuses never calls back, so it counts as finished at once.
+        if (!_cookieManager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
+            callback->Finish();
+        }
+    }
+}
+
+- (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
+    if (_cookieManager) {
+        _cookieManager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
+    }
+}
+
+/// Writes the cookie store to disk, then calls `completion` once on the main thread.
+- (void)flushCookiesWithCompletion:(void (^)(void))completion {
+    CefRefPtr<CookieFlushCallback> callback = new CookieFlushCallback(completion);
+    if (_cookieManager) {
+        _cookieManager->FlushStore(callback);
+    }
+}
+
+- (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *))test completion:(void (^)(void))completion {
+    // The flush of the store the deleter visited runs after the deletions, so its end reports them applied.
+    CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, ^{ [self flushCookiesWithCompletion:completion]; });
+    if (_cookieManager) {
+        _cookieManager->VisitAllCookies(deleter);
+    }
+}
+
+- (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion {
+    if (!_context || origins.count == 0) {
         dispatch_async(dispatch_get_main_queue(), completion);
         return;
     }
@@ -663,12 +694,45 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
     windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView), CefRect(0, 0, 1, 1));
     windowInfo.hidden = true;
     CefBrowserSettings settings;
-    if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, nullptr)) {
+    if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, _context)) {
         dispatch_async(dispatch_get_main_queue(), completion);
     }
 }
 
+- (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin {
+    if (!_context) {
+        return;
+    }
+    // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
+    struct Mapping {
+        ARCHCEFPermission permission;
+        cef_content_setting_types_t type;
+    };
+    static const Mapping kMappings[] = {
+        {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
+        {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
+        {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
+        {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
+        {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
+        {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
+    };
+    cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
+    if (setting == ARCHCEFPermissionSettingAllow) {
+        value = CEF_CONTENT_SETTING_VALUE_ALLOW;
+    } else if (setting == ARCHCEFPermissionSettingBlock) {
+        value = CEF_CONTENT_SETTING_VALUE_BLOCK;
+    }
+    CefString url(origin.UTF8String);
+    for (const Mapping &mapping : kMappings) {
+        if (permissions & mapping.permission) {
+            _context->SetContentSetting(url, url, mapping.type, value);
+        }
+    }
+}
+
 @end
+
+#pragma mark - Runtime
 
 @interface ARCHCEFBrowser ()
 - (void)applyAccessibilityState;
@@ -708,6 +772,7 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
         return NO;
     }
     gInitialized = true;
+    [ARCHCEFRequestContext.globalContext attachContext:CefRequestContext::GetGlobalContext()];
     // CEF shuts down only once AppKit has decided to quit, so a quit that does not happen leaves the engine running.
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification
                                                       object:nil
@@ -727,6 +792,8 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
         return;
     }
     gInitialized = false;
+    // CEF asserts in debug builds on references the app still holds when it shuts down. Storage calls from here on change nothing, as they did before the runtime initialized.
+    [ARCHCEFRequestContext.globalContext detachContext];
     // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashes once Chrome-style developer tools have opened. The closes run CEF's work for at most two seconds.
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
         [browser close];
@@ -756,44 +823,6 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
     CefMainArgs mainArgs(argc, argv);
     CefRefPtr<CefApp> app = new HelperApp();
     return CefExecuteProcess(mainArgs, app, nullptr);
-}
-
-@end
-
-#pragma mark - Permission settings
-
-@implementation ARCHCEFPermissionStore
-
-+ (void)setSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin {
-    CefRefPtr<CefRequestContext> context = gInitialized ? CefRequestContext::GetGlobalContext() : nullptr;
-    if (!context) {
-        return;
-    }
-    // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
-    struct Mapping {
-        ARCHCEFPermission permission;
-        cef_content_setting_types_t type;
-    };
-    static const Mapping kMappings[] = {
-        {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
-        {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
-        {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
-        {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
-        {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
-        {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
-    };
-    cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
-    if (setting == ARCHCEFPermissionSettingAllow) {
-        value = CEF_CONTENT_SETTING_VALUE_ALLOW;
-    } else if (setting == ARCHCEFPermissionSettingBlock) {
-        value = CEF_CONTENT_SETTING_VALUE_BLOCK;
-    }
-    CefString url(origin.UTF8String);
-    for (const Mapping &mapping : kMappings) {
-        if (permissions & mapping.permission) {
-            context->SetContentSetting(url, url, mapping.type, value);
-        }
-    }
 }
 
 @end
@@ -1480,7 +1509,10 @@ private:
 @synthesize currentURL = _currentURL;
 @synthesize title = _title;
 
-- (instancetype)initWithParentView:(NSView *)parentView url:(NSString *)url delegate:(id<ARCHCEFBrowserDelegate>)delegate {
+- (instancetype)initWithParentView:(NSView *)parentView
+                               url:(NSString *)url
+                    requestContext:(ARCHCEFRequestContext *)requestContext
+                          delegate:(id<ARCHCEFBrowserDelegate>)delegate {
     self = [super init];
     if (!self) {
         return nil;
@@ -1501,7 +1533,7 @@ private:
     windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView),
                           CefRect(0, 0, (int)NSWidth(bounds), (int)NSHeight(bounds)));
     CefBrowserSettings settings;
-    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, nullptr, nullptr);
+    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, nullptr, [requestContext cefContext]);
     return self;
 }
 
