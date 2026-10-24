@@ -381,7 +381,7 @@ struct SidebarView: View {
                     SidebarTopRow(session: session, windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
-                // The space pages reach the sidebar's edges so that they slide in from outside it.
+                // The space pages reach the sidebar's edges so that they slide in from outside it. The clip comes before the negative margin, which would otherwise move it in to the margin's line and cut a lifted tab's shadow.
                 VStack(alignment: .leading, spacing: 8) {
                     if !session.favorites.isEmpty {
                         FavoritesGridView(session: session)
@@ -391,8 +391,8 @@ struct SidebarView: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 6)
-                .padding(.horizontal, -Self.inset)
                 .clipped()
+                .padding(.horizontal, -Self.inset)
             }
             // The swipe area reaches the sidebar's edges and the gap above the bar. It rests while the library has pushed the sidebar aside, because its area then reaches over the page.
             .background(SpaceSwipeView(isEnabled: !session.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
@@ -721,8 +721,9 @@ struct SpacePagesView: View {
                 let isCurrent = space.id == session.currentSpaceID
                 SpaceTabsView(session: session, space: space)
                     .frame(width: width)
-                    // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar.
+                    // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar, or from reaching assistive apps.
                     .allowsHitTesting(isCurrent)
+                    .accessibilityElement(children: isCurrent ? .contain : .ignore)
                     .accessibilityHidden(!isCurrent)
             }
         }
