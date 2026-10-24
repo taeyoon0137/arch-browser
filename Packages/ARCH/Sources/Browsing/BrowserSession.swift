@@ -263,9 +263,10 @@ public final class BrowserSession: ObservableObject {
     public func switchToSpace(_ id: UUID) {
         guard spaces.contains(where: { $0.id == id }) else { return }
         isLibraryVisible = false
+        // A selected favorite's tab belongs to no space and shows in the current one. It stays selected while the space stays, and stays open behind a new space's own tab.
+        let selectedSpaceID = selectedTab.map { $0.spaceID ?? currentSpaceID }
         currentSpaceID = id
-        // A selected favorite's tab belongs to no space; it stays open behind the space's own tab.
-        if selectedTab?.spaceID != id {
+        if selectedSpaceID != id {
             // The first tab row the sidebar shows, open tabs before pinned ones. Only a space whose tabs all sit in collapsed folders selects a hidden tab.
             let spaceTabs = tabs(in: id, pinned: false) + tabs(in: id, pinned: true)
             selectedTabID = (spaceTabs.first { !isInCollapsedFolder($0) } ?? spaceTabs.first)?.id
@@ -435,11 +436,14 @@ public final class BrowserSession: ObservableObject {
         favorites.compactMap { favoriteTabs[$0.id] }
     }
 
-    /// Forgets the favorite's saved tab and closes its open one once the page agrees, then runs `didEnd`.
+    /// Forgets the favorite's saved tab and closes its open one once the page agrees, then runs `didEnd`. As with ⌘W on the tab, ⌘Z then reopens none of the tabs closed before it.
     private func endFavoriteTab(_ favorite: Favorite, then didEnd: @escaping () -> Void) {
         savedFavoriteTabs[favorite.id] = nil
         guard let tab = favoriteTabs[favorite.id] else { return didEnd() }
-        closeWhenPageAgrees(tab, then: didEnd)
+        closeWhenPageAgrees(tab) { [weak self] in
+            self?.forgetUndoableCloses()
+            didEnd()
+        }
     }
 
     // MARK: Previews
@@ -636,7 +640,8 @@ public final class BrowserSession: ObservableObject {
     public func requestCloseTab(_ tab: Tab) {
         let isUndoable = tab.spaceID != nil
         closeWhenPageAgrees(tab) { [weak self] in
-            if isUndoable { self?.undoableCloseCount += 1 }
+            // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
+            if isUndoable { self?.undoableCloseCount += 1 } else { self?.forgetUndoableCloses() }
         }
     }
 
@@ -1811,6 +1816,8 @@ public final class BrowserSession: ObservableObject {
             restored[index] = tab
         }
         restoreSplitViews(snapshot.splitViews ?? [], from: restored)
+        // A selected favorite's tab takes the selection once `restoreFavoriteTabs` opens it, so no space tab stands in for it and counts as just used.
+        guard !favorites.contains(where: { $0.id == snapshot.selectedFavoriteID }) else { return }
         selectedTabID = selected?.id ?? tabs.first { $0.spaceID == currentSpaceID }?.id
     }
 
