@@ -153,6 +153,7 @@ public final class BrowserSession: ObservableObject {
         NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)
             .sink { [weak self] _ in self?.showNextSheet() }
             .store(in: &cancellables)
+        nowPlaying = NowPlaying(session: self)
     }
 
     public enum SessionError: Error {
@@ -1232,6 +1233,11 @@ public final class BrowserSession: ObservableObject {
             }
         }
     }
+
+    // MARK: Now Playing
+
+    /// Shows the media of the selected or most recently audible tab in Now Playing and sends the media keys to it.
+    private var nowPlaying: NowPlaying?
 
     // MARK: Persistence
 

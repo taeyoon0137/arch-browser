@@ -220,7 +220,17 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var isAudible = false
     public var selectedText: String? { nil }
     public private(set) var isFullscreen = false
-    public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
+    public var mediaSession: any EngineMediaSession { chromiumMediaSession }
+    /// Follows each frame's media as the helper's renderer script reports it.
+    private lazy var chromiumMediaSession = ScriptMediaSession { [weak self] frame, action in
+        let bridgeAction: ARCHCEFMediaAction = switch action {
+        case .play: .play
+        case .pause: .pause
+        case .previousTrack: .previousTrack
+        case .nextTrack: .nextTrack
+        }
+        self?.browser?.performMediaAction(bridgeAction, inFrame: frame)
+    }
     public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.append(observer) }
     public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.removeAll { $0 === observer } }
     public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
@@ -526,6 +536,9 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.isAudible = isAudible
         uiDelegate?.webContentsDidChangeAudibleState(self)
     }
+    public func cefBrowserDidChangeMedia(_ media: [String: Any]?, frame: String) {
+        chromiumMediaSession.update(document: frame, report: media)
+    }
 
     public func cefBrowserDidChangeThemeColor(_ color: String) {
         let themeColor = Self.color(fromCanvasStyle: color)
@@ -556,6 +569,8 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
     public func cefBrowserRenderProcessDidTerminate() {
+        // The page's frames never report their media again.
+        chromiumMediaSession.removeAllDocuments()
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)
         uiDelegate?.webContentsProcessDidTerminate(self)

@@ -165,6 +165,9 @@ public:
             command_line->AppendSwitch("use-mock-keychain");
             // Without it Chromium shows its own sign-in window and never asks GetAuthCredentials.
             command_line->AppendSwitch("disable-chrome-login-prompt");
+            // The app feeds Now Playing and answers the media keys for both engines. Chromium's own media controls would use the same process-wide centers, so they stay off.
+            std::string disabled = command_line->GetSwitchValue("disable-features").ToString();
+            command_line->AppendSwitchWithValue("disable-features", disabled.empty() ? "HardwareMediaKeyHandling" : disabled + ",HardwareMediaKeyHandling");
         }
     }
 
@@ -192,16 +195,60 @@ const char kThemeColorScript[] = R"JS((() => {
 })())JS";
 
 const char kAudibleReport[] = "ARCHAudibleReport";
+const char kMediaReport[] = "ARCHMediaReport";
 
-// Reports whether the document's media elements play sound. Keep it in step with WebKitAudibleScript in the WebKit adapter.
+// Reports whether the document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in the page's world before the page's scripts, so it records the page's action handlers as the page sets them and runs them for the media keys. Keep it in step with WebKitAudibleScript in the WebKit adapter.
 const char kAudibleScript[] = R"JS((() => {
-  const report = __archReportAudible;
-  let audible = false;
-  const set = (now) => { if (now !== audible) { audible = now; report(now); } };
-  const update = () => set([...document.querySelectorAll("video, audio")].some((m) => !m.paused && !m.ended && !m.muted && m.volume > 0));
-  for (const type of ["play", "playing", "pause", "ended", "volumechange", "emptied"]) document.addEventListener(type, update, true);
-  addEventListener("pagehide", () => set(false));
-  addEventListener("pageshow", update);
+  const report = __archReportAudible, reportMedia = __archReportMedia, stringify = JSON.stringify, apply = Reflect.apply;
+  const session = navigator.mediaSession, handlers = new Map();
+  let audible = false, hidden = false, current = null, reported = "null";
+  const sounds = (m) => !m.paused && !m.ended && !m.muted && m.volume > 0;
+  const largest = (artwork) => {
+    let best = "", area = -1;
+    for (const image of artwork || []) {
+      const sizes = String(image.sizes || "").toLowerCase().split(/\s+/);
+      const size = sizes.includes("any") ? Infinity : Math.max(0, ...sizes.map((s) => { const [w, h] = s.split("x").map(Number); return w * h || 0; }));
+      if (size > area) { area = size; best = image.src; }
+    }
+    return best;
+  };
+  const describe = () => {
+    if (hidden || !current || !current.isConnected) return null;
+    const metadata = session && session.metadata, duration = current.duration;
+    return {
+      playing: !current.paused && !current.ended, duration: Number.isFinite(duration) ? duration : 0, live: duration === Infinity,
+      position: current.currentTime, rate: current.playbackRate,
+      metadata: metadata && { title: metadata.title, artist: metadata.artist, album: metadata.album, artwork: largest(metadata.artwork) },
+      next: handlers.has("nexttrack"), previous: handlers.has("previoustrack"),
+    };
+  };
+  const updateMedia = () => { const text = stringify(describe()); if (text !== reported) { reported = text; reportMedia(text); } };
+  const update = (event) => {
+    if (event && event.target instanceof HTMLMediaElement && sounds(event.target)) current = event.target;
+    const now = !hidden && [...document.querySelectorAll("video, audio")].some(sounds);
+    if (now !== audible) { audible = now; report(now); }
+    updateMedia();
+  };
+  for (const type of ["play", "playing", "pause", "ended", "volumechange", "emptied", "seeked", "ratechange", "durationchange", "loadedmetadata"]) document.addEventListener(type, update, true);
+  addEventListener("pagehide", () => { hidden = true; update(); });
+  addEventListener("pageshow", () => { hidden = false; update(); });
+  if (session) {
+    const prototype = Object.getPrototypeOf(session), original = prototype.setActionHandler, metadata = Object.getOwnPropertyDescriptor(prototype, "metadata");
+    prototype.setActionHandler = function setActionHandler(action, handler) {
+      apply(original, this, [action, handler]);
+      if (this !== session) return;
+      if (typeof handler === "function") handlers.set(action, handler); else handlers.delete(action);
+      updateMedia();
+    };
+    if (metadata && metadata.set) Object.defineProperty(prototype, "metadata", { ...metadata, set(value) { apply(metadata.set, this, [value]); if (this === session) updateMedia(); } });
+  }
+  // The browser runs media actions through this function, which pages can call but not replace: the page's own handler, or else the media itself.
+  Object.defineProperty(window, "__archMediaControl", { value: (action) => {
+    const handler = handlers.get(action);
+    if (handler) return void apply(handler, session, [{ action }]);
+    if (action === "play" && current) current.play().catch(() => {});
+    if (action === "pause") { if (current) current.pause(); for (const m of document.querySelectorAll("video, audio")) if (sounds(m)) m.pause(); }
+  } });
 })())JS";
 
 // Sends a frame's audible state from its renderer to the browser, which tracks each frame.
@@ -223,17 +270,39 @@ private:
     IMPLEMENT_REFCOUNTING(AudibleReporter);
 };
 
+// Sends a frame's media, as the JSON text the media script writes, from its renderer to the browser.
+class MediaReporter : public CefV8Handler {
+public:
+    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
+                 CefString &exception) override {
+        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
+        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
+        if (arguments.size() == 1 && arguments[0]->IsString() && frame) {
+            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kMediaReport);
+            message->GetArgumentList()->SetString(0, arguments[0]->GetStringValue());
+            frame->SendProcessMessage(PID_BROWSER, message);
+        }
+        return true;
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(MediaReporter);
+};
+
 // Runs in the helper's renderer processes and answers the browser's requests for values only a page's script can read.
 class HelperApp : public CefApp, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
 
-    // Every frame's document reports its audible state, through a function pages can call but not replace.
+    // Every frame's document reports its audible state and its media, through functions pages can call but not replace.
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
         if (!context->Enter()) {
             return;
         }
         context->GetGlobal()->SetValue("__archReportAudible", CefV8Value::CreateFunction("__archReportAudible", new AudibleReporter()),
+                                       static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
+                                                                               V8_PROPERTY_ATTRIBUTE_DONTDELETE));
+        context->GetGlobal()->SetValue("__archReportMedia", CefV8Value::CreateFunction("__archReportMedia", new MediaReporter()),
                                        static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
                                                                                V8_PROPERTY_ATTRIBUTE_DONTDELETE));
         CefRefPtr<CefV8Value> result;
@@ -877,6 +946,7 @@ private:
 - (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleThemeColor:(NSString *)color;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
+- (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -1166,6 +1236,10 @@ public:
             [owner_ handleAudible:message->GetArgumentList()->GetBool(0) frame:ToNSString(frame->GetIdentifier())];
             return true;
         }
+        if (message->GetName() == kMediaReport && frame) {
+            [owner_ handleMedia:ToNSString(message->GetArgumentList()->GetString(0)) frame:ToNSString(frame->GetIdentifier())];
+            return true;
+        }
         return false;
     }
 
@@ -1393,6 +1467,36 @@ private:
     if ((_audibleFrames.count > 0) != wasAudible) {
         [_delegate cefBrowserDidChangeAudible:!wasAudible];
     }
+}
+
+- (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier {
+    // The script writes `null` for a frame without media, which the parser rejects as a top-level value.
+    id media = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    [_delegate cefBrowserDidChangeMedia:[media isKindOfClass:NSDictionary.class] ? media : nil frame:frameIdentifier];
+}
+
+- (void)performMediaAction:(ARCHCEFMediaAction)action inFrame:(NSString *)frameIdentifier {
+    const char *name = nullptr;
+    switch (action) {
+        case ARCHCEFMediaActionPlay:
+            name = "play";
+            break;
+        case ARCHCEFMediaActionPause:
+            name = "pause";
+            break;
+        case ARCHCEFMediaActionPreviousTrack:
+            name = "previoustrack";
+            break;
+        case ARCHCEFMediaActionNextTrack:
+            name = "nexttrack";
+            break;
+    }
+    CefRefPtr<CefFrame> frame = _browser ? _browser->GetFrameByIdentifier(CefString(frameIdentifier.UTF8String)) : nullptr;
+    if (!name || !frame) {
+        return;
+    }
+    // The media script defines this function so that pages can call it but not replace it.
+    frame->ExecuteJavaScript(CefString(std::string("__archMediaControl(\"") + name + "\")"), frame->GetURL(), 0);
 }
 
 - (void)exitFullscreenWillResize:(BOOL)willResize {

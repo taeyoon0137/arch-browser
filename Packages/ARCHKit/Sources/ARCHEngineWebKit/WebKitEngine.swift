@@ -243,6 +243,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     private var dismissPendingDialog: (() -> Void)?
     /// The documents, in any frame, whose media elements play sound.
     var audibleDocuments: Set<String> = []
+    /// The frame of each document that reports media, where its media actions run.
+    var mediaFrames: [String: WKFrameInfo] = [:]
+    lazy var webKitMediaSession = ScriptMediaSession { [weak self] document, action in self?.performMediaAction(action, inDocument: document) }
     /// The last search and the position of its active match, kept for when the page's selection cannot place the match.
     private var findQuery: String?
     private var findOrdinal = 0
@@ -314,7 +317,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         set { webView.pageZoom = newValue }
     }
     public var isFullscreen: Bool { webView.fullscreenState == .inFullscreen }
-    public var mediaSession: any EngineMediaSession { fatalError("skeleton") }
+    public var mediaSession: any EngineMediaSession { webKitMediaSession }
     public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {
         observers.append(observer)
     }

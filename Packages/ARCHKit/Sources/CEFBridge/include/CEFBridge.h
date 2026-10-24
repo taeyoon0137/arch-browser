@@ -89,6 +89,14 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandSelectAll = 1 << 3,
 };
 
+/// Actions the media keys send to a frame's media: the page's Media Session handler runs when the page set one; play and pause otherwise reach the media itself.
+typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
+    ARCHCEFMediaActionPlay,
+    ARCHCEFMediaActionPause,
+    ARCHCEFMediaActionPreviousTrack,
+    ARCHCEFMediaActionNextTrack,
+};
+
 /// One page in a browser's back-forward list.
 @interface ARCHCEFNavigationEntry : NSObject
 /// The page's place in the list, from 0 for the oldest.
@@ -155,10 +163,11 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)cefBrowserDidChangeThemeColor:(NSString *)color;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
-/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own.
+/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own. /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
 - (void)cefBrowserDevToolsDidOpenWindow:(NSWindow *)window;
 /// Reports that the developer tools closed.
 - (void)cefBrowserDevToolsDidClose;
+- (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port
@@ -210,6 +219,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)goBack;
 - (void)goForward;
 - (void)executeJavaScript:(NSString *)script;
+/// Sends a media action to the frame that reported media through `cefBrowserDidChangeMedia:frame:`. Nothing happens once the frame is gone.
+- (void)performMediaAction:(ARCHCEFMediaAction)action inFrame:(NSString *)frameIdentifier NS_SWIFT_NAME(performMediaAction(_:inFrame:));
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the search and leaves the active match selected.
 - (void)stopFinding;
