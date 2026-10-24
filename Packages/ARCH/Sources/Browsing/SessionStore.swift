@@ -1,10 +1,10 @@
-// Saves and restores sidebar state (spaces, favorites and their tabs, tabs, tab folders, closed tabs, split views, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
+// Saves and restores sidebar state (Personas, spaces, favorites and their tabs, tabs, tab folders, closed tabs, split views, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
 import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, and version 8 each tab's ID. Files without a version are version 1.
-    static let currentVersion = 8
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, and version 9 the Personas with the Persona of each space, favorite, and tab. Files without a version are version 1.
+    static let currentVersion = 9
 
     struct TabRecord: Codable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -23,6 +23,8 @@ struct SessionSnapshot: Codable {
         var engine: EngineKind?
         /// The engine's restorable page state, such as WebKit's back-forward list. `nil` for engines that keep none, in closed-tab records, and in files before version 3.
         var state: Data?
+        /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
+        var personaID: UUID?
     }
 
     /// A favorite's tab, which opens where it was when the favorite is next opened.
@@ -38,6 +40,8 @@ struct SessionSnapshot: Codable {
 
     var version: Int?
 
+    /// Every Persona, the default one among them. `nil` in files before version 9.
+    var personas: [Persona]?
     var spaces: [Space]
     var currentSpaceID: UUID
     var favorites: [Favorite]
@@ -70,7 +74,43 @@ struct SessionSnapshot: Codable {
         snapshot.tabs = withUniqueIDs(tabs, at: \.id)
         snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
+        snapshot.assignPersonas()
         return snapshot
+    }
+
+    /// What the session starts from when nothing was saved or the file did not load. Normalizing it gives the default Persona and its first space.
+    static var empty: SessionSnapshot { SessionSnapshot(spaces: [], currentSpaceID: UUID(), favorites: [], tabs: []) }
+
+    /// Gives every space and favorite a listed Persona, every Persona a space, and the tab records their Personas. Files before version 9 list none, so everything joins the default Persona. An item whose Persona is not listed joins the first Persona, as in sync's orphan rule.
+    private mutating func assignPersonas() {
+        // The default Persona is always there, first unless the file placed it elsewhere. A Persona listed twice keeps its first place.
+        var listed: Set<UUID> = []
+        var personas = (self.personas ?? []).filter { listed.insert($0.id).inserted }
+        if !listed.contains(Persona.defaultID) {
+            personas.insert(Persona(id: Persona.defaultID, name: "Default"), at: 0)
+            listed.insert(Persona.defaultID)
+        }
+        let firstPersonaID = personas[0].id
+        func knownPersonaID(_ id: UUID?) -> UUID {
+            guard let id else { return Persona.defaultID }
+            return listed.contains(id) ? id : firstPersonaID
+        }
+        for index in spaces.indices { spaces[index].personaID = knownPersonaID(spaces[index].personaID) }
+        for index in favorites.indices { favorites[index].personaID = knownPersonaID(favorites[index].personaID) }
+        // Each Persona's spaces sit together in Persona order and keep their own order. A Persona without spaces gets one, as at first launch.
+        spaces = personas.flatMap { persona in
+            let own = spaces.filter { $0.personaID == persona.id }
+            return own.isEmpty ? [Space(name: "Personal", personaID: persona.id)] : own
+        }
+        // An open tab belongs to its space's Persona; a record whose space is gone does not reopen, so it stays as it is. A closed tab keeps its own Persona, or takes its space's, or the default Persona.
+        let spacePersonaIDs = Dictionary(spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
+        for index in tabs.indices { tabs[index].personaID = spacePersonaIDs[tabs[index].spaceID] ?? tabs[index].personaID }
+        closedTabs = closedTabs?.map { record in
+            var record = record
+            record.personaID = record.personaID ?? spacePersonaIDs[record.spaceID] ?? Persona.defaultID
+            return record
+        }
+        self.personas = personas
     }
 }
 

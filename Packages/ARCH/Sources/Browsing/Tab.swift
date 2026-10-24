@@ -12,6 +12,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var webContents: any EngineWebContents
     /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space.
     @Published public var spaceID: UUID?
+    /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
+    public let personaID: UUID
     @Published public var isPinned: Bool
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
@@ -68,11 +70,12 @@ public final class Tab: ObservableObject, Identifiable {
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private var isDownloadOnly = false
 
-    init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool) {
+    init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
         self.webContents = webContents
         self.spaceID = spaceID
         self.isPinned = isPinned
+        self.personaID = personaID
         self.title = webContents.title
         self.url = webContents.url
         self.isLoading = webContents.isLoading

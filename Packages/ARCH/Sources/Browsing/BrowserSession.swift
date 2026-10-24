@@ -1,4 +1,4 @@
-// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites and the tabs they keep alive, tabs, tab folders, and the closed-tab list. Archives inactive tabs on a timer.
+// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
@@ -31,6 +31,8 @@ public final class BrowserSession: ObservableObject {
     private let cookieSync = CookieSync()
     /// The spaces' tabs. Favorites keep their own tabs in `favoriteTabs`.
     @Published public private(set) var tabs: [Tab] = []
+    /// Every Persona, the default one among them. Each space, favorite, and tab belongs to one.
+    @Published public private(set) var personas: [Persona] = []
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
     @Published public var currentSpaceID: UUID
@@ -147,14 +149,14 @@ public final class BrowserSession: ObservableObject {
         guard let started else { throw SessionError.noEngineStarted }
         primaryEngine = started.kind
         store = SessionStore(directory: userDataDirectory)
-        let snapshot = store.load()
-        let restoredSpaces = snapshot?.spaces ?? []
-        let initialSpaces = restoredSpaces.isEmpty ? [Space(name: "Personal")] : restoredSpaces
-        spaces = initialSpaces
-        currentSpaceID = initialSpaces.first { $0.id == snapshot?.currentSpaceID }?.id ?? initialSpaces[0].id
-        favorites = snapshot?.favorites ?? []
-        folders = snapshot?.folders?.filter { folder in initialSpaces.contains { $0.id == folder.spaceID } } ?? []
-        closedTabs = snapshot?.closedTabs ?? []
+        // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
+        let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
+        personas = snapshot.personas ?? []
+        spaces = snapshot.spaces
+        currentSpaceID = snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id
+        favorites = snapshot.favorites
+        folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
+        closedTabs = snapshot.closedTabs ?? []
         cookieSync.runtimes = { [weak self] in self.map { Array($0.runtimes.values) } ?? [] }
         adoptRuntime(started)
         restoreTabs(snapshot)
@@ -251,11 +253,12 @@ public final class BrowserSession: ObservableObject {
         folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
     }
 
+    /// Adds a space to the current space's Persona and shows it.
     public func addSpace() {
         let tint = SpaceTint.colors[spaces.count % SpaceTint.colors.count]
         // The lowest number no space uses, so names do not repeat after a deletion.
         let number = (1...).first { number in !spaces.contains { $0.name == "Space \(number)" } }!
-        let space = Space(name: "Space \(number)", tint: tint)
+        let space = Space(name: "Space \(number)", tint: tint, personaID: currentSpace.resolvedPersonaID)
         spaces.append(space)
         switchToSpace(space.id)
     }
@@ -378,16 +381,22 @@ public final class BrowserSession: ObservableObject {
     /// The favorites' tabs from the last session, by favorite ID. Each opens where it was when its favorite is next opened, so launching loads none of them.
     @Published private var savedFavoriteTabs: [UUID: SessionSnapshot.FavoriteTabRecord] = [:]
 
+    /// Adds the tab's page to the favorites of the tab's Persona, unless it is one of them already.
     public func addFavorite(_ tab: Tab) {
-        guard let url = tab.url, !favorites.contains(where: { $0.url == url }) else { return }
-        favorites.append(Favorite(url: url, title: tab.displayTitle))
+        guard let url = tab.url, !favorites.contains(where: { $0.url == url && $0.resolvedPersonaID == tab.personaID }) else { return }
+        favorites.append(Favorite(url: url, title: tab.displayTitle, personaID: tab.personaID))
     }
 
-    /// Appends, in order, the favorites whose addresses are not favorites yet, and returns how many it added. Import uses it for bookmarks.
+    /// Appends, in order, the favorites whose addresses are not favorites of the current space's Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
     @discardableResult
     public func addFavorites(_ candidates: [Favorite]) -> Int {
-        var addresses = Set(favorites.map(\.url))
-        let added = candidates.filter { addresses.insert($0.url).inserted }
+        let personaID = currentSpace.resolvedPersonaID
+        var addresses = Set(favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
+        let added = candidates.filter { addresses.insert($0.url).inserted }.map { candidate in
+            var favorite = candidate
+            favorite.personaID = personaID
+            return favorite
+        }
         favorites += added
         return added.count
     }
@@ -406,7 +415,7 @@ public final class BrowserSession: ObservableObject {
             return
         }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), id: saved?.id ?? UUID(), spaceID: nil, pinned: false)
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
         if let saved {
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -527,17 +536,18 @@ public final class BrowserSession: ObservableObject {
         runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
     }
 
-    /// Adds a tab for `webContents` to a space's list. A tab that restores or reopens passes its saved `id`.
+    /// Adds a tab for `webContents` to a space's list, in the space's Persona. A tab that restores or reopens passes its saved `id`.
     private func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
-        let tab = makeTab(webContents, id: id, spaceID: spaceID, pinned: pinned)
+        let space = spaces.first { $0.id == spaceID } ?? currentSpace
+        let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: space.resolvedPersonaID, pinned: pinned)
         tabs.append(tab)
         if select { selectedTabID = tab.id }
         return tab
     }
 
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
-    private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, pinned: Bool) -> Tab {
-        let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned)
+    private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
+        let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
@@ -672,7 +682,7 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         retire(tab.webContents)
         if remember, let spaceID = tab.spaceID {
-            closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind))
+            closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
         // A focused pane hands the selection to the pane beside it, so the rest of its split view stays on screen; a favorite's tab leaves the selection to a tab of the current space.
@@ -891,14 +901,12 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Plugins
 
-    /// The plugins of the default Persona. `nil` until the app loads its built-in plugins at launch.
+    /// The plugins of the default Persona, to which every plugin belongs until each Persona has plugins of its own. `nil` until the app loads its built-in plugins at launch.
     public private(set) var plugins: PluginManager?
-    /// Every plugin belongs to this Persona until Personas (III.12) exist. III.12 adopts it for the Persona that an earlier session loads into.
-    private static let defaultPersonaID = PersonaID(uuidString: "BADC6939-A237-47E4-9A77-4009814D1BCA")!
 
     /// Creates the plugin manager with the built-in plugins the app ships. The app calls it once at launch.
     @MainActor public func loadPlugins(builtIns: [any BuiltInPlugin.Type]) {
-        plugins = PluginManager(persona: Self.defaultPersonaID, builtIns: builtIns)
+        plugins = PluginManager(persona: Persona.defaultID, builtIns: builtIns)
     }
 
     /// Closes the palette and runs a plugin command chosen in it on the selected tab.
@@ -1792,8 +1800,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Persistence
 
-    private func restoreTabs(_ snapshot: SessionSnapshot?) {
-        guard let snapshot else { return }
+    private func restoreTabs(_ snapshot: SessionSnapshot) {
         // Archive stale unpinned records before they have web contents.
         let cutoff = Self.archiveCutoff(now: Date())
         var selected: Tab?
@@ -1822,16 +1829,16 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Keeps the favorites' tabs from the last session until their favorites open them. The tab that was selected opens now, so the window shows the page it showed.
-    private func restoreFavoriteTabs(_ snapshot: SessionSnapshot?) {
-        for record in snapshot?.favoriteTabs ?? [] where favorites.contains(where: { $0.id == record.favoriteID }) {
+    private func restoreFavoriteTabs(_ snapshot: SessionSnapshot) {
+        for record in snapshot.favoriteTabs ?? [] where favorites.contains(where: { $0.id == record.favoriteID }) {
             savedFavoriteTabs[record.favoriteID] = record
         }
-        if let favorite = favorites.first(where: { $0.id == snapshot?.selectedFavoriteID }) { openFavorite(favorite) }
+        if let favorite = favorites.first(where: { $0.id == snapshot.selectedFavoriteID }) { openFavorite(favorite) }
     }
 
     private func observeChanges() {
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, $currentSpaceID.map { _ in () })
-            .merge(with: $selectedTabID.map { _ in () })
+            .merge(with: $selectedTabID.map { _ in () }, $personas.map { _ in () })
             .merge(with: $closedTabs.map { _ in () })
             .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () }, $folders.map { _ in () }, $splitTabIDs.map { _ in () })
             .dropFirst()
@@ -1848,8 +1855,8 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func snapshot() -> SessionSnapshot {
-        SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
+        SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
+                        tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
                         folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
                         splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
     }

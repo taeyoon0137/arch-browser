@@ -1,7 +1,7 @@
 // A plugin's identity and manifest: what it declares before any of its code runs, and what the user grants it. `docs/plugins.md` describes the whole plugin system.
 import Foundation
 
-/// Identifies a Persona, which owns its installed plugins. Personas do not exist yet, so the session gives every plugin one default Persona.
+/// Identifies a Persona, which owns its installed plugins. Until each Persona has plugins of its own, the session gives every plugin the default Persona.
 public typealias PersonaID = UUID
 
 /// A reverse-DNS identifier, such as `local.arch.browser.page-address`.

@@ -1,4 +1,4 @@
-// Spaces group sidebar tabs, and folders group tabs inside a space. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. `symbol` is an SF Symbol name.
+// Spaces group sidebar tabs, and folders group tabs inside a space. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. Each space and favorite belongs to a Persona. `symbol` is an SF Symbol name.
 import Foundation
 
 public struct Space: Identifiable, Codable, Hashable {
@@ -8,6 +8,8 @@ public struct Space: Identifiable, Codable, Hashable {
     public var tint: SpaceTint
     /// The page Home opens in the selected tab. `nil` when the user has set none or the file predates home pages.
     public var homeURL: URL?
+    /// The space's Persona. `nil` in files before version 9 until `normalized()` gives every space one; code reads `resolvedPersonaID`.
+    public var personaID: UUID?
 
     /// The symbols the space menu offers, with their names.
     public static let symbolChoices: [(symbol: String, name: String)] = [
@@ -15,12 +17,15 @@ public struct Space: Identifiable, Codable, Hashable {
         ("book.fill", "Book"), ("graduationcap.fill", "Graduation Cap"), ("leaf.fill", "Leaf"), ("gamecontroller.fill", "Game Controller"), ("cart.fill", "Cart"),
     ]
 
-    public init(id: UUID = UUID(), name: String, symbol: String = "circle.fill", tint: SpaceTint = .blue) {
+    public init(id: UUID = UUID(), name: String, symbol: String = "circle.fill", tint: SpaceTint = .blue, personaID: UUID? = nil) {
         self.id = id
         self.name = name
         self.symbol = symbol
         self.tint = tint
+        self.personaID = personaID
     }
+
+    public var resolvedPersonaID: UUID { personaID ?? Persona.defaultID }
 }
 
 /// A space's theme: a tint color, or Automatic for the accent color chosen in System Settings. `session.json` stores the raw value, so Automatic needs no new snapshot version.
@@ -44,10 +49,15 @@ public struct Favorite: Identifiable, Codable, Hashable {
     public var id: UUID
     public var url: URL
     public var title: String
+    /// The favorite's Persona. `nil` in files before version 9 until `normalized()` gives every favorite one, and in imported bookmarks until the session adds them; code reads `resolvedPersonaID`.
+    public var personaID: UUID?
 
-    public init(id: UUID = UUID(), url: URL, title: String) {
+    public init(id: UUID = UUID(), url: URL, title: String, personaID: UUID? = nil) {
         self.id = id
         self.url = url
         self.title = title
+        self.personaID = personaID
     }
+
+    public var resolvedPersonaID: UUID { personaID ?? Persona.defaultID }
 }
