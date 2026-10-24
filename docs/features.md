@@ -85,7 +85,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 36 | Preferences window | Custom implementation using the `Settings` package | None | in progress |
 | 37 | Automatic updates | Omitted. Builds are manual. Reconsider later | None | not started |
 | 38 | Accounts | None. Arch needs no account | None | not started |
-| 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines as plugins (row 50); each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). 1Password's Universal Autofill needs the page's accessibility tree on Chromium (II.13). A WebKit tab does not get Apple Passwords AutoFill without an extension; the user checked this on macOS 27 | Extensions, accessibility | not started |
+| 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines as plugins (row 50); each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). On Chromium, 1Password's Universal Autofill can read a page once it asks for the accessibility tree (see Private APIs); the user has yet to check it. A WebKit tab does not get Apple Passwords AutoFill without an extension; the user checked this on macOS 27 | Extensions, accessibility | not started |
 | 40 | Web notifications and push | `UserNotifications` for local notifications only. Remote push is omitted | None | not started |
 | 41 | AppleScript | Custom `NSScriptCommand` implementation | None | not started |
 | 42 | Sound effects | `NSSound`. The user has yet to decide whether to offer sound effects. App icon choice is not offered for now | None | not started |
@@ -125,7 +125,8 @@ Arch ships no model or provider account. All AI features use one AI interface. T
 
 ## Private APIs
 
-Arch uses no private API yet. For each private API used later, add a row with the API, its framework or engine, the features that use it, and its availability check. The `flags://` page lists the same entries.
+Each private API has a row with the API, its framework or engine, the features that use it, and its availability check. The `flags://` page lists the same entries.
 
 | API | Framework or engine | Features | Availability check |
 |---|---|---|---|
+| `AXEnhancedUserInterface` and `AXManualAccessibility`, attributes that an assistive app sets on the application | macOS accessibility | Chromium pages for assistive apps: Chromium builds its accessibility tree only on request, and these attributes are how assistive apps other than VoiceOver ask for it. VoiceOver needs no flag, because `NSWorkspace.isVoiceOverEnabled` reports it | None: the assistive app sets the attribute, and Arch only reads it |

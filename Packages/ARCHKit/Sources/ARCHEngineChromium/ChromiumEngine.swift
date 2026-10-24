@@ -10,6 +10,7 @@ public final class ChromiumEngine: Engine {
     public let capabilities: Set<EngineCapability> = [.devTools, .pdfController, .sessionRestore, .cookies]
     let frameworkPath: String
     let helperPath: String?
+    private let accessibility = MainActor.assumeIsolated { ChromiumAccessibility() }
 
     /// Returns `nil` if the framework directory is missing, allowing the app to fall back to WebKit.
     public init?(frameworkPath: String, helperPath: String?) {
@@ -27,6 +28,8 @@ public final class ChromiumEngine: Engine {
         guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: cachePath) else {
             throw StartError.initializationFailed
         }
+        // The engine starts on the main thread, where the flags live.
+        MainActor.assumeIsolated { accessibility.start() }
         return ChromiumApplication()
     }
 }

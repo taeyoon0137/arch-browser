@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// The application class required by CEF. Create it with `sharedApplication` before any other use of `NSApplication`.
 @interface ARCHCEFApplication : NSApplication
+/// Receives each attribute an assistive app sets on the application, before AppKit handles it. Some assistive apps ask a browser to build its accessibility tree this way, through undocumented attributes.
+@property (nonatomic, copy, nullable) void (^accessibilityAttributeHandler)(NSString *attribute, id value);
 @end
 
 typedef NS_ENUM(NSInteger, ARCHCEFDownloadState) {
@@ -161,6 +163,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
                           cachePath:(NSString *)cachePath;
 + (BOOL)isInitialized;
 + (void)shutdown;
+/// Builds the accessibility tree of every browser, now and as browsers open, or stops building it. Assistive apps then read Chromium pages as they read WebKit ones; the tree costs memory and time on every page.
++ (void)setAccessibilityEnabled:(BOOL)enabled;
 /// Helper process entry point. Returns the process exit code.
 + (int)runHelperWithArgc:(int)argc argv:(char *_Nonnull *_Nonnull)argv;
 @end

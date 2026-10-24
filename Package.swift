@@ -56,7 +56,7 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOSurface")]
         ),
-        .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
+        .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "Preferences", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Preferences"),

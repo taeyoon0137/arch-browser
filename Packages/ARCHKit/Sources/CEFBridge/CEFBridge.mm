@@ -48,6 +48,16 @@
     [super sendEvent:event];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-implementations"
+- (void)accessibilitySetValue:(id)value forAttribute:(NSString *)attribute {
+    if (self.accessibilityAttributeHandler) {
+        self.accessibilityAttributeHandler(attribute, value);
+    }
+    [super accessibilitySetValue:value forAttribute:attribute];
+}
+#pragma clang diagnostic pop
+
 - (void)terminate:(id)sender {
     // AppKit does not quit while a window shows a sheet with more than one button, and quits only once that sheet ends. Answer the sheets with Cancel first so that none holds the app open. Ending a sheet can show another one, so the loop repeats a bounded number of times.
     for (NSWindow *window in self.windows) {
@@ -163,6 +173,9 @@ private:
 };
 
 bool gInitialized = false;
+bool gAccessibilityEnabled = false;
+// Every browser, so that accessibility changes reach the open ones.
+NSHashTable *gBrowsers = [NSHashTable weakObjectsHashTable];
 
 // CEF returns no value from `ExecuteJavaScript`, so the browser asks the page's renderer process for the theme color.
 const char kThemeColorRequest[] = "ARCHThemeColorRequest";
@@ -391,7 +404,18 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 @end
 
+@interface ARCHCEFBrowser ()
+- (void)applyAccessibilityState;
+@end
+
 @implementation ARCHCEFRuntime
+
++ (void)setAccessibilityEnabled:(BOOL)enabled {
+    gAccessibilityEnabled = enabled;
+    for (ARCHCEFBrowser *browser in gBrowsers) {
+        [browser applyAccessibilityState];
+    }
+}
 
 + (BOOL)initializeWithFrameworkPath:(NSString *)frameworkPath helperPath:(NSString *)helperPath cachePath:(NSString *)cachePath {
     if (gInitialized) {
@@ -1084,6 +1108,7 @@ private:
     _allowsDownloads = YES;
     _downloads = [NSMutableDictionary dictionary];
     _audibleFrames = [NSMutableSet set];
+    [gBrowsers addObject:self];
     _client = new BridgeClient(self);
 
     CefWindowInfo windowInfo;
@@ -1108,7 +1133,14 @@ private:
     view.frame = _parentView.bounds;
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _browserView = view;
+    [self applyAccessibilityState];
     [_delegate cefBrowserDidCreateView];
+}
+
+- (void)applyAccessibilityState {
+    if (_browser) {
+        _browser->GetHost()->SetAccessibilityState(gAccessibilityEnabled ? STATE_ENABLED : STATE_DISABLED);
+    }
 }
 
 - (void)handleTitle:(NSString *)title {
