@@ -83,8 +83,6 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 35 | Sidebar and settings sync | CloudKit private database through `CKSyncEngine` (macOS 14+); design in `docs/sync.md` | None | not started |
 | 36 | Preferences window | Custom implementation using the `Settings` package | None | in progress |
-| 37 | Automatic updates | Omitted. Builds are manual. Reconsider later | None | not started |
-| 38 | Accounts | None. Arch needs no account | None | not started |
 | 39 | Autofill (passwords, passkeys, cards, addresses) | No browser-side store. The official 1Password and iCloud Passwords extensions (row 44) fill forms on both engines as plugins (row 50); each needs Arch on its allow list (see IV.13). Passkeys go through AuthenticationServices on both engines, which needs Apple's restricted browser passkey entitlement (IV.14). On Chromium, 1Password's Universal Autofill can read a page once it asks for the accessibility tree (see Private APIs); the user has yet to check it. A WebKit tab does not get Apple Passwords AutoFill without an extension; the user checked this on macOS 27 | Extensions, accessibility | not started |
 | 40 | Web notifications and push | `UserNotifications` for local notifications only. Remote push is omitted | None | not started |
 | 41 | AppleScript | `Arch.sdef` with the Cocoa Standard Suite, `open location`, and tabs with their identifier, name, and URL, read through key-value coding on the application; `open location` arrives through `application(_:open:)` | None | complete |
@@ -122,6 +120,8 @@ Arch ships no model or provider account. All AI features use one AI interface. T
 | 30 | Site customizations (per-site CSS, JavaScript, and color changes) | Excluded. Browsers do not commonly provide this feature |
 | 31 | Notes and documents | Excluded. Browsers do not commonly provide this feature |
 | 47 | Prompts to switch browsers | None. Import (row 33) covers moving from another browser |
+| 37 | Automatic updates | None. Arch adds no update service; builds are made by hand from the repository |
+| 38 | Accounts | None. Arch needs no account of its own; sync uses the user's iCloud account (row 35) |
 
 ## Private APIs
 
