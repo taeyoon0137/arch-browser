@@ -1,6 +1,7 @@
-// Places the selected tab's developer tools beside the page. The engine makes the tools' window; while the tools are docked, that window becomes a child of the browser window over the space the page leaves free, so it moves with the window. Docking inside the browser window itself needs a CEF patch (VI.3).
+// Places each browser window's selected tab's developer tools beside the page, on the side and at the size every window shares. The engine makes the tools' window; while the tools are docked, that window becomes a child of the browser window over the space the page leaves free, so it moves with the window. Docking inside the browser window itself needs a CEF patch (VI.3).
 import AppKit
 import ARCHEngine
+import Combine
 import SwiftUI
 
 public enum DevToolsSide: String, CaseIterable {
@@ -18,13 +19,12 @@ public enum DevToolsSide: String, CaseIterable {
     }
 }
 
-/// The side and size of the developer tools for every tab, saved in `UserDefaults`, and the window of the selected tab's tools.
-public final class DevToolsDock: ObservableObject {
+/// The side and sizes of docked developer tools, which every window's dock shares, saved in `UserDefaults`. The Developer menu sets the side.
+public final class DevToolsDockSettings: ObservableObject {
+    public static let shared = DevToolsDockSettings()
+
     @Published public var side: DevToolsSide {
-        didSet {
-            UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey)
-            place()
-        }
+        didSet { UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey) }
     }
     /// The tools' width beside the page.
     @Published var width: CGFloat {
@@ -34,33 +34,45 @@ public final class DevToolsDock: ObservableObject {
     @Published var height: CGFloat {
         didSet { UserDefaults.standard.set(Double(height), forKey: Self.heightKey) }
     }
+
+    private static let sideKey = "ARCHDevToolsSide"
+    private static let widthKey = "ARCHDevToolsWidth"
+    private static let heightKey = "ARCHDevToolsHeight"
+
+    private init() {
+        let defaults = UserDefaults.standard
+        side = defaults.string(forKey: Self.sideKey).flatMap(DevToolsSide.init(rawValue:)) ?? .right
+        width = CGFloat(defaults.object(forKey: Self.widthKey) as? Double ?? 480)
+        height = CGFloat(defaults.object(forKey: Self.heightKey) as? Double ?? 320)
+    }
+}
+
+/// The window of one browser window's selected tab's tools, placed on the shared side (`DevToolsDockSettings`).
+public final class DevToolsDock: ObservableObject {
     /// The selected tab's tools window while it is open.
     @Published private(set) var window: NSWindow?
 
+    private let settings = DevToolsDockSettings.shared
+    private var sideObserver: AnyCancellable?
     private weak var devTools: (any EngineDevTools)?
     private weak var browserWindow: NSWindow?
     /// The space the page leaves free for the tools, in the browser window's coordinates.
     private var region: NSRect?
 
     static let minimumSize: CGFloat = 200
-    private static let sideKey = "ARCHDevToolsSide"
-    private static let widthKey = "ARCHDevToolsWidth"
-    private static let heightKey = "ARCHDevToolsHeight"
 
     init() {
-        let defaults = UserDefaults.standard
-        side = defaults.string(forKey: Self.sideKey).flatMap(DevToolsSide.init(rawValue:)) ?? .right
-        width = CGFloat(defaults.object(forKey: Self.widthKey) as? Double ?? 480)
-        height = CGFloat(defaults.object(forKey: Self.heightKey) as? Double ?? 320)
+        // A side chosen in any window applies to this one at once. The settings publish a new side before they store it, so the placement takes the side it receives.
+        sideObserver = settings.$side.dropFirst().sink { [weak self] side in self?.place(on: side) }
     }
 
     /// The side the page makes room on, or nil while the selected tab's tools are closed or float.
-    var dockedSide: DevToolsSide? { window != nil && side != .floating ? side : nil }
+    var dockedSide: DevToolsSide? { window != nil && settings.side != .floating ? settings.side : nil }
 
-    /// Follows the selected tab's tools. The docked window of the tab left behind hides until its tab returns; floating windows stay.
+    /// Follows the selected tab's tools. The docked window of the tab left behind hides until its tab returns, unless another browser window has docked it since; floating windows stay.
     func track(_ devTools: (any EngineDevTools)?) {
         guard devTools !== self.devTools else { return }
-        if let previous = window, side != .floating {
+        if let previous = window, settings.side != .floating, previous.parent == nil || previous.parent === browserWindow {
             previous.parent?.removeChildWindow(previous)
             previous.orderOut(nil)
         }
@@ -68,21 +80,21 @@ public final class DevToolsDock: ObservableObject {
         devTools?.didChangeWindow = { [weak self, weak devTools] in
             guard let self, let devTools, devTools === self.devTools else { return }
             self.window = devTools.window
-            self.place()
+            self.place(on: self.settings.side)
         }
         window = devTools?.window
-        place()
+        place(on: settings.side)
     }
 
     /// Records the space the page leaves free, as the window lays it out.
     func setRegion(_ region: NSRect?, in browserWindow: NSWindow?) {
         self.region = region
         if let browserWindow { self.browserWindow = browserWindow }
-        place()
+        place(on: settings.side)
     }
 
-    /// Moves the tools window over the free space as a child of the browser window, or lets it go when the tools float.
-    private func place() {
+    /// Moves the tools window over the free space as a child of the browser window, or lets it go when the tools float on `side`.
+    private func place(on side: DevToolsSide) {
         guard let window else { return }
         guard side != .floating, let browserWindow, let region else {
             if let parent = window.parent {
@@ -100,11 +112,12 @@ public final class DevToolsDock: ObservableObject {
         if !window.isVisible { window.orderFront(nil) }
     }
 
-    /// A docked window moves only with the browser window, and only its close button applies.
+    /// A docked window moves only with the browser window, only its close button applies, and the Window menu leaves it out, so that the menu lists browser windows.
     private func setDocked(_ isDocked: Bool, _ window: NSWindow) {
         window.isMovable = !isDocked
         window.standardWindowButton(.miniaturizeButton)?.isHidden = isDocked
         window.standardWindowButton(.zoomButton)?.isHidden = isDocked
+        window.isExcludedFromWindowsMenu = isDocked
     }
 }
 
@@ -114,6 +127,8 @@ struct DevToolsDockSpace: ViewModifier {
     let isHidden: Bool
     /// The page's margins, which the tools repeat on their outer edges.
     let margins: EdgeInsets
+    /// The side and sizes, which every window's tools share.
+    @ObservedObject var settings = DevToolsDockSettings.shared
 
     private var side: DevToolsSide? { isHidden ? nil : dock.dockedSide }
 
@@ -124,7 +139,7 @@ struct DevToolsDockSpace: ViewModifier {
             .onChange(of: side) { if $1 == nil { dock.setRegion(nil, in: nil) } }
     }
 
-    private var size: CGFloat { side == .bottom ? dock.height : dock.width }
+    private var size: CGFloat { side == .bottom ? settings.height : settings.width }
     private var alignment: Alignment { side == .left ? .leading : side == .bottom ? .bottom : .trailing }
 
     /// The page's own margin on that side already separates it from the tools, so only the tools' outer margin is added.
@@ -140,26 +155,26 @@ struct DevToolsDockSpace: ViewModifier {
         switch side {
         case .bottom:
             VStack(spacing: 0) {
-                DevToolsResizeHandle(axis: .vertical, size: $dock.height, sign: -1)
+                DevToolsResizeHandle(axis: .vertical, size: $settings.height, sign: -1)
                     .frame(height: margins.bottom)
                 DevToolsRegionReader(dock: dock)
-                    .frame(height: dock.height)
+                    .frame(height: settings.height)
             }
             .padding(EdgeInsets(top: 0, leading: margins.leading, bottom: margins.bottom, trailing: margins.trailing))
         case .left:
             HStack(spacing: 0) {
                 DevToolsRegionReader(dock: dock)
-                    .frame(width: dock.width)
-                DevToolsResizeHandle(axis: .horizontal, size: $dock.width, sign: 1)
+                    .frame(width: settings.width)
+                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: 1)
                     .frame(width: margins.leading)
             }
             .padding(EdgeInsets(top: margins.top, leading: margins.leading, bottom: margins.bottom, trailing: 0))
         default:
             HStack(spacing: 0) {
-                DevToolsResizeHandle(axis: .horizontal, size: $dock.width, sign: -1)
+                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: -1)
                     .frame(width: margins.trailing)
                 DevToolsRegionReader(dock: dock)
-                    .frame(width: dock.width)
+                    .frame(width: settings.width)
             }
             .padding(EdgeInsets(top: margins.top, leading: 0, bottom: margins.bottom, trailing: margins.trailing))
         }

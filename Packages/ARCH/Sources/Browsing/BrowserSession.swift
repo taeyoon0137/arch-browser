@@ -45,7 +45,7 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var focusedTabID: UUID?
     /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
-    /// Downloads that finished while the library was closed. The library button shows their count.
+    /// Downloads that finished while no window showed the library. The library button shows their count.
     @Published public private(set) var unseenDownloadIDs: Set<String> = []
     /// Counts the most recently closed tabs the user closed since they last pressed another key or clicked in the page. ⌘Z reopens them one at a time, newest first.
     public private(set) var undoableCloseCount = 0
@@ -72,13 +72,12 @@ public final class BrowserSession: ObservableObject {
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
     private let downloadNotifier = DownloadNotifier()
-    /// Sheets that tabs asked for, oldest first. They wait while their tab is not on screen.
-    private var pendingSheets: [UUID: [PendingSheet]] = [:]
-    private var visibleSheet: (tabID: UUID, alert: NSAlert, isPageDialog: Bool)?
+    /// The sheets that tabs asked for, which wait until a window shows their tab.
+    let sheets = TabSheetQueue()
     /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
     public var isQuitting = false {
         didSet {
-            if isQuitting { cancelAllSheets() }
+            if isQuitting { sheets.cancelAll() }
         }
     }
 
@@ -105,6 +104,7 @@ public final class BrowserSession: ObservableObject {
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
         windowModel = BrowserWindowModel(session: self, currentSpaceID: snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id)
+        sheets.windows = { [weak self] in self?.windows ?? [] }
         start(primary)
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
@@ -115,7 +115,7 @@ public final class BrowserSession: ObservableObject {
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
         // Tabs restored at launch can ask before the window exists; their sheets show once it does.
         NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)
-            .sink { [weak self] _ in self?.showNextSheet() }
+            .sink { [weak self] _ in self?.sheets.showNext() }
             .store(in: &cancellables)
         nowPlaying = NowPlaying(session: self)
         // The session is created on the main thread, where the AI interface runs.
@@ -128,6 +128,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Windows
 
+    /// The open browser windows, the most recently main first. The session has one window.
+    public var windows: [BrowserWindowModel] { [windowModel] }
+
     /// The browser window that page commands act on: the one that last became main, which stays the target while Settings or History is key. With one window open, that window.
     public var activeWindow: BrowserWindowModel? { windowModel }
 
@@ -139,7 +142,20 @@ public final class BrowserSession: ObservableObject {
 
     /// The window that shows the tab, as its selected tab or a pane of its split view, or nil while no window shows it.
     func window(showing tab: Tab) -> BrowserWindowModel? {
-        windowModel.paneTabs.contains { $0 === tab } ? windowModel : nil
+        windows.first { $0.shows(tab) }
+    }
+
+    /// The browser window whose AppKit window is `nsWindow`, or nil for any other window, such as Settings or the developer tools.
+    public func window(for nsWindow: NSWindow?) -> BrowserWindowModel? {
+        guard let nsWindow else { return nil }
+        return windows.first { $0.nsWindow === nsWindow }
+    }
+
+    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab selects its fallback, which lets go of the tab's sheet, page fullscreen, and docked developer tools.
+    func release(_ tab: Tab, except window: BrowserWindowModel) {
+        for other in windows where other !== window && other.shows(tab) {
+            other.selectedTabID = other.fallbackTab(excluding: tab.id)?.id
+        }
     }
 
     /// The tab of `focusedTabID`.
@@ -163,7 +179,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Closes the question popovers that windows show about the tab's page, which the tab has left.
     @MainActor func closePageQuestions(ofTab id: UUID) {
-        windowModel.closePageQuestion(ofTab: id)
+        windows.forEach { $0.closePageQuestion(ofTab: id) }
     }
 
     // MARK: Engines
@@ -290,7 +306,7 @@ public final class BrowserSession: ObservableObject {
         spaces.swapAt(index, index + offset)
     }
 
-    /// Removes a space. Its tabs and folders move to the space before it, or to the next one for the first space, so no tab closes.
+    /// Removes a space. Its tabs and folders move to the space before it, or to the next one for the first space, so no tab closes, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
         guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let destination = spaces[index == 0 ? 1 : index - 1].id
@@ -305,7 +321,7 @@ public final class BrowserSession: ObservableObject {
         var movedFolders = folders.filter { $0.spaceID == id }
         for folderIndex in movedFolders.indices { movedFolders[folderIndex].spaceID = destination }
         folders = folders.filter { $0.spaceID != id } + movedFolders
-        if windowModel.currentSpaceID == id { windowModel.switchToSpace(destination) }
+        for window in windows where window.currentSpaceID == id { window.switchToSpace(destination) }
         spaces.remove(at: index)
     }
 
@@ -428,15 +444,17 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. It goes in the page's space or, for a favorite's page, the current space of the page's window or else the sidebar target. The window that shows the page selects it; a page that no window shows opens it behind, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
-            guard let self else { return }
+            guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
-            guard let tab, tab.id != self.windowModel.selectedTabID else {
-                _ = self.adopt(popup, spaceID: self.windowModel.currentSpaceID, personaID: personaID, pinned: false, select: true)
-                return
+            let window = self.window(showing: tab)
+            let popupTab = self.adopt(popup, spaceID: tab.spaceID ?? (window ?? self.sidebarTarget()).currentSpaceID, personaID: personaID, pinned: false, select: false)
+            if let window {
+                window.selectedTabID = popupTab.id
+            } else {
+                popupTab.isUnread = true
             }
-            self.adopt(popup, spaceID: tab.spaceID ?? self.windowModel.currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -446,10 +464,12 @@ public final class BrowserSession: ObservableObject {
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
-            if let self, let tab { self.cancelSheets(for: tab, pageDialogsOnly: true) }
+            if let self, let tab { self.sheets.cancel(for: tab, pageDialogsOnly: true) }
         }
+        // The tab's sheets show while a window shows its page on screen, so only a tab no window shows there needs the sidebar target to select it.
         tab.requestSelection = { [weak self, weak tab] in
-            if let self, let tab { self.windowModel.selectedTabID = tab.id }
+            guard let self, let tab, !self.windows.contains(where: { $0.tabsOnScreen.contains { $0 === tab } }) else { return }
+            self.sidebarTarget().selectedTabID = tab.id
         }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         // Saving after each load keeps the page state that a crash would otherwise lose.
@@ -475,18 +495,24 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(false) }
             self.decidePermission(request, for: tab, completion: completion)
         }
+        // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
-            if let self, let tab { self.windowModel.setPageFullscreen(isFullscreen, of: tab) }
+            guard let self, let tab else { return }
+            if let window = self.window(showing: tab) {
+                window.setPageFullscreen(isFullscreen, of: tab)
+            } else if isFullscreen {
+                DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
+            }
         }
         // A link opened from a page's context menu opens behind the current tab, in the page's space (the current space for a favorite's page) and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
             self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
         }
-        // A web link the user clicks with Shift opens in the preview panel, in the page's engine and Persona.
+        // A web link the user clicks with Shift opens in the preview panel of the page's window, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.windowModel.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
+            self.window(showing: tab)?.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
         }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
@@ -507,11 +533,12 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             let old = tab.webContents
             let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
-            // Sheets and searches belong to the old page.
-            self.cancelSheets(for: tab)
-            if tab.id == self.windowModel.selectedTabID, self.windowModel.isFindBarVisible { self.windowModel.hideFindBar() }
+            // Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
+            self.sheets.cancel(for: tab)
+            let window = self.windows.first { $0.selectedTabID == tab.id }
+            if window?.isFindBarVisible == true { window?.hideFindBar() }
             tab.replaceWebContents(with: replacement)
-            if tab.id == self.windowModel.selectedTabID { self.windowModel.devToolsDock.track(replacement.devTools) }
+            window?.devToolsDock.track(replacement.devTools)
             self.retire(old, of: tab.personaID)
             self.scheduleSave()
         }
@@ -546,8 +573,8 @@ public final class BrowserSession: ObservableObject {
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return }
         recordClose(of: tab, reason: reason)
-        windowModel.setPageFullscreen(false, of: tab)
-        cancelSheets(for: tab)
+        windows.forEach { $0.setPageFullscreen(false, of: tab) }
+        sheets.cancel(for: tab)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
@@ -556,11 +583,12 @@ public final class BrowserSession: ObservableObject {
             closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
-        // A focused pane hands the selection to the pane beside it, so the rest of its split view stays on screen; a favorite's tab leaves the selection to a tab of the current space.
-        let splitNeighborID = leaveSplitView(tab)
-        if windowModel.selectedTabID == tab.id {
-            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? windowModel.currentSpaceID) }
-            windowModel.selectedTabID = splitNeighborID ?? (siblings.first { !$0.isPinned } ?? siblings.first)?.id
+        // Each window that selected the tab selects one that no other window shows (window rule 3): the pane beside it, so the rest of its split view stays on screen, or else an open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space.
+        let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
+        for window in windows where window.selectedTabID == tab.id {
+            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) }
+            let candidates = [splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
+            window.selectedTabID = candidates.first { !window.isShownInAnotherWindow($0) }?.id
         }
     }
 
@@ -607,10 +635,10 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The tabs on screen, the selected tab and the other panes of its split view, count as active now.
+    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
-        windowModel.paneTabs.forEach { $0.lastActivatedAt = Date() }
+        windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = Date() }
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab, reason: .archive)
             undoableCloseCount = 0
@@ -786,7 +814,7 @@ public final class BrowserSession: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Asks with a sheet on the page's window, or on the main window while the page is not on screen. The engine calls this from inside its own message loop, so the sheet never blocks and a request without any window is denied. The answer reaches the engine once.
+    /// Asks with a sheet on the window that shows the page, once a window shows it. The engine calls this from inside its own message loop, so the sheet never blocks. The answer reaches the engine once.
     private static func permissionAlert(for request: EnginePermissionRequest, remembersAnswer: Bool) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
@@ -800,75 +828,10 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Sheets
 
-    private struct PendingSheet {
-        let alert: NSAlert
-        /// An `alert`, `confirm`, or `prompt` from the page, which the engine can cancel.
-        let isPageDialog: Bool
-        let completion: (NSApplication.ModalResponse) -> Void
-    }
-
-    /// Queues a sheet for a tab. Sheets show one at a time and only while their tab is on screen, as the selected tab or another pane of its split view, so a background page cannot cover the page in front.
+    /// Queues a sheet for a tab, which shows on the window that shows the tab on screen (`TabSheetQueue`). While the app quits, the sheet gets the safe answer, `.cancel`, at once.
     func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
-        pendingSheets[tab.id, default: []].append(PendingSheet(alert: alert, isPageDialog: isPageDialog, completion: completion))
-        showNextSheet()
-    }
-
-    /// The tabs whose sheets can show, the selected tab first: the panes on screen, or the selected tab alone while its page fills the window.
-    private var sheetTabs: [Tab] {
-        guard let selected = windowModel.selectedTab else { return [] }
-        if windowModel.fullscreenTabID == selected.id { return [selected] }
-        return [selected] + windowModel.paneTabs.filter { $0.id != selected.id }
-    }
-
-    /// Shows the oldest waiting sheet of the selected tab, or else of another pane on screen, when no sheet is on screen. Nothing runs an app-modal alert inside an engine callback.
-    func showNextSheet() {
-        guard visibleSheet == nil, let tab = sheetTabs.first(where: { pendingSheets[$0.id]?.isEmpty == false }), var queue = pendingSheets[tab.id],
-              let window = tab.webContents.view.window ?? NSApp.mainWindow else { return }
-        let sheet = queue.removeFirst()
-        pendingSheets[tab.id] = queue.isEmpty ? nil : queue
-        visibleSheet = (tab.id, sheet.alert, sheet.isPageDialog)
-        sheet.alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self else { return sheet.completion(response) }
-            self.visibleSheet = nil
-            if response == Self.deferredSheetResponse {
-                self.pendingSheets[tab.id, default: []].insert(sheet, at: 0)
-            } else {
-                sheet.completion(response)
-            }
-            self.showNextSheet()
-        }
-    }
-
-    /// Ends a sheet without answering it, so that it can show again.
-    private static let deferredSheetResponse = NSApplication.ModalResponse(rawValue: -1_100)
-
-    /// Puts away the sheet of a tab that is no longer on screen, as when a link from another app opens a new tab. It shows again first when its tab is back on screen.
-    func deferVisibleSheet() {
-        guard let visibleSheet, !sheetTabs.contains(where: { $0.id == visibleSheet.tabID }), let window = visibleSheet.alert.window.sheetParent else { return }
-        window.endSheet(visibleSheet.alert.window, returnCode: Self.deferredSheetResponse)
-    }
-
-    /// Gives a tab's sheets the safe answer, `.cancel`, including the one on screen: all of them when the tab closes, or only the page's dialogs when the engine cancels those. The queue changes first, so that ending the visible sheet does not show one that is going too.
-    private func cancelSheets(for tab: Tab, pageDialogsOnly: Bool = false) {
-        let queue = pendingSheets.removeValue(forKey: tab.id) ?? []
-        let waiting = pageDialogsOnly ? queue.filter(\.isPageDialog) : queue
-        let kept = pageDialogsOnly ? queue.filter { !$0.isPageDialog } : []
-        if !kept.isEmpty { pendingSheets[tab.id] = kept }
-        if let visibleSheet, visibleSheet.tabID == tab.id, !pageDialogsOnly || visibleSheet.isPageDialog,
-           let window = visibleSheet.alert.window.sheetParent {
-            window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
-        }
-        waiting.forEach { $0.completion(.cancel) }
-    }
-
-    private func cancelAllSheets() {
-        let waiting = pendingSheets.values.flatMap { $0 }
-        pendingSheets = [:]
-        if let visibleSheet, let window = visibleSheet.alert.window.sheetParent {
-            window.endSheet(visibleSheet.alert.window, returnCode: .cancel)
-        }
-        waiting.forEach { $0.completion(.cancel) }
+        sheets.enqueue(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
     }
 
     private static func permissionDescription(for types: [EnginePermissionType]) -> String {
@@ -916,9 +879,9 @@ public final class BrowserSession: ObservableObject {
     /// Why each tab closed this launch, for the tab close log window.
     public let closeLog = TabCloseLog()
 
-    /// Logs a closing tab with its crash count and the engines' total, and drops it from the switcher's order.
+    /// Logs a closing tab with its crash count and the engines' total, and drops it from each window's switcher order.
     private func recordClose(of tab: Tab, reason: TabCloseReason) {
-        windowModel.forgetActivation(of: tab.id)
+        windows.forEach { $0.forgetActivation(of: tab.id) }
         closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount))
     }
 
@@ -976,7 +939,7 @@ public final class BrowserSession: ObservableObject {
         spaces = reordered
     }
 
-    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window follows the selected tab to its new space, so the sidebar keeps showing the page's tab.
+    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
         guard spaces.contains(where: { $0.id == spaceID }), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
         // The other panes of its split view stay together in the space it leaves.
@@ -987,7 +950,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = nil
         reordered.append(tab)
         tabs = reordered
-        if tab.id == windowModel.selectedTabID { windowModel.currentSpaceID = spaceID }
+        for window in windows where window.selectedTabID == tab.id { window.currentSpaceID = spaceID }
     }
 
     /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
@@ -1058,7 +1021,7 @@ public final class BrowserSession: ObservableObject {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
         takeOutOfFolder(tabs(in: folder))
         folders.removeAll { $0.id == id }
-        windowModel.endRenamingFolder(id)
+        windows.forEach { $0.endRenamingFolder(id) }
     }
 
     /// Appends a folder to a space's pinned or open folders.
@@ -1097,8 +1060,8 @@ public final class BrowserSession: ObservableObject {
     @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:] {
         didSet {
             // The panes on screen change with the split views, and the sheets that can show change with them.
-            deferVisibleSheet()
-            showNextSheet()
+            windows.forEach(sheets.deferSheet(of:))
+            sheets.showNext()
         }
     }
 
@@ -1276,7 +1239,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         guard let entry = self.downloads.first(where: { $0.id == item.id }) else { return }
         let wasFinished = entry.isFinished
         entry.refresh()
-        if !wasFinished, entry.state == .completed, !windowModel.isLibraryVisible { unseenDownloadIDs.insert(entry.id) }
+        if !wasFinished, entry.state == .completed, !windows.contains(where: \.isLibraryVisible) { unseenDownloadIDs.insert(entry.id) }
         if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()
     }

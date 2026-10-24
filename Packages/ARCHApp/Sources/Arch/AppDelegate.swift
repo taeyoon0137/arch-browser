@@ -275,9 +275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
     @objc private func toggleSidebar() { session.sidebarTarget().toggleSidebar() }
     @objc private func toggleDeveloperTools() { session.activeWindow?.toggleDeveloperTools() }
+    /// Every window's tools follow the side.
     @objc private func chooseDevToolsSide(_ sender: NSMenuItem) {
         guard let side = (sender.representedObject as? String).flatMap(DevToolsSide.init(rawValue:)) else { return }
-        session.activeWindow?.devToolsDock.side = side
+        DevToolsDockSettings.shared.side = side
     }
     @objc private func toggleDownloads() { session.sidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
@@ -377,7 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return DefaultBrowser.canBecomeDefault && !DefaultBrowser.isDefault
         }
         if item.action == #selector(chooseDevToolsSide(_:)) {
-            item.state = (item.representedObject as? String) == activeWindow?.devToolsDock.side.rawValue ? .on : .off
+            item.state = (item.representedObject as? String) == DevToolsDockSettings.shared.side.rawValue ? .on : .off
             return activeWindow?.canChooseDevToolsSide == true
         }
         if item.action == #selector(toggleDeveloperTools) {
@@ -428,11 +429,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Page fullscreen
 
-    /// A page that fills the window in fullscreen leaves it on Escape, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first.
+    /// A page that fills its window in fullscreen leaves it on Escape in that window, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first.
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
-                  let self, let windowModel = self.session?.activeWindow, windowModel.fullscreenTabID != nil, windowModel.regionCaptureTabID == nil, event.window === self.window else { return event }
+                  let windowModel = self?.session?.window(for: event.window), windowModel.fullscreenTabID != nil, windowModel.regionCaptureTabID == nil else { return event }
             windowModel.exitPageFullscreen()
             return nil
         }
@@ -456,9 +457,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if !isUndo, !closesOrReopens { session.forgetUndoableCloses() }
             return event
         }
-        // A click in the page can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
+        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let session = self?.session, let view = session.activeWindow?.selectedTab?.webContents.view, view.window === event.window,
+            if let session = self?.session, let view = session.window(for: event.window)?.selectedTab?.webContents.view, view.window === event.window,
                view.bounds.contains(view.convert(event.locationInWindow, from: nil)) {
                 session.forgetUndoableCloses()
             }
@@ -474,12 +475,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Tab switcher
 
-    /// ⌃Tab in the browser window opens the switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
+    /// ⌃Tab in a browser window opens that window's switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
     private func installTabSwitcher() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let windowModel = self.session?.activeWindow else { return event }
+            guard let session = self?.session else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], event.window === self.window {
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], let windowModel = session.window(for: event.window) {
                 let backward = modifiers.contains(.shift)
                 if windowModel.isTabSwitcherVisible {
                     windowModel.moveTabSwitcherHighlight(backward: backward)
@@ -488,24 +489,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 }
                 return nil
             }
-            guard windowModel.isTabSwitcherVisible else { return event }
-            windowModel.cancelTabSwitcher()
+            let switching = session.windows.filter(\.isTabSwitcherVisible)
+            guard !switching.isEmpty else { return event }
+            switching.forEach { $0.cancelTabSwitcher() }
             return event.keyCode == 53 ? nil : event
         }
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            if let windowModel = self?.session?.activeWindow, windowModel.isTabSwitcherVisible, !event.modifierFlags.contains(.control) {
-                windowModel.commitTabSwitcher()
+            if let session = self?.session, !event.modifierFlags.contains(.control) {
+                session.windows.filter(\.isTabSwitcherVisible).forEach { $0.commitTabSwitcher() }
             }
             return event
         }
         // A click also closes it. Monitors see no keys while a menu tracks, so a Control-click's context menu could otherwise hide Control's release.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            self?.session?.activeWindow?.cancelTabSwitcher()
+            self?.session?.windows.forEach { $0.cancelTabSwitcher() }
             return event
         }
         // The app receives no key events while inactive, so it cannot see Control's release in another app.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.session?.activeWindow?.cancelTabSwitcher()
+            self?.session?.windows.forEach { $0.cancelTabSwitcher() }
         }
     }
 

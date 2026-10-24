@@ -1,4 +1,4 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, and the question popover, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the page reader's conversations, engines, and persistence.
+// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
 import AI
 import AppKit
 import ARCHEngine
@@ -15,10 +15,11 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// The space the sidebar shows.
     @Published public var currentSpaceID: UUID
-    /// Selecting a tab switches to its space so the sidebar and page match.
+    /// Selecting a tab switches to its space so the sidebar and page match. Another window that shows the tab gives it up first (window rule 2).
     @Published public var selectedTabID: UUID? {
         didSet {
-            session.windowDidSelect(self)
+            // The other window lets go of the tab's sheet, page fullscreen, and docked tools before this window takes them.
+            if let selectedTab { session.release(selectedTab, except: self) }
             // Selecting a tab, even the one under the page, leaves an internal page.
             internalPage = nil
             // Another tab ends the fullscreen of the page that filled the window.
@@ -36,8 +37,9 @@ public final class BrowserWindowModel: ObservableObject {
             }
             // The question popover belongs to the page it opened over.
             if oldValue != selectedTabID { MainActor.assumeIsolated { closePageQuestion() } }
-            session.deferVisibleSheet()
-            session.showNextSheet()
+            session.sheets.deferSheet(of: self)
+            session.sheets.showNext()
+            session.windowDidSelect(self)
             devToolsDock.track(selectedTab?.webContents.devTools)
             followSelectedTab()
             focusSelectedPane()
@@ -50,7 +52,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
     /// Where the selected tab's developer tools show.
     public let devToolsDock = DevToolsDock()
-    /// The AppKit window, set when it is created. Printing, export, sharing, and Clear Site Data use it.
+    /// The AppKit window, set when it is created. Sheets, printing, export, sharing, and Clear Site Data use it.
     public weak var nsWindow: NSWindow?
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
@@ -58,8 +60,8 @@ public final class BrowserWindowModel: ObservableObject {
     @Published public private(set) var fullscreenTabID: UUID? {
         didSet {
             // The other panes of a split view leave the screen while the selected page fills the window, and their sheets wait until the panes return.
-            session.deferVisibleSheet()
-            session.showNextSheet()
+            session.sheets.deferSheet(of: self)
+            session.sheets.showNext()
         }
     }
     /// `nil` when the command palette is hidden.
@@ -107,8 +109,8 @@ public final class BrowserWindowModel: ObservableObject {
         let selectedSpaceID = selectedTab.map { $0.spaceID ?? currentSpaceID }
         currentSpaceID = id
         if selectedSpaceID != id {
-            // The first tab row the sidebar shows, open tabs before pinned ones. Only a space whose tabs all sit in collapsed folders selects a hidden tab.
-            let spaceTabs = session.tabs(in: id, pinned: false) + session.tabs(in: id, pinned: true)
+            // The first tab row the sidebar shows that no other window shows, open tabs before pinned ones. Only a space whose free tabs all sit in collapsed folders selects a hidden tab.
+            let spaceTabs = (session.tabs(in: id, pinned: false) + session.tabs(in: id, pinned: true)).filter { !isShownInAnotherWindow($0) }
             selectedTabID = (spaceTabs.first { !session.isInCollapsedFolder($0) } ?? spaceTabs.first)?.id
         }
     }
@@ -247,6 +249,21 @@ public final class BrowserWindowModel: ObservableObject {
 
     public var selectedTab: Tab? {
         session.tabs.first { $0.id == selectedTabID } ?? session.favoriteTabs.values.first { $0.id == selectedTabID }
+    }
+
+    /// Whether the window shows `tab`, as its selected tab or a pane of its split view. At most one window shows a tab (window rule 1).
+    func shows(_ tab: Tab) -> Bool {
+        paneTabs.contains { $0 === tab }
+    }
+
+    /// Whether another window shows `tab`. Selection this window makes on its own passes such a tab by (window rule 3).
+    func isShownInAnotherWindow(_ tab: Tab) -> Bool {
+        session.windows.contains { $0 !== self && $0.shows(tab) }
+    }
+
+    /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
+    func fallbackTab(excluding id: UUID) -> Tab? {
+        recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
     }
 
     /// Opens a tab at `url` in the current space and the default engine, and selects it.
@@ -469,6 +486,18 @@ public final class BrowserWindowModel: ObservableObject {
         guard let pageQuestion else { return }
         pageQuestion.conversation.cancel()
         self.pageQuestion = nil
+    }
+
+    // MARK: Sheets
+
+    /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
+    var visibleSheet: TabSheet?
+
+    /// The tabs whose pages the window shows now, the selected tab first: every pane of its split view, or the selected tab alone while its page fills the window. Their sheets can show on this window.
+    var tabsOnScreen: [Tab] {
+        guard let selected = selectedTab else { return [] }
+        if fullscreenTabID == selected.id { return [selected] }
+        return [selected] + paneTabs.filter { $0.id != selected.id }
     }
 
     // MARK: Find in page
