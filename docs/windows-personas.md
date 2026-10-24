@@ -59,9 +59,9 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | State that… | Owner | Lifetime |
 |---|---|---|
 | can differ between two windows open at once: what is shown, focused, or being edited | `BrowserWindowModel` | One window |
-| is bound to one Persona's engine storage: contexts, browsers, cookie copying, kept download pages, and later its plugin manager and extension controller | `PersonaEngines` | One Persona, from first use until quit |
+| is bound to one Persona's engine storage: contexts, browsers, cookie copying, and later its plugin manager and extension controller | `PersonaEngines` | One Persona, from first use until quit |
 | belongs to an engine process: the engine applications, CEF initialization, crash totals, the primary engine | `BrowserSession`, engine section | The app |
-| is anything else the user owns: Personas, spaces, favorites, tabs, the closed list, downloads, permissions, zoom, persistence | `BrowserSession` | The app |
+| is anything else the user owns: Personas, spaces, favorites, tabs, the closed list, downloads and the pages kept open for them (each with its runtime), permissions, zoom, persistence | `BrowserSession` | The app |
 
 ### Window rules
 
@@ -698,6 +698,7 @@ Coordination
 
 - `docs/plan.md`'s Documentation row and the docs list of `resources/README.preset.md` list this note.
 - Step 6: `docs/plan.md` Decisions gains the placement rule and window rules 1 to 3.
+- Steps 7 and 8: the placement rule in `docs/plan.md` stops listing the window state each step moves off the session: the reader's visibility and the question popover in step 7, the visible sheet in step 8.
 - Step 10, which finishes III.6: remove the III.6 row; update Current State for the Browsing module (windows, the one-tab-one-window rule, window state in `session.json`) and the App shell (the File and Window menus); add the window checks to the regression checklist; mark row 7 of `docs/features.md` complete.
 - Step 12, which finishes III.7: remove the III.7 row; update Current State; update checks 4 and 18 and the Preferences module's General list; mark row 6 complete.
 - Step 13, which finishes III.12:

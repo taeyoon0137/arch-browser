@@ -40,7 +40,7 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
     /// The state and commands of the one browser window. Created once the session's own state exists, because it reads the session.
-    private var window: BrowserWindowModel!
+    private var windowModel: BrowserWindowModel!
     /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
     /// Downloads that finished while the library was closed. The library button shows their count.
@@ -103,9 +103,9 @@ public final class BrowserSession: ObservableObject {
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
-        window = BrowserWindowModel(session: self, currentSpaceID: currentSpaceID)
+        windowModel = BrowserWindowModel(session: self, currentSpaceID: currentSpaceID)
         // Views still read the window's state through the session, so they hear of its changes here.
-        window.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        windowModel.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
         start(primary)
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
@@ -129,13 +129,13 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Window state mirrors
 
-    /// The window's current space, mirrored for the views and the subscribers of `$currentSpaceID` that still read it here. Assigning it changes the window's.
+    /// The window's current space, mirrored for the views that still read and assign it here. Assigning it changes the window's. Nothing subscribes to its publisher.
     @Published public var currentSpaceID: UUID {
-        didSet { if !isMirroringWindow { window.currentSpaceID = currentSpaceID } }
+        didSet { if !isMirroringWindow { windowModel.currentSpaceID = currentSpaceID } }
     }
-    /// The window's selected tab, mirrored as `currentSpaceID` is. Assigning it selects the tab in the window, even the tab already selected, so that an internal page over it closes.
+    /// The window's selected tab, mirrored as `currentSpaceID` is. `NowPlaying` and `PageAssistant` subscribe to its publisher. Assigning it selects the tab in the window, even the tab already selected, so that an internal page over it closes.
     @Published public var selectedTabID: UUID? {
-        didSet { if !isMirroringWindow { window.selectedTabID = selectedTabID } }
+        didSet { if !isMirroringWindow { windowModel.selectedTabID = selectedTabID } }
     }
     /// Set while the mirrors take the window's values, so that those values do not go back to the window.
     private var isMirroringWindow = false
@@ -144,8 +144,8 @@ public final class BrowserSession: ObservableObject {
     func mirrorWindowSelection() {
         isMirroringWindow = true
         defer { isMirroringWindow = false }
-        if currentSpaceID != window.currentSpaceID { currentSpaceID = window.currentSpaceID }
-        if selectedTabID != window.selectedTabID { selectedTabID = window.selectedTabID }
+        if currentSpaceID != windowModel.currentSpaceID { currentSpaceID = windowModel.currentSpaceID }
+        if selectedTabID != windowModel.selectedTabID { selectedTabID = windowModel.selectedTabID }
     }
 
     // MARK: Engines
@@ -287,7 +287,7 @@ public final class BrowserSession: ObservableObject {
         var movedFolders = folders.filter { $0.spaceID == id }
         for folderIndex in movedFolders.indices { movedFolders[folderIndex].spaceID = destination }
         folders = folders.filter { $0.spaceID != id } + movedFolders
-        if window.currentSpaceID == id { window.switchToSpace(destination) }
+        if windowModel.currentSpaceID == id { windowModel.switchToSpace(destination) }
         spaces.remove(at: index)
     }
 
@@ -318,7 +318,7 @@ public final class BrowserSession: ObservableObject {
     /// Appends, in order, the favorites whose addresses are not favorites of the current space's Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
     @discardableResult
     public func addFavorites(_ candidates: [Favorite]) -> Int {
-        let personaID = window.currentSpace.resolvedPersonaID
+        let personaID = windowModel.currentSpace.resolvedPersonaID
         var addresses = Set(favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
         let added = candidates.filter { addresses.insert($0.url).inserted }.map { candidate in
             var favorite = candidate
@@ -383,7 +383,7 @@ public final class BrowserSession: ObservableObject {
     /// Opens a tab in `engine`, or in the default engine when no engine is given, in the space `spaceID` or the window's current space. `select` selects it in the window.
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
-        let spaceID = spaceID ?? window.currentSpaceID
+        let spaceID = spaceID ?? windowModel.currentSpaceID
         let personaID = personaID(ofSpace: spaceID)
         return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
@@ -395,7 +395,7 @@ public final class BrowserSession: ObservableObject {
 
     /// The Persona of the space `id`, or of the window's current space when no space has that ID.
     private func personaID(ofSpace id: UUID) -> Persona.ID {
-        (spaces.first { $0.id == id } ?? window.currentSpace).resolvedPersonaID
+        (spaces.first { $0.id == id } ?? windowModel.currentSpace).resolvedPersonaID
     }
 
     /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's first space if it has one. A tab that restores or reopens passes its saved `id`. `select` selects it in the window.
@@ -403,7 +403,7 @@ public final class BrowserSession: ObservableObject {
         let spaceID = self.personaID(ofSpace: spaceID) == personaID ? spaceID : spaces.first { $0.resolvedPersonaID == personaID }?.id ?? spaceID
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tabs.append(tab)
-        if select { window.selectedTabID = tab.id }
+        if select { windowModel.selectedTabID = tab.id }
         return tab
     }
 
@@ -414,11 +414,11 @@ public final class BrowserSession: ObservableObject {
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
-            guard let tab, tab.id != self.window.selectedTabID else {
-                _ = self.adopt(popup, spaceID: self.window.currentSpaceID, personaID: personaID, pinned: false, select: true)
+            guard let tab, tab.id != self.windowModel.selectedTabID else {
+                _ = self.adopt(popup, spaceID: self.windowModel.currentSpaceID, personaID: personaID, pinned: false, select: true)
                 return
             }
-            self.adopt(popup, spaceID: tab.spaceID ?? self.window.currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
+            self.adopt(popup, spaceID: tab.spaceID ?? self.windowModel.currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -431,7 +431,7 @@ public final class BrowserSession: ObservableObject {
             if let self, let tab { self.cancelSheets(for: tab, pageDialogsOnly: true) }
         }
         tab.requestSelection = { [weak self, weak tab] in
-            if let self, let tab { self.window.selectedTabID = tab.id }
+            if let self, let tab { self.windowModel.selectedTabID = tab.id }
         }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         // Saving after each load keeps the page state that a crash would otherwise lose.
@@ -458,7 +458,7 @@ public final class BrowserSession: ObservableObject {
             self.decidePermission(request, for: tab, completion: completion)
         }
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
-            if let self, let tab { self.window.setPageFullscreen(isFullscreen, of: tab) }
+            if let self, let tab { self.windowModel.setPageFullscreen(isFullscreen, of: tab) }
         }
         // A link opened from a page's context menu opens behind the current tab, in the page's space (the current space for a favorite's page) and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
@@ -468,7 +468,7 @@ public final class BrowserSession: ObservableObject {
         // A web link the user clicks with Shift opens in the preview panel, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.window.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
+            self.windowModel.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
         }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
@@ -491,9 +491,9 @@ public final class BrowserSession: ObservableObject {
             let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
             // Sheets and searches belong to the old page.
             self.cancelSheets(for: tab)
-            if tab.id == self.window.selectedTabID, self.window.isFindBarVisible { self.window.hideFindBar() }
+            if tab.id == self.windowModel.selectedTabID, self.windowModel.isFindBarVisible { self.windowModel.hideFindBar() }
             tab.replaceWebContents(with: replacement)
-            if tab.id == self.window.selectedTabID { self.window.devToolsDock.track(replacement.devTools) }
+            if tab.id == self.windowModel.selectedTabID { self.windowModel.devToolsDock.track(replacement.devTools) }
             self.retire(old, of: tab.personaID)
             self.scheduleSave()
         }
@@ -528,7 +528,7 @@ public final class BrowserSession: ObservableObject {
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return }
         recordClose(of: tab, reason: reason)
-        window.setPageFullscreen(false, of: tab)
+        windowModel.setPageFullscreen(false, of: tab)
         cancelSheets(for: tab)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
@@ -540,9 +540,9 @@ public final class BrowserSession: ObservableObject {
         }
         // A focused pane hands the selection to the pane beside it, so the rest of its split view stays on screen; a favorite's tab leaves the selection to a tab of the current space.
         let splitNeighborID = leaveSplitView(tab)
-        if window.selectedTabID == tab.id {
-            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) }
-            window.selectedTabID = splitNeighborID ?? (siblings.first { !$0.isPinned } ?? siblings.first)?.id
+        if windowModel.selectedTabID == tab.id {
+            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? windowModel.currentSpaceID) }
+            windowModel.selectedTabID = splitNeighborID ?? (siblings.first { !$0.isPinned } ?? siblings.first)?.id
         }
     }
 
@@ -552,7 +552,7 @@ public final class BrowserSession: ObservableObject {
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
-        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : window.currentSpaceID
+        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : windowModel.currentSpaceID
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
@@ -592,7 +592,7 @@ public final class BrowserSession: ObservableObject {
     /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The tabs on screen, the selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
-        window.paneTabs.forEach { $0.lastActivatedAt = Date() }
+        windowModel.paneTabs.forEach { $0.lastActivatedAt = Date() }
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab, reason: .archive)
             undoableCloseCount = 0
@@ -798,9 +798,9 @@ public final class BrowserSession: ObservableObject {
 
     /// The tabs whose sheets can show, the selected tab first: the panes on screen, or the selected tab alone while its page fills the window.
     private var sheetTabs: [Tab] {
-        guard let selected = window.selectedTab else { return [] }
-        if window.fullscreenTabID == selected.id { return [selected] }
-        return [selected] + window.paneTabs.filter { $0.id != selected.id }
+        guard let selected = windowModel.selectedTab else { return [] }
+        if windowModel.fullscreenTabID == selected.id { return [selected] }
+        return [selected] + windowModel.paneTabs.filter { $0.id != selected.id }
     }
 
     /// Shows the oldest waiting sheet of the selected tab, or else of another pane on screen, when no sheet is on screen. Nothing runs an app-modal alert inside an engine callback.
@@ -900,7 +900,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Logs a closing tab with its crash count and the engines' total, and drops it from the switcher's order.
     private func recordClose(of tab: Tab, reason: TabCloseReason) {
-        window.forgetActivation(of: tab.id)
+        windowModel.forgetActivation(of: tab.id)
         closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount))
     }
 
@@ -969,7 +969,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = nil
         reordered.append(tab)
         tabs = reordered
-        if tab.id == window.selectedTabID { window.currentSpaceID = spaceID }
+        if tab.id == windowModel.selectedTabID { windowModel.currentSpaceID = spaceID }
     }
 
     /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
@@ -1040,7 +1040,7 @@ public final class BrowserSession: ObservableObject {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
         takeOutOfFolder(tabs(in: folder))
         folders.removeAll { $0.id == id }
-        window.endRenamingFolder(id)
+        windowModel.endRenamingFolder(id)
     }
 
     /// Appends a folder to a space's pinned or open folders.
@@ -1141,7 +1141,7 @@ public final class BrowserSession: ObservableObject {
         restoreSplitViews(snapshot.splitViews ?? [], from: restored)
         // A selected favorite's tab takes the selection once `restoreFavoriteTabs` opens it, so no space tab stands in for it and counts as just used.
         guard !favorites.contains(where: { $0.id == snapshot.selectedFavoriteID }) else { return }
-        window.selectedTabID = selected?.id ?? tabs.first { $0.spaceID == window.currentSpaceID }?.id
+        windowModel.selectedTabID = selected?.id ?? tabs.first { $0.spaceID == windowModel.currentSpaceID }?.id
     }
 
     /// Keeps the favorites' tabs from the last session until their favorites open them. The tab that was selected opens now, so the window shows the page it showed.
@@ -1149,12 +1149,12 @@ public final class BrowserSession: ObservableObject {
         for record in snapshot.favoriteTabs ?? [] where favorites.contains(where: { $0.id == record.favoriteID }) {
             savedFavoriteTabs[record.favoriteID] = record
         }
-        if let favorite = favorites.first(where: { $0.id == snapshot.selectedFavoriteID }) { window.openFavorite(favorite) }
+        if let favorite = favorites.first(where: { $0.id == snapshot.selectedFavoriteID }) { windowModel.openFavorite(favorite) }
     }
 
     private func observeChanges() {
-        Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, window.$currentSpaceID.map { _ in () })
-            .merge(with: window.$selectedTabID.map { _ in () }, $personas.map { _ in () })
+        Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, windowModel.$currentSpaceID.map { _ in () })
+            .merge(with: windowModel.$selectedTabID.map { _ in () }, $personas.map { _ in () })
             .merge(with: $closedTabs.map { _ in () })
             .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () }, $folders.map { _ in () }, $splitTabIDs.map { _ in () })
             .dropFirst()
@@ -1171,10 +1171,10 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func snapshot() -> SessionSnapshot {
-        SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: window.currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? window.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
-                        folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == window.selectedTabID }, closedTabs: closedTabs,
-                        splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: window.selectedFavoriteID)
+        SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: windowModel.currentSpaceID, favorites: favorites,
+                        tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? windowModel.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
+                        folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == windowModel.selectedTabID }, closedTabs: closedTabs,
+                        splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: windowModel.selectedFavoriteID)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.
@@ -1258,7 +1258,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         guard let entry = self.downloads.first(where: { $0.id == item.id }) else { return }
         let wasFinished = entry.isFinished
         entry.refresh()
-        if !wasFinished, entry.state == .completed, !window.isLibraryVisible { unseenDownloadIDs.insert(entry.id) }
+        if !wasFinished, entry.state == .completed, !windowModel.isLibraryVisible { unseenDownloadIDs.insert(entry.id) }
         if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()
     }
@@ -1290,138 +1290,139 @@ extension BrowserSession: EngineDownloadsDelegate {
 
 /// The window's state and commands for the views, menus, scripts, and features that still reach them through the session. Each member forwards to the window's model.
 extension BrowserSession {
-    public var currentSpace: Space { window.currentSpace }
-    public var selectedTab: Tab? { window.selectedTab }
-    public var selectedFavoriteID: UUID? { window.selectedFavoriteID }
-    public var recentTabs: [Tab] { window.recentTabs }
-    var paneTabs: [Tab] { window.paneTabs }
-    var preview: PagePreview? { window.preview }
-    public var devToolsDock: DevToolsDock { window.devToolsDock }
-    public var internalPage: InternalPage? { window.internalPage }
-    public var fullscreenTabID: UUID? { window.fullscreenTabID }
-    public var regionCaptureTabID: UUID? { window.regionCaptureTabID }
-    public var tabSwitcherHighlightID: UUID? { window.tabSwitcherHighlightID }
-    public var isTabSwitcherVisible: Bool { window.isTabSwitcherVisible }
-    public var commandPaletteGeneration: Int { window.commandPaletteGeneration }
-    public var commandPaletteOrigin: CommandPaletteOrigin { window.commandPaletteOrigin }
-    public var isFindBarVisible: Bool { window.isFindBarVisible }
-    public var findBarFocusRequests: Int { window.findBarFocusRequests }
-    public var findResult: EngineFindResult? { window.findResult }
+    public var currentSpace: Space { windowModel.currentSpace }
+    public var selectedTab: Tab? { windowModel.selectedTab }
+    public var selectedFavoriteID: UUID? { windowModel.selectedFavoriteID }
+    public var recentTabs: [Tab] { windowModel.recentTabs }
+    var paneTabs: [Tab] { windowModel.paneTabs }
+    var preview: PagePreview? { windowModel.preview }
+    public var devToolsDock: DevToolsDock { windowModel.devToolsDock }
+    public var internalPage: InternalPage? { windowModel.internalPage }
+    public var fullscreenTabID: UUID? { windowModel.fullscreenTabID }
+    public var regionCaptureTabID: UUID? { windowModel.regionCaptureTabID }
+    public var tabSwitcherHighlightID: UUID? { windowModel.tabSwitcherHighlightID }
+    public var isTabSwitcherVisible: Bool { windowModel.isTabSwitcherVisible }
+    public var commandPaletteGeneration: Int { windowModel.commandPaletteGeneration }
+    public var commandPaletteOrigin: CommandPaletteOrigin { windowModel.commandPaletteOrigin }
+    public var isFindBarVisible: Bool { windowModel.isFindBarVisible }
+    public var findBarFocusRequests: Int { windowModel.findBarFocusRequests }
+    public var findResult: EngineFindResult? { windowModel.findResult }
 
     public var isSidebarVisible: Bool {
-        get { window.isSidebarVisible }
-        set { window.isSidebarVisible = newValue }
+        get { windowModel.isSidebarVisible }
+        set { windowModel.isSidebarVisible = newValue }
     }
     public var isLibraryVisible: Bool {
-        get { window.isLibraryVisible }
-        set { window.isLibraryVisible = newValue }
+        get { windowModel.isLibraryVisible }
+        set { windowModel.isLibraryVisible = newValue }
     }
     public var commandPaletteMode: CommandPaletteMode? {
-        get { window.commandPaletteMode }
-        set { window.commandPaletteMode = newValue }
+        get { windowModel.commandPaletteMode }
+        set { windowModel.commandPaletteMode = newValue }
     }
     public var findText: String {
-        get { window.findText }
-        set { window.findText = newValue }
+        get { windowModel.findText }
+        set { windowModel.findText = newValue }
     }
     public var renamingSpaceID: UUID? {
-        get { window.renamingSpaceID }
-        set { window.renamingSpaceID = newValue }
+        get { windowModel.renamingSpaceID }
+        set { windowModel.renamingSpaceID = newValue }
     }
     public var renamingTabID: UUID? {
-        get { window.renamingTabID }
-        set { window.renamingTabID = newValue }
+        get { windowModel.renamingTabID }
+        set { windowModel.renamingTabID = newValue }
     }
     public var renamingFolderID: UUID? {
-        get { window.renamingFolderID }
-        set { window.renamingFolderID = newValue }
+        get { windowModel.renamingFolderID }
+        set { windowModel.renamingFolderID = newValue }
     }
     var shareButtonView: NSView? {
-        get { window.shareButtonView }
-        set { window.shareButtonView = newValue }
+        get { windowModel.shareButtonView }
+        set { windowModel.shareButtonView = newValue }
     }
 
-    public var canSetCurrentPageAsHome: Bool { window.canSetCurrentPageAsHome }
-    public var canGoHome: Bool { window.canGoHome }
-    public var canShowDeveloperTools: Bool { window.canShowDeveloperTools }
-    public var isShowingDeveloperTools: Bool { window.isShowingDeveloperTools }
-    public var canChooseDevToolsSide: Bool { window.canChooseDevToolsSide }
-    public var canZoom: Bool { window.canZoom }
-    public var canPrint: Bool { window.canPrint }
-    public var canCapture: Bool { window.canCapture }
-    public var canShareSelectedPage: Bool { window.canShareSelectedPage }
-    public var canClearSiteData: Bool { window.canClearSiteData }
-    public var canOpenSelectedTabInSplitView: Bool { window.canOpenSelectedTabInSplitView }
+    public var canSetCurrentPageAsHome: Bool { windowModel.canSetCurrentPageAsHome }
+    public var canGoHome: Bool { windowModel.canGoHome }
+    public var canShowDeveloperTools: Bool { windowModel.canShowDeveloperTools }
+    public var isShowingDeveloperTools: Bool { windowModel.isShowingDeveloperTools }
+    public var canChooseDevToolsSide: Bool { windowModel.canChooseDevToolsSide }
+    public var canZoom: Bool { windowModel.canZoom }
+    public var canPrint: Bool { windowModel.canPrint }
+    public var canCapture: Bool { windowModel.canCapture }
+    public var canShareSelectedPage: Bool { windowModel.canShareSelectedPage }
+    public var canClearSiteData: Bool { windowModel.canClearSiteData }
+    public var canOpenSelectedTabInSplitView: Bool { windowModel.canOpenSelectedTabInSplitView }
 
-    public func addSpace() { window.addSpace() }
-    public func switchToSpace(_ id: UUID) { window.switchToSpace(id) }
-    public func switchToAdjacentSpace(forward: Bool) { window.switchToAdjacentSpace(forward: forward) }
-    public func renameSpace(_ id: UUID, to name: String) { window.renameSpace(id, to: name) }
-    public func renameTab(_ id: UUID, to name: String) { window.renameTab(id, to: name) }
-    public func endRenaming(_ id: UUID) { window.endRenaming(id) }
-    public func addFolder(toSpace spaceID: UUID) { window.addFolder(toSpace: spaceID) }
-    public func addToNewFolder(_ tab: Tab) { window.addToNewFolder(tab) }
-    public func renameFolder(_ id: UUID, to name: String) { window.renameFolder(id, to: name) }
-    public func endRenamingFolder(_ id: UUID) { window.endRenamingFolder(id) }
-    public func setCurrentPageAsHome(ofSpace id: UUID) { window.setCurrentPageAsHome(ofSpace: id) }
-    public func goHome() { window.goHome() }
-    public func openFavorite(_ favorite: Favorite) { window.openFavorite(favorite) }
-    func previewFavorite(_ favorite: Favorite) { window.previewFavorite(favorite) }
-    func openPreviewInTab() { window.openPreviewInTab() }
-    func closePreview() { window.closePreview() }
+    public func addSpace() { windowModel.addSpace() }
+    public func switchToSpace(_ id: UUID) { windowModel.switchToSpace(id) }
+    public func switchToAdjacentSpace(forward: Bool) { windowModel.switchToAdjacentSpace(forward: forward) }
+    public func renameSpace(_ id: UUID, to name: String) { windowModel.renameSpace(id, to: name) }
+    public func renameTab(_ id: UUID, to name: String) { windowModel.renameTab(id, to: name) }
+    public func endRenaming(_ id: UUID) { windowModel.endRenaming(id) }
+    public func addFolder(toSpace spaceID: UUID) { windowModel.addFolder(toSpace: spaceID) }
+    public func addToNewFolder(_ tab: Tab) { windowModel.addToNewFolder(tab) }
+    public func renameFolder(_ id: UUID, to name: String) { windowModel.renameFolder(id, to: name) }
+    public func endRenamingFolder(_ id: UUID) { windowModel.endRenamingFolder(id) }
+    public func setCurrentPageAsHome(ofSpace id: UUID) { windowModel.setCurrentPageAsHome(ofSpace: id) }
+    public func goHome() { windowModel.goHome() }
+    public func navigate(to input: String) { windowModel.navigate(to: input) }
+    public func openFavorite(_ favorite: Favorite) { windowModel.openFavorite(favorite) }
+    func previewFavorite(_ favorite: Favorite) { windowModel.previewFavorite(favorite) }
+    func openPreviewInTab() { windowModel.openPreviewInTab() }
+    func closePreview() { windowModel.closePreview() }
 
-    public func closeSelectedTab() { window.closeSelectedTab() }
-    public func closeOtherTabs() { window.closeOtherTabs() }
-    public func selectTab(at index: Int) { window.selectTab(at: index) }
-    public func selectLastTab() { window.selectLastTab() }
-    public func shortcutNumber(for tab: Tab) -> Int? { window.shortcutNumber(for: tab) }
-    public func selectAdjacentTab(forward: Bool) { window.selectAdjacentTab(forward: forward) }
-    public func moveSelectedTab(up: Bool) { window.moveSelectedTab(up: up) }
+    public func closeSelectedTab() { windowModel.closeSelectedTab() }
+    public func closeOtherTabs() { windowModel.closeOtherTabs() }
+    public func selectTab(at index: Int) { windowModel.selectTab(at: index) }
+    public func selectLastTab() { windowModel.selectLastTab() }
+    public func shortcutNumber(for tab: Tab) -> Int? { windowModel.shortcutNumber(for: tab) }
+    public func selectAdjacentTab(forward: Bool) { windowModel.selectAdjacentTab(forward: forward) }
+    public func moveSelectedTab(up: Bool) { windowModel.moveSelectedTab(up: up) }
 
-    public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) { window.showCommandPalette(mode, from: origin) }
-    public func dismissCommandPalette() { window.dismissCommandPalette() }
-    public func submitCommandPalette(_ input: String) { window.submitCommandPalette(input) }
-    public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { window.focusCommandBar(from: origin) }
-    public func closeInternalPage() { window.closeInternalPage() }
-    public func exitPageFullscreen() { window.exitPageFullscreen() }
-    func focusPage(leaving previous: NSView? = nil) { window.focusPage(leaving: previous) }
-    @MainActor public func runPluginCommand(_ command: PluginCommandRef) { window.runPluginCommand(command) }
+    public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) { windowModel.showCommandPalette(mode, from: origin) }
+    public func dismissCommandPalette() { windowModel.dismissCommandPalette() }
+    public func submitCommandPalette(_ input: String) { windowModel.submitCommandPalette(input) }
+    public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { windowModel.focusCommandBar(from: origin) }
+    public func closeInternalPage() { windowModel.closeInternalPage() }
+    public func exitPageFullscreen() { windowModel.exitPageFullscreen() }
+    func focusPage(leaving previous: NSView? = nil) { windowModel.focusPage(leaving: previous) }
+    @MainActor public func runPluginCommand(_ command: PluginCommandRef) { windowModel.runPluginCommand(command) }
 
-    public func showFindBar() { window.showFindBar() }
-    public func hideFindBar() { window.hideFindBar() }
-    public func findNext() { window.findNext() }
-    public func findPrevious() { window.findPrevious() }
-    public func toggleSidebar() { window.toggleSidebar() }
-    public func toggleLibrary() { window.toggleLibrary() }
+    public func showFindBar() { windowModel.showFindBar() }
+    public func hideFindBar() { windowModel.hideFindBar() }
+    public func findNext() { windowModel.findNext() }
+    public func findPrevious() { windowModel.findPrevious() }
+    public func toggleSidebar() { windowModel.toggleSidebar() }
+    public func toggleLibrary() { windowModel.toggleLibrary() }
 
-    public func goBack() { window.goBack() }
-    public func goForward() { window.goForward() }
-    public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] { window.recentBackItems(limit: limit) }
-    public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) { window.go(to: item, inTab: tabID) }
-    public func reload() { window.reload() }
-    public func stopLoading() { window.stopLoading() }
-    public func toggleDeveloperTools() { window.toggleDeveloperTools() }
-    public func zoomIn() { window.zoomIn() }
-    public func zoomOut() { window.zoomOut() }
-    public func resetZoom() { window.resetZoom() }
-    public func printPage() { window.printPage() }
-    public func exportPageAsPDF() { window.exportPageAsPDF() }
-    public func captureViewport() { window.captureViewport() }
-    public func captureFullPage() { window.captureFullPage() }
-    public func beginRegionCapture() { window.beginRegionCapture() }
-    func finishRegionCapture(_ rect: CGRect) { window.finishRegionCapture(rect) }
-    func cancelRegionCapture() { window.cancelRegionCapture() }
-    public func shareSelectedPage() { window.shareSelectedPage() }
-    public func confirmClearSiteData() { window.confirmClearSiteData() }
+    public func goBack() { windowModel.goBack() }
+    public func goForward() { windowModel.goForward() }
+    public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] { windowModel.recentBackItems(limit: limit) }
+    public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) { windowModel.go(to: item, inTab: tabID) }
+    public func reload() { windowModel.reload() }
+    public func stopLoading() { windowModel.stopLoading() }
+    public func toggleDeveloperTools() { windowModel.toggleDeveloperTools() }
+    public func zoomIn() { windowModel.zoomIn() }
+    public func zoomOut() { windowModel.zoomOut() }
+    public func resetZoom() { windowModel.resetZoom() }
+    public func printPage() { windowModel.printPage() }
+    public func exportPageAsPDF() { windowModel.exportPageAsPDF() }
+    public func captureViewport() { windowModel.captureViewport() }
+    public func captureFullPage() { windowModel.captureFullPage() }
+    public func beginRegionCapture() { windowModel.beginRegionCapture() }
+    func finishRegionCapture(_ rect: CGRect) { windowModel.finishRegionCapture(rect) }
+    func cancelRegionCapture() { windowModel.cancelRegionCapture() }
+    public func shareSelectedPage() { windowModel.shareSelectedPage() }
+    public func confirmClearSiteData() { windowModel.confirmClearSiteData() }
 
-    public func showTabSwitcher(backward: Bool) { window.showTabSwitcher(backward: backward) }
-    public func moveTabSwitcherHighlight(backward: Bool) { window.moveTabSwitcherHighlight(backward: backward) }
-    public func commitTabSwitcher() { window.commitTabSwitcher() }
-    public func cancelTabSwitcher() { window.cancelTabSwitcher() }
+    public func showTabSwitcher(backward: Bool) { windowModel.showTabSwitcher(backward: backward) }
+    public func moveTabSwitcherHighlight(backward: Bool) { windowModel.moveTabSwitcherHighlight(backward: backward) }
+    public func commitTabSwitcher() { windowModel.commitTabSwitcher() }
+    public func cancelTabSwitcher() { windowModel.cancelTabSwitcher() }
 
-    func isInSplitViewOnScreen(_ tab: Tab) -> Bool { window.isInSplitViewOnScreen(tab) }
-    public func canOpenInSplitView(_ tab: Tab) -> Bool { window.canOpenInSplitView(tab) }
-    public func openInSplitView(_ tab: Tab, at index: Int? = nil) { window.openInSplitView(tab, at: index) }
-    public func openSelectedTabInSplitView() { window.openSelectedTabInSplitView() }
-    func closePane(_ tab: Tab) { window.closePane(tab) }
+    func isInSplitViewOnScreen(_ tab: Tab) -> Bool { windowModel.isInSplitViewOnScreen(tab) }
+    public func canOpenInSplitView(_ tab: Tab) -> Bool { windowModel.canOpenInSplitView(tab) }
+    public func openInSplitView(_ tab: Tab, at index: Int? = nil) { windowModel.openInSplitView(tab, at: index) }
+    public func openSelectedTabInSplitView() { windowModel.openSelectedTabInSplitView() }
+    func closePane(_ tab: Tab) { windowModel.closePane(tab) }
 }
