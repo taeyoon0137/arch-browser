@@ -48,6 +48,8 @@ public final class BrowserSession: ObservableObject {
     @Published public var isSidebarVisible = true
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
+    /// Counts the palette's openings, including a change of mode, so each one gets a fresh view.
+    @Published public private(set) var commandPaletteGeneration = 0
     /// Where the open palette came from, which sets the direction it appears from.
     @Published public private(set) var commandPaletteOrigin = CommandPaletteOrigin.keyboard
     @Published public private(set) var isFindBarVisible = false
@@ -537,6 +539,7 @@ public final class BrowserSession: ObservableObject {
 
     public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) {
         commandPaletteOrigin = origin
+        if commandPaletteMode != mode { commandPaletteGeneration += 1 }
         commandPaletteMode = mode
     }
     public func dismissCommandPalette() {

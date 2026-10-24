@@ -55,9 +55,9 @@ public struct BrowserWindowView: View {
                     .transition(.commandPaletteDimming(from: session.commandPaletteOrigin))
             }
             if let mode = session.commandPaletteMode {
-                // Give each mode its own view identity to reset the typed text and initial address.
+                // Each opening gets its own view, so a palette reopened while the last one leaves starts fresh: typed text reset and the field focused.
                 CommandPaletteView(session: session, mode: mode)
-                    .id(mode)
+                    .id(session.commandPaletteGeneration)
                     .transition(.commandPalette(from: session.commandPaletteOrigin))
             }
         }
@@ -65,8 +65,9 @@ public struct BrowserWindowView: View {
         .animation(.paletteIn(from: session.commandPaletteOrigin), value: session.commandPaletteMode)
         .background(SpaceBackgroundView(tint: session.currentSpace.tint.color))
         .background(WindowButtonsReader { windowButtons = $0 })
-        // Hiding or showing the sidebar slides it and widens or narrows the page.
+        // Hiding or showing the sidebar, or the library pushing it aside, slides it and widens or narrows the page.
         .animation(SidebarView.pageSpring, value: session.isSidebarVisible)
+        .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
         // The window buttons sit on the sidebar, so they hide with it and come back while it peeks. Full screen keeps its own.
         .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking, reference: windowReference))
         .onChange(of: session.isSidebarVisible) { isVisible in
@@ -127,10 +128,13 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card out while the pointer is over it, or while a menu, popover, or sheet opened from it, or the command palette, is open.
+    /// Keeps the card out while the pointer is over it, while text in it is being edited, or while a menu, popover, or sheet opened from it, or the command palette, is open. In full screen the window's toolbar lives in a child window, which does not count.
     private func checkPeek() {
-        let isInUse = isPointerOverSidebar || session.commandPaletteMode != nil || RunLoop.main.currentMode == .eventTracking
-            || NSApp.windows.contains { $0.isVisible && ($0.parent != nil || $0.attachedSheet != nil) }
+        let window = windowReference.window
+        let hasOpenChild = window?.attachedSheet != nil
+            || (window?.childWindows ?? []).contains { $0.isVisible && !NSStringFromClass(type(of: $0)).contains("FullScreen") }
+        let isEditingText = session.renamingSpaceID != nil || window?.firstResponder is NSText
+        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
         // A library opened in the card goes with it, once the card is out of sight, so the card comes back with the sidebar.
@@ -406,6 +410,8 @@ struct SidebarView: View {
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, 10)
+        // The library may open or close by menu or shortcut during a swipe; the swipe then lets go of it.
+        .onChange(of: session.isLibraryVisible) { _ in isSwipingLibrary = false }
     }
 }
 
@@ -437,6 +443,8 @@ struct SidebarColumn: View {
         HStack(spacing: 0) {
             LibraryPanel(session: session, windowButtons: windowButtons)
                 .frame(width: libraryWidth)
+                .allowsHitTesting(progress > 0)
+                .accessibilityHidden(progress == 0)
                 // The line runs beside the library's contents, between its title row and its button row.
                 .overlay(alignment: .trailing) {
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
@@ -453,18 +461,22 @@ struct SidebarColumn: View {
                 .overlay {
                     if session.isLibraryVisible, !isFloating {
                         Color.clear
+                            .frame(width: peek)
                             .contentShape(Rectangle())
                             .onTapGesture { finishLibrarySwipe(opens: false) }
                             .accessibilityElement()
                             .accessibilityLabel("Show Sidebar")
                             .accessibilityAddTraits(.isButton)
                             .accessibilityAction { finishLibrarySwipe(opens: false) }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
         }
         .offset(x: reveal - libraryWidth)
         .frame(width: width + peek * progress, alignment: .leading)
         .clipped()
+        // Clicks reach only what the clip shows.
+        .contentShape(Rectangle())
         // A swipe over the open library or the pushed sidebar takes the library away again.
         .background(SpaceSwipeView(isEnabled: session.isLibraryVisible,
                                    onChange: { travel in swipeReveal = min(libraryWidth, max(0, libraryWidth + travel)) },
@@ -479,6 +491,7 @@ struct SidebarColumn: View {
         }
         .animation(SidebarView.pageSpring, value: session.isLibraryVisible)
         .environment(\.sidebarWidth, width)
+        .onChange(of: session.isLibraryVisible) { _ in swipeReveal = nil }
     }
 
     private func finishLibrarySwipe(opens: Bool) {
@@ -749,6 +762,8 @@ struct SpaceTabsView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// The tab being dragged to a new place, while the drag lasts and while it settles.
     @State private var drag: TabDrag?
+    /// Set while a row's drag gesture is under way. It resets on its own when the gesture is cancelled, as when its row goes away.
+    @GestureState private var isDragGestureActive = false
     /// Each tab row's frame in the list, for finding the row under the pointer and the place a dropped tab settles into.
     @State private var rowFrames: [UUID: CGRect] = [:]
 
@@ -808,6 +823,13 @@ struct SpaceTabsView: View {
             .environment(\.isDraggingTab, drag != nil)
             .coordinateSpace(name: Self.coordinateSpace)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
+            // A cancelled gesture never reports its end, so the drag is dropped once the gesture is gone and nothing is settling.
+            .onChange(of: isDragGestureActive) { isActive in
+                guard !isActive else { return }
+                DispatchQueue.main.async {
+                    if !isDragGestureActive, drag?.isSettling == false { drag = nil }
+                }
+            }
             .overlay(alignment: .topLeading) { draggedRow }
         }
         .scrollIndicators(.never)
@@ -827,6 +849,7 @@ struct SpaceTabsView: View {
                 Color.clear.preference(key: TabRowFramesKey.self, value: [tab.id: proxy.frame(in: .named(Self.coordinateSpace))])
             })
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.coordinateSpace))
+                .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
                 .onEnded { _ in dragEnded() })
     }
@@ -845,7 +868,7 @@ struct SpaceTabsView: View {
 
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
         guard drag?.isSettling != true else { return }
-        if drag == nil {
+        if drag?.id != tab.id {
             drag = TabDrag(id: tab.id, pointerY: value.location.y, grabOffset: value.startLocation.y - (rowFrames[tab.id]?.minY ?? value.startLocation.y))
         }
         drag?.pointerY = value.location.y
@@ -960,13 +983,22 @@ final class CommandKeyState: ObservableObject {
 
     private init() {
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.setDown(event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command)
+            self?.setDown(Self.isCommandAlone(event.modifierFlags))
             return event
         }
         // The app gets no key events while another app is active, so a release there would go unseen.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.setDown(false)
         }
+        // Modifier changes while a menu tracks reach no monitor, so the keys are read again when it closes.
+        NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.setDown(Self.isCommandAlone(NSEvent.modifierFlags))
+        }
+    }
+
+    /// Caps Lock and the like do not count.
+    private static func isCommandAlone(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.intersection([.command, .shift, .option, .control, .function]) == .command
     }
 
     private func setDown(_ isDown: Bool) {
@@ -977,6 +1009,7 @@ final class CommandKeyState: ObservableObject {
             return
         }
         let show = DispatchWorkItem { [weak self] in
+            guard Self.isCommandAlone(NSEvent.modifierFlags) else { return }
             withAnimation(.easeOut(duration: 0.18)) { self?.showsShortcuts = true }
         }
         pendingShow = show

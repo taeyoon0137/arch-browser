@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 struct SpaceSwipeView: NSViewRepresentable {
-    /// While off, scroll events pass by untouched.
+    /// While off, no new swipe starts and scroll events pass by.
     var isEnabled = true
     /// Receives the horizontal finger travel in points while a swipe is in progress. Positive values mean the fingers moved right.
     let onChange: (_ translation: CGFloat) -> Void
@@ -54,9 +54,10 @@ final class SpaceSwipeNSView: NSView {
 
     /// Returns the event to pass it on, or nil to consume it as part of a horizontal swipe.
     private func handle(_ event: NSEvent) -> NSEvent? {
-        guard isEnabled, event.hasPreciseScrollingDeltas, event.window === window else { return event }
+        guard event.hasPreciseScrollingDeltas, event.window === window else { return event }
+        // Turning the view off stops new swipes only, so a swipe under way still ends and still takes its momentum.
         if event.phase == .began {
-            isTracking = bounds.contains(convert(event.locationInWindow, from: nil))
+            isTracking = isEnabled && bounds.contains(convert(event.locationInWindow, from: nil))
             axis = .undecided
             travel = .zero
             velocity = 0
