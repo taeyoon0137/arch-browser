@@ -58,10 +58,10 @@ public final class PluginManager {
         }
     }
 
-    /// The page scripts of the enabled plugins, for every web contents of the Persona. Each runs in its plugin's world, and only in documents whose address one of its patterns and one of the plugin's granted sites cover.
+    /// The page scripts of the enabled plugins, for every web contents of the Persona. Each runs in its plugin's world, and only in documents whose address one of its patterns and one of the plugin's granted sites cover. A script whose source is not a function body on its own is left out.
     public func pageScripts() -> [EnginePageScript] {
         plugins.filter(\.isEnabled).flatMap { plugin in
-            plugin.manifest.contributions.pageScripts.map { $0.engineScript(world: plugin.id.pageScriptWorld, sites: plugin.grant.sites) }
+            plugin.manifest.contributions.pageScripts.compactMap { $0.engineScript(world: plugin.id.pageScriptWorld, sites: plugin.grant.sites) }
         }
     }
 

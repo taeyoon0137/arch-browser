@@ -10,7 +10,7 @@ public enum EnginePageScriptInjectionTime: String, Hashable, Sendable {
 
 /// A script the engine runs in each new document of a web contents. Scripts in one world share their globals and one channel to the app.
 ///
-/// WebKit runs each world in a content world of its own, which the page cannot reach. Chromium runs every world in the page's main world: the page sees the globals and DOM changes a script makes and can replace the functions a script calls later, but it cannot reach the channel.
+/// WebKit runs each world in a content world of its own, which the page cannot reach. Chromium runs every world in the page's main world: the page sees the globals and DOM changes a script makes and can replace the functions a script calls later, so it can also see the values the script sends and receives, but it cannot reach the channel.
 public struct EnginePageScript: Hashable, Sendable {
     public var world: String
     /// A JavaScript function expression, such as `(channel) => { … }`, that the engine calls with the world's channel:

@@ -318,40 +318,43 @@ const char kPageScriptReply[] = "ARCHPageScriptReply";
 // A value for the listeners of a world's channel in the main frame carries the world and the JSON text.
 const char kPageScriptDelivery[] = "ARCHPageScriptDelivery";
 
-// Opens a world's channel in a document. It takes the native function that sends JSON text to the browser and returns the request's number, and returns the renderer's endpoint: the `channel` the world's scripts receive, `deliver` for posted values, `reply` for replies, and `run` for the world's scripts. It runs in the page's main world, so it keeps what it uses from the page's reach: it captures the built-ins it calls before the page's scripts run and keeps its state in objects without prototypes. Keep the channel in step with `WebKitPageScripts.channelSource` in the WebKit adapter.
-const char kPageScriptEndpoint[] = R"JS(((post) => {
-  const stringify = JSON.stringify, parse = JSON.parse, apply = Reflect.apply, freeze = Object.freeze, report = reportError, PromiseType = Promise;
+// Evaluates to the function that opens a world's channel in a document. That function takes the native function that sends JSON text to the browser and returns the request's number, and returns the renderer's endpoint: the `channel` the world's scripts receive, `deliver` for posted values, `reply` for replies, and `run` for the world's scripts. Endpoints live in the page's main world, so they keep what they use from the page's reach: the helper evaluates this script in each new document before the page's scripts run, so every endpoint, even one opened after the page has run, calls the built-ins as they were then, and endpoints keep their state in objects without prototypes. Keep the channel in step with `WebKitPageScripts.channelSource` in the WebKit adapter.
+const char kPageScriptEndpointOpener[] = R"JS((() => {
+  const stringify = JSON.stringify, parse = JSON.parse, apply = Reflect.apply, create = Object.create, freeze = Object.freeze, report = reportError;
+  const PromiseType = Promise, TypeErrorType = TypeError;
   const listen = EventTarget.prototype.addEventListener, readyState = Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get;
-  const listeners = Object.create(null), replies = Object.create(null);
-  let listenerCount = 0;
   const call = (target, args) => { try { apply(target, undefined, args); } catch (error) { report(error); } };
-  const channel = freeze({
-    send: (value) => new PromiseType((resolve) => {
-      const json = stringify(value);
-      if (typeof json !== "string") throw new TypeError("A page script can send only values JSON can hold.");
-      replies[post(json)] = resolve;
-    }),
-    onMessage: (listener) => {
-      if (typeof listener !== "function") throw new TypeError("A page script's message listener must be a function.");
-      listeners[listenerCount++] = listener;
-    },
-  });
-  return freeze({
-    channel,
-    deliver: (json) => { const value = parse(json); for (let i = 0; i < listenerCount; i++) call(listeners[i], [value]); },
-    reply: (request, json) => {
-      const resolve = replies[request];
-      if (!resolve) return;
-      delete replies[request];
-      resolve(typeof json === "string" ? parse(json) : undefined);
-    },
-    run: (script, atDocumentEnd) => {
-      const start = () => call(script, [channel]);
-      if (atDocumentEnd && apply(readyState, document, []) === "loading") apply(listen, document, ["DOMContentLoaded", start, { once: true }]);
-      else start();
-    },
-  });
-}))JS";
+  return (post) => {
+    const listeners = create(null), replies = create(null);
+    let listenerCount = 0;
+    const channel = freeze({
+      send: (value) => new PromiseType((resolve) => {
+        const json = stringify(value);
+        if (typeof json !== "string") throw new TypeErrorType("A page script can send only values JSON can hold.");
+        replies[post(json)] = resolve;
+      }),
+      onMessage: (listener) => {
+        if (typeof listener !== "function") throw new TypeErrorType("A page script's message listener must be a function.");
+        listeners[listenerCount++] = listener;
+      },
+    });
+    return freeze({
+      channel,
+      deliver: (json) => { const value = parse(json); for (let i = 0; i < listenerCount; i++) call(listeners[i], [value]); },
+      reply: (request, json) => {
+        const resolve = replies[request];
+        if (!resolve) return;
+        delete replies[request];
+        resolve(typeof json === "string" ? parse(json) : undefined);
+      },
+      run: (script, atDocumentEnd) => {
+        const start = () => call(script, [channel]);
+        if (atDocumentEnd && apply(readyState, document, []) === "loading") apply(listen, document, ["DOMContentLoaded", start, { once: true }]);
+        else start();
+      },
+    });
+  };
+})())JS";
 
 // One page script as a renderer keeps it.
 struct PageScript {
@@ -453,7 +456,7 @@ public:
         std::erase_if(pageScripts_, [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
     }
 
-    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the page scripts run, before the page's own scripts.
+    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the document gets its opener of page script endpoints, and the page scripts run, before the page's own scripts.
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
         if (!context->Enter()) {
             return;
@@ -465,11 +468,15 @@ public:
                                        static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
                                                                                V8_PROPERTY_ATTRIBUTE_DONTDELETE));
         Evaluate(context, kAudibleScript);
+        if (CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpointOpener); open && open->IsFunction()) {
+            openers_.push_back({context, open});
+        }
         RunPageScripts(browser, frame, context);
         context->Exit();
     }
 
     void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        std::erase_if(openers_, [&](const EndpointOpener &opener) { return opener.context->IsSame(context); });
         std::erase_if(endpoints_, [&](const WorldEndpoint &endpoint) { return endpoint.context->IsSame(context); });
     }
 
@@ -528,6 +535,12 @@ private:
         std::vector<PageScript> scripts;
     };
 
+    // The function that opens world endpoints in one document, made before the page's scripts ran.
+    struct EndpointOpener {
+        CefRefPtr<CefV8Context> context;
+        CefRefPtr<CefV8Value> open;
+    };
+
     // A world's endpoint in one document.
     struct WorldEndpoint {
         std::string world;
@@ -574,13 +587,16 @@ private:
         return nullptr;
     }
 
-    // The world's endpoint in the document of `context`, which the caller entered, opened there if the document has none. nullptr when the endpoint script fails.
+    // The world's endpoint in the document of `context`, which the caller entered, opened there with the document's opener if the document has none. nullptr when the document has no opener or the opener fails.
     CefRefPtr<CefV8Value> OpenEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
         if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
             return endpoint;
         }
-        CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpoint);
-        CefRefPtr<CefV8Value> endpoint = open && open->IsFunction() ? open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))}) : nullptr;
+        auto opener = std::find_if(openers_.begin(), openers_.end(), [&](const EndpointOpener &entry) { return entry.context->IsSame(context); });
+        if (opener == openers_.end()) {
+            return nullptr;
+        }
+        CefRefPtr<CefV8Value> endpoint = opener->open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))});
         if (!endpoint || !endpoint->IsObject()) {
             return nullptr;
         }
@@ -618,7 +634,8 @@ private:
     }
 
     std::vector<BrowserScripts> pageScripts_;
-    // The endpoints of the documents in this process, removed as their contexts go.
+    // The endpoint openers and endpoints of the documents in this process, removed as their contexts go.
+    std::vector<EndpointOpener> openers_;
     std::vector<WorldEndpoint> endpoints_;
     IMPLEMENT_REFCOUNTING(HelperApp);
 };
@@ -2434,7 +2451,7 @@ private:
     }
 }
 
-/// A frame created after the scripts changed may be the first of the browser in a new renderer process, which received only the scripts of the browser's extra info. CEF sends the message before the frame attaches.
+/// A frame created after the scripts changed may be the first of the browser in its renderer process, which then has only the scripts of the browser's extra info. CEF queues the message until the frame attaches and does not order it before the frame's first document, so that document may still run the extra info's scripts (needs verification).
 - (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame {
     if (_pageScriptsChanged) {
         [self sendPageScriptsToFrame:frame];

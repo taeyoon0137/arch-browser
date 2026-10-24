@@ -80,13 +80,26 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
 
 /// Match patterns for page scripts, which check a document's address in the page.
 extension MatchPattern {
-    /// A JavaScript function, `(location, patterns) => boolean`, that tells whether one of the patterns `javaScriptLiteral(_:)` writes covers the address of `location`, by the rules of `matches(_:)`. It reads the parts of the address from `location`, whose properties a page cannot replace; the URL parser writes the scheme and host in lowercase. Keep it in step with `matches(_:)` and `glob(_:matches:)`.
+    /// A JavaScript function, `(location, patterns) => boolean`, that tells whether one of the patterns `javaScriptLiteral(_:)` writes covers the address of `location`, by the rules of `matches(_:)`. It reads the parts of the address from `location`, whose properties a page cannot replace; the URL parser writes the scheme and host in lowercase. It calls no built-in function and reads only own properties, so its answer holds in a page's main world after the page's scripts have replaced built-ins. Keep it in step with `matches(_:)` and `glob(_:matches:)`.
     static let javaScriptMatcher = #"""
     (location, patterns) => {
-      const scheme = location.protocol.slice(0, -1), host = location.hostname;
-      if ((scheme !== "http" && scheme !== "https") || !host) return false;
-      const href = location.href, hash = href.indexOf("#"), end = hash < 0 ? href.length : hash, query = href.indexOf("?");
-      const target = location.pathname + (query >= 0 && query < end ? href.slice(query, end) : "");
+      const protocol = location.protocol, host = location.hostname, href = location.href;
+      if ((protocol !== "http:" && protocol !== "https:") || !host) return false;
+      const scheme = protocol === "http:" ? "http" : "https";
+      // The path, then the query: the address's text from its first "?" to its "#" or its end.
+      let target = location.pathname, inQuery = false;
+      for (let i = 0; i < href.length && href[i] !== "#"; i++) {
+        if (href[i] === "?") inQuery = true;
+        if (inQuery) target += href[i];
+      }
+      const endsWith = (text, suffix) => {
+        const offset = text.length - suffix.length;
+        if (offset < 0) return false;
+        for (let i = 0; i < suffix.length; i++) {
+          if (text[offset + i] !== suffix[i]) return false;
+        }
+        return true;
+      };
       const glob = (pattern, text) => {
         let p = 0, t = 0, retryPattern = -1, retryText = 0;
         while (t < text.length) {
@@ -105,24 +118,28 @@ extension MatchPattern {
             return false;
           }
         }
-        while (pattern[p] === "*") p += 1;
+        while (p < pattern.length && pattern[p] === "*") p += 1;
         return p === pattern.length;
       };
-      return patterns.some((pattern) => (!pattern.scheme || pattern.scheme === scheme)
-        && (!pattern.host || host === pattern.host || (pattern.subdomains && host.endsWith("." + pattern.host)))
-        && glob(pattern.path, target));
+      for (let i = 0; i < patterns.length; i++) {
+        const pattern = patterns[i];
+        if ((!pattern.scheme || pattern.scheme === scheme)
+          && (!pattern.host || host === pattern.host || (pattern.subdomains && endsWith(host, "." + pattern.host)))
+          && glob(pattern.path, target)) return true;
+      }
+      return false;
     }
     """#
 
-    /// The patterns as a JavaScript array for `javaScriptMatcher`. A pattern for every scheme or host leaves that part out.
+    /// The patterns as a JavaScript array for `javaScriptMatcher`. A pattern for every scheme or host has an empty string for that part, so every part is an own property of the pattern's object.
     static func javaScriptLiteral(_ patterns: [MatchPattern]) -> String {
         struct Parts: Encodable {
-            let scheme: String?
-            let host: String?
+            let scheme: String
+            let host: String
             let subdomains: Bool
             let path: String
         }
-        let parts = patterns.map { Parts(scheme: $0.scheme, host: $0.host, subdomains: $0.includesSubdomains, path: $0.path) }
+        let parts = patterns.map { Parts(scheme: $0.scheme ?? "", host: $0.host ?? "", subdomains: $0.includesSubdomains, path: $0.path) }
         // JSON is JavaScript, and strings and booleans always encode.
         return String(decoding: try! JSONEncoder().encode(parts), as: UTF8.self)
     }

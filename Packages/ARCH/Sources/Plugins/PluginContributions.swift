@@ -15,7 +15,7 @@ public struct PluginContributions: Hashable, Sendable {
 /// A script that runs in each document whose address one of its patterns and one of the plugin's granted sites cover, on both engines. It reaches its plugin through `arch`: `arch.send(value)` returns a promise of the reply from `Plugin.receive(_:)`, and `arch.onMessage(listener)` receives the values posted to the page's main frame.
 public struct PluginPageScript: Hashable, Sendable {
     public var matches: [MatchPattern]
-    /// JavaScript, run as the body of a function.
+    /// JavaScript, run as the body of a function. A source that does not parse as a function body on its own never runs.
     public var source: String
     public var runAt: EnginePageScriptInjectionTime
     /// Whether the script also runs in the frames inside a page.

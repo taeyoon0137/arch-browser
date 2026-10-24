@@ -300,6 +300,39 @@ import Testing
         }
     }
 
+    @Test func passesValuesFromGrantedFramesAndReturnsTheReply() async throws {
+        var tab = PluginTab(id: UUID(), spaceID: nil, title: "Other", url: URL(string: "https://other.example/")!, engine: .webKit, isPinned: false, isSelected: true)
+        let world = PageScriptPlugin.manifest.id.pageScriptWorld
+        let frameURL = URL(string: "https://example.org/docs/a")!
+        let reply = await manager([PageScriptPlugin.self]).receive(EnginePageScriptMessage(world: world, frameURL: frameURL, isMainFrame: false, json: #"{"count": 2}"#), from: tab)
+        #expect(reply == #"["echo",{"count":2}]"#)
+        let message = try #require(Recorder.pageMessages.first)
+        #expect(message.body == .object(["count": .number(2)]))
+        #expect(message.frameURL == frameURL && !message.isMainFrame)
+        // The grant covers the frame but not the tab's page.
+        tab.title = nil
+        tab.url = nil
+        #expect(message.tab == tab)
+    }
+
+    @Test func dropsValuesThePluginMayNotReceive() async {
+        let tab = PluginTab(id: UUID(), spaceID: nil, title: nil, url: nil, engine: .chromium, isPinned: false, isSelected: true)
+        let world = PageScriptPlugin.manifest.id.pageScriptWorld
+        let covered = URL(string: "https://example.org/")
+        let messages = [
+            EnginePageScriptMessage(world: world, frameURL: URL(string: "https://other.example/"), isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: world, frameURL: nil, isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: world, frameURL: covered, isMainFrame: true, json: "not json"),
+            EnginePageScriptMessage(world: "ARCHPlugin.org.example.unknown", frameURL: covered, isMainFrame: true, json: "1"),
+            EnginePageScriptMessage(world: DisabledPageScriptPlugin.manifest.id.pageScriptWorld, frameURL: covered, isMainFrame: true, json: "1"),
+        ]
+        let manager = manager([PageScriptPlugin.self, DisabledPageScriptPlugin.self])
+        for message in messages {
+            #expect(await manager.receive(message, from: tab) == nil, "\(message)")
+        }
+        #expect(Recorder.activations.isEmpty && Recorder.pageMessages.isEmpty)
+    }
+
     @Test func contextChecksTheGrant() throws {
         let context = context(for: RecordingPlugin.manifest)
         #expect(throws: PluginError.permissionDenied(.clipboard)) { try context.copyToClipboard("text") }
@@ -322,13 +355,9 @@ import Testing
 }
 
 @MainActor
-@Suite(.serialized) struct PluginPageScriptTests {
+@Suite struct PluginPageScriptTests {
     private let folder = TemporaryFolder()
     private let world = PluginID(rawValue: "org.example.page-script")!.pageScriptWorld
-
-    init() {
-        Recorder.reset()
-    }
 
     private func manager() -> PluginManager {
         PluginManager(persona: UUID(), directory: folder.url, builtIns: [PageScriptPlugin.self, DisabledPageScriptPlugin.self])
@@ -342,22 +371,44 @@ import Testing
     }
 
     @Test func startsOnlyWhereThePatternsAndTheGrantCoverThePage() throws {
-        let script = PluginPageScript(matches: [try MatchPattern("https://*.example.org/docs/*")], source: "ran = arch; // A final comment")
-        let engineScript = script.engineScript(world: world, sites: [try MatchPattern("https://example.org/*"), try MatchPattern("https://a.example.org/*")])
+        let script = PluginPageScript(matches: [try MatchPattern("*://*/docs/*")], source: "ran = arch; // A final comment")
+        let engineScript = try #require(script.engineScript(world: world, sites: [try MatchPattern("https://example.org/*"), try MatchPattern("https://*.a.example.org/*")]))
         let cases: [(String, Bool)] = [
             ("https://example.org/docs/a", true),
             ("https://a.example.org/docs/?q=1", true),
+            ("https://b.a.example.org/docs/", true),
             ("https://b.example.org/docs/a", false),
             ("https://example.org/other", false),
             ("http://example.org/docs/a", false),
         ]
-        for (address, runs) in cases {
-            let context = try #require(JSContext())
-            context.setObject(location(address), forKeyedSubscript: "location" as NSString)
-            context.evaluateScript("var ran = null; const channel = {};")
-            context.evaluateScript("(\(engineScript.source))(channel);")
-            #expect(context.exception == nil, "\(address)")
-            #expect(context.evaluateScript("ran === channel").toBool() == runs, "\(address)")
+        // On Chromium, the guard of a document-end script runs after the page's scripts, which may have replaced built-ins and added properties to prototypes.
+        let pageChanges = """
+        Array.prototype.some = function () { return true; };
+        String.prototype.slice = function () { return "https"; };
+        String.prototype.indexOf = function () { return -1; };
+        String.prototype.endsWith = function () { return true; };
+        Object.prototype.host = "other.example";
+        """
+        for page in ["", pageChanges] {
+            for (address, runs) in cases {
+                let context = try #require(JSContext())
+                context.setObject(location(address), forKeyedSubscript: "location" as NSString)
+                context.evaluateScript("var ran = null; const channel = {};\n" + page)
+                context.evaluateScript("(\(engineScript.source))(channel);")
+                #expect(context.exception == nil, "\(address)")
+                #expect(context.evaluateScript("ran === channel").toBool() == runs, "\(address)\(page.isEmpty ? "" : " after page changes")")
+            }
+        }
+    }
+
+    @Test func leavesOutSourcesThatAreNotFunctionBodiesOnTheirOwn() throws {
+        let sites = [try MatchPattern("https://example.org/*")]
+        // Each closes brackets of the function it would run in; the first two would then run on every page.
+        for source in ["})(channel); }, (channel) => { ran = channel; ((arch) => {", "})(channel); }, ran = 1, (channel) => { ((arch) => {", "}"] {
+            #expect(PluginPageScript(matches: sites, source: source).engineScript(world: world, sites: sites) == nil, "\(source)")
+        }
+        for source in ["", "return;", "ran = arch; // A final comment", #"const brace = "}"; /* } */"#] {
+            #expect(PluginPageScript(matches: sites, source: source).engineScript(world: world, sites: sites) != nil, "\(source)")
         }
     }
 
@@ -380,37 +431,6 @@ import Testing
             }
         }
         #expect(context.exception == nil)
-    }
-
-    @Test func passesValuesFromGrantedFramesAndReturnsTheReply() async throws {
-        var tab = PluginTab(id: UUID(), spaceID: nil, title: "Other", url: URL(string: "https://other.example/")!, engine: .webKit, isPinned: false, isSelected: true)
-        let frameURL = URL(string: "https://example.org/docs/a")!
-        let reply = await manager().receive(EnginePageScriptMessage(world: world, frameURL: frameURL, isMainFrame: false, json: #"{"count": 2}"#), from: tab)
-        #expect(reply == #"["echo",{"count":2}]"#)
-        let message = try #require(Recorder.pageMessages.first)
-        #expect(message.body == .object(["count": .number(2)]))
-        #expect(message.frameURL == frameURL && !message.isMainFrame)
-        // The grant covers the frame but not the tab's page.
-        tab.title = nil
-        tab.url = nil
-        #expect(message.tab == tab)
-    }
-
-    @Test func dropsValuesThePluginMayNotReceive() async {
-        let tab = PluginTab(id: UUID(), spaceID: nil, title: nil, url: nil, engine: .chromium, isPinned: false, isSelected: true)
-        let covered = URL(string: "https://example.org/")
-        let messages = [
-            EnginePageScriptMessage(world: world, frameURL: URL(string: "https://other.example/"), isMainFrame: true, json: "1"),
-            EnginePageScriptMessage(world: world, frameURL: nil, isMainFrame: true, json: "1"),
-            EnginePageScriptMessage(world: world, frameURL: covered, isMainFrame: true, json: "not json"),
-            EnginePageScriptMessage(world: "ARCHPlugin.org.example.unknown", frameURL: covered, isMainFrame: true, json: "1"),
-            EnginePageScriptMessage(world: PluginID(rawValue: "org.example.disabled-page-script")!.pageScriptWorld, frameURL: covered, isMainFrame: true, json: "1"),
-        ]
-        let manager = manager()
-        for message in messages {
-            #expect(await manager.receive(message, from: tab) == nil, "\(message)")
-        }
-        #expect(Recorder.activations.isEmpty && Recorder.pageMessages.isEmpty)
     }
 }
 
@@ -440,7 +460,7 @@ private final class TemporaryFolder {
     }
 }
 
-/// What the test plugins saw: the Persona and storage of each activation, the tab of each run, and each page script value.
+/// What the test plugins saw: the Persona and storage of each activation, the tab of each run, and each page script value. Only `PluginManagerTests` uses it, because Swift Testing runs suites in parallel and `.serialized` orders the tests of one suite only.
 @MainActor
 private enum Recorder {
     static var activations: [PersonaID] = []
