@@ -12,6 +12,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_cookie.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
@@ -447,6 +448,68 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 @end
 
+#pragma mark - Context menu
+
+@interface ARCHCEFContextMenuParams ()
+- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params location:(NSPoint)location;
+@end
+
+@implementation ARCHCEFContextMenuParams
+
+- (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params location:(NSPoint)location {
+    self = [super init];
+    if (!self) {
+        return nil;
+    }
+    _location = location;
+    CefString link = params->GetUnfilteredLinkUrl();
+    if ((params->GetTypeFlags() & CM_TYPEFLAG_LINK) && !link.empty()) {
+        _linkURL = ToNSString(link);
+    }
+    CefString source = params->GetSourceUrl();
+    if (!source.empty()) {
+        switch (params->GetMediaType()) {
+            case CM_MEDIATYPE_IMAGE:
+                _imageURL = ToNSString(source);
+                break;
+            case CM_MEDIATYPE_VIDEO:
+            case CM_MEDIATYPE_AUDIO:
+                _mediaURL = ToNSString(source);
+                break;
+            default:
+                break;
+        }
+    }
+    _selectionText = ToNSString(params->GetSelectionText());
+    _isEditable = params->IsEditable();
+    CefContextMenuParams::EditStateFlags flags = params->GetEditStateFlags();
+    ARCHCEFEditCommand commands = 0;
+    if (flags & CM_EDITFLAG_CAN_CUT) {
+        commands |= ARCHCEFEditCommandCut;
+    }
+    if (flags & CM_EDITFLAG_CAN_COPY) {
+        commands |= ARCHCEFEditCommandCopy;
+    }
+    if (flags & CM_EDITFLAG_CAN_PASTE) {
+        commands |= ARCHCEFEditCommandPaste;
+    }
+    if (flags & CM_EDITFLAG_CAN_SELECT_ALL) {
+        commands |= ARCHCEFEditCommandSelectAll;
+    }
+    _editCommands = commands;
+    _misspelledWord = ToNSString(params->GetMisspelledWord());
+    std::vector<CefString> suggestions;
+    params->GetDictionarySuggestions(suggestions);
+    NSMutableArray<NSString *> *words = [NSMutableArray arrayWithCapacity:suggestions.size()];
+    for (const CefString &word : suggestions) {
+        [words addObject:ToNSString(word)];
+    }
+    _spellingSuggestions = words;
+    return self;
+}
+
+@end
+
 #pragma mark - Browser
 
 @interface ARCHCEFBrowser ()
@@ -473,6 +536,8 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 - (void)handlePermissionRequest:(ARCHCEFPermission)permissions origin:(NSString *)origin decision:(void (^)(BOOL))decision;
 - (BOOL)handleShouldDownload:(NSString *)url hasDocument:(BOOL)hasDocument;
 - (void)handleRenderProcessTerminated;
+- (void)handleContextMenu:(CefRefPtr<CefContextMenuParams>)params frame:(CefRefPtr<CefFrame>)frame callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
+- (void)finishContextMenu;
 - (void)handleAuthenticationForHost:(NSString *)host
                                port:(int)port
                               realm:(NSString *)realm
@@ -533,7 +598,8 @@ class BridgeClient : public CefClient,
                      public CefDownloadHandler,
                      public CefJSDialogHandler,
                      public CefPermissionHandler,
-                     public CefRequestHandler {
+                     public CefRequestHandler,
+                     public CefContextMenuHandler {
 public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
@@ -545,6 +611,18 @@ public:
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+    // The app shows its own menu once CEF's current work returns, so Chromium's menu never shows. CEF's model is left as it is, because CEF asks only when the model has items.
+    bool RunContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefContextMenuParams> params,
+                        CefRefPtr<CefMenuModel> model, CefRefPtr<CefRunContextMenuCallback> callback) override {
+        if (!owner_) {
+            callback->Cancel();
+            return true;
+        }
+        [owner_ handleContextMenu:params frame:frame callback:callback];
+        return true;
+    }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
 
     // The app shows the page's dialogs as its own sheets and answers through the callback, which stays alive in the block until then.
@@ -801,6 +879,10 @@ private:
     void (^_pendingClose)(BOOL);
     /// Set while the page waits for the answer to an `alert`, `confirm`, or `prompt` dialog.
     void (^_pendingDialog)(BOOL, NSString *_Nullable);
+    /// The frame the last context menu opened on, where its edit commands run.
+    CefRefPtr<CefFrame> _contextMenuFrame;
+    /// Set while a context menu is open. It ends CEF's request exactly once.
+    void (^_pendingContextMenu)(void);
 }
 
 @synthesize browserView = _browserView;
@@ -833,6 +915,7 @@ private:
 }
 
 - (void)dealloc {
+    [self finishContextMenu];
     if (_client) {
         _client->Detach();
     }
@@ -961,6 +1044,8 @@ private:
 }
 
 - (void)handleBeforeClose {
+    [self finishContextMenu];
+    _contextMenuFrame = nullptr;
     _browser = nullptr;
     _browserView = nil;
     // `+shutdown` clears `gInitialized` before it closes every browser at quit. Those closes are not reported, so the session keeps the tabs and saves them.
@@ -1031,6 +1116,79 @@ private:
 
 - (void)handleRenderProcessTerminated {
     [_delegate cefBrowserRenderProcessDidTerminate];
+}
+
+- (void)handleContextMenu:(CefRefPtr<CefContextMenuParams>)params frame:(CefRefPtr<CefFrame>)frame callback:(CefRefPtr<CefRunContextMenuCallback>)callback {
+    // An earlier menu that never closed ends first.
+    [self finishContextMenu];
+    // CEF gives the point from the top-left corner of its view, which fills the parent view.
+    NSPoint point = NSMakePoint(params->GetXCoord(), params->GetYCoord());
+    if (!_parentView.isFlipped) {
+        point.y = NSHeight(_parentView.bounds) - point.y;
+    }
+    ARCHCEFContextMenuParams *values = [[ARCHCEFContextMenuParams alloc] initWithParams:params location:point];
+    CefRefPtr<CefRunContextMenuCallback> continuation = callback;
+    __weak ARCHCEFBrowser *weakSelf = self;
+    __block BOOL finished = NO;
+    void (^finish)(void) = ^{
+        if (finished) {
+            return;
+        }
+        finished = YES;
+        ARCHCEFBrowser *strongSelf = weakSelf;
+        if (strongSelf) {
+            strongSelf->_pendingContextMenu = nil;
+        }
+        // The app runs its items itself, so CEF's own commands never run.
+        continuation->Cancel();
+    };
+    _pendingContextMenu = finish;
+    _contextMenuFrame = frame;
+    // A main-queue block would hold the serial queue, and the CEF work scheduled on it, while the menu tracks. A run loop block in the default mode runs once CEF's current work returns.
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode, ^{
+        ARCHCEFBrowser *strongSelf = weakSelf;
+        id<ARCHCEFBrowserDelegate> delegate = strongSelf ? strongSelf->_delegate : nil;
+        if (!delegate || !strongSelf->_browserView) {
+            finish();
+            return;
+        }
+        CefScopedSendingEvent sendingEvent;
+        [delegate cefBrowserRunContextMenu:values completion:finish];
+    });
+    CFRunLoopWakeUp(CFRunLoopGetMain());
+}
+
+- (void)finishContextMenu {
+    void (^finish)(void) = _pendingContextMenu;
+    _pendingContextMenu = nil;
+    if (finish) {
+        finish();
+    }
+}
+
+- (void)performEditCommand:(ARCHCEFEditCommand)command {
+    if (!_browser) {
+        return;
+    }
+    CefRefPtr<CefFrame> frame = _contextMenuFrame && _contextMenuFrame->IsValid() ? _contextMenuFrame : _browser->GetFocusedFrame();
+    if (!frame) {
+        return;
+    }
+    if (command & ARCHCEFEditCommandCut) {
+        frame->Cut();
+    } else if (command & ARCHCEFEditCommandCopy) {
+        frame->Copy();
+    } else if (command & ARCHCEFEditCommandPaste) {
+        frame->Paste();
+    } else if (command & ARCHCEFEditCommandSelectAll) {
+        frame->SelectAll();
+    }
+}
+
+- (void)replaceMisspellingWithWord:(NSString *)word {
+    if (_browser) {
+        _browser->GetHost()->ReplaceMisspelling(CefString(word.UTF8String));
+    }
 }
 
 - (void)handleAuthenticationForHost:(NSString *)host

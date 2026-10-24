@@ -209,9 +209,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.allowsDownloads = !configuration.disallowDownloads
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.websiteDataStore = context.dataStore
-        self.webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
         super.init()
         installBridge()
+        installContextMenu()
         if let url = configuration.initialURL {
             webView.load(URLRequest(url: url))
         }
@@ -222,9 +223,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.sessionID = sessionID
         self.context = context
         self.allowsDownloads = true
-        self.webView = WKWebView(frame: .zero, configuration: parentConfiguration)
+        self.webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
         super.init()
         installBridge()
+        installContextMenu()
     }
 
     public var view: NSView { webView }

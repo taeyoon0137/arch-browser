@@ -57,6 +57,17 @@ public struct EnginePermissionRequest: Sendable {
     }
 }
 
+/// Identifiers an engine gives the context menu items it runs itself.
+public enum EngineContextMenuItem {
+    /// A replacement for the misspelled word. Its title is the replacement, so it keeps its title.
+    public static let spellingSuggestion = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.spellingSuggestion")
+    public static let noSpellingSuggestions = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.noSpellingSuggestions")
+    public static let cut = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.cut")
+    public static let copy = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.copy")
+    public static let paste = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.paste")
+    public static let selectAll = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.selectAll")
+}
+
 public struct EngineContextMenuElement: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
@@ -107,6 +118,7 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void)
     /// Asks whether a download that `url` starts may proceed. `hasPage` is false when the web contents never showed a page, as when a tab opens straight onto a file.
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool
+    /// Builds the page's context menu. On entry `menu` holds only the spelling and editing items the engine runs itself, marked with `EngineContextMenuItem` identifiers, and they carry their enabled state. The delegate may retitle, reorder, or remove them, except that a spelling suggestion keeps its title, and sets `isEnabled` on every item it adds. The engine shows the menu after this returns, unless it is empty.
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu)
     func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool
     func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void)
@@ -160,5 +172,18 @@ public extension EngineWebContentsUIDelegate {
     func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
         guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
         self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
+    }
+}
+
+public extension URL {
+    /// Parses an address an engine reported. Browsers serialize addresses with characters such as `|` left unescaped, which `URL(string:)` rejects before macOS 14, so in that case the bytes are taken as they are.
+    init?(engineString string: String) {
+        if let url = URL(string: string) {
+            self = url
+        } else if let url = URL(dataRepresentation: Data(string.utf8), relativeTo: nil, isAbsolute: true) {
+            self = url
+        } else {
+            return nil
+        }
     }
 }

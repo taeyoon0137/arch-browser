@@ -70,6 +70,30 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
     ARCHCEFDialogKindPrompt,
 };
 
+/// Edit commands a page allows in a context menu. One value may combine several.
+typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
+    ARCHCEFEditCommandCut = 1 << 0,
+    ARCHCEFEditCommandCopy = 1 << 1,
+    ARCHCEFEditCommandPaste = 1 << 2,
+    ARCHCEFEditCommandSelectAll = 1 << 3,
+};
+
+/// What a context menu opened on, copied from CEF, whose own object lasts only for its callback.
+@interface ARCHCEFContextMenuParams : NSObject
+/// Where the menu opens, in the coordinates of the browser's parent view.
+@property (nonatomic, readonly) NSPoint location;
+/// The link's absolute URL, before Chromium replaces disallowed targets with `about:blank#blocked`, so Copy Link keeps the real address. nil without a link.
+@property (nonatomic, readonly, copy, nullable) NSString *linkURL;
+@property (nonatomic, readonly, copy, nullable) NSString *imageURL;
+@property (nonatomic, readonly, copy, nullable) NSString *mediaURL;
+@property (nonatomic, readonly, copy) NSString *selectionText;
+@property (nonatomic, readonly) BOOL isEditable;
+@property (nonatomic, readonly) ARCHCEFEditCommand editCommands;
+/// Empty unless the menu opened on a misspelled word in an editable field.
+@property (nonatomic, readonly, copy) NSString *misspelledWord;
+@property (nonatomic, readonly, copy) NSArray<NSString *> *spellingSuggestions;
+@end
+
 @protocol ARCHCEFBrowserDelegate <NSObject>
 - (void)cefBrowserDidCreateView;
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
@@ -102,6 +126,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
 - (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
 /// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
 - (void)cefBrowserDidResetDialogs;
+/// Asks the app to show the page's context menu. The bridge calls this after CEF's current work returns, so CEF keeps running while the menu tracks. Call `completion` once after the menu closes; the bridge calls it itself if the browser closes first.
+- (void)cefBrowserRunContextMenu:(ARCHCEFContextMenuParams *)params completion:(void (^)(void))completion;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
@@ -162,6 +188,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
 - (void)close;
 /// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
 - (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;
+/// Runs one edit command in the frame the last context menu opened on, or in the focused frame once that frame is gone.
+- (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
+/// Replaces the selected misspelled word with `word`.
+- (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
 @end
 
 NS_ASSUME_NONNULL_END

@@ -341,6 +341,11 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(false) }
             self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
         }
+        // A link opened from a page's context menu opens behind the current tab, in the page's space and engine.
+        tab.openURLInNewTab = { [weak self, weak tab] url in
+            guard let self, let tab else { return }
+            self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind)
+        }
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)

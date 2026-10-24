@@ -37,6 +37,8 @@ public final class Tab: ObservableObject, Identifiable {
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show a sheet for the page, which waits until the tab is selected. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
     var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
+    /// The session sets this callback to open an address from the page's context menu in a background tab.
+    var openURLInNewTab: ((URL) -> Void)?
     /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
     private var isOfferingExternalApp = false
     /// The site whose own request to open another app the user declined: its host, or its scheme for a page without one, such as a file. The page asks no more until the tab moves to another site, so changing its own address or reloading does not bring the question back. A link the user clicks or an address the user types still asks.
@@ -173,6 +175,68 @@ extension Tab: EngineWebContentsUIDelegate {
         didCancelDialogs?()
     }
 
+    // MARK: Context menus
+
+    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, and editing or Copy, separated by lines. Back, Forward, and Reload show only when none of those apply. The engine's own items keep their actions and enabled state.
+    public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
+        let engineItems = menu.items
+        menu.removeAllItems()
+        menu.autoenablesItems = false
+        func engineItem(_ identifier: NSUserInterfaceItemIdentifier, _ title: String) -> NSMenuItem? {
+            guard let item = engineItems.first(where: { $0.identifier == identifier }) else { return nil }
+            item.title = title
+            return item
+        }
+        var sections: [[NSMenuItem]] = []
+        let suggestions = engineItems.filter { $0.identifier == EngineContextMenuItem.spellingSuggestion }
+        if !suggestions.isEmpty {
+            sections.append(Array(suggestions.prefix(5)))
+        } else if let noGuesses = engineItem(EngineContextMenuItem.noSpellingSuggestions, "No Guesses Found") {
+            noGuesses.isEnabled = false
+            sections.append([noGuesses])
+        }
+        if let link = element.linkURL {
+            sections.append([newTabItem("Open Link in New Tab", for: link), ActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
+        }
+        if let image = element.imageURL {
+            sections.append([newTabItem("Open Image in New Tab", for: image), ActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+        }
+        if element.isEditable {
+            sections.append([engineItem(EngineContextMenuItem.cut, "Cut"), engineItem(EngineContextMenuItem.copy, "Copy"),
+                             engineItem(EngineContextMenuItem.paste, "Paste"), engineItem(EngineContextMenuItem.selectAll, "Select All")].compactMap { $0 })
+        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = engineItem(EngineContextMenuItem.copy, "Copy") {
+            // WebKit offers Copy outside fields only when the click is not on a link, image, or media, so Chromium follows it.
+            sections.append([copy])
+        }
+        sections.removeAll { $0.isEmpty }
+        if sections.isEmpty {
+            sections.append([
+                ActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak webContents] in webContents?.navigationController.goBack() },
+                ActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak webContents] in webContents?.navigationController.goForward() },
+                ActionMenuItem("Reload") { [weak webContents] in webContents?.navigationController.reload() },
+            ])
+        }
+        for (index, section) in sections.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            section.forEach(menu.addItem)
+        }
+    }
+
+    /// Only web addresses open in a tab; a link for another app offers just Copy Link.
+    private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return ActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
+    }
+
+    private static func copyToPasteboard(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(url.absoluteString, forType: .URL)
+        item.setString(url.absoluteString, forType: .string)
+        pasteboard.writeObjects([item])
+    }
+
     // MARK: Links for other apps
 
     public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
@@ -265,5 +329,25 @@ extension Tab: EngineWebContentsUIDelegate {
     private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard let presentAlert else { return completion(.cancel) }
         presentAlert(alert, isPageDialog, completion)
+    }
+}
+
+/// A menu item that runs a closure, because a tab is not an Objective-C object that menu actions can target.
+private final class ActionMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(_ title: String, isEnabled: Bool = true, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+        self.isEnabled = isEnabled
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    @objc private func run() {
+        handler()
     }
 }

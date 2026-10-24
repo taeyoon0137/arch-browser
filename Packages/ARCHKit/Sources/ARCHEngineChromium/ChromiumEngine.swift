@@ -183,6 +183,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var lastCrashedURL: URL?
     /// Credentials sent per protection space since the last page finished loading; a further request for that space means they failed.
     private var authenticationAttempts: [String: Int] = [:]
+    /// The context menu while it tracks, so that a closing browser can end it.
+    private var contextMenu: NSMenu?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     init(sessionID: String, context: ChromiumBrowserContext?, configuration: EngineWebContentsConfiguration) {
@@ -335,7 +337,61 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
     }
     public func cefBrowserDidClose() {
+        contextMenu?.cancelTracking()
         uiDelegate?.webContentsDidClose(self)
+    }
+
+    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click.
+    public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
+        guard let uiDelegate, view.window != nil else { return completion() }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if !params.misspelledWord.isEmpty {
+            for word in params.spellingSuggestions {
+                let item = engineMenuItem(word, EngineContextMenuItem.spellingSuggestion, #selector(replaceMisspellingFromMenu(_:)), isEnabled: true)
+                item.representedObject = word
+                menu.addItem(item)
+            }
+            if params.spellingSuggestions.isEmpty {
+                menu.addItem(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
+            }
+        }
+        let commands: [(String, NSUserInterfaceItemIdentifier, ARCHCEFEditCommand)] = [
+            ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
+            ("Paste", EngineContextMenuItem.paste, .paste), ("Select All", EngineContextMenuItem.selectAll, .selectAll),
+        ]
+        for (title, identifier, command) in commands where params.isEditable || (command == .copy && !params.selectionText.isEmpty) {
+            let item = engineMenuItem(title, identifier, #selector(runEditCommandFromMenu(_:)), isEnabled: params.editCommands.contains(command))
+            item.tag = Int(command.rawValue)
+            menu.addItem(item)
+        }
+        let element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
+                                               mediaURL: params.mediaURL.flatMap(URL.init(engineString:)),
+                                               selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable)
+        uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
+        guard !menu.items.isEmpty else { return completion() }
+        contextMenu = menu
+        // Not popUpContextMenu: by now the current event is no longer the click.
+        menu.popUp(positioning: nil, at: params.location, in: view)
+        contextMenu = nil
+        completion()
+    }
+
+    private func engineMenuItem(_ title: String, _ identifier: NSUserInterfaceItemIdentifier, _ action: Selector?, isEnabled: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.identifier = identifier
+        item.isEnabled = isEnabled
+        return item
+    }
+
+    @objc private func runEditCommandFromMenu(_ sender: NSMenuItem) {
+        browser?.performEditCommand(ARCHCEFEditCommand(rawValue: UInt(sender.tag)))
+    }
+
+    @objc private func replaceMisspellingFromMenu(_ sender: NSMenuItem) {
+        guard let word = sender.representedObject as? String else { return }
+        browser?.replaceMisspelling(withWord: word)
     }
     public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
         guard let uiDelegate else { return completion(kind == .alert, nil) }
