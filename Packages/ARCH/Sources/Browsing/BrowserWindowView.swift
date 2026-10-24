@@ -1060,7 +1060,7 @@ struct SpaceTabsView: View {
     @EnvironmentObject private var tabDrag: TabDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
-    /// Each tab and folder row's frame in the window, used to find the row under the pointer and the dropped tab's destination.
+    /// Each tab and folder row's frame in the window, and those of the rows that end the pinned and open lists, used to find the row under the pointer and the dropped tab's destination.
     @State private var rowFrames: [UUID: CGRect] = [:]
     /// The visible part of the list in the window. Rows scrolled out of sight lie outside it.
     @State private var listFrame = CGRect.zero
@@ -1071,6 +1071,9 @@ struct SpaceTabsView: View {
     private static let liftDuration = TabDragState.liftDuration
     /// How far a folder's tabs sit in from its row.
     private static let folderIndent: CGFloat = 12
+    /// The keys in `rowFrames` of the rows that end the pinned and open lists: the divider and the new tab row.
+    private static let pinnedListEndID = UUID()
+    private static let openListEndID = UUID()
 
     /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them or into and out of a folder.
     private enum Item: Identifiable {
@@ -1094,7 +1097,7 @@ struct SpaceTabsView: View {
         return pinned + (pinned.isEmpty ? [] : [.divider]) + listItems(pinned: false) + [.newTab]
     }
 
-    /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and a tab dragged into it until release, so that the drag keeps its row.
+    /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row.
     private func listItems(pinned: Bool) -> [Item] {
         let folders = session.folders(in: space.id, pinned: pinned).flatMap { folder in
             let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == session.selectedTabID || ($0.id == tabDrag.tabID && !tabDrag.isSettling) }
@@ -1120,8 +1123,10 @@ struct SpaceTabsView: View {
                             .padding(.leading, isInFolder ? Self.folderIndent : 0)
                     case .divider:
                         Divider().padding(.vertical, 4).padding(.horizontal, 10)
+                            .background(frameReader(for: Self.pinnedListEndID))
                     case .newTab:
                         NewTabButton(action: { session.showCommandPalette(.newTab, from: .sidebar) })
+                            .background(frameReader(for: Self.openListEndID))
                     }
                 }
             }
@@ -1188,11 +1193,25 @@ struct SpaceTabsView: View {
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: session) : nil)
-        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead.
+        guard isOverList else { return }
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
-        guard isOverList, let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id]?.contains(value.location) == true }) else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
+        if let target = tabs.first(where: { $0.id != tab.id && !session.isInCollapsedFolder($0) && rowFrames[$0.id]?.contains(value.location) == true }) {
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
+        } else if let pinned = listEnd(at: value.location), session.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id != tab.id {
+            // The divider or the new tab row puts the tab last in the list it ends, outside folders, so that it can leave a folder in a list with no other tab outside folders.
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTabToListEnd(tab.id, pinned: pinned) }
+        } else {
+            return
+        }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    /// The list whose closing row is under the pointer: `true` for the divider after the pinned list, `false` for the new tab row after the open list.
+    private func listEnd(at point: CGPoint) -> Bool? {
+        if rowFrames[Self.pinnedListEndID]?.contains(point) == true { return true }
+        if rowFrames[Self.openListEndID]?.contains(point) == true { return false }
+        return nil
     }
 
     /// Lights up a drop target newly under the dragged tab, with a light haptic, or turns off the one it left.

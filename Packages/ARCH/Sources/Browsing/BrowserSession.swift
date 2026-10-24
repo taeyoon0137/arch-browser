@@ -259,7 +259,9 @@ public final class BrowserSession: ObservableObject {
         currentSpaceID = id
         // A selected favorite's tab belongs to no space; it stays open behind the space's own tab.
         if selectedTab?.spaceID != id {
-            selectedTabID = (tabs(in: id, pinned: false).first ?? tabs(in: id, pinned: true).first)?.id
+            // The first tab row the sidebar shows, open tabs before pinned ones. Only a space whose tabs all sit in collapsed folders selects a hidden tab.
+            let spaceTabs = tabs(in: id, pinned: false) + tabs(in: id, pinned: true)
+            selectedTabID = (spaceTabs.first { !isInCollapsedFolder($0) } ?? spaceTabs.first)?.id
         }
     }
 
@@ -695,9 +697,9 @@ public final class BrowserSession: ObservableObject {
         undoableCloseCount = 0
     }
 
-    /// The current space's tabs in sidebar order: pinned first, then open.
+    /// The current space's tab rows in sidebar order: pinned first, then open. A collapsed folder shows only the selected tab.
     private var orderedTabs: [Tab] {
-        tabs(in: currentSpaceID, pinned: true) + tabs(in: currentSpaceID, pinned: false)
+        (tabs(in: currentSpaceID, pinned: true) + tabs(in: currentSpaceID, pinned: false)).filter { $0.id == selectedTabID || !isInCollapsedFolder($0) }
     }
 
     public func selectTab(at index: Int) {
@@ -1515,6 +1517,17 @@ public final class BrowserSession: ObservableObject {
         if tab.id == selectedTabID { currentSpaceID = spaceID }
     }
 
+    /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
+    public func moveTabToListEnd(_ id: UUID, pinned: Bool) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        var reordered = tabs
+        let tab = reordered.remove(at: index)
+        tab.isPinned = pinned
+        tab.folderID = nil
+        reordered.append(tab)
+        tabs = reordered
+    }
+
     // MARK: Folders
 
     /// Every space's folders. The sidebar shows a space's pinned and open folders in this order, each list starting with its folders.
@@ -1535,6 +1548,11 @@ public final class BrowserSession: ObservableObject {
     /// A folder's tabs in sidebar order.
     public func tabs(in folder: TabFolder) -> [Tab] {
         tabs.filter { $0.folderID == folder.id }
+    }
+
+    /// Whether `tab` sits in a collapsed folder, which shows it in the sidebar only while it is selected.
+    func isInCollapsedFolder(_ tab: Tab) -> Bool {
+        folders.contains { $0.id == tab.folderID && $0.isCollapsed }
     }
 
     /// A space's pinned or open tabs that are in no folder, in sidebar order.
