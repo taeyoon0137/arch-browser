@@ -26,8 +26,8 @@ public final class ChromiumEngine: Engine {
     }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
-        // A profile removed at an earlier launch stays on disk when the app quit before its deletion finished.
-        Self.deleteRemovedProfiles(in: configuration.chromiumRootCache)
+        // A removal that a quit cut short leaves a renamed profile, which goes here even when no list names its Persona any more, as after a session that did not load.
+        Self.deleteRemovedProfiles(in: configuration.chromiumProfileRoots)
         guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: configuration.chromiumRootCache.path) else {
             throw StartError.initializationFailed
         }
@@ -36,33 +36,41 @@ public final class ChromiumEngine: Engine {
         return ChromiumApplication(configuration: configuration)
     }
 
-    /// CEF may keep a loaded profile's files open, so nothing is removed while it runs. Otherwise the profile's directory gets a new name at once, which no context loads, and is deleted in the background.
+    /// CEF may keep a loaded profile's files open, so nothing is removed while it runs. Otherwise the profile's directories get a new name at once, which no context loads, and are deleted in the background. The report waits for the deletion, so a quit before it finishes leaves the identifier to a later launch.
     public func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) {
         guard !ARCHCEFRuntime.isInitialized() else { return completion(false) }
-        let profile = configuration.chromiumProfile(forStorage: identifier)
-        guard FileManager.default.fileExists(atPath: profile.path) else { return completion(true) }
-        do {
-            try FileManager.default.moveItem(at: profile, to: profile.appendingPathExtension(Self.removedProfileExtension))
-        } catch {
-            return completion(false)
+        let roots = configuration.chromiumProfileRoots
+        let profiles = roots.map { $0.appendingPathComponent(Self.profileName(forStorage: identifier)) }
+        // A missing directory has nothing to move, and one that does not move stays for the check below.
+        for profile in profiles {
+            try? FileManager.default.moveItem(at: profile, to: profile.appendingPathExtension(Self.removedProfileExtension))
         }
-        Self.deleteRemovedProfiles(in: configuration.chromiumRootCache)
-        completion(true)
+        Self.deleteRemovedProfiles(in: roots) {
+            let leftovers = profiles + profiles.map { $0.appendingPathExtension(Self.removedProfileExtension) }
+            completion(!leftovers.contains { FileManager.default.fileExists(atPath: $0.path) })
+        }
     }
 
     /// The profile of a context with a storage identifier is named by this prefix and the identifier. A removed one also has the extension until its deletion finishes.
-    fileprivate static let profileNamePrefix = "Persona-"
+    private static let profileNamePrefix = "Persona-"
     private static let removedProfileExtension = "removed"
     /// Deletes removed profiles one at a time, so that two deletions never race over one directory.
     private static let profileDeletionQueue = DispatchQueue(label: "local.arch.browser.chromium.profile-deletion", qos: .utility)
 
-    /// Deletes, in the background, every profile directory that `removeStoredData` renamed.
-    private static func deleteRemovedProfiles(in rootCache: URL) {
+    fileprivate static func profileName(forStorage identifier: UUID) -> String {
+        profileNamePrefix + identifier.uuidString
+    }
+
+    /// Deletes, in the background, every profile directory that `removeStoredData` renamed under `roots`, then calls `completion` on the main thread.
+    private static func deleteRemovedProfiles(in roots: [URL], completion: @escaping () -> Void = {}) {
         profileDeletionQueue.async {
-            let names = (try? FileManager.default.contentsOfDirectory(atPath: rootCache.path)) ?? []
-            for name in names where name.hasPrefix(profileNamePrefix) && (name as NSString).pathExtension == removedProfileExtension {
-                try? FileManager.default.removeItem(at: rootCache.appendingPathComponent(name))
+            for root in roots {
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+                for name in names where name.hasPrefix(profileNamePrefix) && (name as NSString).pathExtension == removedProfileExtension {
+                    try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
+                }
             }
+            DispatchQueue.main.async(execute: completion)
         }
     }
 }
@@ -71,8 +79,17 @@ private extension EngineApplicationConfiguration {
     /// CEF's root cache path. The global profile is `Default` under it, and the profile of a context with a storage identifier is `Persona-<UUID>` beside it.
     var chromiumRootCache: URL { cacheDirectory.appendingPathComponent("Chromium") }
 
+    /// The directories that hold Chromium profiles: the root cache path and, for a root under the user's Application Support directory, its counterpart under the user's Caches directory, where Chromium keeps each profile's HTTP and code caches.
+    var chromiumProfileRoots: [URL] {
+        let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path + "/"
+        let rootCache = chromiumRootCache.path
+        guard rootCache.hasPrefix(applicationSupport) else { return [chromiumRootCache] }
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return [chromiumRootCache, caches.appendingPathComponent(String(rootCache.dropFirst(applicationSupport.count)))]
+    }
+
     func chromiumProfile(forStorage identifier: UUID) -> URL {
-        chromiumRootCache.appendingPathComponent(ChromiumEngine.profileNamePrefix + identifier.uuidString)
+        chromiumRootCache.appendingPathComponent(ChromiumEngine.profileName(forStorage: identifier))
     }
 }
 

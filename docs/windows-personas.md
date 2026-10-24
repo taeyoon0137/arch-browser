@@ -38,12 +38,17 @@ Engines and bridge
 - `wrapper_src/shutdown_checker.cc` is compiled (Package.swift:11). In DCHECK builds it asserts "Object reference incorrectly held at CefShutdown". `+[ARCHCEFRuntime shutdown]` closes the browsers, runs CEF's work for up to two seconds, then calls `CefShutdown` (CEFBridge.mm:700–715).
 - `WKWebsiteDataStore.h` in the macOS 27 SDK: `+dataStoreForIdentifier:` (macOS 14; "Throws exception if identifier is 0"), `+removeDataStoreForIdentifier:completionHandler:` (macOS 14; "WKWebView using the data store must be released before removal"), `+fetchAllDataStoreIdentifiers:` (macOS 14), and `identifier` (nil for the default and non-persistent stores). `WKWebExtensionControllerConfiguration.h`: `+configurationWithIdentifier:` and `defaultWebsiteDataStore` (macOS 15.4). The package targets macOS 14 (open decision 1).
 
+Checked at runtime for step 5, with the bundled app on the Chromium engine, a Work Persona added to `session.json` by hand, and pages from a local server that report `navigator.languages`
+- Work's first Chromium tab creates a full profile in `Cache/Chromium/Persona-<UUID>`. Chromium keeps the HTTP and code caches of a profile under `~/Library/Application Support` at the same relative path under `~/Library/Caches`, so Work's are in `~/Library/Caches/Arch/Cache/Chromium/Persona-<UUID>` and the global profile's in `~/Library/Caches/Arch/Cache/Chromium/Default`.
+- On Chromium, `navigator.languages` is `en-US,en` and `Accept-Language` is `en-US,en;q=0.9` in both the default and the Work Persona, so `initWithCachePath:` leaves `accept_language_list` empty.
+- A Work Chromium tab restored at launch loads on its first request. The bridge creates the browser at once with the new context, so CEF's `CreateBrowser` waits for the context to initialize.
+- WebKit keeps an identifier store, caches included, in `~/Library/WebKit/local.arch.browser/WebsiteDataStore/<UUID in lowercase>`, and `+removeDataStoreForIdentifier:completionHandler:` deletes that directory.
+- Chromium's `Local State` lists every profile it has loaded in `profile.info_cache` and `profile.profiles_order` and keeps the entry after the removal pass deletes the profile's directories. Chromium starts normally with such entries. An entry holds the default name and avatar and empty account fields, no site data, so the removal pass leaves the file alone.
+
 Not verified; the implementation order checks each
-- That CEF treats `Cache/Chromium/Persona-<UUID>` as a profile of its own with the same `Accept-Language` as the global profile, and whether CEF delays `CreateBrowser` until a new context initializes.
 - That a CEF Alloy browser keeps input, IME, focus, accessibility, and backing scale when its parent view moves to another `NSWindow`.
 - The order in which app activation and the URL event arrive when another app opens a link, and whether activation brings only the small window forward.
-- Where WebKit keeps identifier stores, and whether Chromium's `Local State` tolerates a profile directory removed between launches.
-- That Chromium's developer tools for a tab use that tab's request context.
+- That Chromium's developer tools for a tab use that tab's request context. The check needs the screen, so step 13 makes it.
 
 ## Decisions
 
@@ -354,7 +359,7 @@ public protocol Engine: AnyObject {
 - `ChromiumBrowserContext` holds `let requestContext: ARCHCEFRequestContext`: `globalContext` without a storage identifier, otherwise one for `<cacheDirectory>/Chromium/Persona-<UUID>`, a direct child of the root beside `Default`.
 - `ChromiumBrowser`'s cookie and site-data members and the context's `setRememberedPermission` call that object.
 - `ChromiumWebContents` keeps its request context strongly, passes it to `ARCHCEFBrowser`, and gives it to its popups, so a popup never falls back to the global profile.
-- `ChromiumEngine.removeStoredData` reports false while `ARCHCEFRuntime.isInitialized`. Otherwise it renames `Persona-<UUID>` to `Persona-<UUID>.removed`, which is fast, deletes it on a background queue, and reports true. A missing directory also reports true. `makeApplication` deletes leftover `Persona-*.removed` directories on a background queue before it initializes CEF.
+- `ChromiumEngine.removeStoredData` reports false while `ARCHCEFRuntime.isInitialized`. Otherwise it renames the profile's `Persona-<UUID>` directories, under the root cache path and under its counterpart in `~/Library/Caches`, to `Persona-<UUID>.removed`, which is fast. It then deletes every removed profile in both on a background queue and, once that finishes, reports whether no directory of the profile remains, so a quit before then leaves the ID for the next launch. A missing directory counts as removed. `makeApplication` also deletes leftover `Persona-*.removed` directories in both on a background queue before it initializes CEF, which covers a list lost with an unreadable `session.json`.
 
 ### CEFBridge
 
@@ -385,7 +390,7 @@ public protocol Engine: AnyObject {
 - Every global path moves to the instance: the cookie calls (:437, :445, :453, :469); `CookieDeleter`, which keeps the manager it visited and flushes that one (:504); `deleteCookiesPassingTest` (:622); the permission settings (:743); and both `CreateBrowser` calls, for the hidden storage-clearing browser (:641) and for tabs (:1459), which pass the context.
 - Shutdown: a weak table like `gBrowsers` tracks the context objects. `+shutdown` closes the browsers and runs CEF's work as today, then releases every object's `CefRefPtr`s (context, handler, cookie manager) and runs its queued completions, then calls `CefShutdown`. Calls after that do nothing.
 - Transition within step 4: the class methods `ARCHCEFCookieStore`, `ARCHCEFSiteData`, and `ARCHCEFPermissionStore` first become thin wrappers over `globalContext`, then are deleted once the adapter calls the instance methods, so no global path survives.
-- Developer tools open from the inspected browser and need no change (checked in step 5).
+- Developer tools open from the inspected browser and need no change (checked in step 13).
 - Cost: each Persona with Chromium tabs has its own render processes.
 - This is bridge work, not a CEF patch, so the plan's patch list does not change.
 
@@ -611,10 +616,10 @@ Coordination
    - New checks, with a Persona added by hand: quit, add `{"id": "<new UUID>", "name": "Work"}` to `personas`, set one space's `personaID` to that UUID, and launch.
      - In that space, `https://httpbin.org/cookies/set?persona=work` on Chromium, then `https://httpbin.org/cookies` on WebKit, shows the cookie, copied within the Persona. The same page in a default space shows no `persona` cookie on either engine.
      - `localStorage.x = 1` on example.org in Work leaves it undefined in the default Persona on both engines.
-     - `Cache/Chromium/Persona-<UUID>` appears after Work's first Chromium tab. The developer tools of a Work tab show Work's cookies under Application ▸ Cookies.
+     - `Cache/Chromium/Persona-<UUID>` appears after Work's first Chromium tab, and its caches appear in `~/Library/Caches/Arch/Cache/Chromium/Persona-<UUID>`.
      - `navigator.languages` matches between the two Personas on Chromium. If it does not, `initWithCachePath:` sets `accept_language_list` from the global context's `intl.accept_languages` preference.
      - A new Work Chromium tab loads on its first try after launch. Record whether CEF waited for the context or the browser had to be created after `OnRequestContextInitialized`.
-     - Quit, add the Work UUID to `removedPersonaIDs`, remove Work from `personas` and its space's `personaID`, and launch: the directory is gone, or renamed and then gone; `WKWebsiteDataStore.allDataStoreIdentifiers`, logged once in a debug build, no longer lists the UUID; `removedPersonaIDs` is empty. Record where WebKit kept the store.
+     - Quit, add the Work UUID to `removedPersonaIDs`, remove Work from `personas` and its space's `personaID`, and launch: both directories are gone, or renamed and then gone; `WKWebsiteDataStore.allDataStoreIdentifiers`, logged once in a debug build, no longer lists the UUID; `removedPersonaIDs` is empty. Record where WebKit kept the store.
 
 6. III.6.2 Window model with one window and forwarding shims (bundle)
    - Files: new `BrowserWindowModel.swift`; `BrowserSession.swift`. No view, `AppDelegate`, `NowPlaying`, or `Scripting` change.
@@ -685,7 +690,8 @@ Coordination
       - Clear Site Data in Work leaves the default Persona signed in.
       - Window 2 on Work shows Work's favorites while window 1 shows the default Persona's; a favorite added in Work does not appear in the default Persona.
       - Dragging a default-Persona tab onto a Work space symbol neither lights the symbol nor moves the tab. Move Left on Work's first space does not cross into the default group.
-      - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directory and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona has no Delete Persona item.
+      - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directories, under Application Support and under `~/Library/Caches`, and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona has no Delete Persona item.
+      - The developer tools of a Work Chromium tab show Work's cookies under Application ▸ Cookies.
       - Separate plugins per Persona are checked when V.11 lands.
 
 ## Documents
@@ -695,7 +701,7 @@ Coordination
 - Step 10, which finishes III.6: remove the III.6 row; update Current State for the Browsing module (windows, the one-tab-one-window rule, window state in `session.json`) and the App shell (the File and Window menus); add the window checks to the regression checklist; mark row 7 of `docs/features.md` complete.
 - Step 12, which finishes III.7: remove the III.7 row; update Current State; update checks 4 and 18 and the Preferences module's General list; mark row 6 complete.
 - Step 13, which finishes III.12:
-  - `docs/plan.md`: remove the III.12 row. Update Current State for the Browsing module, the WebKit adapter (a store per Persona), the Chromium adapter ("Cookies go through each Persona's request context" in place of "CEF's global cookie manager"), and the Build Procedure's state list (`Cache/Chromium/Persona-<UUID>`, and the WebKit store location found in step 5). Add to Decisions: the default Persona keeps the engines' default storage, cookies copy only within a Persona, and stored data goes at the next launch.
+  - `docs/plan.md`: remove the III.12 row. Update Current State for the Browsing module, the WebKit adapter (a store per Persona), the Chromium adapter ("Cookies go through each Persona's request context" in place of "CEF's global cookie manager"), and the Build Procedure's state list (`Cache/Chromium/Persona-<UUID>`; Chromium's caches in `~/Library/Caches/Arch/Cache/Chromium`, where the removal pass also deletes a Persona's directory; and the WebKit stores in `~/Library/WebKit/local.arch.browser/WebsiteDataStore`). Add to Decisions: the default Persona keeps the engines' default storage, cookies copy only within a Persona, and stored data goes at the next launch.
   - `docs/features.md`: row 9 complete; row 3 (favorites per Persona), row 44 (an extension controller per Persona), and row 48 (cookies shared within a Persona).
   - `docs/engine-protocol.md`: `EngineBrowserContextID.default`, `storageIdentifier`, `removeStoredData`, `EngineBrowser` per Persona, the cookies capability row, and the Engine switching section.
   - `docs/sync.md`: the default Persona's UUID maps to the record name `default`. `docs/plugins.md`: the default Persona's folder. `docs/ai.md`: the interim plugin folder note.
