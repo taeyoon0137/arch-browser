@@ -22,7 +22,10 @@ final class NowPlaying: EngineMediaSessionDelegate {
 
     init(session: BrowserSession) {
         self.session = session
-        session.$tabs.sink { [weak self] tabs in self?.observe(tabs) }.store(in: &cancellables)
+        // A favorite's tab plays media like a space's tab.
+        session.$tabs.combineLatest(session.$favoriteTabs) { tabs, favoriteTabs in tabs + favoriteTabs.values }
+            .sink { [weak self] tabs in self?.observe(tabs) }
+            .store(in: &cancellables)
         session.$selectedTabID.sink { [weak self] _ in self?.scheduleUpdate() }.store(in: &cancellables)
     }
 
@@ -68,7 +71,7 @@ final class NowPlaying: EngineMediaSessionDelegate {
     /// The selected tab while it plays sound; otherwise the tab that plays sound and started last, or, while none plays, the one that stopped last.
     private func tabToShow() -> Tab? {
         guard let session else { return nil }
-        let candidates = session.tabs.filter { audibleChangedAt[$0.id] != nil && $0.webContents.mediaSession.playbackState != .none }
+        let candidates = session.allTabs.filter { audibleChangedAt[$0.id] != nil && $0.webContents.mediaSession.playbackState != .none }
         if let selected = session.selectedTab, selected.isAudible, candidates.contains(where: { $0 === selected }) { return selected }
         return candidates.max { ($0.isAudible ? 1 : 0, audibleChangedAt[$0.id] ?? .distantPast) < ($1.isAudible ? 1 : 0, audibleChangedAt[$1.id] ?? .distantPast) }
     }

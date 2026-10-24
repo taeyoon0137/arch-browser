@@ -43,7 +43,8 @@ public struct PluginInvocation: Sendable {
 /// A tab as a plugin sees it.
 public struct PluginTab: Identifiable, Hashable, Sendable {
     public let id: UUID
-    public var spaceID: UUID
+    /// `nil` for a favorite's tab, which belongs to no space.
+    public var spaceID: UUID?
     /// nil unless the grant has `tabs`.
     public var title: String?
     /// nil unless the grant has `tabs`.
@@ -52,7 +53,7 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public var isPinned: Bool
     public var isSelected: Bool
 
-    public init(id: UUID, spaceID: UUID, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool) {
+    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool) {
         self.id = id
         self.spaceID = spaceID
         self.title = title

@@ -9,7 +9,8 @@ public final class Tab: ObservableObject, Identifiable {
     public let id = UUID()
     /// Replaced when the tab switches engines.
     @Published public private(set) var webContents: any EngineWebContents
-    @Published public var spaceID: UUID
+    /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space.
+    @Published public var spaceID: UUID?
     @Published public var isPinned: Bool
     /// The session updates this on tab selection. Archiving closes unpinned tabs whose dates are too old.
     var lastActivatedAt = Date()
@@ -62,7 +63,7 @@ public final class Tab: ObservableObject, Identifiable {
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private var isDownloadOnly = false
 
-    init(webContents: any EngineWebContents, spaceID: UUID, isPinned: Bool) {
+    init(webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool) {
         self.webContents = webContents
         self.spaceID = spaceID
         self.isPinned = isPinned

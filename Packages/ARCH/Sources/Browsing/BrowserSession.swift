@@ -1,4 +1,4 @@
-// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites, tabs, and the closed-tab list. Archives inactive tabs on a timer.
+// Owns one runtime per engine (its application, profile, and browser), started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: spaces, favorites and the tabs they keep alive, tabs, and the closed-tab list. Archives inactive tabs on a timer.
 import AppKit
 import ARCHEngine
 import Combine
@@ -29,6 +29,7 @@ public final class BrowserSession: ObservableObject {
     /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
     private let primaryEngine: EngineKind
     private let cookieSync = CookieSync()
+    /// The spaces' tabs. Favorites keep their own tabs in `favoriteTabs`.
     @Published public private(set) var tabs: [Tab] = []
     @Published public private(set) var spaces: [Space] = []
     @Published public private(set) var favorites: [Favorite] = []
@@ -43,10 +44,11 @@ public final class BrowserSession: ObservableObject {
             selectedTab?.lastActivatedAt = Date()
             recordActivation()
             if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
-            if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
+            // A favorite's tab belongs to no space, so selecting it keeps the current one.
+            if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
             // Switching tabs ends the search because it belongs to one page.
             if isFindBarVisible, oldValue != selectedTabID {
-                tabs.first { $0.id == oldValue }?.webContents.stopFind()
+                allTabs.first { $0.id == oldValue }?.webContents.stopFind()
                 isFindBarVisible = false
                 findResult = nil
             }
@@ -148,6 +150,7 @@ public final class BrowserSession: ObservableObject {
         cookieSync.runtimes = { [weak self] in self.map { Array($0.runtimes.values) } ?? [] }
         adoptRuntime(started)
         restoreTabs(snapshot)
+        restoreFavoriteTabs(snapshot)
         observeChanges()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
         // Tabs restored at launch can ask before the window exists; their sheets show once it does.
@@ -252,6 +255,7 @@ public final class BrowserSession: ObservableObject {
         guard spaces.contains(where: { $0.id == id }) else { return }
         isLibraryVisible = false
         currentSpaceID = id
+        // A selected favorite's tab belongs to no space; it stays open behind the space's own tab.
         if selectedTab?.spaceID != id {
             selectedTabID = (tabs(in: id, pinned: false).first ?? tabs(in: id, pinned: true).first)?.id
         }
@@ -352,6 +356,11 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Favorites
 
+    /// The tab each opened favorite keeps alive, by favorite ID. Every space shows these tabs through their favorites instead of in its list, so a favorite's page stays the same across spaces, and archiving passes them by.
+    @Published private(set) var favoriteTabs: [UUID: Tab] = [:]
+    /// The favorites' tabs from the last session, by favorite ID. Each opens where it was when its favorite is next opened, so launching loads none of them.
+    @Published private var savedFavoriteTabs: [UUID: SessionSnapshot.FavoriteTabRecord] = [:]
+
     public func addFavorite(_ tab: Tab) {
         guard let url = tab.url, !favorites.contains(where: { $0.url == url }) else { return }
         favorites.append(Favorite(url: url, title: tab.displayTitle))
@@ -366,35 +375,89 @@ public final class BrowserSession: ObservableObject {
         return added.count
     }
 
+    /// Removes a favorite once its tab, if it has one, agrees to close.
     public func removeFavorite(_ favorite: Favorite) {
-        favorites.removeAll { $0.id == favorite.id }
+        endFavoriteTab(favorite) { [weak self] in
+            self?.favorites.removeAll { $0.id == favorite.id }
+        }
     }
 
-    /// Reuses an open tab for the same site in the current space, or opens a new tab.
+    /// Selects the favorite's own tab, opening it if needed: where it was when Arch last quit, or else at the favorite's address in the default engine.
     public func openFavorite(_ favorite: Favorite) {
-        if let host = favorite.url.host, let existing = tabs.first(where: { $0.spaceID == currentSpaceID && $0.url?.host == host }) {
-            selectedTabID = existing.id
-        } else {
-            openTab(url: favorite.url)
+        if let tab = favoriteTabs[favorite.id] {
+            selectedTabID = tab.id
+            return
         }
+        let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state), spaceID: nil, pinned: false)
+        if let saved {
+            tab.isRestored = true
+            // Loading a restored page does not count as a visit.
+            tab.recordedURL = saved.url
+        }
+        favoriteTabs[favorite.id] = tab
+        selectedTabID = tab.id
+    }
+
+    /// Ends the favorite's tab, as its Close menu item does. The favorite then opens at its own address again.
+    public func closeFavorite(_ favorite: Favorite) {
+        endFavoriteTab(favorite) {}
+    }
+
+    /// Whether the favorite has a tab of its own: an open one, or one saved from the last session.
+    public func hasTab(_ favorite: Favorite) -> Bool {
+        favoriteTabs[favorite.id] != nil || savedFavoriteTabs[favorite.id] != nil
+    }
+
+    /// The favorite whose tab is selected.
+    public var selectedFavoriteID: UUID? {
+        favoriteTabs.first { $0.value.id == selectedTabID }?.key
+    }
+
+    /// The favorites' open tabs, in favorite order.
+    public var openFavoriteTabs: [Tab] {
+        favorites.compactMap { favoriteTabs[$0.id] }
+    }
+
+    /// Forgets the favorite's saved tab and closes its open one once the page agrees, then runs `didEnd`.
+    private func endFavoriteTab(_ favorite: Favorite, then didEnd: @escaping () -> Void) {
+        savedFavoriteTabs[favorite.id] = nil
+        guard let tab = favoriteTabs[favorite.id] else { return didEnd() }
+        closeWhenPageAgrees(tab, then: didEnd)
     }
 
     // MARK: Tabs
 
     public var selectedTab: Tab? {
-        tabs.first { $0.id == selectedTabID }
+        tabs.first { $0.id == selectedTabID } ?? favoriteTabs.values.first { $0.id == selectedTabID }
     }
+
+    /// Every open tab: the spaces' tabs, then the favorites' tabs.
+    public var allTabs: [Tab] { tabs + openFavoriteTabs }
 
     /// Opens a tab in `engine`, or in the default engine when no engine is given.
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
-        let webContents = runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
-        return adopt(webContents, spaceID: spaceID ?? currentSpaceID, pinned: pinned, select: select)
+        adopt(makeWebContents(url: url, engine: engine, state: state), spaceID: spaceID ?? currentSpaceID, pinned: pinned, select: select)
     }
 
+    /// A web contents in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given.
+    private func makeWebContents(url: URL?, engine: EngineKind?, state: Data?) -> any EngineWebContents {
+        runtime(for: engine ?? defaultEngine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
+    }
+
+    /// Adds a tab for `webContents` to a space's list.
     private func adopt(_ webContents: any EngineWebContents, spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
+        let tab = makeTab(webContents, spaceID: spaceID, pinned: pinned)
+        tabs.append(tab)
+        if select { selectedTabID = tab.id }
+        return tab
+    }
+
+    /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
+    private func makeTab(_ webContents: any EngineWebContents, spaceID: UUID?, pinned: Bool) -> Tab {
         let tab = Tab(webContents: webContents, spaceID: spaceID, isPinned: pinned)
-        // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space, marked unread.
+        // A tab a page opens comes from the page's engine. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
             self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
@@ -402,11 +465,11 @@ public final class BrowserSession: ObservableObject {
                 _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
                 return
             }
-            self.adopt(popup, spaceID: tab.spaceID, pinned: false, select: false).isUnread = true
+            self.adopt(popup, spaceID: tab.spaceID ?? self.currentSpaceID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
-            guard let self, let tab, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+            guard let self, let tab, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             self.closeTab(tab, reason: tab.hasCrashed ? .crash : .page)
             self.undoableCloseCount = 0
         }
@@ -449,7 +512,7 @@ public final class BrowserSession: ObservableObject {
                 self.fullscreenTabID = nil
             }
         }
-        // A link opened from a page's context menu opens behind the current tab, in the page's space and engine, marked unread.
+        // A link opened from a page's context menu opens behind the current tab, in the page's space (the current space for a favorite's page) and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
             self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
@@ -464,19 +527,17 @@ public final class BrowserSession: ObservableObject {
             if tab?.id == self.selectedTabID { self.objectWillChange.send() }
             self.scheduleSave()
         }
-        tabs.append(tab)
-        if select { selectedTabID = tab.id }
         return tab
     }
 
     /// Moves a tab to another engine: a web contents from `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
-        guard tab.engineKind != kind, tabs.contains(where: { $0.id == tab.id }) else { return }
+        guard tab.engineKind != kind, allTabs.contains(where: { $0.id == tab.id }) else { return }
         let target = runtime(for: kind)
         guard target.kind == kind, let source = runtimes[tab.engineKind] else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
         cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
-            guard let self, let tab, tab.engineKind != kind, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+            guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             let old = tab.webContents
             let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
             // Sheets and searches belong to the old page.
@@ -489,36 +550,47 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay.
+    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
     public func requestCloseTab(_ tab: Tab) {
+        let isUndoable = tab.spaceID != nil
+        closeWhenPageAgrees(tab) { [weak self] in
+            if isUndoable { self?.undoableCloseCount += 1 }
+        }
+    }
+
+    /// Closes a tab once its page agrees to close, then runs `didClose`.
+    private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
         // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
         guard !tab.webContents.closingStopsDownloads else {
             closeTab(tab)
-            undoableCloseCount += 1
-            return
+            return didClose()
         }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
             guard closing, let self, let tab else { return }
             self.closeTab(tab)
-            self.undoableCloseCount += 1
+            didClose()
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening. `reason` goes to the tab close log.
+    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
     public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
-        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let index = tabs.firstIndex(where: { $0.id == tab.id })
+        let favoriteID = favoriteTabs.first { $0.value === tab }?.key
+        guard index != nil || favoriteID != nil else { return }
         recordClose(of: tab, reason: reason)
         if fullscreenTabID == tab.id { fullscreenTabID = nil }
         cancelSheets(for: tab)
-        tabs.remove(at: index)
+        if let index { tabs.remove(at: index) }
+        if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
         retire(tab.webContents)
-        if remember {
-            closedTabs.append(SessionSnapshot.TabRecord(spaceID: tab.spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, engine: tab.engineKind))
+        if remember, let spaceID = tab.spaceID {
+            closedTabs.append(SessionSnapshot.TabRecord(spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
+        // A favorite's tab leaves the selection to a tab of the current space.
         if selectedTabID == tab.id {
-            let siblings = tabs.filter { $0.spaceID == tab.spaceID }
+            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? currentSpaceID) }
             selectedTabID = (siblings.first { !$0.isPinned } ?? siblings.first)?.id
         }
     }
@@ -583,8 +655,8 @@ public final class BrowserSession: ObservableObject {
 
     /// Swaps the selected tab with its neighbor in the same space and pinned or open list.
     public func moveSelectedTab(up: Bool) {
-        guard let selected = selectedTab, let index = tabs.firstIndex(where: { $0.id == selected.id }) else { return }
-        let siblings = tabs(in: selected.spaceID, pinned: selected.isPinned)
+        guard let selected = selectedTab, let spaceID = selected.spaceID, let index = tabs.firstIndex(where: { $0.id == selected.id }) else { return }
+        let siblings = tabs(in: spaceID, pinned: selected.isPinned)
         guard let position = siblings.firstIndex(where: { $0.id == selected.id }) else { return }
         let target = up ? position - 1 : position + 1
         guard siblings.indices.contains(target), let neighborIndex = tabs.firstIndex(where: { $0.id == siblings[target].id }) else { return }
@@ -694,7 +766,7 @@ public final class BrowserSession: ObservableObject {
     public func exitPageFullscreen() {
         guard let id = fullscreenTabID else { return }
         fullscreenTabID = nil
-        tabs.first { $0.id == id }?.webContents.exitFullscreen()
+        allTabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
     /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window.
@@ -1062,7 +1134,7 @@ public final class BrowserSession: ObservableObject {
         var factors = defaults.dictionary(forKey: Self.zoomFactorsKey) as? [String: Double] ?? [:]
         factors[host] = abs(factor - 1) < 0.001 ? nil : factor
         defaults.set(factors, forKey: Self.zoomFactorsKey)
-        for tab in tabs where tab.webContents.url?.host == host { applyZoom(to: tab) }
+        for tab in allTabs where tab.webContents.url?.host == host { applyZoom(to: tab) }
     }
 
     /// Gives a tab its host's remembered zoom factor, or 1 for a host without one.
@@ -1189,7 +1261,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     private func showCaptureFailure(_ message: String, detail: String? = nil, for tab: Tab) {
-        guard tabs.contains(where: { $0 === tab }) else { return }
+        guard allTabs.contains(where: { $0 === tab }) else { return }
         let alert = NSAlert()
         alert.messageText = message
         if let detail { alert.informativeText = detail }
@@ -1229,12 +1301,12 @@ public final class BrowserSession: ObservableObject {
 
     public var isTabSwitcherVisible: Bool { tabSwitcherHighlightID != nil }
 
-    /// The current space's tabs, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
+    /// The current space's tabs and the favorites' open tabs, which every space shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
     public var recentTabs: [Tab] {
-        let spaceTabs = tabs.filter { $0.spaceID == currentSpaceID }
-        let selected = activationOrder.compactMap { id in spaceTabs.first { $0.id == id } }
+        let candidates = tabs.filter { $0.spaceID == currentSpaceID } + openFavoriteTabs
+        let selected = activationOrder.compactMap { id in candidates.first { $0.id == id } }
         let selectedIDs = Set(activationOrder)
-        return selected + spaceTabs.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }
+        return selected + candidates.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }
     }
 
     private func recordActivation() {
@@ -1265,7 +1337,7 @@ public final class BrowserSession: ObservableObject {
     public func commitTabSwitcher() {
         guard let id = tabSwitcherHighlightID else { return }
         tabSwitcherHighlightID = nil
-        guard tabs.contains(where: { $0.id == id }) else { return }
+        guard allTabs.contains(where: { $0.id == id }) else { return }
         selectedTabID = id
         if commandPaletteMode != nil { dismissCommandPalette() } else { focusPage() }
     }
@@ -1312,7 +1384,7 @@ public final class BrowserSession: ObservableObject {
         availableEngines.forEach { _ = runtime(for: $0) }
         cookieSync.removeCookies(where: { site.contains($0) }) { [weak self] in
             guard let self else { return }
-            let pages = self.tabs.compactMap(\.url).filter { $0.host.map(site.contains(host:)) == true }
+            let pages = self.allTabs.compactMap(\.url).filter { $0.host.map(site.contains(host:)) == true }
             let origins = Array(Set(site.origins + pages.compactMap(SiteDataScope.origin(of:))))
             let group = DispatchGroup()
             for runtime in self.runtimes.values {
@@ -1321,7 +1393,7 @@ public final class BrowserSession: ObservableObject {
             }
             group.notify(queue: .main) { [weak self] in
                 guard let self else { return }
-                for tab in self.tabs where tab.url?.host.map(site.contains(host:)) == true {
+                for tab in self.allTabs where tab.url?.host.map(site.contains(host:)) == true {
                     tab.webContents.navigationController.reloadWithoutCache()
                 }
             }
@@ -1391,10 +1463,19 @@ public final class BrowserSession: ObservableObject {
         selectedTabID = selected?.id ?? tabs.first { $0.spaceID == currentSpaceID }?.id
     }
 
+    /// Keeps the favorites' tabs from the last session until their favorites open them. The tab that was selected opens now, so the window shows the page it showed.
+    private func restoreFavoriteTabs(_ snapshot: SessionSnapshot?) {
+        for record in snapshot?.favoriteTabs ?? [] where favorites.contains(where: { $0.id == record.favoriteID }) {
+            savedFavoriteTabs[record.favoriteID] = record
+        }
+        if let favorite = favorites.first(where: { $0.id == snapshot?.selectedFavoriteID }) { openFavorite(favorite) }
+    }
+
     private func observeChanges() {
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, $currentSpaceID.map { _ in () })
             .merge(with: $selectedTabID.map { _ in () })
             .merge(with: $closedTabs.map { _ in () })
+            .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () })
             .dropFirst()
             .sink { [weak self] in self?.scheduleSave() }
             .store(in: &cancellables)
@@ -1410,8 +1491,17 @@ public final class BrowserSession: ObservableObject {
 
     private func snapshot() -> SessionSnapshot {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
-                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
-                        selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs)
+                        tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
+                        selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
+                        favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
+    }
+
+    /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.
+    private var favoriteTabRecords: [SessionSnapshot.FavoriteTabRecord] {
+        favorites.compactMap { favorite in
+            guard let tab = favoriteTabs[favorite.id] else { return savedFavoriteTabs[favorite.id] }
+            return SessionSnapshot.FavoriteTabRecord(favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
+        }
     }
 }
 
@@ -1457,7 +1547,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         // The engine is still choosing the file's destination, so the tabs close once that callback returns.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            for tab in self.tabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false, reason: .download) }
+            for tab in self.allTabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false, reason: .download) }
         }
     }
 

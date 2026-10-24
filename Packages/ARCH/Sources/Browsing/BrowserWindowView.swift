@@ -961,7 +961,7 @@ struct SiteSettingsSection<Content: View>: View {
     }
 }
 
-/// Shows favorites shared by all spaces as a grid of site icons. Dragging a tile moves it among the others.
+/// Shows favorites shared by all spaces as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var tabDrag: TabDragState
@@ -970,13 +970,17 @@ struct FavoritesGridView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
+        let selectedFavoriteID = session.selectedFavoriteID
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(session.favorites) { favorite in
-                FavoriteTileView(favorite: favorite, isActive: session.selectedTab?.url?.host == favorite.url.host)
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasTab(favorite))
                     // The release that ends a drag does not also open the favorite.
                     .onTapGesture { if tabDrag.item == nil { session.openFavorite(favorite) } }
                     .accessibilityAction { session.openFavorite(favorite) }
                     .contextMenu {
+                        Button("Close") { session.closeFavorite(favorite) }
+                            .disabled(!session.hasTab(favorite))
+                        Divider()
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
                     .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
@@ -995,7 +999,10 @@ struct FavoritesGridView: View {
 
 struct FavoriteTileView: View {
     let favorite: Favorite
+    /// Set while the favorite's tab is selected.
     let isActive: Bool
+    /// Set while the favorite has a tab of its own, which a dot below the tile shows, as the Dock does for an open app.
+    let isOpen: Bool
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
     @State private var isHovering = false
@@ -1018,12 +1025,22 @@ struct FavoriteTileView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // The dot sits in the gap below the tile, nearer the tile than the row below it; a short tile has no room for it under the icon.
+            .overlay(alignment: .bottom) {
+                if isOpen {
+                    Circle()
+                        .fill(.secondary)
+                        .frame(width: 4, height: 4)
+                        .offset(y: 5)
+                }
+            }
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .help(favorite.title)
             .accessibilityElement()
             .accessibilityLabel(favorite.title)
-            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isOpen ? "Open" : "")
+            .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
             .onAppear {
                 guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
                 FaviconLoader.load(url) { icon = $0 }

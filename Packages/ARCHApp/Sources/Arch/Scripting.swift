@@ -6,10 +6,11 @@ import Browsing
 extension ArchApplication {
     private var browserSession: BrowserSession? { (delegate as? AppDelegate)?.session }
 
-    /// Every tab in sidebar order: each space's pinned tabs, then its open tabs.
+    /// Every tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs.
     @objc var scriptTabs: [ScriptTab] {
         guard let session = browserSession else { return [] }
-        return session.spaces.flatMap { session.tabs(in: $0.id, pinned: true) + session.tabs(in: $0.id, pinned: false) }.map { ScriptTab($0) }
+        let spaceTabs = session.spaces.flatMap { session.tabs(in: $0.id, pinned: true) + session.tabs(in: $0.id, pinned: false) }
+        return (session.openFavoriteTabs + spaceTabs).map { ScriptTab($0) }
     }
 
     @objc var scriptActiveTab: ScriptTab? { browserSession?.selectedTab.map { ScriptTab($0) } }
@@ -17,7 +18,7 @@ extension ArchApplication {
     /// Resolves `tab id "…"`. The identifier comes from the script, so it may not be text.
     @objc(valueInScriptTabsWithUniqueID:) func scriptTab(withUniqueID uniqueID: Any) -> ScriptTab? {
         guard let text = uniqueID as? String, let id = UUID(uuidString: text) else { return nil }
-        return browserSession?.tabs.first { $0.id == id }.map { ScriptTab($0) }
+        return browserSession?.allTabs.first { $0.id == id }.map { ScriptTab($0) }
     }
 }
 

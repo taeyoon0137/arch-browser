@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             pendingURLs.removeAll()
         } else if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
             session.openTab(url: startURL)
-        } else if session.tabs.isEmpty {
+        } else if session.allTabs.isEmpty {
             session.openTab()
         }
         NSApp.appearance = AppearanceSetting.current.appearance
@@ -378,6 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(goHome) {
             return session?.canGoHome == true
+        }
+        // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list.
+        if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
+            || item.action == #selector(nextTab) || item.action == #selector(previousTab) || item.action == #selector(closeOtherTabs) {
+            return session?.selectedTab?.spaceID != nil
         }
         // Clearing site data needs a web page in front and no sheet on its window.
         if item.action == #selector(clearSiteData) {

@@ -27,7 +27,7 @@ struct CommandPaletteView: View {
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return [] }
-        return Array(session.tabs.filter { tab in
+        return Array(session.allTabs.filter { tab in
             tab.id != session.selectedTabID &&
                 (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
