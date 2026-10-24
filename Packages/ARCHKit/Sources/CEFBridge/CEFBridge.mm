@@ -19,7 +19,9 @@
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_permission_handler.h"
+#include "include/cef_render_process_handler.h"
 #include "include/cef_request_handler.h"
+#include "include/cef_v8.h"
 #include "include/cef_values.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -161,6 +163,50 @@ private:
 };
 
 bool gInitialized = false;
+
+// CEF returns no value from `ExecuteJavaScript`, so the browser asks the page's renderer process for the theme color.
+const char kThemeColorRequest[] = "ARCHThemeColorRequest";
+const char kThemeColorReply[] = "ARCHThemeColorReply";
+
+// The first theme color whose media query matches, as a canvas normalizes it, or an empty string. A transparent color stands for an invalid one.
+const char kThemeColorScript[] = R"JS((() => {
+  const meta = [...document.querySelectorAll('meta[name="theme-color" i]')].find((m) => m.content && (!m.media || matchMedia(m.media).matches));
+  if (!meta) return "";
+  const context = document.createElement("canvas").getContext("2d");
+  context.fillStyle = "rgba(0, 0, 0, 0)";
+  context.fillStyle = meta.content;
+  return context.fillStyle;
+})())JS";
+
+// Runs in the helper's renderer processes and answers the browser's requests for values only a page's script can read.
+class HelperApp : public CefApp, public CefRenderProcessHandler {
+public:
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
+                                  CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() != kThemeColorRequest) {
+            return false;
+        }
+        std::string color;
+        CefRefPtr<CefV8Context> context = frame->GetV8Context();
+        if (context && context->Enter()) {
+            CefRefPtr<CefV8Value> value;
+            CefRefPtr<CefV8Exception> exception;
+            if (context->Eval(kThemeColorScript, CefString(), 0, value, exception) && value && value->IsString()) {
+                color = value->GetStringValue();
+            }
+            context->Exit();
+        }
+        CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
+        reply->GetArgumentList()->SetString(0, color);
+        frame->SendProcessMessage(PID_BROWSER, reply);
+        return true;
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(HelperApp);
+};
 
 }  // namespace
 
@@ -352,7 +398,8 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
         return 1;
     }
     CefMainArgs mainArgs(argc, argv);
-    return CefExecuteProcess(mainArgs, nullptr, nullptr);
+    CefRefPtr<CefApp> app = new HelperApp();
+    return CefExecuteProcess(mainArgs, app, nullptr);
 }
 
 @end
@@ -567,6 +614,7 @@ private:
 - (void)handleResetDialogs;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
+- (void)handleThemeColor:(NSString *)color;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -846,6 +894,15 @@ public:
         [owner_ handleFullscreen:fullscreen];
     }
 
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
+                                  CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() != kThemeColorReply) {
+            return false;
+        }
+        [owner_ handleThemeColor:ToNSString(message->GetArgumentList()->GetString(0))];
+        return true;
+    }
+
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &url) override {
         if (frame->IsMain()) {
             [owner_ handleURL:ToNSString(url)];
@@ -855,6 +912,9 @@ public:
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
         if (!isLoading) {
             [owner_ handleMainFrameNavigationPending:NO];
+            if (CefRefPtr<CefFrame> frame = browser->GetMainFrame()) {
+                frame->SendProcessMessage(PID_RENDERER, CefProcessMessage::Create(kThemeColorRequest));
+            }
         }
         [owner_ handleLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
     }
@@ -1004,6 +1064,10 @@ private:
 
 - (void)handleFullscreen:(BOOL)isFullscreen {
     [_delegate cefBrowserDidChangeFullscreen:isFullscreen];
+}
+
+- (void)handleThemeColor:(NSString *)color {
+    [_delegate cefBrowserDidChangeThemeColor:color];
 }
 
 - (void)exitFullscreenWillResize:(BOOL)willResize {

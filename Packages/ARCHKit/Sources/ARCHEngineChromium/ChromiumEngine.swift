@@ -204,7 +204,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
 
     public private(set) var favicon: NSImage?
     public var loadProgress: Double { isLoading ? 0.5 : 1 }
-    public var themeColor: NSColor? { nil }
+    public private(set) var themeColor: NSColor?
     public var selectedText: String? { nil }
     public private(set) var isFullscreen = false
     public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
@@ -491,6 +491,24 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             completion(credential?.user, credential?.password)
         }
     }
+    public func cefBrowserDidChangeThemeColor(_ color: String) {
+        let themeColor = Self.color(fromCanvasStyle: color)
+        guard themeColor != self.themeColor else { return }
+        self.themeColor = themeColor
+        uiDelegate?.webContentsDidChangeThemeColor(self)
+    }
+
+    /// Reads `#rrggbb` or `rgba(r, g, b, a)`, the two forms a canvas writes. A transparent color counts as none.
+    static func color(fromCanvasStyle style: String) -> NSColor? {
+        if style.hasPrefix("#"), style.count == 7, let value = Int(style.dropFirst(), radix: 16) {
+            return NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255, blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+        }
+        guard style.hasPrefix("rgba("), style.hasSuffix(")") else { return nil }
+        let parts = style.dropFirst(5).dropLast().split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 4, parts[3] > 0 else { return nil }
+        return NSColor(srgbRed: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255, alpha: parts[3])
+    }
+
     /// Alloy style leaves the window's transition to the app, which the UI delegate makes.
     public func cefBrowserDidChangeFullscreen(_ isFullscreen: Bool) {
         self.isFullscreen = isFullscreen
