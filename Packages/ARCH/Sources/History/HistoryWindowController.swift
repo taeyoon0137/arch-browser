@@ -38,8 +38,9 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         fatalError("HistoryWindowController is created through shared")
     }
 
-    /// Brings the History window to the front.
+    /// Brings the History window to the front with the store's current entries. The window does not become key while the app is in the background, so it loads here too.
     public func show() {
+        model.reload()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
