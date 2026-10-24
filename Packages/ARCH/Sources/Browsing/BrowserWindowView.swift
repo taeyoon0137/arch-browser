@@ -26,6 +26,8 @@ public struct BrowserWindowView: View {
     @State private var isCardDocking = false
     /// The next check of whether the floating sidebar should stay visible.
     @State private var peekCheck: DispatchWorkItem?
+    /// The window's child windows when the card appeared or the window last changed full screen, such as the full screen toolbar's. Only child windows opened after that, like the card's popovers, keep the card visible.
+    @State private var childWindowsBeforePeek: Set<ObjectIdentifier> = []
     @State private var windowReference = WindowReference()
     @StateObject private var tabDrag = TabDragState()
     /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
@@ -161,8 +163,13 @@ public struct BrowserWindowView: View {
                 if isWindowFullScreen { window.toggleFullScreen(nil) }
             }
         }
+        // Full screen adds or removes the toolbar's child window, which must not hold the card open.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { notification in
+            if notification.object as? NSWindow === windowReference.window { recordChildWindows() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
             guard notification.object as? NSWindow === windowReference.window else { return }
+            recordChildWindows()
             enteredFullScreenForPage = false
             if isPageFullscreen { session.exitPageFullscreen() }
         }
@@ -222,9 +229,14 @@ public struct BrowserWindowView: View {
         guard !session.isSidebarVisible else { return }
         peekCheck?.cancel()
         if !isSidebarPeeking {
+            recordChildWindows()
             withAnimation(SidebarView.pageSpring) { isSidebarPeeking = true }
         }
         scheduleCheckOfPeek()
+    }
+
+    private func recordChildWindows() {
+        childWindowsBeforePeek = Set((windowReference.window?.childWindows ?? []).map(ObjectIdentifier.init))
     }
 
     // Check rather than track the pointer: a card sliding under it gets no hover until the pointer leaves.
@@ -234,11 +246,11 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window and the docked developer tools do not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before, and the docked developer tools, do not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
-            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !NSStringFromClass(type(of: $0)).contains("FullScreen") }
+            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
         let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || window?.firstResponder is NSText
         let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.tabID != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
