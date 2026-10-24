@@ -4,6 +4,7 @@ import ARCHEngine
 import Combine
 import Foundation
 import PDFKit
+import Plugins
 import UniformTypeIdentifiers
 
 /// One engine's running pieces: its application, the profile, and the browser that owns its tabs' web contents.
@@ -705,6 +706,32 @@ public final class BrowserSession: ObservableObject {
             }
             window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.first)
         }
+    }
+
+    // MARK: Plugins
+
+    /// The plugins of the default Persona. `nil` until the app loads its built-in plugins at launch.
+    public private(set) var plugins: PluginManager?
+    /// Every plugin belongs to this Persona until Personas (III.12) exist. III.12 adopts it for the Persona that an earlier session loads into.
+    private static let defaultPersonaID = PersonaID(uuidString: "BADC6939-A237-47E4-9A77-4009814D1BCA")!
+
+    /// Creates the plugin manager with the built-in plugins the app ships. The app calls it once at launch.
+    @MainActor public func loadPlugins(builtIns: [any BuiltInPlugin.Type]) {
+        plugins = PluginManager(persona: Self.defaultPersonaID, builtIns: builtIns)
+    }
+
+    /// Closes the palette and runs a plugin command chosen in it on the selected tab.
+    @MainActor public func runPluginCommand(_ command: PluginCommandRef) {
+        guard let plugins else { return }
+        let invocation = PluginInvocation(tab: selectedPluginTab)
+        dismissCommandPalette()
+        Task { await plugins.run(command, invocation) }
+    }
+
+    /// The selected tab before the manager applies a plugin's grant. Plugins see no tab under an internal page.
+    private var selectedPluginTab: PluginTab? {
+        guard internalPage == nil, let tab = selectedTab else { return nil }
+        return PluginTab(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, engine: tab.engineKind, isPinned: tab.isPinned, isSelected: true)
     }
 
     // MARK: Find in page

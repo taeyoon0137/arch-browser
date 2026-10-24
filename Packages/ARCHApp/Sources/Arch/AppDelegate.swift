@@ -7,6 +7,7 @@ import ARCHPrivateAPI
 import Browsing
 import History
 import Import
+import Plugins
 import Preferences
 import SwiftUI
 
@@ -32,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory) else { fatalError("No engine could start") }
         self.session = session
         session.showSettings = { PreferencesWindowController.shared.show() }
+        // The built-in plugins that ship with the app.
+        session.loadPlugins(builtIns: [PageAddressPlugin.self])
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()

@@ -1,5 +1,6 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching open tabs to switch to and matching pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching plugin commands, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
 import History
+import Plugins
 import SwiftUI
 
 struct CommandPaletteView: View {
@@ -17,6 +18,11 @@ struct CommandPaletteView: View {
     @FocusState private var isFocused: Bool
     /// Set as the palette appears to animate its arrival as a state change.
     @State private var hasArrived = false
+
+    /// Matching commands of enabled plugins.
+    private var pluginCommands: [Attributed<PluginCommand>] {
+        Array((session.plugins?.contributions.paletteCommands(matching: text) ?? []).prefix(5))
+    }
 
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
@@ -75,6 +81,10 @@ struct CommandPaletteView: View {
                     VStack(spacing: 2) {
                         PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
                             .paletteAction { session.submitCommandPalette(text) }
+                        ForEach(pluginCommands, id: \.ref) { command in
+                            PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
+                                .paletteAction { session.runPluginCommand(command.ref) }
+                        }
                         ForEach(matchingTabs) { tab in
                             PaletteTabRow(tab: tab)
                                 .paletteAction {
@@ -171,6 +181,8 @@ extension Animation {
 struct PaletteRow: View {
     let symbol: String
     let title: String
+    /// Dim text at the trailing end, such as the plugin that adds a command.
+    var detail: String?
     var isPrimary = false
 
     var body: some View {
@@ -183,6 +195,12 @@ struct PaletteRow: View {
                 .font(.system(size: 15, weight: isPrimary ? .medium : .regular))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: 40)
