@@ -10,7 +10,8 @@ import Preferences
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
-    private var session: BrowserSession!
+    /// Scripting reads it through the application.
+    private(set) var session: BrowserSession!
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     private static let recentPageTag = 9_100

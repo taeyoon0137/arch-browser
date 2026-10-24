@@ -1,0 +1,56 @@
+// AppleScript support for the terms in `Arch.sdef`. Cocoa Scripting finds these classes by their Objective-C names and reads their properties through key-value coding.
+import AppKit
+import Browsing
+
+/// The application's scripting keys.
+extension ArchApplication {
+    private var browserSession: BrowserSession? { (delegate as? AppDelegate)?.session }
+
+    /// Every tab in sidebar order: each space's pinned tabs, then its open tabs.
+    @objc var scriptTabs: [ScriptTab] {
+        guard let session = browserSession else { return [] }
+        return session.spaces.flatMap { session.tabs(in: $0.id, pinned: true) + session.tabs(in: $0.id, pinned: false) }.map { ScriptTab($0) }
+    }
+
+    @objc var scriptActiveTab: ScriptTab? { browserSession?.selectedTab.map { ScriptTab($0) } }
+
+    /// Resolves `tab id "…"`. The identifier comes from the script, so it may not be text.
+    @objc(valueInScriptTabsWithUniqueID:) func scriptTab(withUniqueID uniqueID: Any) -> ScriptTab? {
+        guard let text = uniqueID as? String, let id = UUID(uuidString: text) else { return nil }
+        return browserSession?.tabs.first { $0.id == id }.map { ScriptTab($0) }
+    }
+}
+
+/// A tab as scripts see it. Each request makes new ones, and scripts refer to a tab by its identifier.
+@objc(ArchScriptTab) final class ScriptTab: NSObject {
+    private let tab: Tab
+
+    init(_ tab: Tab) {
+        self.tab = tab
+        super.init()
+    }
+
+    @objc var uniqueID: String { tab.id.uuidString }
+    /// The user's name for the tab, or the page's title.
+    @objc var name: String { tab.displayTitle }
+    @objc var url: String { tab.url?.absoluteString ?? "" }
+
+    /// `NSApp.classDescription` is nil for an `NSApplication` subclass, so the description comes from the scripting class.
+    override var objectSpecifier: NSScriptObjectSpecifier? {
+        guard let application = NSScriptClassDescription(for: NSApplication.self) else { return nil }
+        return NSUniqueIDSpecifier(containerClassDescription: application, containerSpecifier: nil, key: "scriptTabs", uniqueID: uniqueID)
+    }
+}
+
+/// `open location` opens an address in a new tab the way a link from another app does.
+@objc(ArchOpenLocationCommand) final class OpenLocationCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        guard let text = directParameter as? String, let url = BrowserSession.url(forInput: text) else {
+            scriptErrorNumber = Int(paramErr)
+            scriptErrorString = "Arch can open only a web address, such as https://example.org or example.org."
+            return nil
+        }
+        (NSApp.delegate as? AppDelegate)?.application(NSApp, open: [url])
+        return nil
+    }
+}

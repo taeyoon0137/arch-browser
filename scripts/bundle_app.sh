@@ -7,6 +7,7 @@ CONFIG="${1:-debug}"
 BIN="$ROOT/.build/$CONFIG"
 CEF="$ROOT/Frameworks/cef/Release/Chromium Embedded Framework.framework"
 ICON_SOURCE="$ROOT/resources/assets/sym_arch.png"
+SDEF="$ROOT/Packages/ARCHApp/Sources/Arch/Arch.sdef"
 APP="$ROOT/build/Arch.app"
 VERSION="0.1.0"
 MIN_MACOS="13.0"
@@ -15,6 +16,7 @@ MIN_MACOS="13.0"
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 [ -f "$ICON_SOURCE" ] || { echo "missing app icon source at $ICON_SOURCE" >&2; exit 1; }
+[ -f "$SDEF" ] || { echo "missing scripting definition at $SDEF" >&2; exit 1; }
 
 write_plist() {
   # Arguments: `$1` is the output path, `$2` the executable name, `$3` the bundle identifier, and `$4` the user interface element flag (0/1). `$5` holds extra keys for the main app.
@@ -42,8 +44,10 @@ ${5:-}
 PLIST
 }
 
-# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, or location access on a page's behalf.
+# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, or location access on a page's behalf. AppleScript reads the app's terms from the scripting definition in Resources.
 APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
+	<key>NSAppleScriptEnabled</key><true/>
+	<key>OSAScriptingDefinition</key><string>Arch.sdef</string>
 	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Web pages can use the microphone after you allow them.</string>
 	<key>NSLocationUsageDescription</key><string>Web pages can use your location after you allow them.</string>
@@ -65,6 +69,7 @@ xcrun vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -outpu
 mv "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
 write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+cp "$SDEF" "$APP/Contents/Resources/Arch.sdef"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
 # Build the icon set from the 1024-pixel symbol. `opaque_icon.swift` fills its transparent corners so that macOS clips it to the system shape instead of placing it on a gray plate. Each size appears at 1x and 2x, as `iconutil` requires.

@@ -60,7 +60,8 @@ let package = Package(
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "Preferences", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Preferences"),
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch"),
+        // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
+        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
     ],
     cxxLanguageStandard: .cxx20

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- AppleScript terms for Arch. `Scripting.swift` implements the classes and keys named here; `scripts/bundle_app.sh` copies this file into the bundle's Resources. -->
+<dictionary title="Arch Terminology" xmlns:xi="http://www.w3.org/2001/XInclude">
+
+	<xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef" xpointer="xpointer(/dictionary/suite)"/>
+
+	<suite name="Arch Suite" code="Arch" description="Web addresses and tabs in Arch.">
+
+		<command name="open location" code="GURLGURL" description="Open a web address in a new tab.">
+			<cocoa class="ArchOpenLocationCommand"/>
+			<direct-parameter type="text" description="The address to open, such as https://example.org or example.org."/>
+		</command>
+
+		<class-extension extends="application" description="The Arch application.">
+			<element type="tab" access="r" description="Every tab in sidebar order: each space's pinned tabs, then its open tabs.">
+				<cocoa key="scriptTabs"/>
+			</element>
+			<property name="active tab" code="ArAT" type="tab" access="r" description="The selected tab.">
+				<cocoa key="scriptActiveTab"/>
+			</property>
+		</class-extension>
+
+		<class name="tab" code="ArTb" plural="tabs" description="A tab.">
+			<cocoa class="ArchScriptTab"/>
+			<property name="id" code="ID  " type="text" access="r" description="The tab's unique identifier.">
+				<cocoa key="uniqueID"/>
+			</property>
+			<property name="name" code="pnam" type="text" access="r" description="The tab's title as the sidebar shows it.">
+				<cocoa key="name"/>
+			</property>
+			<property name="URL" code="pURL" type="text" access="r" description="The address of the tab's page.">
+				<cocoa key="url"/>
+			</property>
+		</class>
+
+	</suite>
+
+</dictionary>
