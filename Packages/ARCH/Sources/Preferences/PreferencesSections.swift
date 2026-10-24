@@ -5,7 +5,7 @@ import Browsing
 import SwiftUI
 
 /// Every section has the same width, so only the window's height changes between them.
-let sectionWidth: CGFloat = 420
+let sectionWidth: CGFloat = 540
 
 /// The default browser, the engine and search engine for new pages, and where downloads go.
 struct GeneralSection: View {
