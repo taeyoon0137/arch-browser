@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = AppearanceSetting.current.appearance
         NSApp.mainMenu = makeMainMenu()
         installUndoCloseShortcut()
+        installFullscreenEscape()
         // Engines register their private APIs when they start; the checks run without delaying launch.
         PrivateAPIFlags.shared.checkInBackground()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -290,6 +291,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func showSettings() { PreferencesWindowController.shared.show() }
+
+    // MARK: Page fullscreen
+
+    /// A page that fills the window in fullscreen leaves it on Escape, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself.
+    private func installFullscreenEscape() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+                  let self, let session = self.session, session.fullscreenTabID != nil, event.window === self.window else { return event }
+            session.exitPageFullscreen()
+            return nil
+        }
+    }
 
     // MARK: Undo close
 

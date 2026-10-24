@@ -35,6 +35,8 @@ public final class BrowserSession: ObservableObject {
         didSet {
             // Selecting a tab, even the one under the page, leaves an internal page.
             internalPage = nil
+            // Another tab ends the fullscreen of the page that filled the window.
+            if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
             selectedTab?.lastActivatedAt = Date()
             if let tab = selectedTab, tab.spaceID != currentSpaceID { currentSpaceID = tab.spaceID }
             // Switching tabs ends the search because it belongs to one page.
@@ -50,6 +52,8 @@ public final class BrowserSession: ObservableObject {
     @Published public var isSidebarVisible = true
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
+    /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
+    @Published public private(set) var fullscreenTabID: UUID?
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Counts palette openings and mode changes so each gets a fresh view.
@@ -369,6 +373,14 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(false) }
             self.enqueueSheet(Self.permissionAlert(for: request), for: tab) { completion($0 == .alertFirstButtonReturn) }
         }
+        tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
+            guard let self, let tab else { return }
+            if isFullscreen {
+                self.fullscreenTabID = tab.id
+            } else if self.fullscreenTabID == tab.id {
+                self.fullscreenTabID = nil
+            }
+        }
         // A link opened from a page's context menu opens behind the current tab, in the page's space and engine.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
@@ -426,6 +438,7 @@ public final class BrowserSession: ObservableObject {
     /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening.
     public func closeTab(_ tab: Tab, remember: Bool = true) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if fullscreenTabID == tab.id { fullscreenTabID = nil }
         cancelSheets(for: tab)
         tabs.remove(at: index)
         tabObservers[tab.id] = nil
@@ -601,6 +614,13 @@ public final class BrowserSession: ObservableObject {
 
     public func closeInternalPage() {
         internalPage = nil
+    }
+
+    /// Ends the fullscreen of the page that fills the window, as Escape does.
+    public func exitPageFullscreen() {
+        guard let id = fullscreenTabID else { return }
+        fullscreenTabID = nil
+        tabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
     /// Returns keyboard focus to the page after the palette closes. Runs after the next layout pass so a new tab's view is in the window.

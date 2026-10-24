@@ -41,6 +41,8 @@ public final class Tab: ObservableObject, Identifiable {
     var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
+    /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
+    var didChangeFullscreen: ((Bool) -> Void)?
     /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
     private var isOfferingExternalApp = false
     /// The site whose own request to open another app the user declined: its host, or its scheme for a page without one, such as a file. The page asks no more until the tab moves to another site, so changing its own address or reloading does not bring the question back. A link the user clicks or an address the user types still asks.
@@ -87,6 +89,8 @@ extension Tab: EngineWebContentsUIDelegate {
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
+    public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
+    public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         isLoading = webContents.isLoading
         // The Chromium engine reloads a page once after its first crash; any new load clears the notice.

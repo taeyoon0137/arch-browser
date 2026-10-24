@@ -28,6 +28,8 @@ public struct BrowserWindowView: View {
     @State private var peekCheck: DispatchWorkItem?
     @State private var windowReference = WindowReference()
     @StateObject private var tabDrag = TabDragState()
+    /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
+    @State private var enteredFullScreenForPage = false
 
     public init(session: BrowserSession) {
         self.session = session
@@ -42,17 +44,20 @@ public struct BrowserWindowView: View {
     /// The floating card's corners match the window's own 16-point corners rather than the page's.
     static let cardCornerRadius: CGFloat = 16
 
+    /// While the selected tab's page is in fullscreen, it fills the window without the sidebar or margins.
+    private var isPageFullscreen: Bool { session.fullscreenTabID != nil && session.fullscreenTabID == session.selectedTabID }
+
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                if session.isSidebarVisible {
+                if session.isSidebarVisible, !isPageFullscreen {
                     SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
                         sidebarWidth = Double(SidebarView.clampedWidth($0))
                     }
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
-                WebContentsHostView(contentView: session.selectedTab?.webContents.view)
+                WebContentsHostView(contentView: session.selectedTab?.webContents.view, cornerRadius: isPageFullscreen ? 0 : PageFrameShape.cornerRadius)
                     .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
                     .overlay { if let tab = session.selectedTab { PageCrashNoticeView(tab: tab) } }
                     .overlay {
@@ -61,12 +66,12 @@ public struct BrowserWindowView: View {
                                 .clipShape(PageFrameShape())
                         }
                     }
-                    .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
+                    .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(isPageFullscreen ? 0 : 0.08)).allowsHitTesting(false))
                     // The sidebar's own margin is part of the gap beside it.
-                    .padding(EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
-                                        bottom: Self.pageMargin, trailing: Self.pageMargin))
+                    .padding(isPageFullscreen ? EdgeInsets() : EdgeInsets(top: Self.pageMargin, leading: session.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin,
+                                                                          bottom: Self.pageMargin, trailing: Self.pageMargin))
             }
-            if !session.isSidebarVisible || isSidebarPeeking {
+            if !session.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
                 peekingSidebar
             }
             TabDragLayer(session: session, tabDrag: tabDrag)
@@ -132,6 +137,23 @@ public struct BrowserWindowView: View {
         .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !session.isSidebarVisible && !isSidebarPeeking,
                                             slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
                                             reference: windowReference))
+        // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
+        .onChange(of: isPageFullscreen) { isFullscreen in
+            guard let window = windowReference.window else { return }
+            let isWindowFullScreen = window.styleMask.contains(.fullScreen)
+            if isFullscreen, !isWindowFullScreen {
+                enteredFullScreenForPage = true
+                window.toggleFullScreen(nil)
+            } else if !isFullscreen, enteredFullScreenForPage {
+                enteredFullScreenForPage = false
+                if isWindowFullScreen { window.toggleFullScreen(nil) }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
+            guard notification.object as? NSWindow === windowReference.window else { return }
+            enteredFullScreenForPage = false
+            if isPageFullscreen { session.exitPageFullscreen() }
+        }
         // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
         .onChange(of: session.isSidebarVisible) { isVisible in
             peekCheck?.cancel()

@@ -566,6 +566,7 @@ private:
 - (void)handleLeavePageDialog:(void (^)(BOOL))completion;
 - (void)handleResetDialogs;
 - (void)handleTitle:(NSString *)title;
+- (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -841,6 +842,10 @@ public:
         [owner_ handleTitle:ToNSString(title)];
     }
 
+    void OnFullscreenModeChange(CefRefPtr<CefBrowser> browser, bool fullscreen) override {
+        [owner_ handleFullscreen:fullscreen];
+    }
+
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &url) override {
         if (frame->IsMain()) {
             [owner_ handleURL:ToNSString(url)];
@@ -995,6 +1000,16 @@ private:
 - (void)handleTitle:(NSString *)title {
     _title = [title copy];
     [_delegate cefBrowserDidChangeTitle:title];
+}
+
+- (void)handleFullscreen:(BOOL)isFullscreen {
+    [_delegate cefBrowserDidChangeFullscreen:isFullscreen];
+}
+
+- (void)exitFullscreenWillResize:(BOOL)willResize {
+    if (_browser) {
+        _browser->GetHost()->ExitFullscreen(willResize);
+    }
 }
 
 - (void)handleURL:(NSString *)url {

@@ -219,6 +219,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.websiteDataStore = context.dataStore
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
+        // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
+        webConfiguration.preferences.isElementFullscreenEnabled = true
         self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
         super.init()
         installBridge()

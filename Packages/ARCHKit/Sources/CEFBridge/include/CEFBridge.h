@@ -138,6 +138,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)cefBrowserRunContextMenu:(ARCHCEFContextMenuParams *)params completion:(void (^)(void))completion;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
+/// Reports that the page entered or left fullscreen through the Fullscreen API. CEF has already sized the content; the app makes the window's transition and handles Escape.
+- (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port
@@ -202,6 +204,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)closeDevTools;
 /// Whether this browser's developer tools are open.
 @property (nonatomic, readonly) BOOL hasDevTools;
+/// Leaves the fullscreen the page entered. `willResize` tells CEF that leaving also resizes the view.
+- (void)exitFullscreenWillResize:(BOOL)willResize NS_SWIFT_NAME(exitFullscreen(willResize:));
 - (void)close;
 /// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
 - (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;

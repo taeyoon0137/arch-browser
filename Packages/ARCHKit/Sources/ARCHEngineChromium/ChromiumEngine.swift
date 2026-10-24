@@ -206,7 +206,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public var loadProgress: Double { isLoading ? 0.5 : 1 }
     public var themeColor: NSColor? { nil }
     public var selectedText: String? { nil }
-    public var isFullscreen: Bool { false }
+    public private(set) var isFullscreen = false
     public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
     public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.append(observer) }
     public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.removeAll { $0 === observer } }
@@ -255,7 +255,9 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
     }
     public func print() { browser?.print() }
-    public func exitFullscreen() {}
+    public func exitFullscreen() {
+        if isFullscreen { browser?.exitFullscreen(willResize: true) }
+    }
     public func discard() { browser?.close() }
     public var closingStopsDownloads: Bool { browser?.hasDownloadsInProgress == true }
     public func tryToClose(completion: @escaping (Bool) -> Void) {
@@ -487,6 +489,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate.webContents(self, didReceiveAuthenticationChallenge: challenge) { [weak self] credential in
             if credential != nil { self?.authenticationAttempts[key, default: 0] += 1 }
             completion(credential?.user, credential?.password)
+        }
+    }
+    /// Alloy style leaves the window's transition to the app, which the UI delegate makes.
+    public func cefBrowserDidChangeFullscreen(_ isFullscreen: Bool) {
+        self.isFullscreen = isFullscreen
+        if isFullscreen {
+            uiDelegate?.webContentsDidRequestEnterFullscreen(self)
+        } else {
+            uiDelegate?.webContentsDidRequestExitFullscreen(self)
         }
     }
     /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
