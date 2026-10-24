@@ -51,7 +51,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | 14 | Back, forward, reload, zoom | `WKWebView` and CEF back-forward lists; the History menu lists the selected tab's previous ten pages | Navigation | in progress |
 | 15 | Find in page | `WKWebView.find(_:configuration:)` | Find | in progress |
 | 16 | Link routing, universal links, opening external apps | `NSWorkspace`, `WKNavigationDelegate` policies | Policy decisions | in progress |
-| 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | in progress |
+| 17 | Default browser setup and prompts | `NSWorkspace.setDefaultApplication` | None | complete |
 | 18 | Drag and drop (tabs, links, files) | AppKit drag APIs | None | in progress |
 | 49 | Page context menus | One menu built by the app on both engines: Chromium through `CefContextMenuHandler::RunContextMenu`, WebKit through `willOpenMenu(_:with:)` with the engine's own spelling and editing items kept. WebKit keeps its own menu for menus a page element provides and for elements in closed shadow roots. Inspect Element waits for DevTools (row 45) | Context menus | in progress |
 
