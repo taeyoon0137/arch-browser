@@ -241,9 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func newTab() { session.showCommandPalette(.newTab) }
-    /// ⌘W closes the History window or the tab close log when it is in front, not a tab behind it.
+    /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it.
     @objc private func closeTab() {
-        if let key = NSApp.keyWindow, key.windowController is HistoryWindowController || key.windowController is TabCloseLogWindowController { return key.performClose(nil) }
+        if let key = NSApp.keyWindow, key !== window, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
         session.closeSelectedTab()
     }
     @objc private func closeOtherTabs() { session.closeOtherTabs() }
