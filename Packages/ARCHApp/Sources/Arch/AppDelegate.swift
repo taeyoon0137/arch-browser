@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         NSApp.appearance = AppearanceSetting.current.appearance
         NSApp.mainMenu = makeMainMenu()
+        installUndoCloseShortcut()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
@@ -286,6 +287,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func showSettings() { PreferencesWindowController.shared.show() }
+
+    // MARK: Undo close
+
+    /// ⌘Z reopens the tabs the user just closed, newest first, until the user presses a different key or clicks in the page. It runs before the focused page can handle ⌘Z as its own undo.
+    private func installUndoCloseShortcut() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let session = self?.session else { return event }
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            let isUndo = modifiers == .command && Self.isKey(event, "z", keyCode: 6)
+            if isUndo, session.undoableCloseCount > 0 {
+                session.reopenLastClosedTab()
+                return nil
+            }
+            // Closing and reopening tabs keep the count. Any other key, whether typing or a shortcut such as ⌘V, makes ⌘Z undo where the user works.
+            let closesOrReopens = (Self.isKey(event, "w", keyCode: 13) && (modifiers == .command || modifiers == [.command, .option]))
+                || (Self.isKey(event, "t", keyCode: 17) && modifiers == [.command, .shift])
+            if !isUndo, !closesOrReopens { session.forgetUndoableCloses() }
+            return event
+        }
+        // A click in the page can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            if let session = self?.session, let view = session.selectedTab?.webContents.view, view.window === event.window,
+               view.bounds.contains(view.convert(event.locationInWindow, from: nil)) {
+                session.forgetUndoableCloses()
+            }
+            return event
+        }
+    }
+
+    /// Input sources without Latin letters report other characters, so use the key's position on an ANSI keyboard.
+    private static func isKey(_ event: NSEvent, _ letter: String, keyCode: UInt16) -> Bool {
+        guard let key = event.charactersIgnoringModifiers, key.unicodeScalars.allSatisfy(\.isASCII) else { return event.keyCode == keyCode }
+        return key.lowercased() == letter
+    }
 
     // MARK: Default browser
 

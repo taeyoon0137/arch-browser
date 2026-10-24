@@ -73,6 +73,8 @@ public final class BrowserSession: ObservableObject {
     @Published public var renamingSpaceID: UUID?
     /// The tab whose name is being edited in the sidebar.
     @Published public var renamingTabID: UUID?
+    /// Counts the most recently closed tabs the user closed since they last pressed another key or clicked in the page. ⌘Z reopens them one at a time, newest first.
+    public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
     /// The last 100 closed or archived tabs, oldest first. The newest reopens first.
@@ -331,8 +333,11 @@ public final class BrowserSession: ObservableObject {
             self.runtime(for: popup.engineKind).browser.takeOwnership(of: popup)
             _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
         }
+        // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
-            if let self, let tab { self.closeTab(tab) }
+            guard let self, let tab, self.tabs.contains(where: { $0.id == tab.id }) else { return }
+            self.closeTab(tab)
+            self.undoableCloseCount = 0
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
@@ -402,10 +407,15 @@ public final class BrowserSession: ObservableObject {
     /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay.
     public func requestCloseTab(_ tab: Tab) {
         // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
-        guard !tab.webContents.closingStopsDownloads else { return closeTab(tab) }
+        guard !tab.webContents.closingStopsDownloads else {
+            closeTab(tab)
+            undoableCloseCount += 1
+            return
+        }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
             guard closing, let self, let tab else { return }
             self.closeTab(tab)
+            self.undoableCloseCount += 1
         }
     }
 
@@ -443,8 +453,14 @@ public final class BrowserSession: ObservableObject {
     /// Reopens the newest closed tab in its original space, or the current space if the original is gone.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
+        undoableCloseCount = max(0, undoableCloseCount - 1)
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
         openTab(url: record.url, in: spaceID, pinned: record.isPinned, engine: record.engine).customTitle = record.customTitle
+    }
+
+    /// Pressing another key or clicking in the page makes ⌘Z undo there instead of reopening tabs.
+    public func forgetUndoableCloses() {
+        undoableCloseCount = 0
     }
 
     /// The current space's tabs in sidebar order: pinned first, then open.
@@ -506,6 +522,7 @@ public final class BrowserSession: ObservableObject {
         selectedTab?.lastActivatedAt = Date()
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab)
+            undoableCloseCount = 0
         }
     }
 
