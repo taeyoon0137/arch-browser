@@ -4,7 +4,7 @@
 
 - Protocols in `ARCHEngine` separate the Swift layer from the web engine. `ARCHEngineChromium` is the primary engine. It uses Chromium through the Chromium Embedded Framework (CEF). The `WKWebView` adapter serves as the secondary engine and the debug engine. The selection model allows each profile or tab to use a different engine.
 - Feature code depends only on these protocols. It never depends directly on an engine framework. Add protocol members only when a feature needs them. Treat the current set as a starting point, not a checklist to complete. `docs/features.md` lists the features the protocols serve.
-- Keep features lightweight. Delegate password, card, and address autofill to Apple Passwords (iCloud Keychain and passkeys) or a third-party provider such as 1Password. Both adapters route engine events to the system framework wherever macOS provides the user experience. The Chromium engine disables its own equivalent UI for these features. See the Platform integration table in `docs/features.md`. Prefer Apple APIs for picture-in-picture (PiP), CSS and JavaScript injection, ad blocking, and translation. These include WebKit's built-in PiP, `WKUserScript`, `WKUserContentController`, `WKContentRuleList`, and the Translation framework.
+- Keep features lightweight. Delegate password, card, and address autofill to Apple Passwords (iCloud Keychain and passkeys) or a third-party provider such as 1Password. Both adapters route engine events to the system framework wherever macOS provides the user experience. The Chromium engine disables its own equivalent UI for these features. See the Platform integration table in `docs/features.md`. Prefer Apple APIs for picture-in-picture (PiP), CSS and JavaScript injection, and translation. These include WebKit's built-in PiP, `WKUserScript`, `WKUserContentController`, and the Translation framework.
 
 ## Module layout
 
@@ -14,7 +14,7 @@
 | `ARCHEngineWebKit` | `Packages/ARCHKit/Sources/ARCHEngineWebKit` | `WKWebView` adapter. Secondary and debug engine | `ARCHEngine`, WebKit |
 | `ARCHEngineChromium` | `Packages/ARCHKit/Sources/ARCHEngineChromium` | Primary engine. Swift adapter over the `CEFBridge` Objective-C++ target. The embedded browser uses Alloy style, which CEF requires for embedding in a client view. Chrome style requires a CEF Views window. Support for Chrome style is evaluated separately. Chrome extensions depend on Chrome style. Build steps: `docs/plan.md` | `ARCHEngine`, `CEFBridge`, CEF framework |
 
-- Both existing modules are maintained by hand and declared in `Package.swift`. Add `ARCHEngineChromium` when its bridge exists.
+- The engine modules and `CEFBridge` are declared by hand in `Package.swift`.
 
 ## Tier 1: protocols implemented by both engines
 
@@ -70,12 +70,9 @@ Chromium-specific UI callbacks, including translation bubbles, extension install
 
 ## Current state and next steps
 
-`ARCHEngine` and `ARCHEngineWebKit` build. `ARCHEngineWebKit` implements find, script execution, style injection, snapshots, PDF, and navigation through `WKWebView`. Media, downloads, and history remain stubs.
+Both adapters build and run in the app. `docs/plan.md` Current State lists what each adapter implements and which protocol members are still stubs. Its Work Queue holds the remaining engine gaps in Phase II and the changes that need a source build of CEF in Phase VI.
 
-Next steps:
+The adapters keep these rules beyond the member signatures:
 
-1. Design the Chromium adapter's Objective-C++ bridge.
-2. Get the prebuilt CEF framework running on this Mac. Set up the patched CEF source build on another Mac when a gap requires it.
-3. Check `WebKitDelegateBridge` against the delegate protocols and implement the missing callbacks.
-4. Connect the first feature module to `EngineRegistry` for engine selection.
-5. Implement the debug menu.
+- `go(to:)` loads an earlier or later page from the same controller's back-forward list. It ignores the current page and items read from another tab's list, so an item that outlived its menu cannot load a different page.
+- The Chromium adapter calls the DevTools protocol only where CEF has no other route, because an attached DevTools client stays until the browser closes and stops Chromium from timing out a hung page (`docs/plan.md`, Decisions).
