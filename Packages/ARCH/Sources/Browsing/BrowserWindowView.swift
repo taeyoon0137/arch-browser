@@ -803,7 +803,7 @@ struct AddressPillView: View {
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
                 .padding(.trailing, 4)
                 .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
-                    SiteSettingsView(session: session, tab: tab)
+                    SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
                 }
         }
         .font(.system(size: 14))
@@ -892,15 +892,24 @@ private struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab and the engine for new tabs.
+/// The site settings popover: the engine of the current tab, clearing its site's data, and the engine for new tabs.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     let tab: Tab?
+    /// Closes the popover, so that it does not stay over the sheet it opens.
+    var close: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let tab {
                 TabEngineSection(session: session, tab: tab)
+                SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
+                    Button("Clear Site Data\u{2026}") {
+                        close()
+                        session.confirmClearSiteData()
+                    }
+                    .disabled(!session.canClearSiteData)
+                }
             }
             SiteSettingsSection(title: "New tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
                 Picker("New tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {

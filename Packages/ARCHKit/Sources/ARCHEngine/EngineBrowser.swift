@@ -53,6 +53,10 @@ public protocol EngineBrowser: AnyObject {
     /// Stores the cookies, each for its own domain, and calls `completion` on the main thread once all are stored.
     func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void)
     func removeCookie(named name: String, for url: URL)
+    /// Deletes every cookie `shouldRemove` accepts and calls `completion` on the main thread once the store has applied the deletions.
+    func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void)
+    /// Removes what the engine stores for each origin besides cookies, such as local storage, IndexedDB, caches, and service workers, and calls `completion` on the main thread once it is gone. An engine that keeps this data by site removes it for each origin's whole site.
+    func removeSiteData(for origins: [URL], completion: @escaping () -> Void)
     /// Called after the cookie store changes, when the engine can tell. The Chromium engine cannot.
     var cookiesDidChange: (() -> Void)? { get set }
 }

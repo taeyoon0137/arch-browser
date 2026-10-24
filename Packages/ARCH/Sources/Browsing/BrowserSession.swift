@@ -1179,6 +1179,48 @@ public final class BrowserSession: ObservableObject {
         closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount))
     }
 
+    // MARK: Site data
+
+    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page covers, and its window shows no sheet.
+    public var canClearSiteData: Bool {
+        guard internalPage == nil, let tab = selectedTab, SiteDataScope(url: tab.url) != nil else { return false }
+        return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
+    }
+
+    /// Asks with a sheet on the selected tab before clearing the data of its page's host.
+    public func confirmClearSiteData() {
+        guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Clear the data stored by \u{201C}\(site.displayName)\u{201D}?"
+        alert.informativeText = "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again."
+        alert.addButton(withTitle: "Clear").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        enqueueSheet(alert, for: tab) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.clearSiteData(of: site) }
+        }
+    }
+
+    /// Deletes the site's cookies from every engine at once, then each engine's other data for the site's origins, then reloads the site's tabs. An engine that has not started yet starts first, so that the cookies it keeps on disk cannot come back through a later copy.
+    private func clearSiteData(of site: SiteDataScope) {
+        availableEngines.forEach { _ = runtime(for: $0) }
+        cookieSync.removeCookies(where: { site.contains($0) }) { [weak self] in
+            guard let self else { return }
+            let pages = self.tabs.compactMap(\.url).filter { $0.host.map(site.contains(host:)) == true }
+            let origins = Array(Set(site.origins + pages.compactMap(SiteDataScope.origin(of:))))
+            let group = DispatchGroup()
+            for runtime in self.runtimes.values {
+                group.enter()
+                runtime.browser.removeSiteData(for: origins) { group.leave() }
+            }
+            group.notify(queue: .main) { [weak self] in
+                guard let self else { return }
+                for tab in self.tabs where tab.url?.host.map(site.contains(host:)) == true {
+                    tab.webContents.navigationController.reloadWithoutCache()
+                }
+            }
+        }
+    }
+
     // MARK: Persistence
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {

@@ -51,6 +51,15 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFPermission) {
 + (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name;
 @end
 
+/// Removes a site's data from CEF's global request context, which every browser in the app shares. Use after `ARCHCEFRuntime` initializes.
+@interface ARCHCEFSiteData : NSObject
+/// Deletes every stored cookie that `test` accepts, then calls `completion` once on the main thread after the store has applied the deletions. `test` runs on the main thread.
++ (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *cookie))test
+                      completion:(void (^)(void))completion NS_SWIFT_NAME(deleteCookies(passingTest:completion:));
+/// Clears what each origin, such as `https://example.com`, stores besides cookies: local storage, IndexedDB, Cache Storage, service workers, and file systems. The DevTools protocol's `Storage.clearDataForOrigin` runs in a hidden browser that closes afterwards, so no tab keeps a DevTools client. Calls `completion` once on the main thread.
++ (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion NS_SWIFT_NAME(clearStorage(forOrigins:completion:));
+@end
+
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;

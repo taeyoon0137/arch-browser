@@ -225,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         historyMenu.addItem(.separator())
         historyMenu.addItem(withTitle: "Show All History", action: #selector(showHistory), keyEquivalent: "y")
         historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
+        historyMenu.addItem(withTitle: "Clear Site Data\u{2026}", action: #selector(clearSiteData), keyEquivalent: "")
         historyMenu.delegate = self
         self.historyMenu = historyMenu
         mainMenu.addItem(submenu(historyMenu, title: "History"))
@@ -274,6 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func goForward() { session.goForward() }
     @objc private func goHome() { session.goHome() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
+    @objc private func clearSiteData() { session.confirmClearSiteData() }
 
     /// Pages chosen in the History window open as new tabs in the browser window, which comes to the front.
     @objc private func showHistory() {
@@ -366,6 +368,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(goHome) {
             return session?.canGoHome == true
+        }
+        // Clearing site data needs a web page in front and no sheet on its window.
+        if item.action == #selector(clearSiteData) {
+            return session?.canClearSiteData == true
         }
         return true
     }

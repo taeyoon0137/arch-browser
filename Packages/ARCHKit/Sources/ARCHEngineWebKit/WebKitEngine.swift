@@ -172,6 +172,29 @@ public final class WebKitBrowser: EngineBrowser {
             }
         }
     }
+    public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
+        let store = webKitContext.dataStore.httpCookieStore
+        store.getAllCookies { cookies in
+            let group = DispatchGroup()
+            for cookie in cookies where shouldRemove(EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expiresDate,
+                                                                  isSecure: cookie.isSecure, isHTTPOnly: cookie.isHTTPOnly)) {
+                group.enter()
+                store.delete(cookie) { group.leave() }
+            }
+            group.notify(queue: .main, execute: completion)
+        }
+    }
+    /// WebKit keeps this data in one record per site, its registrable domain, so each origin's whole site loses it. Cookies stay for `removeCookies(where:completion:)`.
+    public func removeSiteData(for origins: [URL], completion: @escaping () -> Void) {
+        let hosts = origins.compactMap { $0.host?.lowercased() }
+        let store = webKitContext.dataStore
+        let types = WKWebsiteDataStore.allWebsiteDataTypes().subtracting([WKWebsiteDataTypeCookies])
+        store.fetchDataRecords(ofTypes: types) { records in
+            let matching = records.filter { record in hosts.contains { $0 == record.displayName || $0.hasSuffix("." + record.displayName) } }
+            guard !matching.isEmpty else { return completion() }
+            store.removeData(ofTypes: types, for: matching, completionHandler: completion)
+        }
+    }
 }
 
 /// Forwards the cookie store's change reports. The store keeps its observers weakly, so the browser holds this one.
@@ -440,7 +463,6 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var closingStopsDownloads: Bool { false }
     /// WebKit has no public way to run `beforeunload` handlers.
     public func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
-    public func clearSiteDataAndReload() { fatalError("skeleton") }
     public var devTools: (any EngineDevTools)? { nil }
 
     /// Lets the system's web inspector attach to the page. Opening the inspector from the app needs a private API, so the app offers no developer tools on this engine.

@@ -140,6 +140,15 @@ public final class ChromiumBrowser: EngineBrowser {
     public func removeCookie(named name: String, for url: URL) {
         ARCHCEFCookieStore.deleteCookies(forURL: url.absoluteString, name: name)
     }
+    public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
+        ARCHCEFSiteData.deleteCookies(passingTest: { cookie in
+            shouldRemove(EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, isSecure: cookie.secure, isHTTPOnly: cookie.httpOnly))
+        }, completion: completion)
+    }
+    /// Chromium keeps this data by origin. The bridge clears it in a hidden browser, so no tab keeps the DevTools client it needs.
+    public func removeSiteData(for origins: [URL], completion: @escaping () -> Void) {
+        ARCHCEFSiteData.clearStorage(forOrigins: origins.map(\.absoluteString), completion: completion)
+    }
     private static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
         let value = ARCHCEFCookie()
         value.name = cookie.name
@@ -279,7 +288,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         guard let browser else { return completion(true) }
         browser.tryClose(completion: completion)
     }
-    public func clearSiteDataAndReload() { browser?.reloadIgnoringCache() }
     public private(set) lazy var devTools: (any EngineDevTools)? = ChromiumDevTools(webContents: self)
     public var thumbnails: (any EngineThumbnails)? { nil }
 

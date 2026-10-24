@@ -404,6 +404,177 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
 
 @end
 
+#pragma mark - Site data
+
+namespace {
+
+// Reports once CEF releases it: after the flush it was given finishes, or at once when the flush cannot start.
+class CookieFlushCallback : public CefCompletionCallback {
+  public:
+    explicit CookieFlushCallback(void (^completion)(void)) : completion_([completion copy]) {}
+
+    ~CookieFlushCallback() override { dispatch_async(dispatch_get_main_queue(), completion_); }
+
+    void OnComplete() override {}
+
+  private:
+    void (^completion_)(void);
+    IMPLEMENT_REFCOUNTING(CookieFlushCallback);
+};
+
+// Deletes the cookies a test accepts as CEF visits them. Once CEF releases the visitor, which also happens when the store has no cookies or cannot be read, it flushes the store; the flush runs after the deletions, so its end reports them applied.
+class CookieDeleter : public CefCookieVisitor {
+  public:
+    CookieDeleter(BOOL (^test)(ARCHCEFCookie *), void (^completion)(void)) : test_([test copy]), completion_([completion copy]) {}
+
+    ~CookieDeleter() override {
+        void (^completion)(void) = completion_;
+        // CEF releases the visitor inside its own call, so the flush starts on the next turn of the main run loop.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+            CefRefPtr<CookieFlushCallback> callback = new CookieFlushCallback(completion);
+            if (manager) {
+                manager->FlushStore(callback);
+            }
+        });
+    }
+
+    bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
+        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
+        item.name = ToNSString(CefString(&cookie.name));
+        item.value = ToNSString(CefString(&cookie.value));
+        item.domain = ToNSString(CefString(&cookie.domain));
+        item.path = ToNSString(CefString(&cookie.path));
+        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
+        item.secure = cookie.secure != 0;
+        item.httpOnly = cookie.httponly != 0;
+        deleteCookie = test_(item);
+        return true;
+    }
+
+  private:
+    BOOL (^test_)(ARCHCEFCookie *);
+    void (^completion_)(void);
+    IMPLEMENT_REFCOUNTING(CookieDeleter);
+};
+
+// The storage types of `Storage.clearDataForOrigin` that belong to an origin, leaving out cookies, which the cookie store deletes, and the shader cache, which Chromium clears for every site at once. Chromium ignores names it does not know.
+const char kClearedStorageTypes[] =
+    "file_systems,indexeddb,local_storage,websql,service_workers,cache_storage,interest_groups,shared_storage,storage_buckets";
+
+// Runs `Storage.clearDataForOrigin` for each origin in a hidden browser of its own, then closes that browser. A DevTools client stays attached to a browser until the browser closes, and an attached client keeps Chromium from timing out a hung page, so no tab makes the calls.
+class StorageClearingClient : public CefClient, public CefLifeSpanHandler, public CefDevToolsMessageObserver {
+  public:
+    StorageClearingClient(NSArray<NSString *> *origins, NSView *parentView, void (^completion)(void))
+        : origins_([origins copy]), parentView_(parentView), completion_([completion copy]) {}
+
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        browser_ = browser;
+        CefRefPtr<CefBrowserHost> host = browser->GetHost();
+        registration_ = host->AddDevToolsMessageObserver(this);
+        // A call that fails can answer before `ExecuteDevToolsMethod` returns, so the answers count only once every call is sent.
+        isSending_ = YES;
+        for (NSString *origin in origins_) {
+            CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+            params->SetString("origin", origin.UTF8String);
+            params->SetString("storageTypes", kClearedStorageTypes);
+            int messageID = host->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", params);
+            if (messageID != 0) {
+                [sent_ addObject:@(messageID)];
+            }
+        }
+        isSending_ = NO;
+        FinishIfAnswered();
+    }
+
+    void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result, size_t result_size) override {
+        [answered_ addObject:@(message_id)];
+        FinishIfAnswered();
+    }
+
+    // Answers still pending when the agent detaches never arrive.
+    void OnDevToolsAgentDetached(CefRefPtr<CefBrowser> browser) override { Finish(); }
+
+    // The parent view is in no window. Returning false would ask CEF to close that window; the browser's view leaves its parent instead, and CEF finishes closing the browser once the view is released.
+    bool DoClose(CefRefPtr<CefBrowser> browser) override {
+        [CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle()) removeFromSuperview];
+        return true;
+    }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        Finish();
+        browser_ = nullptr;
+        parentView_ = nil;
+    }
+
+  private:
+    void FinishIfAnswered() {
+        if (!isSending_ && [sent_ isSubsetOfSet:answered_]) {
+            Finish();
+        }
+    }
+
+    // Reports once and closes the browser. It runs on the next turn of the main run loop, outside CEF's callback.
+    void Finish() {
+        if (isFinished_) {
+            return;
+        }
+        isFinished_ = YES;
+        CefRefPtr<StorageClearingClient> client = this;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            client->registration_ = nullptr;
+            if (client->browser_) {
+                client->browser_->GetHost()->CloseBrowser(true);
+            }
+            client->completion_();
+        });
+    }
+
+    NSArray<NSString *> *origins_;
+    NSView *parentView_;
+    void (^completion_)(void);
+    CefRefPtr<CefBrowser> browser_;
+    CefRefPtr<CefRegistration> registration_;
+    NSMutableSet<NSNumber *> *sent_ = [NSMutableSet set];
+    NSMutableSet<NSNumber *> *answered_ = [NSMutableSet set];
+    BOOL isSending_ = NO;
+    BOOL isFinished_ = NO;
+    IMPLEMENT_REFCOUNTING(StorageClearingClient);
+};
+
+}  // namespace
+
+@implementation ARCHCEFSiteData
+
++ (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *))test completion:(void (^)(void))completion {
+    CefRefPtr<CefCookieManager> manager = gInitialized ? CefCookieManager::GetGlobalManager(nullptr) : nullptr;
+    CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, completion);
+    if (manager) {
+        manager->VisitAllCookies(deleter);
+    }
+}
+
++ (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion {
+    if (!gInitialized || origins.count == 0) {
+        dispatch_async(dispatch_get_main_queue(), completion);
+        return;
+    }
+    // The browser needs a parent view, which stays out of every window and holds the browser's view until it closes.
+    NSView *parentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+    CefRefPtr<StorageClearingClient> client = new StorageClearingClient(origins, parentView, completion);
+    CefWindowInfo windowInfo;
+    windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView), CefRect(0, 0, 1, 1));
+    windowInfo.hidden = true;
+    CefBrowserSettings settings;
+    if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, nullptr)) {
+        dispatch_async(dispatch_get_main_queue(), completion);
+    }
+}
+
+@end
+
 @interface ARCHCEFBrowser ()
 - (void)applyAccessibilityState;
 /// Whether CEF still has the browser, from its creation until `OnBeforeClose`.

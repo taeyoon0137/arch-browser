@@ -115,7 +115,6 @@ public protocol EngineWebContents: AnyObject {
     var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
     func tryToClose(completion: @escaping (Bool) -> Void)
-    func clearSiteDataAndReload()
     /// Tier 2 capability. nil when the engine does not support it.
     var devTools: (any EngineDevTools)? { get }
     var thumbnails: (any EngineThumbnails)? { get }

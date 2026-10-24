@@ -1,4 +1,4 @@
-// Keeps the engines' cookie stores in step so that a site stays signed in whichever engine shows it. Copies add and update cookies; a cookie that one engine deletes stays in the other until it expires or the site replaces it. Local storage and IndexedDB stay with each engine.
+// Keeps the engines' cookie stores in step so that a site stays signed in whichever engine shows it. Copies add and update cookies; a cookie that one engine deletes stays in the other until it expires or the site replaces it, unless `removeCookies` deletes it from every engine at once. Local storage and IndexedDB stay with each engine.
 import ARCHEngine
 import Foundation
 
@@ -8,16 +8,28 @@ final class CookieSync {
     private var pendingCopies: [EngineKind: DispatchWorkItem] = [:]
     /// Engines the sync is writing to. Their change reports during a write are the sync's own.
     private var writingEngines: Set<EngineKind> = []
+    /// Copies that started and have not finished. A removal starts only once there are none.
+    private var runningCopies = 0
+    /// Set while a removal runs. Nothing else starts until it finishes.
+    private var isRemoving = false
+    /// Work waiting for its turn, oldest first: removals, and the copies asked for after them.
+    private var queue: [(isRemoval: Bool, start: () -> Void)] = []
 
     /// Copies every cookie of `source` into `target`, then calls `completion` once they are stored.
     func copy(from source: EngineRuntime, to target: EngineRuntime, completion: @escaping () -> Void) {
-        source.browser.allCookies { [weak self] cookies in
+        enqueue(isRemoval: false) { [weak self] in
             guard let self else { return completion() }
-            self.writingEngines.insert(target.kind)
-            target.browser.setCookies(cookies) { [weak self] in
-                // The store reports its own writes shortly after they finish.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.writingEngines.remove(target.kind) }
-                completion()
+            self.runningCopies += 1
+            source.browser.allCookies { [weak self] cookies in
+                guard let self else { return completion() }
+                self.writingEngines.insert(target.kind)
+                target.browser.setCookies(cookies) { [weak self] in
+                    // The store reports its own writes shortly after they finish.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.writingEngines.remove(target.kind) }
+                    completion()
+                    self?.runningCopies -= 1
+                    self?.startQueued()
+                }
             }
         }
     }
@@ -34,5 +46,36 @@ final class CookieSync {
         }
         pendingCopies[source] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    /// Deletes the cookies `shouldRemove` accepts from every running engine, then calls `completion`. It runs alone: copies already running finish first, and copies asked for meanwhile wait, so that no copy writes back a cookie it read before the deletion.
+    func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
+        enqueue(isRemoval: true) { [weak self] in
+            guard let self else { return completion() }
+            let group = DispatchGroup()
+            for runtime in self.runtimes() {
+                group.enter()
+                runtime.browser.removeCookies(where: shouldRemove) { group.leave() }
+            }
+            group.notify(queue: .main) { [weak self] in
+                self?.isRemoving = false
+                completion()
+                self?.startQueued()
+            }
+        }
+    }
+
+    private func enqueue(isRemoval: Bool, _ start: @escaping () -> Void) {
+        queue.append((isRemoval, start))
+        startQueued()
+    }
+
+    /// Starts waiting work in order: copies alongside each other, and a removal alone once the copies before it finish.
+    private func startQueued() {
+        while let next = queue.first, !isRemoving, !next.isRemoval || runningCopies == 0 {
+            queue.removeFirst()
+            isRemoving = next.isRemoval
+            next.start()
+        }
     }
 }
