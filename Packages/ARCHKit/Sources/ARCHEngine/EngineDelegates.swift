@@ -103,6 +103,7 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents)
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents)
+    func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, didChangeStatusText text: String?)
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
     func webContentsDidClose(_ webContents: any EngineWebContents)
@@ -139,6 +140,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents) {}
+    func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, didChangeStatusText text: String?) {}
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}

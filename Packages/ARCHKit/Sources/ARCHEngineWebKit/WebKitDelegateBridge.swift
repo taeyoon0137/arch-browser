@@ -120,6 +120,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// The tab stays blank until a reload restarts the process. The application counts the crash.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        owner.clearAudibleDocuments()
         owner.uiDelegate?.webContentsProcessDidTerminate(owner)
         owner.context.application?.rendererDidCrash()
     }

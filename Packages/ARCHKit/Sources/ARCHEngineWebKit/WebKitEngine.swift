@@ -198,6 +198,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     var observers: [any EngineWebContentsNavigationObserver] = []
     /// Gives the dialog the page waits on its safe answer. Set while an `alert`, `confirm`, or `prompt` dialog is open.
     private var dismissPendingDialog: (() -> Void)?
+    /// The documents, in any frame, whose media elements play sound.
+    var audibleDocuments: Set<String> = []
     /// The last search and the position of its active match, kept for when the page's selection cannot place the match.
     private var findQuery: String?
     private var findOrdinal = 0
@@ -223,6 +225,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         super.init()
         installBridge()
         installContextMenu()
+        installAudibleScript()
         allowInspection()
         // Restoring loads the current entry; a state WebKit cannot read leaves the list empty, and the page loads its address instead.
         if let state = configuration.restorableState {
@@ -242,6 +245,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         super.init()
         installBridge()
         installContextMenu()
+        installAudibleScript()
         allowInspection()
     }
 
@@ -256,6 +260,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var themeColor: NSColor? { webView.themeColor }
     /// WebKit's interaction state holds the back-forward list and each page's position.
     public var restorableState: Data? { webView.interactionState as? Data }
+    public var isAudible: Bool { !audibleDocuments.isEmpty }
     public var selectedText: String? { nil }
     public var zoomFactor: Double {
         get { webView.pageZoom }

@@ -21,6 +21,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var canGoBack: Bool
     @Published public private(set) var canGoForward: Bool
     @Published public private(set) var favicon: NSImage?
+    /// Whether the page plays sound, for a speaker badge on its row.
+    @Published public private(set) var isAudible = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
     /// How many times this tab's page process quit, kept for the tab close log (III.8).
@@ -88,6 +90,7 @@ extension Tab: EngineWebContentsUIDelegate {
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
+    public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
@@ -133,6 +136,7 @@ extension Tab: EngineWebContentsUIDelegate {
         isLoading = replacement.isLoading
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
+        isAudible = replacement.isAudible
         hasCrashed = false
         isDownloadOnly = false
     }

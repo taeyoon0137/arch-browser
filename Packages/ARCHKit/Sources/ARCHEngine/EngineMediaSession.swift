@@ -22,7 +22,6 @@ public protocol EngineMediaSessionDelegate: AnyObject {
     func mediaSession(_ session: any EngineMediaSession, didChangePlaybackState state: EngineMediaPlaybackState)
     func mediaSession(_ session: any EngineMediaSession, didChangePosition position: EngineMediaPosition)
     func mediaSession(_ session: any EngineMediaSession, didChangePictureInPictureActive isActive: Bool)
-    func mediaSession(_ session: any EngineMediaSession, didChangeAudible isAudible: Bool)
     func mediaSession(_ session: any EngineMediaSession, didChangeMuted isMuted: Bool)
 }
 

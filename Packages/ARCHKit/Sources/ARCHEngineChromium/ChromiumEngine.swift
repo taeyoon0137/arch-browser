@@ -205,6 +205,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var themeColor: NSColor?
     /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
     public var restorableState: Data? { nil }
+    public private(set) var isAudible = false
     public var selectedText: String? { nil }
     public private(set) var isFullscreen = false
     public var mediaSession: any EngineMediaSession { fatalError("not implemented") }
@@ -491,6 +492,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             completion(credential?.user, credential?.password)
         }
     }
+    public func cefBrowserDidChangeAudible(_ isAudible: Bool) {
+        self.isAudible = isAudible
+        uiDelegate?.webContentsDidChangeAudibleState(self)
+    }
+
     public func cefBrowserDidChangeThemeColor(_ color: String) {
         let themeColor = Self.color(fromCanvasStyle: color)
         guard themeColor != self.themeColor else { return }

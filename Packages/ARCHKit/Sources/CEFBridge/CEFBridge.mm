@@ -178,10 +178,56 @@ const char kThemeColorScript[] = R"JS((() => {
   return context.fillStyle;
 })())JS";
 
+const char kAudibleReport[] = "ARCHAudibleReport";
+
+// Reports whether the document's media elements play sound. Keep it in step with WebKitAudibleScript in the WebKit adapter.
+const char kAudibleScript[] = R"JS((() => {
+  const report = __archReportAudible;
+  let audible = false;
+  const set = (now) => { if (now !== audible) { audible = now; report(now); } };
+  const update = () => set([...document.querySelectorAll("video, audio")].some((m) => !m.paused && !m.ended && !m.muted && m.volume > 0));
+  for (const type of ["play", "playing", "pause", "ended", "volumechange", "emptied"]) document.addEventListener(type, update, true);
+  addEventListener("pagehide", () => set(false));
+  addEventListener("pageshow", update);
+})())JS";
+
+// Sends a frame's audible state from its renderer to the browser, which tracks each frame.
+class AudibleReporter : public CefV8Handler {
+public:
+    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
+                 CefString &exception) override {
+        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
+        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
+        if (arguments.size() == 1 && arguments[0]->IsBool() && frame) {
+            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kAudibleReport);
+            message->GetArgumentList()->SetBool(0, arguments[0]->GetBoolValue());
+            frame->SendProcessMessage(PID_BROWSER, message);
+        }
+        return true;
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(AudibleReporter);
+};
+
 // Runs in the helper's renderer processes and answers the browser's requests for values only a page's script can read.
 class HelperApp : public CefApp, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+
+    // Every frame's document reports its audible state, through a function pages can call but not replace.
+    void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        if (!context->Enter()) {
+            return;
+        }
+        context->GetGlobal()->SetValue("__archReportAudible", CefV8Value::CreateFunction("__archReportAudible", new AudibleReporter()),
+                                       static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
+                                                                               V8_PROPERTY_ATTRIBUTE_DONTDELETE));
+        CefRefPtr<CefV8Value> result;
+        CefRefPtr<CefV8Exception> exception;
+        context->Eval(kAudibleScript, CefString(), 0, result, exception);
+        context->Exit();
+    }
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
@@ -615,6 +661,7 @@ private:
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleThemeColor:(NSString *)color;
+- (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
@@ -896,11 +943,15 @@ public:
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
-        if (message->GetName() != kThemeColorReply) {
-            return false;
+        if (message->GetName() == kThemeColorReply) {
+            [owner_ handleThemeColor:ToNSString(message->GetArgumentList()->GetString(0))];
+            return true;
         }
-        [owner_ handleThemeColor:ToNSString(message->GetArgumentList()->GetString(0))];
-        return true;
+        if (message->GetName() == kAudibleReport && frame) {
+            [owner_ handleAudible:message->GetArgumentList()->GetBool(0) frame:ToNSString(frame->GetIdentifier())];
+            return true;
+        }
+        return false;
     }
 
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &url) override {
@@ -1010,6 +1061,8 @@ private:
     void (^_pendingContextMenu)(void);
     /// Set from the start of a main frame navigation until it commits or loading ends.
     BOOL _mainFrameNavigationPending;
+    /// The frames whose media elements play sound.
+    NSMutableSet<NSString *> *_audibleFrames;
 }
 
 @synthesize browserView = _browserView;
@@ -1030,6 +1083,7 @@ private:
     _title = @"";
     _allowsDownloads = YES;
     _downloads = [NSMutableDictionary dictionary];
+    _audibleFrames = [NSMutableSet set];
     _client = new BridgeClient(self);
 
     CefWindowInfo windowInfo;
@@ -1068,6 +1122,18 @@ private:
 
 - (void)handleThemeColor:(NSString *)color {
     [_delegate cefBrowserDidChangeThemeColor:color];
+}
+
+- (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier {
+    BOOL wasAudible = _audibleFrames.count > 0;
+    if (isAudible) {
+        [_audibleFrames addObject:frameIdentifier];
+    } else {
+        [_audibleFrames removeObject:frameIdentifier];
+    }
+    if ((_audibleFrames.count > 0) != wasAudible) {
+        [_delegate cefBrowserDidChangeAudible:!wasAudible];
+    }
 }
 
 - (void)exitFullscreenWillResize:(BOOL)willResize {
@@ -1256,6 +1322,11 @@ private:
 }
 
 - (void)handleRenderProcessTerminated {
+    // A page whose process quit plays nothing, and its frames never report again.
+    if (_audibleFrames.count > 0) {
+        [_audibleFrames removeAllObjects];
+        [_delegate cefBrowserDidChangeAudible:NO];
+    }
     [_delegate cefBrowserRenderProcessDidTerminate];
 }
 

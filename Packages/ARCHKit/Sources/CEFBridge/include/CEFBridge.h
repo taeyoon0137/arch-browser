@@ -142,6 +142,8 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 - (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
 /// Reports the page's theme color after each load: empty when the page declares none, otherwise `#rrggbb` or `rgba(r, g, b, a)` as a canvas writes the color.
 - (void)cefBrowserDidChangeThemeColor:(NSString *)color;
+/// Reports whether any frame's media elements play sound that is not muted.
+- (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port

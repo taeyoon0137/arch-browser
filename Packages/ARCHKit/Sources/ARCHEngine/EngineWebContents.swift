@@ -84,6 +84,8 @@ public protocol EngineWebContents: AnyObject {
     var themeColor: NSColor? { get }
     /// The page's state, such as its back-forward list, as opaque data the same engine restores through `EngineWebContentsConfiguration.restorableState`. `nil` when the engine cannot restore it.
     var restorableState: Data? { get }
+    /// Whether a media element in the page plays sound that is not muted. Sound from Web Audio, or from media elements outside the document or inside shadow roots, does not count.
+    var isAudible: Bool { get }
     var selectedText: String? { get }
     var zoomFactor: Double { get set }
     var visibility: EngineWebContentsVisibility { get set }
