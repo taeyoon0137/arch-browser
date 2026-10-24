@@ -234,11 +234,11 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window does not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. The full screen toolbar's child window and the docked developer tools do not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
-            || (window?.childWindows ?? []).contains { $0.isVisible && !NSStringFromClass(type(of: $0)).contains("FullScreen") }
+            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !NSStringFromClass(type(of: $0)).contains("FullScreen") }
         let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || window?.firstResponder is NSText
         let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.tabID != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
