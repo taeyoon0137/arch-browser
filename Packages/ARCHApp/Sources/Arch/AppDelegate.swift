@@ -345,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }
         if item.action == #selector(setAsDefaultBrowser) {
-            return Self.isRunningFromBundle && !Self.isDefaultBrowser
+            return DefaultBrowser.canBecomeDefault && !DefaultBrowser.isDefault
         }
         if item.action == #selector(chooseDevToolsSide(_:)) {
             item.state = (item.representedObject as? String) == session?.devToolsDock.side.rawValue ? .on : .off
@@ -456,24 +456,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Default browser
 
-    /// A bare build product has no app bundle, so the system cannot register it to handle URLs.
-    private static var isRunningFromBundle: Bool { Bundle.main.bundleURL.pathExtension == "app" }
-
-    private static var isDefaultBrowser: Bool {
-        guard let handler = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) else { return false }
-        return handler.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
-    }
-
-    /// The system shows its own confirmation. Registering http covers https as well.
-    @objc private func setAsDefaultBrowser() {
-        guard Self.isRunningFromBundle else { return }
-        NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "http") { _ in }
-    }
+    @objc private func setAsDefaultBrowser() { DefaultBrowser.makeDefault() }
 
     /// Prompts once per user after the window opens. Skips the prompt outside an app bundle or when the app is already the default browser.
     private func promptForDefaultBrowserIfNeeded() {
         let defaults = UserDefaults.standard
-        guard Self.isRunningFromBundle, !defaults.bool(forKey: Self.askedDefaultBrowserKey), !Self.isDefaultBrowser else { return }
+        guard DefaultBrowser.canBecomeDefault, !defaults.bool(forKey: Self.askedDefaultBrowserKey), !DefaultBrowser.isDefault else { return }
         defaults.set(true, forKey: Self.askedDefaultBrowserKey)
         let alert = NSAlert()
         alert.messageText = "Set Arch as your default browser?"

@@ -130,16 +130,16 @@ struct AppearanceSection: View {
 }
 
 /// Whether Arch opens web links from other apps, as Launch Services reports. Only an app bundle can register, and the system asks the user to confirm. Registering `http` covers `https` as well.
-enum DefaultBrowser {
-    static var canBecomeDefault: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+public enum DefaultBrowser {
+    public static var canBecomeDefault: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
-    static var isDefault: Bool {
+    public static var isDefault: Bool {
         guard let handler = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) else { return false }
         return handler.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
     }
 
     /// Calls `completion` on the main queue once the user answers the system's confirmation.
-    static func makeDefault(completion: @escaping () -> Void) {
+    public static func makeDefault(completion: @escaping () -> Void = {}) {
         guard canBecomeDefault else { return }
         NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "http") { _ in
             DispatchQueue.main.async(execute: completion)
