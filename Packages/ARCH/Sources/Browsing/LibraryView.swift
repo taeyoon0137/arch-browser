@@ -75,7 +75,7 @@ struct LibraryButton: View {
         Button(action: session.toggleLibrary) {
             Group {
                 if activeDownloads.isEmpty {
-                    Image(systemName: "shippingbox")
+                    Image(systemName: "archivebox")
                         .font(.system(size: 15, weight: .medium))
                 } else {
                     VStack(spacing: 3) {
