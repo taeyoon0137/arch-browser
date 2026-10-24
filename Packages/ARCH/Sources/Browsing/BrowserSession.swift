@@ -356,8 +356,8 @@ public final class BrowserSession: ObservableObject {
         updateSpace(id) { $0.homeURL = nil }
     }
 
-    /// Home needs a home page for the current space and no internal page over the tab.
-    public var canGoHome: Bool { internalPage == nil && currentSpace.homeURL != nil }
+    /// Home needs a home page for the current space and no internal page or preview over the tab.
+    public var canGoHome: Bool { !isSelectedPageCovered && currentSpace.homeURL != nil }
 
     /// Loads the current space's home page in the selected tab, or in a new tab when no tab is selected.
     public func goHome() {
@@ -447,6 +447,9 @@ public final class BrowserSession: ObservableObject {
     /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
     @Published private(set) var preview: PagePreview?
 
+    /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front leave the tab alone.
+    private var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
+
     /// Previews a favorite in the default engine, which opening the favorite would use.
     func previewFavorite(_ favorite: Favorite) {
         showPreview(of: favorite.url, engine: defaultEngine)
@@ -456,6 +459,9 @@ public final class BrowserSession: ObservableObject {
     private func showPreview(of url: URL, engine: EngineKind) {
         guard preview?.openedURL != url else { return }
         closePreview()
+        // The panel covers the page that a search or a region capture belongs to, so both end.
+        hideFindBar()
+        cancelRegionCapture()
         let webContents = runtime(for: engine).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
         let preview = PagePreview(webContents: webContents, openedURL: url)
         // A page the preview opens, as for a link to a new window, becomes a selected tab in the current space and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
@@ -485,7 +491,7 @@ public final class BrowserSession: ObservableObject {
         focusPage()
     }
 
-    /// Closes the panel and its page. Keyboard focus returns to the selected tab's page when it was in the panel.
+    /// Closes the panel and its page. Keyboard focus returns to the selected tab's page when it was in the panel, unless the click that closed the panel gave it to a field.
     func closePreview() {
         guard let preview else { return }
         self.preview = nil
@@ -494,7 +500,7 @@ public final class BrowserSession: ObservableObject {
         // The page stops reporting to the panel before it closes.
         preview.webContents.uiDelegate = nil
         retire(preview.webContents)
-        if hadFocus { focusPage() }
+        if hadFocus { focusPage(leaving: view) }
     }
 
     // MARK: Tabs
@@ -851,10 +857,12 @@ public final class BrowserSession: ObservableObject {
         allTabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
-    /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window.
-    func focusPage() {
+    /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
+    func focusPage(leaving previous: NSView? = nil) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let view = self.selectedTab?.webContents.view, let window = view.window else { return }
+            if let previous, let responder = window.firstResponder, responder !== window,
+               (responder as? NSView)?.isDescendant(of: previous) != true { return }
             // Keys must not reach a page an internal page covers.
             guard self.internalPage == nil else {
                 window.makeFirstResponder(nil)
@@ -904,9 +912,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Find in page
 
-    /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match.
+    /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match. The bar does not open under the preview panel, whose page it would not search.
     public func showFindBar() {
-        guard selectedTab != nil else { return }
+        guard selectedTab != nil, preview == nil else { return }
         findBarFocusRequests += 1
         guard !isFindBarVisible else { return }
         isFindBarVisible = true
@@ -1172,12 +1180,14 @@ public final class BrowserSession: ObservableObject {
         return ListFormatter.localizedString(byJoining: phrases)
     }
 
-    // Going to another page leaves an internal page, and reloading does not reach the page under it.
+    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it.
     public func goBack() {
+        if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
         selectedTab?.webContents.navigationController.goBack()
     }
     public func goForward() {
+        if let preview { return preview.webContents.navigationController.goForward() }
         internalPage = nil
         selectedTab?.webContents.navigationController.goForward()
     }
@@ -1186,13 +1196,15 @@ public final class BrowserSession: ObservableObject {
         guard let list = selectedTab?.webContents.navigationController.backForwardList else { return [] }
         return Array(list.backList.reversed().prefix(limit))
     }
-    /// Pages keep running while the menu is open. Use an item only in its original tab, while that tab is selected.
+    /// Pages keep running while the menu is open. Use an item only in its original tab, while that tab is selected. The item is one of the tab's pages, so the preview panel closes to show it.
     public func go(to item: any EngineBackForwardListItem, inTab tabID: UUID) {
         guard let tab = selectedTab, tab.id == tabID else { return }
+        closePreview()
         internalPage = nil
         tab.webContents.navigationController.go(to: item)
     }
     public func reload() {
+        if let preview { return preview.webContents.navigationController.reload() }
         guard internalPage == nil else { return }
         selectedTab?.webContents.navigationController.reload()
     }
@@ -1217,8 +1229,8 @@ public final class BrowserSession: ObservableObject {
     /// Each host's zoom factor other than 1, as a `UserDefaults` dictionary keyed by host.
     private static let zoomFactorsKey = "ARCHZoomFactorsByHost"
 
-    /// Zooming needs a selected tab that no internal page covers.
-    public var canZoom: Bool { selectedTab != nil && internalPage == nil }
+    /// Zooming needs a selected tab that no internal page or preview covers.
+    public var canZoom: Bool { selectedTab != nil && !isSelectedPageCovered }
 
     public func zoomIn() { changeZoom { current in Self.zoomFactors.first { $0 > current + 0.01 } } }
     public func zoomOut() { changeZoom { current in Self.zoomFactors.last { $0 < current - 0.01 } } }
@@ -1247,9 +1259,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Printing
 
-    /// Whether Print and Export as PDF can act: a page is selected with no internal page over it, no PDF is rendering, and its window shows no sheet.
+    /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it, no PDF is rendering, and its window shows no sheet.
     public var canPrint: Bool {
-        guard let tab = selectedTab, internalPage == nil, !isRenderingPDF else { return false }
+        guard let tab = selectedTab, !isSelectedPageCovered, !isRenderingPDF else { return false }
         return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
     }
 
@@ -1304,8 +1316,8 @@ public final class BrowserSession: ObservableObject {
     /// The tab whose page shows the region capture overlay, from Capture Region until the user drags out a region or cancels.
     @Published public private(set) var regionCaptureTabID: UUID?
 
-    /// Whether the capture commands can act: a page is selected and no internal page covers it.
-    public var canCapture: Bool { selectedTab != nil && internalPage == nil }
+    /// Whether the capture commands can act: a page is selected and no internal page or preview covers it.
+    public var canCapture: Bool { selectedTab != nil && !isSelectedPageCovered }
 
     /// Saves the visible part of the selected page as a PNG file in the captures folder and shows it in the Finder.
     public func captureViewport() {
@@ -1376,12 +1388,12 @@ public final class BrowserSession: ObservableObject {
     /// The picker holds its delegate weakly, so the last one stays here until the next share.
     private var sharePicker: PageSharePicker?
 
-    /// Whether the selected tab shows a page to share. An internal page has nothing to share.
-    public var canShareSelectedPage: Bool { internalPage == nil && selectedTab?.url != nil }
+    /// Whether the selected tab shows a page to share. An internal page has nothing to share, and the preview panel hides the tab's page.
+    public var canShareSelectedPage: Bool { !isSelectedPageCovered && selectedTab?.url != nil }
 
     /// Shows the system share picker for the selected tab's address and title, below the share button, or from the top of the window while the sidebar or the library hides the button.
     public func shareSelectedPage() {
-        guard internalPage == nil, let tab = selectedTab, let url = tab.url else { return }
+        guard !isSelectedPageCovered, let tab = selectedTab, let url = tab.url else { return }
         let picker = PageSharePicker(url: url, title: tab.pageTitle, icon: tab.favicon)
         sharePicker = picker
         if let button = shareButtonView, button.window != nil, !isLibraryVisible {
@@ -1461,9 +1473,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site data
 
-    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page covers, and its window shows no sheet.
+    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers, and its window shows no sheet.
     public var canClearSiteData: Bool {
-        guard internalPage == nil, let tab = selectedTab, SiteDataScope(url: tab.url) != nil else { return false }
+        guard !isSelectedPageCovered, let tab = selectedTab, SiteDataScope(url: tab.url) != nil else { return false }
         return (tab.webContents.view.window ?? NSApp.mainWindow)?.attachedSheet == nil
     }
 

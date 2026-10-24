@@ -117,7 +117,7 @@ struct PagePreviewPanel: View {
     }
 }
 
-/// Closes the preview on Escape and on a click anywhere outside the panel, which then goes on to whatever it hit. A field of the app's own, such as the palette's or the find bar's, keeps its Escape.
+/// Closes the preview on Escape and on a click in its window outside the panel, which then goes on to whatever it hit. A field of the app's own, such as the palette's or the find bar's, keeps its Escape. Clicks in other windows leave the panel open: the previewed page opens some of them, such as a date picker or the window a fullscreen video moves to.
 private struct PreviewDismissal: NSViewRepresentable {
     let close: () -> Void
     /// Whether something above the panel that has no field, such as the tab switcher, takes Escape first.
@@ -148,7 +148,7 @@ private struct PreviewDismissal: NSViewRepresentable {
                 return nil
             }
             let click = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-                if let self, !self.contains(event) { self.close?() }
+                if let self, self.closesOnClick(event) { self.close?() }
                 return event
             }
             monitors = [escape, click].compactMap { $0 }
@@ -162,8 +162,9 @@ private struct PreviewDismissal: NSViewRepresentable {
             return !(window.firstResponder is NSText) && ignoresEscape?() != true
         }
 
-        private func contains(_ event: NSEvent) -> Bool {
-            event.window === window && bounds.contains(convert(event.locationInWindow, from: nil))
+        private func closesOnClick(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window else { return false }
+            return !bounds.contains(convert(event.locationInWindow, from: nil))
         }
     }
 }
@@ -185,7 +186,7 @@ struct ShiftHoverPreview: ViewModifier {
     }
 }
 
-/// Watches the modifier keys while the pointer is over one view and runs its preview once Shift alone has stayed down for `restDuration`. The app sees modifier changes only while it is active.
+/// Watches the keys while the pointer is over one view and runs its preview once Shift alone has stayed down for `restDuration` with no other key pressed. The app sees key changes only while it is active.
 final class ShiftHoverMonitor: ObservableObject {
     /// Passing over a view with Shift held, or pressing a shortcut that starts with Shift, opens no preview.
     static let restDuration = 0.25
@@ -196,8 +197,9 @@ final class ShiftHoverMonitor: ObservableObject {
     func start(_ preview: @escaping () -> Void) {
         stop()
         self.preview = preview
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.modifiersDidChange(event.modifierFlags)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+            // A key typed with Shift down, as for a capital letter, ends the wait until Shift is pressed again.
+            if event.type == .keyDown { self?.cancelPendingPreview() } else { self?.modifiersDidChange(event.modifierFlags) }
             return event
         }
         modifiersDidChange(NSEvent.modifierFlags)
@@ -207,18 +209,21 @@ final class ShiftHoverMonitor: ObservableObject {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         preview = nil
-        pendingPreview?.cancel()
-        pendingPreview = nil
+        cancelPendingPreview()
     }
 
     deinit {
         stop()
     }
 
-    /// Each change starts the wait again; any other modifier ends it.
-    private func modifiersDidChange(_ flags: NSEvent.ModifierFlags) {
+    private func cancelPendingPreview() {
         pendingPreview?.cancel()
         pendingPreview = nil
+    }
+
+    /// Each change starts the wait again; any other modifier ends it.
+    private func modifiersDidChange(_ flags: NSEvent.ModifierFlags) {
+        cancelPendingPreview()
         guard Self.isShiftAlone(flags), let preview else { return }
         let work = DispatchWorkItem {
             guard NSApp.isActive, Self.isShiftAlone(NSEvent.modifierFlags) else { return }
