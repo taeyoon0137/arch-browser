@@ -87,6 +87,8 @@ public struct BrowserWindowView: View {
             }
             TabDragLayer(session: session, tabDrag: tabDrag)
                 .modifier(SidebarAppearance())
+            SidebarItemDragLayer(session: session, tabDrag: tabDrag)
+                .modifier(SidebarAppearance())
             if session.isFindBarVisible {
                 FindBarView(session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -206,6 +208,8 @@ public struct BrowserWindowView: View {
                 .frame(width: Self.pageMargin)
                 .contentShape(Rectangle())
                 .onHover { if $0 { peekSidebar() } }
+                // A drag from another app gets no hover, so its arrival shows the card for the drop.
+                .onDrop(of: SidebarDropTarget.types, isTargeted: Binding(get: { false }, set: { if $0 { peekSidebar() } })) { _ in false }
             if isSidebarPeeking {
                 // While docking, the card moves to the docked sidebar's place and loses its shadow and edge.
                 SidebarColumn(session: session, windowButtons: buttons, width: width, isFloating: true)
@@ -248,13 +252,13 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before, and the docked developer tools, do not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs, favorites, or space symbols is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before, and the docked developer tools, do not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
             || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== session.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
         let isEditingText = session.renamingSpaceID != nil || session.renamingTabID != nil || window?.firstResponder is NSText
-        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.tabID != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
+        let isInUse = isPointerOverSidebar || isEditingText || session.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
         // Close the card's library after the card disappears, so the card reopens showing the sidebar.
@@ -567,6 +571,7 @@ struct SidebarView: View {
                 .padding(.top, 6)
                 .clipped()
                 .padding(.horizontal, -Self.inset)
+                .modifier(SidebarDropTarget(session: session))
             }
             // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
             .background(SpaceSwipeView(isEnabled: !session.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
@@ -947,22 +952,35 @@ struct SiteSettingsSection<Content: View>: View {
     }
 }
 
-/// Shows favorites shared by all spaces as a grid of site icons.
+/// Shows favorites shared by all spaces as a grid of site icons. Dragging a tile moves it among the others.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var tabDrag: TabDragState
+    /// Each tile's frame in the window, used to find the tile under a dragged favorite.
+    @State private var tileFrames: [UUID: CGRect] = [:]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(session.favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: session.selectedTab?.url?.host == favorite.url.host)
-                    .onTapGesture { session.openFavorite(favorite) }
+                    // The release that ends a drag does not also open the favorite.
+                    .onTapGesture { if tabDrag.item == nil { session.openFavorite(favorite) } }
                     .accessibilityAction { session.openFavorite(favorite) }
                     .contextMenu {
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
+                    .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
             }
         }
+        .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
+    }
+
+    /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
+    private func reorder(_ favorite: Favorite, at location: CGPoint) {
+        guard let target = session.favorites.first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { session.moveFavorite(favorite.id, to: target) }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 }
 
@@ -1045,7 +1063,7 @@ struct SpaceTabsView: View {
     @State private var dragOwner = UUID()
 
     /// How long the lifted row's shadow and the slot's dimming take to appear and disappear.
-    private static let liftDuration = 0.4
+    private static let liftDuration = TabDragState.liftDuration
 
     /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them.
     private enum Item: Identifiable {
@@ -1131,13 +1149,19 @@ struct SpaceTabsView: View {
 
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
-        guard !tabDrag.isSettling, tabDrag.tabID == nil || (tabDrag.tabID == tab.id && tabDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
-        if tabDrag.tabID == nil {
-            tabDrag.begin(tab.id, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
+        guard !tabDrag.isSettling, tabDrag.item == nil || (tabDrag.tabID == tab.id && tabDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
+        if tabDrag.item == nil {
+            tabDrag.begin(.tab(tab.id), frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: Self.liftDuration)) { tabDrag.isLifted = true } }
         }
         tabDrag.move(to: value.location)
+        // Another space's symbol under the pointer lights up, with a light haptic, and takes the tab on release.
+        let targetSpaceID = tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 }
+        if targetSpaceID != tabDrag.targetSpaceID {
+            withAnimation(.easeInOut(duration: 0.15)) { tabDrag.targetSpaceID = targetSpaceID }
+            if targetSpaceID != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+        }
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
         guard listFrame.contains(value.location),
@@ -1149,6 +1173,11 @@ struct SpaceTabsView: View {
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
     private func dragEnded() {
         guard tabDrag.owner == dragOwner, let id = tabDrag.tabID, let slot = rowFrames[id] else { return tabDrag.end(ownedBy: dragOwner) }
+        // Over another space's symbol, the tab goes after that space's own tabs and the lifted row shrinks into the symbol.
+        if let spaceID = tabDrag.targetSpaceID {
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toSpace: spaceID) }
+            return tabDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
+        }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             tabDrag.isSettling = true
             tabDrag.frame = slot
@@ -1158,23 +1187,36 @@ struct SpaceTabsView: View {
     }
 }
 
-/// The tab row lifted by a drag. The window draws it above the sidebar and the page, so it can follow the pointer out of the list.
+/// The tab row, favorite, or space symbol lifted by a drag. The window draws it above the sidebar and the page, so it can follow the pointer out of the list.
 final class TabDragState: ObservableObject {
-    /// The dragged tab.
-    @Published private(set) var tabID: UUID?
+    /// The dragged item.
+    @Published private(set) var item: SidebarDragItem?
     /// The lifted row's frame in the window.
     @Published var frame: CGRect = .zero
     /// Set after release, while the row returns to its slot.
     @Published var isSettling = false
     /// Shows the lifted row's shadow and backing and the slot's dimming.
     @Published var isLifted = false
-    /// The list that started the drag.
+    /// The other space whose symbol is under a dragged tab. Releasing the tab there moves it to that space.
+    @Published var targetSpaceID: UUID?
+    /// Set while a tab released over a space's symbol shrinks into it.
+    @Published var isEnteringSpace = false
+    /// Each space symbol's frame in the window and the strip's visible part, reported by the bottom bar on screen.
+    var spaceSymbolFrames: [UUID: CGRect] = [:]
+    var spaceStripFrame = CGRect.zero
+    /// The list or item that started the drag.
     private(set) var owner: UUID?
     /// The pointer's position in the row when the drag started.
     private var grabOffset: CGSize = .zero
 
-    func begin(_ id: UUID, frame: CGRect, grabbedAt point: CGPoint, owner: UUID) {
-        tabID = id
+    /// The dragged tab.
+    var tabID: UUID? {
+        if case .tab(let id) = item { return id }
+        return nil
+    }
+
+    func begin(_ item: SidebarDragItem, frame: CGRect, grabbedAt point: CGPoint, owner: UUID) {
+        self.item = item
         self.owner = owner
         self.frame = frame
         grabOffset = CGSize(width: point.x - frame.minX, height: point.y - frame.minY)
@@ -1187,10 +1229,12 @@ final class TabDragState: ObservableObject {
     /// Ends the drag if `owner` started it, so a list cannot end another list's drag.
     func end(ownedBy owner: UUID) {
         guard self.owner == owner else { return }
-        tabID = nil
+        item = nil
         self.owner = nil
         isSettling = false
         isLifted = false
+        targetSpaceID = nil
+        isEnteringSpace = false
     }
 }
 
@@ -1207,6 +1251,9 @@ struct TabDragLayer: View {
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(tabDrag.isLifted ? 1 : 0))
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
                 .shadow(color: .black.opacity(tabDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                // A tab released over a space's symbol shrinks into it.
+                .scaleEffect(tabDrag.isEnteringSpace ? 0.2 : 1)
+                .opacity(tabDrag.isEnteringSpace ? 0 : 1)
                 .environment(\.isDraggingTab, true)
                 .frame(width: tabDrag.frame.width, height: tabDrag.frame.height)
                 .offset(x: tabDrag.frame.minX, y: tabDrag.frame.minY)
@@ -1599,9 +1646,10 @@ struct SpaceMenuItems: View {
     }
 }
 
-/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them.
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. Dragging a symbol moves its space among the others; a tab dragged over another space's symbol lights it up.
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var tabDrag: TabDragState
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
     @Environment(\.spaceTheme) private var theme
@@ -1627,16 +1675,19 @@ struct SidebarBottomBar: View {
         HStack(spacing: 2) {
             ForEach(Array(session.spaces.enumerated()), id: \.element.id) { index, space in
                 let isCurrent = space.id == session.currentSpaceID
-                Button(action: { session.switchToSpace(space.id) }) {
+                let isTabTarget = tabDrag.targetSpaceID == space.id
+                // The release that ends a drag of the symbol does not also switch spaces.
+                Button(action: { if tabDrag.item == nil { session.switchToSpace(space.id) } }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
-                        .foregroundStyle(isCurrent ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
-                        .scaleEffect(scale(at: index))
+                        .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
+                        .scaleEffect(scale(at: index) * (isTabTarget ? 1.4 : 1))
                         .frame(width: Self.itemWidth, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
+                .modifier(SidebarItemDrag(item: .space(space.id), cornerRadius: 6) { reorder(space, at: $0) })
                 .contextMenu { SpaceMenuItems(session: session, space: space) }
                 .help(space.name)
                 .accessibilityLabel(space.name)
@@ -1647,8 +1698,16 @@ struct SidebarBottomBar: View {
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
         .animation(SidebarView.pageSpring, value: session.currentSpaceID)
+        .animation(.easeInOut(duration: 0.15), value: session.spaces.map(\.id))
         // Let the first and last items scroll clear of the shrinking ends.
         .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
+    }
+
+    /// The symbol under the pointer makes room for the dragged space, with a light haptic at each new position. Only the strip animates the move; the space pages move at once, so the current page stays in view.
+    private func reorder(_ space: Space, at location: CGPoint) {
+        guard let id = tabDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }) else { return }
+        session.moveSpace(space.id, to: target)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     var body: some View {
@@ -1668,6 +1727,14 @@ struct SidebarBottomBar: View {
                 }
             }
             .frame(maxWidth: groupWidth)
+            // Dragged spaces and tabs find a symbol only in the strip's visible part.
+            .background(GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+                Color.clear
+                    .onAppear { tabDrag.spaceStripFrame = frame }
+                    .onChange(of: frame) { tabDrag.spaceStripFrame = $0 }
+            })
+            .onPreferenceChange(SidebarItemFramesKey.self) { tabDrag.spaceSymbolFrames = $0 }
             // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
             .offset(x: isFloating ? 0 : 2)
         }

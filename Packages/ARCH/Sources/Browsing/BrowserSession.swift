@@ -1304,6 +1304,35 @@ public final class BrowserSession: ObservableObject {
     /// Shows the media of the selected or most recently audible tab in Now Playing and sends the media keys to it.
     private var nowPlaying: NowPlaying?
 
+    // MARK: Drag and drop
+
+    /// Moves a dragged favorite to `target`'s place.
+    public func moveFavorite(_ id: UUID, to target: Favorite) {
+        guard let from = favorites.firstIndex(where: { $0.id == id }), let to = favorites.firstIndex(where: { $0.id == target.id }), from != to else { return }
+        var reordered = favorites
+        reordered.insert(reordered.remove(at: from), at: to)
+        favorites = reordered
+    }
+
+    /// Moves a dragged space to `target`'s place in the switcher.
+    public func moveSpace(_ id: UUID, to target: Space) {
+        guard let from = spaces.firstIndex(where: { $0.id == id }), let to = spaces.firstIndex(where: { $0.id == target.id }), from != to else { return }
+        var reordered = spaces
+        reordered.insert(reordered.remove(at: from), at: to)
+        spaces = reordered
+    }
+
+    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs. The window follows the selected tab to its new space, so the sidebar keeps showing the page's tab.
+    public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
+        guard spaces.contains(where: { $0.id == spaceID }), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
+        var reordered = tabs
+        let tab = reordered.remove(at: index)
+        tab.spaceID = spaceID
+        reordered.append(tab)
+        tabs = reordered
+        if tab.id == selectedTabID { currentSpaceID = spaceID }
+    }
+
     // MARK: Persistence
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
