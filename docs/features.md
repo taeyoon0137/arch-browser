@@ -98,7 +98,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 | # | Feature | Implementation | Engine dependency | Status |
 |---|---|---|---|---|
 | 44 | Extensions | The same Chrome-format (Manifest V3) extensions on both engines, installed once: `WKWebExtensionController` on WebKit (macOS 15.4+), CEF Chrome style on Chromium. On macOS, CEF uses Alloy style whenever the browser has a parent view, so Chrome style needs CEF-owned windows or a patched build (VI.1) | Extensions | not started |
-| 45 | DevTools | Chromium DevTools in their own window behind one menu item and shortcut. WebKit only allows inspection (`isInspectable`), because opening its inspector from the app needs a private API | DevTools | not started |
+| 45 | DevTools | Chromium DevTools in their own window behind one menu item and shortcut. WebKit only allows inspection (`isInspectable`), because opening its inspector from the app needs a private API | DevTools | complete |
 
 ## 7. Exclusions
 

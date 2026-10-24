@@ -756,6 +756,9 @@ public final class BrowserSession: ObservableObject {
     }
     public func reload() { selectedTab?.webContents.navigationController.reload() }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
+    /// Whether the selected tab's engine offers developer tools.
+    public var canShowDeveloperTools: Bool { selectedTab?.webContents.devTools != nil }
+    public func showDeveloperTools() { selectedTab?.webContents.devTools?.open() }
     public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }
     public func toggleSidebar() { isSidebarVisible.toggle() }
 

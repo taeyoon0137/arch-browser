@@ -263,8 +263,12 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser.tryClose(completion: completion)
     }
     public func clearSiteDataAndReload() { browser?.reloadIgnoringCache() }
-    public var devTools: (any EngineDevTools)? { nil }
+    public private(set) lazy var devTools: (any EngineDevTools)? = ChromiumDevTools(webContents: self)
     public var thumbnails: (any EngineThumbnails)? { nil }
+
+    fileprivate var hasDevTools: Bool { browser?.hasDevTools == true }
+    fileprivate func showDevTools() { browser?.showDevTools() }
+    fileprivate func closeDevTools() { browser?.closeDevTools() }
 
     fileprivate func load(_ request: URLRequest) {
         guard let target = request.url else { return }
@@ -502,6 +506,22 @@ public final class ChromiumNavigationController: EngineNavigationController {
         guard let item = item as? ChromiumBackForwardListItem, item.owner === webContents else { return }
         webContents.goToNavigationEntry(at: item.index, url: item.entryURL)
     }
+}
+
+/// Chromium's developer tools in their own window. CEF offers no way to pick a panel, so every view opens the tools as they are.
+final class ChromiumDevTools: EngineDevTools {
+    private unowned let webContents: ChromiumWebContents
+
+    init(webContents: ChromiumWebContents) {
+        self.webContents = webContents
+    }
+
+    var isOpen: Bool { webContents.hasDevTools }
+    func open() { webContents.showDevTools() }
+    func close() { webContents.closeDevTools() }
+    func openConsoleView() { open() }
+    func openInspectView() { open() }
+    func openNetworkView() { open() }
 }
 
 /// A page in a Chromium tab's back-forward list. Its index records its position when read; its URL shows whether the entry is still there.

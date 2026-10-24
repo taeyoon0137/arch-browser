@@ -197,6 +197,11 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
 /// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
+/// Opens Chromium's developer tools for this browser in their own window, or brings that window forward.
+- (void)showDevTools;
+- (void)closeDevTools;
+/// Whether this browser's developer tools are open.
+@property (nonatomic, readonly) BOOL hasDevTools;
 - (void)close;
 /// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
 - (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;

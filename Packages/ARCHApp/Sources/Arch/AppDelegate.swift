@@ -142,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
         let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
+        let developerMenu = NSMenu(title: "Developer")
+        developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(showDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(submenu(developerMenu, title: "Developer"))
         let appearanceMenu = NSMenu(title: "Appearance")
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
             appearanceMenu.addItem(withTitle: title, action: #selector(chooseAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
@@ -207,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func selectLastTab() { session.selectLastTab() }
     @objc private func openLocation() { session.focusCommandBar() }
     @objc private func toggleSidebar() { session.toggleSidebar() }
+    @objc private func showDeveloperTools() { session.showDeveloperTools() }
     @objc private func toggleDownloads() { session.toggleLibrary() }
     @objc private func reload() { session.reload() }
     @objc private func showFindBar() { session.showFindBar() }
@@ -267,13 +271,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }
         if item.action == #selector(setAsDefaultBrowser) {
             return Self.isRunningFromBundle && !Self.isDefaultBrowser
+        }
+        if item.action == #selector(showDeveloperTools) {
+            return session?.canShowDeveloperTools == true
         }
         return true
     }

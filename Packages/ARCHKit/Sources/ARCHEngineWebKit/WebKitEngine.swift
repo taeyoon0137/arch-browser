@@ -220,6 +220,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         super.init()
         installBridge()
         installContextMenu()
+        allowInspection()
         if let url = configuration.initialURL {
             webView.load(URLRequest(url: url))
         }
@@ -234,6 +235,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         super.init()
         installBridge()
         installContextMenu()
+        allowInspection()
     }
 
     public var view: NSView { webView }
@@ -317,6 +319,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
     public func clearSiteDataAndReload() { fatalError("skeleton") }
     public var devTools: (any EngineDevTools)? { nil }
+
+    /// Lets the system's web inspector attach to the page. Opening the inspector from the app needs a private API, so the app offers no developer tools on this engine.
+    private func allowInspection() {
+        if #available(macOS 13.3, *) { webView.isInspectable = true }
+    }
     public var thumbnails: (any EngineThumbnails)? { nil }
 
     /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate.

@@ -1350,6 +1350,23 @@ private:
     }
 }
 
+- (void)showDevTools {
+    if (_browser) {
+        // With no window info and no client, CEF makes and owns the tools' window.
+        _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
+    }
+}
+
+- (void)closeDevTools {
+    if (_browser) {
+        _browser->GetHost()->CloseDevTools();
+    }
+}
+
+- (BOOL)hasDevTools {
+    return _browser && _browser->GetHost()->HasDevTools();
+}
+
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable))completion {
     if (!_browser) {
         completion(nil);
