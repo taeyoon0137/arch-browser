@@ -508,11 +508,11 @@ public final class BrowserSession: ObservableObject {
         let runtime = runtime(for: engine, in: personaID)
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
         let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
-        // A page the preview opens, as for a link to a new window, becomes a selected tab in the current space and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
+        // A page the preview opens, as for a link to a new window, comes from the preview's runtime, so it becomes a selected tab of the preview's Persona and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
         preview.openNewTab = { [weak self, weak preview] popup in
             guard let self else { return }
             runtime.browser.takeOwnership(of: popup)
-            _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
+            _ = self.adopt(popup, spaceID: self.currentSpaceID, personaID: personaID, pinned: false, select: true)
             DispatchQueue.main.async { [weak self] in
                 if let self, let preview, self.preview === preview { self.closePreview() }
             }
@@ -526,11 +526,11 @@ public final class BrowserSession: ObservableObject {
         self.preview = preview
     }
 
-    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the same engine with its page focused, and closes the panel.
+    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the same engine and Persona with its page focused, and closes the panel.
     func openPreviewInTab() {
         guard let preview else { return }
         closePreview()
-        openTab(url: preview.url, engine: preview.webContents.engineKind)
+        _ = adopt(makeWebContents(url: preview.url, engine: preview.webContents.engineKind, state: nil, in: preview.personaID), spaceID: currentSpaceID, personaID: preview.personaID, pinned: false, select: true)
         focusPage()
     }
 
@@ -559,7 +559,8 @@ public final class BrowserSession: ObservableObject {
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
         let spaceID = spaceID ?? currentSpaceID
-        return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID(ofSpace: spaceID)), spaceID: spaceID, pinned: pinned, select: select)
+        let personaID = personaID(ofSpace: spaceID)
+        return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
 
     /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given.
@@ -567,14 +568,15 @@ public final class BrowserSession: ObservableObject {
         runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
     }
 
-    /// The Persona of a tab that `adopt` adds to the space `id`: the space's, or the current space's when no space has that ID.
+    /// The Persona of the space `id`, or of the current space when no space has that ID.
     private func personaID(ofSpace id: UUID) -> Persona.ID {
         (spaces.first { $0.id == id } ?? currentSpace).resolvedPersonaID
     }
 
-    /// Adds a tab for `webContents` to a space's list, in the space's Persona. A tab that restores or reopens passes its saved `id`.
-    private func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, pinned: Bool, select: Bool) -> Tab {
-        let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID(ofSpace: spaceID), pinned: pinned)
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's first space if it has one. A tab that restores or reopens passes its saved `id`.
+    private func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool) -> Tab {
+        let spaceID = self.personaID(ofSpace: spaceID) == personaID ? spaceID : spaces.first { $0.resolvedPersonaID == personaID }?.id ?? spaceID
+        let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tabs.append(tab)
         if select { selectedTabID = tab.id }
         return tab
@@ -583,15 +585,15 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. A page that is not selected opens it behind the selected tab, in the page's space or, for a favorite's page, the current space, marked unread.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             guard let tab, tab.id != self.selectedTabID else {
-                _ = self.adopt(popup, spaceID: self.currentSpaceID, pinned: false, select: true)
+                _ = self.adopt(popup, spaceID: self.currentSpaceID, personaID: personaID, pinned: false, select: true)
                 return
             }
-            self.adopt(popup, spaceID: tab.spaceID ?? self.currentSpaceID, pinned: false, select: false).isUnread = true
+            self.adopt(popup, spaceID: tab.spaceID ?? self.currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -750,7 +752,8 @@ public final class BrowserSession: ObservableObject {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
         let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : currentSpaceID
-        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID(ofSpace: spaceID)), id: record.id ?? UUID(), spaceID: spaceID, pinned: record.isPinned, select: true)
+        let personaID = personaID(ofSpace: spaceID)
+        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
         tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
     }
@@ -1854,7 +1857,8 @@ public final class BrowserSession: ObservableObject {
                 closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }
-            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state, in: personaID(ofSpace: record.spaceID)), id: record.id ?? UUID(), spaceID: record.spaceID, pinned: record.isPinned, select: false)
+            let personaID = personaID(ofSpace: record.spaceID)
+            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state, in: personaID), id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
             tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
@@ -1935,11 +1939,8 @@ extension BrowserSession: EngineApplicationDelegate {
     public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
 }
 
-extension BrowserSession: EngineBrowserDelegate {
-    public func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool) {
-        _ = adopt(webContents, spaceID: currentSpaceID, pinned: false, select: isActive)
-    }
-}
+/// The protocol's defaults apply: popups reach the session through their opener's `Tab.openNewTab`, and no engine reports new web contents to the browser's delegate.
+extension BrowserSession: EngineBrowserDelegate {}
 
 extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
