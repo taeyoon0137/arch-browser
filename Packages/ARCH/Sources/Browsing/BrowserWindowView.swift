@@ -1092,16 +1092,16 @@ struct SidebarBottomBar: View {
                 }
             }
             .frame(maxWidth: groupWidth)
-            // An optical correction beside the page: the group looks centered 4 points right of the true center. The floating sidebar keeps the true center.
-            .offset(x: isFloating ? 0 : 4)
+            // An optical correction beside the page: the group looks centered 2 points right of the true center. The floating sidebar keeps the true center.
+            .offset(x: isFloating ? 0 : 2)
         }
         .frame(height: 28)
     }
 }
 
-/// Scales an item of a scrolling strip down as its center nears either end of the strip, to nothing at the end itself.
+/// Scales an item of a scrolling strip down from three items before either end of the strip, to nothing at the end itself.
 private struct EdgeShrink: ViewModifier {
-    static let distance: CGFloat = 24
+    static let distance = 3 * (SidebarBottomBar.itemWidth + 2)
 
     let isActive: Bool
     let stripWidth: CGFloat
