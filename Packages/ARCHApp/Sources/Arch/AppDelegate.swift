@@ -200,6 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         tabMenu.addItem(withTitle: "Pin or Unpin Tab", action: #selector(togglePinned), keyEquivalent: "d")
         let favoriteItem = tabMenu.addItem(withTitle: "Add to Favorites", action: #selector(addFavorite), keyEquivalent: "D")
         favoriteItem.keyEquivalentModifierMask = [.command, .shift]
+        let splitViewItem = tabMenu.addItem(withTitle: "Open in Split View", action: #selector(openInSplitView), keyEquivalent: "=")
+        splitViewItem.keyEquivalentModifierMask = [.command, .option]
         tabMenu.addItem(.separator())
         let nextTabItem = tabMenu.addItem(withTitle: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
         nextTabItem.keyEquivalentModifierMask = [.command, .shift]
@@ -335,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     @objc private func togglePinned() { session.selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.selectedTab.map(session.addFavorite) }
+    @objc private func openInSplitView() { session.openSelectedTabInSplitView() }
     @objc private func newSpace() { session.addSpace() }
     @objc private func nextSpace() { session.switchToAdjacentSpace(forward: true) }
     @objc private func previousSpace() { session.switchToAdjacentSpace(forward: false) }
@@ -348,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page over the tab. Capturing needs a selected tab that no internal page covers.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page over the tab. Capturing needs a selected tab that no internal page covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return session?.canZoom == true
@@ -383,6 +386,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) || item.action == #selector(closeOtherTabs) {
             return session?.selectedTab?.spaceID != nil
+        }
+        if item.action == #selector(openInSplitView) {
+            return session?.canOpenSelectedTabInSplitView == true
         }
         // Clearing site data needs a web page in front and no sheet on its window.
         if item.action == #selector(clearSiteData) {

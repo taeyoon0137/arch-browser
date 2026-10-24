@@ -309,6 +309,8 @@ public final class BrowserSession: ObservableObject {
     public func deleteSpace(_ id: UUID) {
         guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let destination = spaces[index == 0 ? 1 : index - 1].id
+        // The space's split view goes with it; its tabs join the destination as separate tabs.
+        splitTabIDs[id] = nil
         // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders.
         let moved = tabs.filter { $0.spaceID == id }
         let movedIDs = Set(moved.map(\.id))
@@ -593,10 +595,11 @@ public final class BrowserSession: ObservableObject {
             closedTabs.append(SessionSnapshot.TabRecord(spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
-        // A favorite's tab leaves the selection to a tab of the current space.
+        // A focused pane hands the selection to the pane beside it, so the rest of its split view stays on screen; a favorite's tab leaves the selection to a tab of the current space.
+        let splitNeighborID = leaveSplitView(tab)
         if selectedTabID == tab.id {
             let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? currentSpaceID) }
-            selectedTabID = (siblings.first { !$0.isPinned } ?? siblings.first)?.id
+            selectedTabID = splitNeighborID ?? (siblings.first { !$0.isPinned } ?? siblings.first)?.id
         }
     }
 
@@ -685,10 +688,10 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The selected tab counts as active now.
+    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The tabs on screen, the selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
-        selectedTab?.lastActivatedAt = Date()
+        paneTabs.forEach { $0.lastActivatedAt = Date() }
         for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab, reason: .archive)
             undoableCloseCount = 0
@@ -1440,6 +1443,8 @@ public final class BrowserSession: ObservableObject {
     /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window follows the selected tab to its new space, so the sidebar keeps showing the page's tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
         guard spaces.contains(where: { $0.id == spaceID }), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
+        // The other panes of its split view stay together in the space it leaves.
+        leaveSplitView(tabs[index])
         var reordered = tabs
         let tab = reordered.remove(at: index)
         tab.spaceID = spaceID
@@ -1561,6 +1566,102 @@ public final class BrowserSession: ObservableObject {
         folders.first { $0.id == id && $0.spaceID == spaceID && $0.isPinned == pinned }?.id
     }
 
+    // MARK: Split view
+
+    /// The most tabs a split view shows side by side.
+    static let maximumPanes = 4
+    /// Each space's split view: two to four of its tabs that share the page area, left to right. The page area shows a space's split view while one of its tabs is selected, and the selected tab is the focused pane.
+    @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:]
+
+    /// The split view the page area shows: the selected tab's, if it is in one.
+    private var splitOnScreen: [UUID]? {
+        guard let selected = selectedTab, let spaceID = selected.spaceID, let ids = splitTabIDs[spaceID], ids.contains(selected.id) else { return nil }
+        return ids
+    }
+
+    /// The tabs the page area shows, left to right: the selected tab's split view, or the selected tab alone.
+    var paneTabs: [Tab] {
+        guard let selected = selectedTab else { return [] }
+        guard let ids = splitOnScreen else { return [selected] }
+        return ids.compactMap { id in tabs.first { $0.id == id } }
+    }
+
+    /// Whether `tab` is a pane of the split view the page area shows.
+    func isInSplitViewOnScreen(_ tab: Tab) -> Bool {
+        splitOnScreen?.contains(tab.id) == true
+    }
+
+    /// Whether `tab` can open as a pane: it belongs to the selected tab's space, the page area does not show it yet, and the panes it joins have room.
+    public func canOpenInSplitView(_ tab: Tab) -> Bool {
+        let panes = panesJoined(by: tab)
+        return !panes.isEmpty && !panes.contains(tab.id) && panes.count < Self.maximumPanes
+    }
+
+    /// Opens `tab` as a pane at `index` among the panes it joins, or after the last, and selects it. The result becomes the space's split view, in place of an earlier one. A tab that is already a pane on screen moves to `index`.
+    public func openInSplitView(_ tab: Tab, at index: Int? = nil) {
+        guard let spaceID = tab.spaceID else { return }
+        var ids = panesJoined(by: tab)
+        var position = min(index ?? ids.count, ids.count)
+        if let current = ids.firstIndex(of: tab.id) {
+            ids.remove(at: current)
+            if current < position { position -= 1 }
+        }
+        ids.insert(tab.id, at: position)
+        guard (2...Self.maximumPanes).contains(ids.count) else { return }
+        splitTabIDs[spaceID] = ids
+        // Selecting the tab again would close an internal page over it.
+        if selectedTabID != tab.id { selectedTabID = tab.id }
+    }
+
+    /// Whether the menu bar's Open in Split View can act: the selected tab can open as a pane, and no internal page covers it.
+    public var canOpenSelectedTabInSplitView: Bool {
+        internalPage == nil && selectedTab.map(canOpenInSplitView) == true
+    }
+
+    public func openSelectedTabInSplitView() {
+        guard canOpenSelectedTabInSplitView, let tab = selectedTab else { return }
+        openInSplitView(tab)
+    }
+
+    /// Takes `tab` out of its split view and leaves the tab open. When it was the focused pane, the pane that takes its place is selected, so the rest of the split view stays on screen.
+    func closePane(_ tab: Tab) {
+        let neighborID = leaveSplitView(tab)
+        if selectedTabID == tab.id, let neighborID { selectedTabID = neighborID }
+    }
+
+    /// The panes `tab` joins, left to right: those on screen, which are a split view or the selected tab alone. The selected tab shown alone joins its space's split view instead or, without one, the tab selected before it. Empty when `tab` is in another space or has no tab to join.
+    private func panesJoined(by tab: Tab) -> [UUID] {
+        guard let selected = selectedTab, let spaceID = tab.spaceID, selected.spaceID == spaceID else { return [] }
+        let onScreen = paneTabs.map(\.id)
+        guard onScreen == [tab.id] else { return onScreen }
+        if let split = splitTabIDs[spaceID] { return split }
+        return recentTabs.first { $0.id != tab.id && $0.spaceID == tab.spaceID }.map { [$0.id] } ?? []
+    }
+
+    /// Removes `tab` from its space's split view, which ends once fewer than two tabs remain. Returns the pane that takes its place: the one after it, or the one before for the last pane.
+    @discardableResult
+    private func leaveSplitView(_ tab: Tab) -> UUID? {
+        guard let spaceID = tab.spaceID, var ids = splitTabIDs[spaceID], let index = ids.firstIndex(of: tab.id) else { return nil }
+        ids.remove(at: index)
+        splitTabIDs[spaceID] = ids.count >= 2 ? ids : nil
+        return ids.indices.contains(index) ? ids[index] : ids.last
+    }
+
+    /// The split views for `session.json`, in the order of their spaces, each as indexes into the tab list.
+    private var splitViewRecords: [[Int]] {
+        spaces.compactMap { splitTabIDs[$0.id] }.map { ids in ids.compactMap { id in tabs.firstIndex { $0.id == id } } }
+    }
+
+    /// Rebuilds the split views `session.json` recorded from the tabs that reopened, keyed by their records' indexes. A split view returns while two to four of its tabs reopened in one space.
+    private func restoreSplitViews(_ records: [[Int]], from restored: [Int: Tab]) {
+        for record in records {
+            let panes = record.compactMap { restored[$0] }
+            guard let spaceID = panes.first?.spaceID, (2...Self.maximumPanes).contains(panes.count), splitTabIDs[spaceID] == nil,
+                  panes.allSatisfy({ $0.spaceID == spaceID }), Set(panes.map(\.id)).count == panes.count else { continue }
+            splitTabIDs[spaceID] = panes.map(\.id)
+        }
+    }
+
     // MARK: Persistence
 
     private func restoreTabs(_ snapshot: SessionSnapshot?) {
@@ -1568,6 +1669,8 @@ public final class BrowserSession: ObservableObject {
         // Archive stale unpinned records before they have web contents.
         let cutoff = Self.archiveCutoff(now: Date())
         var selected: Tab?
+        // The reopened tabs by their records' indexes, which the split views refer to.
+        var restored: [Int: Tab] = [:]
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
             if !record.isPinned, let cutoff, let last = record.lastActivatedAt, last < cutoff {
                 closedTabs.append(record)
@@ -1582,7 +1685,9 @@ public final class BrowserSession: ObservableObject {
             // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
             if index == snapshot.selectedTabIndex { selected = tab }
+            restored[index] = tab
         }
+        restoreSplitViews(snapshot.splitViews ?? [], from: restored)
         selectedTabID = selected?.id ?? tabs.first { $0.spaceID == currentSpaceID }?.id
     }
 
@@ -1598,7 +1703,7 @@ public final class BrowserSession: ObservableObject {
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, $currentSpaceID.map { _ in () })
             .merge(with: $selectedTabID.map { _ in () })
             .merge(with: $closedTabs.map { _ in () })
-            .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () }, $folders.map { _ in () })
+            .merge(with: $favoriteTabs.map { _ in () }, $savedFavoriteTabs.map { _ in () }, $folders.map { _ in () }, $splitTabIDs.map { _ in () })
             .dropFirst()
             .sink { [weak self] in self?.scheduleSave() }
             .store(in: &cancellables)
@@ -1616,7 +1721,7 @@ public final class BrowserSession: ObservableObject {
         SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: spaces, currentSpaceID: currentSpaceID, favorites: favorites,
                         tabs: tabs.map { SessionSnapshot.TabRecord(spaceID: $0.spaceID ?? currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState) },
                         folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == selectedTabID }, closedTabs: closedTabs,
-                        favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
+                        splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: selectedFavoriteID)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.

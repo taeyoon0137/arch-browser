@@ -1,4 +1,4 @@
-// Main window content. The system's translucent window material fills the window with a wash of the current space's tint (`SpaceTheme.swift`). The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs or the library, and the library button with the space switcher. The page fills the remaining space with nothing above it.
+// Main window content. The system's translucent window material fills the window with a wash of the current space's tint (`SpaceTheme.swift`). The sidebar sits over it and contains navigation, the address field, favorites, the current space's tabs or the library, and the library button with the space switcher. The page area fills the remaining space with nothing above it: the selected tab's page, or the split view it belongs to (`SplitView.swift`).
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -64,32 +64,7 @@ public struct BrowserWindowView: View {
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
-                WebContentsHostView(contentView: session.selectedTab?.webContents.view, cornerRadius: isPageFullscreen ? 0 : PageFrameShape.cornerRadius)
-                    .background(PageBackgroundView(isEmpty: session.selectedTab == nil))
-                    .overlay { if let tab = session.selectedTab { PageCrashNoticeView(tab: tab) } }
-                    .overlay {
-                        if let page = session.internalPage {
-                            InternalPageView(session: session, page: page)
-                                .clipShape(PageFrameShape())
-                        }
-                    }
-                    .overlay {
-                        if let tab = session.selectedTab, session.regionCaptureTabID == tab.id, session.internalPage == nil {
-                            CaptureRegionOverlay(session: session, pageView: tab.webContents.view, cornerRadius: isPageFullscreen ? 0 : PageFrameShape.cornerRadius)
-                        }
-                    }
-                    // The find bar and the question popover float over the page's top trailing corner, the popover below the bar, so neither covers the page reader or docked developer tools beside the page.
-                    .overlay(alignment: .topTrailing) {
-                        VStack(alignment: .trailing, spacing: 8) {
-                            if session.isFindBarVisible {
-                                FindBarView(session: session)
-                            }
-                            PageQuestionLayer(session: session, assistant: session.pageAssistant)
-                        }
-                        .padding(.top, 12)
-                        .padding(.trailing, 16)
-                    }
-                    .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(isPageFullscreen ? 0 : 0.08)).allowsHitTesting(false))
+                PageAreaView(session: session, tabDrag: tabDrag, isPageFullscreen: isPageFullscreen)
                     .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
                     .modifier(DevToolsDockSpace(dock: session.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
                 if !isPageFullscreen {
@@ -99,6 +74,7 @@ public struct BrowserWindowView: View {
             if !session.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
                 peekingSidebar
             }
+            SplitDropIndicator(tabDrag: tabDrag)
             TabDragLayer(session: session, tabDrag: tabDrag)
                 .modifier(SidebarAppearance())
             SidebarItemDragLayer(session: session, tabDrag: tabDrag)
@@ -1207,6 +1183,8 @@ struct SpaceTabsView: View {
         // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it.
         setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 })
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
+        // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
+        setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: session) : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position.
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
         guard isOverList, let target = tabs.first(where: { $0.id != tab.id && rowFrames[$0.id]?.contains(value.location) == true }) else { return }
@@ -1215,10 +1193,10 @@ struct SpaceTabsView: View {
     }
 
     /// Lights up a drop target newly under the dragged tab, with a light haptic, or turns off the one it left.
-    private func setDropTarget(_ target: ReferenceWritableKeyPath<TabDragState, UUID?>, to id: UUID?) {
-        guard tabDrag[keyPath: target] != id else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { tabDrag[keyPath: target] = id }
-        if id != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+    private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<TabDragState, Target?>, to target: Target?) {
+        guard tabDrag[keyPath: keyPath] != target else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { tabDrag[keyPath: keyPath] = target }
+        if target != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     }
 
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
@@ -1233,6 +1211,11 @@ struct SpaceTabsView: View {
         if let folderID = tabDrag.targetFolderID, let folderRow = rowFrames[folderID] {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toFolder: folderID) }
             return tabDrag.settle(shrinkingInto: folderRow, ownedBy: dragOwner)
+        }
+        // Over the page area, the tab opens in split view, and its row returns to its slot.
+        if let drop = tabDrag.splitDrop, let tab = session.tabs.first(where: { $0.id == id }) {
+            withAnimation(.easeInOut(duration: 0.15)) { tabDrag.splitDrop = nil }
+            session.openInSplitView(tab, at: drop.index)
         }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             tabDrag.isSettling = true
@@ -1259,9 +1242,13 @@ final class TabDragState: ObservableObject {
     @Published var targetFolderID: UUID?
     /// Set while a tab released over a space's symbol or a folder's row shrinks into it.
     @Published var isEntering = false
+    /// Where a tab released over the page area opens in split view.
+    @Published var splitDrop: SplitDrop?
     /// Each space symbol's frame in the window and the strip's visible part, reported by the bottom bar on screen.
     var spaceSymbolFrames: [UUID: CGRect] = [:]
     var spaceStripFrame = CGRect.zero
+    /// The page area's panes, left to right, reported by the page area.
+    var paneFrames: [PaneFrame] = []
     /// The list or item that started the drag.
     private(set) var owner: UUID?
     /// The pointer's position in the row when the drag started.
@@ -1294,6 +1281,7 @@ final class TabDragState: ObservableObject {
         targetSpaceID = nil
         targetFolderID = nil
         isEntering = false
+        splitDrop = nil
     }
 }
 
@@ -1345,6 +1333,8 @@ struct TabRowView: View {
 
     private var fill: Color {
         if isSelected { return SidebarFill.selected.color(in: colorScheme) }
+        // The other panes of the split view on screen show a lighter selection.
+        if session.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(0.5) }
         return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -1394,6 +1384,7 @@ struct TabRowView: View {
             }
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+            Button("Open in Split View") { session.openInSplitView(tab) }.disabled(!session.canOpenInSplitView(tab))
             Divider()
             Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.addToNewFolder(tab) } }
             let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []

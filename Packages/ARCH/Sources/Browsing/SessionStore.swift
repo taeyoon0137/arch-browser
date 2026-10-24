@@ -1,10 +1,10 @@
-// Saves and restores sidebar state (spaces, favorites and their tabs, tabs, tab folders, closed tabs, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
+// Saves and restores sidebar state (spaces, favorites and their tabs, tabs, tab folders, closed tabs, split views, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
 import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, and version 6 tab folders. Files without a version are version 1.
-    static let currentVersion = 6
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, and version 7 each space's split view. Files without a version are version 1.
+    static let currentVersion = 7
 
     struct TabRecord: Codable {
         var spaceID: UUID
@@ -43,6 +43,8 @@ struct SessionSnapshot: Codable {
     var selectedTabIndex: Int?
     /// Recently closed tabs, oldest first. Optional so older files without this field still decode.
     var closedTabs: [TabRecord]?
+    /// Each space's split view as indexes into `tabs`, left to right; the tabs' space is the split view's. `nil` in files before version 7.
+    var splitViews: [[Int]]?
     /// The favorites' tabs, in favorite order. `nil` in files before version 5.
     var favoriteTabs: [FavoriteTabRecord]?
     /// The favorite whose tab was selected. `nil` when a space's tab was selected and in files before version 5.
