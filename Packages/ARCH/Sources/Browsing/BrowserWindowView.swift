@@ -1164,7 +1164,7 @@ struct SidebarBottomBar: View {
     private func strip(shrinksAtEdges: Bool) -> some View {
         HStack(spacing: 2) {
             ForEach(session.spaces) { space in
-                let isCurrent = space.id == session.currentSpaceID && !session.isLibraryVisible
+                let isCurrent = space.id == session.currentSpaceID
                 Button(action: { session.switchToSpace(space.id) }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
