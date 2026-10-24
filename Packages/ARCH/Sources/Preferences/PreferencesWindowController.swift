@@ -47,6 +47,7 @@ public final class PreferencesWindowController: NSWindowController {
         sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection()))
         sections.addTabViewItem(Self.section("Sidebar", symbol: "sidebar.left", SidebarSection()))
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
+        sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
         let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference

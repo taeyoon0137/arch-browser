@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         installUndoCloseShortcut()
         installFullscreenEscape()
         installTabSwitcher()
+        installShortcuts()
         // Engines register their private APIs when they start; the checks run without delaying launch.
         PrivateAPIFlags.shared.checkInBackground()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -472,6 +473,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.session?.cancelTabSwitcher()
         }
+    }
+
+    // MARK: Shortcuts
+
+    /// Applies the shortcuts chosen in Settings ▸ Shortcuts to the menu bar and registers the global shortcut.
+    @MainActor private func installShortcuts() {
+        let shortcuts = ShortcutSettings.shared
+        shortcuts.onGlobalShortcut = { [weak self] in self?.openNewTabFromAnyApp() }
+        if let menuBar = NSApp.mainMenu { shortcuts.manage(menuBar) }
+    }
+
+    /// The global shortcut brings the browser window forward, out of the Dock if it is minimized, and opens the new tab palette in it.
+    private func openNewTabFromAnyApp() {
+        guard let session, let window else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        session.showCommandPalette(.newTab)
     }
 
     // MARK: Tab close log
