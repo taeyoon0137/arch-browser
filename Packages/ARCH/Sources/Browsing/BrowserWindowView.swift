@@ -1044,25 +1044,35 @@ struct SidebarBottomBar: View {
     /// The widest the symbols and the new space button may grow together while staying centered: each side keeps room for the 30-point library button and its gap, so the group never reaches it.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
 
-    private var symbols: some View {
-        HStack(spacing: 4) {
+    /// The width each symbol and the new space button take, close enough that the row reads as one group.
+    fileprivate static let itemWidth: CGFloat = 18
+    private static let stripSpace = "SpaceStrip"
+
+    /// The symbols followed by the new space button. When the row scrolls, each item shrinks toward the ends of the strip, so nothing shows cut off there.
+    private func strip(shrinksAtEdges: Bool) -> some View {
+        HStack(spacing: 2) {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == session.currentSpaceID && !session.isLibraryVisible
                 Button(action: { session.switchToSpace(space.id) }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
                         .foregroundStyle(isCurrent ? space.tint.color : Color.secondary.opacity(0.6))
-                        .frame(width: 26, height: 26)
+                        .frame(width: Self.itemWidth, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
                 .contextMenu { SpaceMenuItems(session: session, space: space) }
                 .help(space.name)
                 .accessibilityLabel(space.name)
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }
+            NewSpaceButton(action: session.addSpace)
+                .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
+        // In the scrolling strip the first and last items can scroll clear of the shrinking ends.
+        .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
     }
 
     var body: some View {
@@ -1071,24 +1081,43 @@ struct SidebarBottomBar: View {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
             }
-            // The symbols and the new space button are centered as one group, as if the library button were not there.
-            HStack(spacing: 2) {
-                // Too many symbols to fit scroll sideways instead of covering the buttons or widening the sidebar.
-                ViewThatFits(in: .horizontal) {
-                    symbols
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal, showsIndicators: false) { symbols }
-                            .onAppear { proxy.scrollTo(session.currentSpaceID) }
-                            .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id) } }
-                    }
+            // The symbols and the new space button are centered as one group, as if the library button were not there. Too many to fit scroll sideways together instead of covering the library button or widening the sidebar.
+            ViewThatFits(in: .horizontal) {
+                strip(shrinksAtEdges: false)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) { strip(shrinksAtEdges: true) }
+                        .coordinateSpace(name: Self.stripSpace)
+                        .onAppear { proxy.scrollTo(session.currentSpaceID, anchor: .center) }
+                        .onChange(of: session.currentSpaceID) { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
                 }
-                NewSpaceButton(action: session.addSpace)
             }
             .frame(maxWidth: groupWidth)
             // An optical correction beside the page: the group looks centered 4 points right of the true center. The floating sidebar keeps the true center.
             .offset(x: isFloating ? 0 : 4)
         }
         .frame(height: 28)
+    }
+}
+
+/// Scales an item of a scrolling strip down as its center nears either end of the strip, to nothing at the end itself.
+private struct EdgeShrink: ViewModifier {
+    static let distance: CGFloat = 24
+
+    let isActive: Bool
+    let stripWidth: CGFloat
+    let coordinateSpace: String
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if isActive {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(coordinateSpace))
+                let nearest = min(frame.midX, stripWidth - frame.midX)
+                content.scaleEffect(max(0, min(1, nearest / Self.distance)))
+            }
+            .frame(width: SidebarBottomBar.itemWidth, height: 26)
+        } else {
+            content
+        }
     }
 }
 
@@ -1102,7 +1131,7 @@ private struct NewSpaceButton: View {
             Image(systemName: "plus")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Color.secondary.opacity(isHovering ? 1 : 0.6))
-                .frame(width: 26, height: 26)
+                .frame(width: SidebarBottomBar.itemWidth, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
