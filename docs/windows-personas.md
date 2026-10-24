@@ -590,7 +590,7 @@ Coordination
 
 2. III.12.1 Persona model with only the default Persona (bundle)
    - Files: new `Persona.swift`; `Space.swift`, `Tab.swift`, `SessionStore.swift`, `BrowserSession.swift`, `SessionSnapshotTests.swift`.
-   - Changes: `personas` published and saved; `normalized()` rules 2 to 6; `Tab.personaID` from the space; `addSpace` gives the new space the current space's Persona; `addFavorite` and `addFavorites` set the Persona and check duplicates within it; closed records carry `personaID`; version +1. No view changes.
+   - Changes: `personas` published and saved; `normalized()` rules 2 to 6; `Tab.personaID` from the space; `addSpace` gives the new space the current space's Persona and puts it at the end of that Persona's group, and both `moveSpace` methods keep a space within its group, so the order matches what `normalized()` restores; `addFavorite` and `addFavorites` set the Persona and check duplicates within it; closed records carry `personaID`; version +1. No view changes.
    - Re-check: 24, 26 (Import adds favorites), 31; signed-in sites stay signed in on both engines after relaunch.
    - New checks: the tests cover v4 files and step 1 files. The kept v4 file loads into one default Persona, and the new file has `personas` with `D59DAF4B-…` and `personaID` on spaces, favorites, and tab records.
 

@@ -253,13 +253,15 @@ public final class BrowserSession: ObservableObject {
         folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
     }
 
-    /// Adds a space to the current space's Persona and shows it.
+    /// Adds a space to the current space's Persona and shows it. The space goes last in that Persona's group, because each Persona's spaces stay together in the order `normalized()` restores at launch.
     public func addSpace() {
         let tint = SpaceTint.colors[spaces.count % SpaceTint.colors.count]
         // The lowest number no space uses, so names do not repeat after a deletion.
         let number = (1...).first { number in !spaces.contains { $0.name == "Space \(number)" } }!
-        let space = Space(name: "Space \(number)", tint: tint, personaID: currentSpace.resolvedPersonaID)
-        spaces.append(space)
+        let personaID = currentSpace.resolvedPersonaID
+        let space = Space(name: "Space \(number)", tint: tint, personaID: personaID)
+        let groupEnd = spaces.lastIndex { $0.resolvedPersonaID == personaID }.map { $0 + 1 } ?? spaces.endIndex
+        spaces.insert(space, at: groupEnd)
         switchToSpace(space.id)
     }
 
@@ -312,9 +314,10 @@ public final class BrowserSession: ObservableObject {
         updateSpace(id) { $0.symbol = symbol }
     }
 
-    /// Moves a space one place left (`-1`) or right (`1`) in the switcher.
+    /// Moves a space one place left (`-1`) or right (`1`) in the switcher, within its Persona's group.
     public func moveSpace(_ id: UUID, by offset: Int) {
-        guard let index = spaces.firstIndex(where: { $0.id == id }), spaces.indices.contains(index + offset) else { return }
+        guard let index = spaces.firstIndex(where: { $0.id == id }), spaces.indices.contains(index + offset),
+              spaces[index + offset].resolvedPersonaID == spaces[index].resolvedPersonaID else { return }
         spaces.swapAt(index, index + offset)
     }
 
@@ -1546,9 +1549,10 @@ public final class BrowserSession: ObservableObject {
         favorites = reordered
     }
 
-    /// Moves a dragged space to `target`'s place in the switcher.
+    /// Moves a dragged space to `target`'s place in the switcher, when both belong to the same Persona.
     public func moveSpace(_ id: UUID, to target: Space) {
-        guard let from = spaces.firstIndex(where: { $0.id == id }), let to = spaces.firstIndex(where: { $0.id == target.id }), from != to else { return }
+        guard let from = spaces.firstIndex(where: { $0.id == id }), let to = spaces.firstIndex(where: { $0.id == target.id }), from != to,
+              spaces[from].resolvedPersonaID == spaces[to].resolvedPersonaID else { return }
         var reordered = spaces
         reordered.insert(reordered.remove(at: from), at: to)
         spaces = reordered
