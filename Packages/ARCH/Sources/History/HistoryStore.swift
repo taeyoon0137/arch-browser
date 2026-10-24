@@ -1,4 +1,4 @@
-// Records page visits in `history.sqlite` and uses them for address suggestions. The store uses the system SQLite library and runs every query serially on one queue.
+// Records page visits in `history.sqlite` and uses them for address suggestions and the History window. The store uses the system SQLite library and runs every query serially on one queue.
 import Foundation
 import SQLite3
 
@@ -71,6 +71,13 @@ public final class HistoryStore {
     public func remove(_ url: URL) {
         queue.async {
             self.execute("DELETE FROM visits WHERE url = ?1", bindings: [.text(url.absoluteString)])
+        }
+    }
+
+    /// Removes the entries last visited at or after `date`, including their earlier visits.
+    public func removeEntries(since date: Date) {
+        queue.async {
+            self.execute("DELETE FROM visits WHERE last_visit >= ?1", bindings: [.double(date.timeIntervalSince1970)])
         }
     }
 

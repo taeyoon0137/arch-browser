@@ -203,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
         historyMenu.addItem(.separator())
+        historyMenu.addItem(withTitle: "Show All History", action: #selector(showHistory), keyEquivalent: "y")
         historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
         historyMenu.delegate = self
         self.historyMenu = historyMenu
@@ -217,7 +218,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func newTab() { session.showCommandPalette(.newTab) }
-    @objc private func closeTab() { session.closeSelectedTab() }
+    /// ⌘W closes the History window when it is in front, not a tab behind it.
+    @objc private func closeTab() {
+        if let history = NSApp.keyWindow, history.windowController is HistoryWindowController { return history.performClose(nil) }
+        session.closeSelectedTab()
+    }
     @objc private func closeOtherTabs() { session.closeOtherTabs() }
     @objc private func reopenClosedTab() { session.reopenLastClosedTab() }
     @objc private func nextTab() { session.selectAdjacentTab(forward: true) }
@@ -244,7 +249,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func goForward() { session.goForward() }
     @objc private func clearHistory() { HistoryStore.shared.clear() }
 
-    /// Lists the selected tab's previous ten pages, most recent first, between Forward and Clear History.
+    /// Pages chosen in the History window open as new tabs in the browser window, which comes to the front.
+    @objc private func showHistory() {
+        let history = HistoryWindowController.shared
+        history.openURL = { [weak self] url in
+            guard let self else { return }
+            self.session.openTab(url: url)
+            self.window.makeKeyAndOrderFront(nil)
+        }
+        history.show()
+    }
+
+    /// Lists the selected tab's previous ten pages, most recent first, between Forward and Show All History.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
