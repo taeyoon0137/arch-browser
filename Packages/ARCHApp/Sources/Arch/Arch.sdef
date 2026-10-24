@@ -7,8 +7,8 @@
 
 	<suite name="Arch Suite" code="Arch" description="Web addresses and tabs in Arch.">
 
+		<!-- AppKit delivers this event to `application(_:open:)` in `AppDelegate.swift`, as it does links from other apps, so no command class handles it. -->
 		<command name="open location" code="GURLGURL" description="Open a web address in a new tab.">
-			<cocoa class="ArchOpenLocationCommand"/>
 			<direct-parameter type="text" description="The address to open, such as https://example.org or example.org."/>
 		</command>
 

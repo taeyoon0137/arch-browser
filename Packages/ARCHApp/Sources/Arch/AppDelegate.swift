@@ -75,8 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Opens links from other apps in new tabs. Links received before launch finishes wait for the session.
+    /// Opens links from other apps and addresses from `open location` scripts in new tabs. Links received before launch finishes wait for the session. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
     func application(_ application: NSApplication, open urls: [URL]) {
+        let urls = urls.compactMap { url in
+            url.scheme == nil ? BrowserSession.url(forInput: url.absoluteString.removingPercentEncoding ?? url.absoluteString) : url
+        }
+        guard !urls.isEmpty else { return }
         guard let session else {
             pendingURLs += urls
             return

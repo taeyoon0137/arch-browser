@@ -41,16 +41,3 @@ extension ArchApplication {
         return NSUniqueIDSpecifier(containerClassDescription: application, containerSpecifier: nil, key: "scriptTabs", uniqueID: uniqueID)
     }
 }
-
-/// `open location` opens an address in a new tab the way a link from another app does.
-@objc(ArchOpenLocationCommand) final class OpenLocationCommand: NSScriptCommand {
-    override func performDefaultImplementation() -> Any? {
-        guard let text = directParameter as? String, let url = BrowserSession.url(forInput: text) else {
-            scriptErrorNumber = Int(paramErr)
-            scriptErrorString = "Arch can open only a web address, such as https://example.org or example.org."
-            return nil
-        }
-        (NSApp.delegate as? AppDelegate)?.application(NSApp, open: [url])
-        return nil
-    }
-}
