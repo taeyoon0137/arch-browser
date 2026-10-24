@@ -18,8 +18,9 @@ public final class BrowserWindowModel: ObservableObject {
     /// Selecting a tab switches to its space so the sidebar and page match. Another window that shows the tab gives it up first (window rule 2).
     @Published public var selectedTabID: UUID? {
         didSet {
-            // The other window lets go of the tab's sheet, page fullscreen, and docked tools before this window takes them.
-            if let selectedTab { session.release(selectedTab, except: self) }
+            // The window shows its selected tab, and another window that shows the tab lets go of its sheet, page fullscreen, and docked tools before this window takes them.
+            updateShownTabs()
+            session.release(selectedTab, except: self)
             // Selecting a tab, even the one under the page, leaves an internal page.
             internalPage = nil
             // Another tab ends the fullscreen of the page that filled the window.
@@ -251,14 +252,34 @@ public final class BrowserWindowModel: ObservableObject {
         session.tabs.first { $0.id == selectedTabID } ?? session.favoriteTabs.values.first { $0.id == selectedTabID }
     }
 
-    /// Whether the window shows `tab`, as its selected tab or a pane of its split view. At most one window shows a tab (window rule 1).
+    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview.
+    @Published private(set) var shownTabIDs: [UUID] = []
+
+    /// Whether the window shows `tab`, as its selected tab or a pane of its split view.
     func shows(_ tab: Tab) -> Bool {
-        paneTabs.contains { $0 === tab }
+        shownTabIDs.contains(tab.id)
     }
 
     /// Whether another window shows `tab`. Selection this window makes on its own passes such a tab by (window rule 3).
     func isShownInAnotherWindow(_ tab: Tab) -> Bool {
         session.windows.contains { $0 !== self && $0.shows(tab) }
+    }
+
+    /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows.
+    func updateShownTabs() {
+        let ids = paneTabs.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }.map(\.id)
+        if ids != shownTabIDs { shownTabIDs = ids }
+    }
+
+    /// Lets another window take `tab` (window rule 2). The window selects its fallback when `tab` is its selected tab. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
+    func giveUp(_ tab: Tab) {
+        shownTabIDs.removeAll { $0 == tab.id }
+        if tab.id == selectedTabID {
+            selectedTabID = fallbackTab(excluding: tab.id)?.id
+        } else {
+            if fullscreenTabID == tab.id { exitPageFullscreen() }
+            session.sheets.deferSheet(of: self)
+        }
     }
 
     /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
@@ -403,7 +424,7 @@ public final class BrowserWindowModel: ObservableObject {
     private func focusSelectedPane() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let isFocusInOtherPane = self.paneTabs.contains { pane in
+            let isFocusInOtherPane = self.tabsOnScreen.contains { pane in
                 let view = pane.webContents.view
                 return pane.id != self.selectedTabID && (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
             }
@@ -493,11 +514,11 @@ public final class BrowserWindowModel: ObservableObject {
     /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
     var visibleSheet: TabSheet?
 
-    /// The tabs whose pages the window shows now, the selected tab first: every pane of its split view, or the selected tab alone while its page fills the window. Their sheets can show on this window.
+    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window.
     var tabsOnScreen: [Tab] {
         guard let selected = selectedTab else { return [] }
         if fullscreenTabID == selected.id { return [selected] }
-        return [selected] + paneTabs.filter { $0.id != selected.id }
+        return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
     }
 
     // MARK: Find in page
@@ -893,7 +914,7 @@ public final class BrowserWindowModel: ObservableObject {
         return ids
     }
 
-    /// The tabs the page area shows, left to right: the selected tab's split view, or the selected tab alone.
+    /// The page area's panes, left to right: the selected tab's split view, or the selected tab alone. The window shows the pages of `shownTabIDs` among them.
     var paneTabs: [Tab] {
         guard let selected = selectedTab else { return [] }
         guard let ids = splitOnScreen else { return [selected] }

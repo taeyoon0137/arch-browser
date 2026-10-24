@@ -65,8 +65,8 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 
 ### Window rules
 
-1. At most one window shows a tab. An engine view is one `NSView` with one superview. `BrowserWindowModel.shownTabIDs` lists what a window shows: its selected tab, and with split view (III.5) its panes.
-2. Explicit selection moves the tab: a sidebar click, a palette tab row, the tab switcher, ⌘-numbers, Next and Previous Tab, a favorite's tab, a tab's `requestSelection`, and selection by sync or a plugin. The window that shows the tab gives it up first, through its own selection change to a fallback. Only then does the selecting window run its own side effects. This order lets the losing window undock the developer tools before the gaining window docks them.
+1. At most one window shows a tab. An engine view is one `NSView` with one superview. `BrowserWindowModel.shownTabIDs` lists what a window shows: its selected tab, and with split view (III.5) the panes that no other window shows.
+2. Explicit selection moves the tab: a sidebar click, a palette tab row, the tab switcher, ⌘-numbers, Next and Previous Tab, a favorite's tab, a tab's `requestSelection`, and selection by sync or a plugin. The window that shows the tab gives it up first: through its own selection change to a fallback when the tab is its selected tab, or by leaving the pane when the tab is another pane of its split view. Only then does the selecting window run its own side effects. This order lets the losing window undock the developer tools before the gaining window docks them.
 3. Automatic selection never takes a tab that another window shows: `switchToSpace`, the `closeTab` fallback, restore, a new window, and the fallback in rule 2. When no tab is free, the window shows the empty page state that exists today.
 4. A window's current space follows its selected tab, as today. Two windows may show the same space.
 5. Closing a main window keeps its tabs. Closing a small window closes its tab into the closed list.
@@ -86,7 +86,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 
 | # | What breaks | Mitigation | Step |
 |---|---|---|---|
-| R1 | One visible-sheet slot lets a sheet in one window block every other window, and the `NSApp.mainWindow` fallback can put a tab's sheet on the wrong window | `TabSheetQueue` keeps the queues per tab and one visible sheet per window. A window with no visible sheet shows its selected tab's oldest sheet on its own `nsWindow`, which exists from the window's creation, so a sheet requested at selection time shows at once. When a tab leaves a window, that window's sheet is deferred and shows again in the next window that shows the tab | 8 |
+| R1 | One visible-sheet slot lets a sheet in one window block every other window, and the `NSApp.mainWindow` fallback can put a tab's sheet on the wrong window | `TabSheetQueue` keeps the queues per tab and one visible sheet per window. A window with no visible sheet shows the oldest sheet of the tabs on its screen, its selected tab's first, on its own `nsWindow`, which exists from the window's creation, so a sheet requested at selection time shows at once. When a tab leaves a window, that window's sheet is deferred and shows again in the next window that shows the tab | 8 |
 | R2 | Lookups by engine kind pick the default Persona's runtime: a kept download page is never closed, Clear Site Data clears the wrong profile, a popup is owned by the wrong browser | Every lookup goes through `runtime(of: tab)` or the runtime stored with the kept page | 3 |
 | R3 | Cookie copies cross Personas | One `CookieSync` per Persona, whose `runtimes` closure returns only that Persona's runtimes | 3 |
 | R4 | Clear Site Data on Chromium reaches the global profile through the hidden browser and the flush | The bridge's context object creates the hidden browser in its own context and flushes the manager it visited | 4 |
@@ -99,7 +99,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | R11 | `moveTab(_:to:)`, `moveTab(_:toSpace:)`, `deleteSpace`, `reopenLastClosedTab`, drops on a space symbol, folders, and sync orphan moves put a web contents under another Persona's space | `Tab.personaID` is a constant; one guard for every space change; `deleteSpace` picks a neighbor in the same Persona and refuses a Persona's last space | 2, 13 |
 | R12 | Two windows on one tab: the last `addSubview` wins and the other window goes blank | Window rules 1 to 3 | 8 |
 | R13 | Palette, find, renaming, capture, switcher, and library state on the session appears in every window | All of it moves to `BrowserWindowModel` | 6 |
-| R14 | One dock holds one browser window; per-window docks drift apart because each reads `UserDefaults` only at `init`; a dock can undock tools another window just docked | One dock per window; one shared `DevToolsDockSettings` that every dock observes; the rule 2 order; `track(_:)` removes the previous tools window only while it is still a child of its own browser window | 8 |
+| R14 | One dock holds one browser window; per-window docks drift apart because each reads `UserDefaults` only at `init`; a dock can undock tools another window just docked | One dock per window; one shared `DevToolsDockSettings` that every dock observes; the rule 2 order; `track(_:)` hides the previous tools window only while no other browser window has docked it | 8 |
 | R15 | `fullscreenTabID` is global, and the Escape monitor is bound to one window | `fullscreenTabID` per window; monitors resolve the window from `event.window`; a tab that leaves a window exits page fullscreen first | 6, 8 |
 | R16 | Archiving exempts only one selected tab | Every shown tab and every small-window tab counts as active | 8, 11 |
 | R17 | The last window closes before the quit saves; frames refer to removed displays; AppKit tabbing and restoration interfere; a window built in code is released when it closes | Keep the record of the last main window that closed; clamp frames; `NSWindow.allowsAutomaticWindowTabbing = false`, and `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false` on every browser window | 9, 10 |
@@ -152,7 +152,7 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
     unowned let session: BrowserSession
 
     @Published public var currentSpaceID: UUID
-    /// Assigning it applies window rule 2: another window that shows the tab falls back first.
+    /// Assigning it applies window rule 2: another window that shows the tab gives it up first.
     @Published public var selectedTabID: UUID?
     @Published public var isSidebarVisible: Bool
     @Published public var isLibraryVisible: Bool
@@ -179,7 +179,12 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
     /// The frame outside full screen, which the window controller records.
     var restorableFrame: CGRect?
 
-    public var shownTabIDs: [UUID] { get }
+    /// Window rule 1: the selected tab and the panes of its split view that no other window shows, left to right.
+    @Published private(set) var shownTabIDs: [UUID]
+    /// The selected tab, then the other shown panes, or the selected tab alone while its page fills the window. Their sheets can show here.
+    var tabsOnScreen: [Tab] { get }
+    /// The sheet the window shows, which `TabSheetQueue` sets and clears.
+    var visibleSheet: TabSheet?
     public var selectedTab: Tab? { get }
     public var currentSpace: Space { get }
     /// A small window's tab's Persona, or the current space's.
@@ -190,12 +195,15 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
 
 - These commands move here from the session with the same names and bodies, reading the user's data through `session`: `switchToSpace`, `switchToAdjacentSpace`, `addSpace` (adds a space to this window's Persona and switches to it), `selectTab(at:)`, `selectLastTab`, `selectAdjacentTab`, `moveSelectedTab`, `shortcutNumber(for:)`, `openTab(url:engine:)` (in the current space, selected here), `openFavorite`, `navigate(to:)`, `goHome`, `canGoHome`, `setCurrentPageAsHome(ofSpace:)`, `canSetCurrentPageAsHome`, `showCommandPalette`, `dismissCommandPalette`, `submitCommandPalette`, `focusCommandBar`, `closeInternalPage`, `exitPageFullscreen`, `focusPage`, `showFindBar`, `hideFindBar`, `findNext`, `findPrevious`, `toggleLibrary`, `toggleSidebar`, `goBack`, `goForward`, `go(to:inTab:)`, `recentBackItems`, `reload`, `stopLoading`, `toggleDeveloperTools` with the developer tools properties, zoom in, out, and reset with `canZoom`, `printPage`, `exportPageAsPDF`, `canPrint`, the capture commands with `canCapture`, `shareSelectedPage`, `canShareSelectedPage`, the tab switcher, `closeSelectedTab`, `closeOtherTabs`, `confirmClearSiteData`, `canClearSiteData`, `renameSpace`, `renameTab`, and `endRenaming`.
 - `selectedTabID.didSet` runs these in order:
-  1. `session.release(selectedTabID, except: self)`, which makes any other window that shows the tab select its fallback first.
-  2. Today's window side effects: leave the internal page, end another tab's page fullscreen, stop find on the old tab, follow the tab's space (main windows only), and record this window's activation.
-  3. `session.windowDidSelect(self, previous:)`: the activation date, the unread dot, sheets, the focused tab, and the save.
-  4. `devToolsDock.track(selectedTab?.webContents.devTools)`.
-  5. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, as the session does today (:458–463).
-- `fallbackTab(excluding:)` returns the first tab of `recentTabs` that is listed in the sidebar, is not `excluding`, and is not shown by another window, or nil.
+  1. `updateShownTabs()`, then `session.release(selectedTab, except: self)`, which makes every other window that shows the tab give it up first and then lets every window show the panes that no window shows any longer.
+  2. The window's side effects: leave the internal page, end another tab's page fullscreen, stamp the tab's activation date, record this window's activation, clear the unread dot, follow the tab's space (main windows only), stop find on the old tab, and close the question popover.
+  3. `session.sheets.deferSheet(of: self)` and `session.sheets.showNext()`.
+  4. `session.windowDidSelect(self)`, which updates the focused tab while this is the active window. The session's change observer saves the selection.
+  5. `devToolsDock.track(selectedTab?.webContents.devTools)`.
+  6. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, and move keyboard focus from another pane of the split view to the selected page.
+- `shows(_:)` reads `shownTabIDs`, and `isShownInAnotherWindow(_:)` asks the other windows. `updateShownTabs()` runs after the selection or a split view changes: the window keeps its selected tab and the panes it shows already, and takes each other pane of `paneTabs` that no other window shows. Step 9's placeholder fills each pane of `paneTabs` outside `shownTabIDs`.
+- `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection, ends the pane's page fullscreen, and defers its sheet.
+- `fallbackTab(excluding:)` returns the first tab of `recentTabs` that is listed in the sidebar, is not `excluding`, and is not shown by another window, or nil. It can be another pane of the same split view; the window then shows a placeholder in the pane of the tab it gave up.
 - `isLibraryVisible.didSet` asks the session to mark finished downloads seen.
 
 `PersonaEngines` (new, internal, `PersonaEngines.swift`)
@@ -215,21 +223,30 @@ final class PersonaEngines {
 `TabSheetQueue` (new, internal, `TabSheetQueue.swift`, moved out of the session)
 
 ```swift
-/// Sheets that tabs asked for, oldest first per tab, and the one sheet each window shows. A tab's sheet shows only on the window whose selected tab it is.
+/// A sheet a tab asked for.
+struct TabSheet {
+    let tabID: UUID
+    let alert: NSAlert
+    let isPageDialog: Bool
+    let completion: (NSApplication.ModalResponse) -> Void
+}
+
+/// Sheets that tabs asked for, oldest first per tab. A window shows one of them at a time (`BrowserWindowModel.visibleSheet`), for a tab on its screen.
 final class TabSheetQueue {
+    /// The open browser windows, which the session supplies.
     var windows: () -> [BrowserWindowModel] = { [] }
     func enqueue(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool, completion: @escaping (NSApplication.ModalResponse) -> Void)
-    /// Each window that has an AppKit window and no visible sheet shows its selected tab's oldest sheet there.
+    /// Each window that has an AppKit window and shows no sheet shows the oldest waiting sheet of its `tabsOnScreen`, the selected tab's first.
     func showNext()
-    /// Puts away a window's sheet when the window no longer selects its tab. It shows again first when a window selects that tab.
+    /// Puts away the window's sheet once its tab has left the window's screen. It shows again first when a window shows its tab.
     func deferSheet(of window: BrowserWindowModel)
-    func cancel(for tab: Tab, pageDialogsOnly: Bool)
+    func cancel(for tab: Tab, pageDialogsOnly: Bool = false)
     func cancelAll()
-    func isShowingSheet(in window: BrowserWindowModel) -> Bool
 }
 ```
 
-- The deferral response, the page-dialog flag, and the permission waiters keep today's rules. `isQuitting` stays on the session, which answers `.cancel` at once while the app quits.
+- The deferral response, the page-dialog flag, and the permission waiters keep today's rules. `isQuitting` stays on the session, whose `enqueueSheet` answers `.cancel` at once while the app quits.
+- `canPrint` and `canClearSiteData` read the window's `nsWindow?.attachedSheet`, so the queue needs no query of its own.
 
 `DevToolsDockSettings` (new, in `DevToolsDock.swift`)
 
@@ -243,9 +260,9 @@ public final class DevToolsDockSettings: ObservableObject {
 }
 ```
 
-- `DevToolsDock` keeps `side` as a forwarding property, places its window again whenever the shared side changes, and reads the sizes from the settings. `DevToolsDockSpace` observes the settings for the sizes.
+- `DevToolsDock` has no side of its own. It observes `DevToolsDockSettings.shared.side`, places its window again whenever the side changes, and reads the sizes from the settings. `DevToolsDockSpace` observes the settings for the sizes. The Developer menu sets and checks `DevToolsDockSettings.shared.side`.
 - `setDocked(true, _:)` also sets `isExcludedFromWindowsMenu`, so the Window menu lists only browser windows. `setDocked(false, _:)` clears it.
-- `track(_:)` removes and orders out the previous tools window only while that window's parent is the dock's own browser window.
+- `track(_:)` hides the previous tools window only while no other browser window has docked it: while its parent is the dock's own browser window or none. It undocks the window as it hides it, so the window comes back as a window of its own if the tools float by then.
 
 `BrowserWindowController` (new, internal, `BrowserWindowController.swift`)
 
@@ -280,10 +297,13 @@ public func sidebarTarget() -> BrowserWindowModel
 public func openWindow(kind: BrowserWindowKind = .main, spaceID: UUID? = nil, frame: CGRect? = nil) -> BrowserWindowModel
 /// Creates the windows of the loaded snapshot, back to front.
 public func restoreWindows()
-public func window(showing tab: Tab) -> BrowserWindowModel?
+/// The window whose `shownTabIDs` has the tab.
+func window(showing tab: Tab) -> BrowserWindowModel?
 public func window(for nsWindow: NSWindow?) -> BrowserWindowModel?
-func release(_ tabID: UUID?, except window: BrowserWindowModel)
-func windowDidSelect(_ window: BrowserWindowModel, previous: UUID?)
+/// Window rule 2 for `window`'s new selection: every other window that shows the tab gives it up, then every window updates its shown tabs.
+func release(_ tab: Tab?, except window: BrowserWindowModel)
+/// Updates the focused tab when `window` is the active window.
+func windowDidSelect(_ window: BrowserWindowModel)
 func windowDidBecomeMain(_ window: BrowserWindowModel)
 func windowWillClose(_ window: BrowserWindowModel)
 
@@ -483,7 +503,7 @@ Monitors
 Engine and tab events
 - A popup opens in its opener's space and Persona, owned by the opener's runtime. When a window shows the opener, the popup is selected there; from step 11, a small window's popup opens in a new small window (open decision 11). Otherwise it opens unread in the background, as today.
 - Open Link in New Tab opens unread in the background of the page's space, as today; for a small-window tab, that is its destination space.
-- `requestSelection`, which a leave-page sheet uses on close, does nothing when a window shows the tab. Otherwise the sidebar target selects it.
+- `requestSelection`, which a leave-page sheet uses on close, shows the page the sheet asks about. The window that shows the tab selects it when it is another pane there, or closes the internal page over it when it is selected already. Otherwise the sidebar target selects it.
 - Page fullscreen goes to the window that shows the tab. A tab that no window shows exits fullscreen at once.
 - Closing a tab that windows show makes each of them pick its fallback (window rule 3).
 - `deleteSpace` moves the tabs to a neighbor space in the same Persona and switches every window on the deleted space there.
@@ -562,7 +582,7 @@ Live favorites (III.13)
 - A favorite and its live tab belong to one Persona. The live tab follows window rule 1: selecting a favorite whose tab another window shows moves the tab here. It stays alive, hidden, while its window shows another Persona's space. Whether the live tab keeps a `spaceID` is III.13's choice; if it leaves space lists, III.13 extends `isListedInSidebar`.
 
 Split view (III.5)
-- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows; Show Here applies rule 2. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
+- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows, a pane of its `paneTabs` outside its `shownTabIDs`; Show Here applies rule 2. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
 
 Previews (III.11)
 - A preview's secondary web contents comes from the runtime of the window's Persona, so it carries that Persona's cookies. The window model owns the panel, which closes with the window.

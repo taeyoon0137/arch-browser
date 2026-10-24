@@ -151,11 +151,12 @@ public final class BrowserSession: ObservableObject {
         return windows.first { $0.nsWindow === nsWindow }
     }
 
-    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab selects its fallback, which lets go of the tab's sheet, page fullscreen, and docked developer tools.
-    func release(_ tab: Tab, except window: BrowserWindowModel) {
-        for other in windows where other !== window && other.shows(tab) {
-            other.selectedTabID = other.fallbackTab(excluding: tab.id)?.id
+    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab gives it up (`BrowserWindowModel.giveUp(_:)`). The panes that no window shows any longer, the ones given up and the ones `window` left, then show again in the windows whose split views have them (window rule 1).
+    func release(_ tab: Tab?, except window: BrowserWindowModel) {
+        if let tab {
+            for other in windows where other !== window && other.shows(tab) { other.giveUp(tab) }
         }
+        windows.forEach { $0.updateShownTabs() }
     }
 
     /// The tab of `focusedTabID`.
@@ -466,10 +467,15 @@ public final class BrowserSession: ObservableObject {
         tab.didCancelDialogs = { [weak self, weak tab] in
             if let self, let tab { self.sheets.cancel(for: tab, pageDialogsOnly: true) }
         }
-        // The tab's sheets show while a window shows its page on screen, so only a tab no window shows there needs the sidebar target to select it.
+        // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and the sidebar target selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in
-            guard let self, let tab, !self.windows.contains(where: { $0.tabsOnScreen.contains { $0 === tab } }) else { return }
-            self.sidebarTarget().selectedTabID = tab.id
+            guard let self, let tab else { return }
+            guard let window = self.window(showing: tab) else { return self.sidebarTarget().selectedTabID = tab.id }
+            if window.selectedTabID != tab.id {
+                window.selectedTabID = tab.id
+            } else if window.internalPage != nil {
+                window.closeInternalPage()
+            }
         }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         // Saving after each load keeps the page state that a crash would otherwise lose.
@@ -1059,7 +1065,8 @@ public final class BrowserSession: ObservableObject {
     /// Each space's split view: two to four of its tabs that share the page area, left to right. The page area shows a space's split view while one of its tabs is selected, and the selected tab is the focused pane.
     @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:] {
         didSet {
-            // The panes on screen change with the split views, and the sheets that can show change with them.
+            // The panes on screen change with the split views, and the sheets that can show change with them. A pane that joins a window's split view while another window shows its tab stays with that window.
+            windows.forEach { $0.updateShownTabs() }
             windows.forEach(sheets.deferSheet(of:))
             sheets.showNext()
         }

@@ -69,11 +69,12 @@ public final class DevToolsDock: ObservableObject {
     /// The side the page makes room on, or nil while the selected tab's tools are closed or float.
     var dockedSide: DevToolsSide? { window != nil && settings.side != .floating ? settings.side : nil }
 
-    /// Follows the selected tab's tools. The docked window of the tab left behind hides until its tab returns, unless another browser window has docked it since; floating windows stay.
+    /// Follows the selected tab's tools. The docked window of the tab left behind hides until its tab returns, unless another browser window has docked it since; floating windows stay. A hidden window is no longer docked, so it returns as a window of its own when the tools float by then.
     func track(_ devTools: (any EngineDevTools)?) {
         guard devTools !== self.devTools else { return }
         if let previous = window, settings.side != .floating, previous.parent == nil || previous.parent === browserWindow {
             previous.parent?.removeChildWindow(previous)
+            setDocked(false, previous)
             previous.orderOut(nil)
         }
         self.devTools = devTools
