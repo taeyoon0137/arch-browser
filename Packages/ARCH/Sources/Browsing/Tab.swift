@@ -75,7 +75,7 @@ public final class Tab: ObservableObject, Identifiable {
     private var declinedExternalAppSite: String?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
-    /// The session sets this for tabs it restores from the saved session.
+    /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens.
     var isRestored = false
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?

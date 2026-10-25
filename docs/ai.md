@@ -593,7 +593,7 @@ public enum AIHookEventKind: Hashable, Sendable {
 public enum AIHookEvent: Sendable {
     /// A tab's main frame finished loading a document.
     case pageLoaded(AIPageLoad)
-    /// A tab opened, other than one restored from the saved session.
+    /// A tab opened, other than one restored from the saved session or a pinned tab that a browser import opened.
     case tabOpened(AITabOpen)
     /// A download finished, and its file is in place.
     case downloadFinished(AIDownloadFinish)
@@ -608,7 +608,7 @@ public enum AIHookEvent: Sendable {
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
-    /// The first load of a tab restored from the saved session.
+    /// The first load of a tab restored from the saved session or of a pinned tab that a browser import opened.
     public var isRestore: Bool
 }
 
@@ -629,7 +629,7 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's main frame finishes loading a document, which the engines report through `webContentsDidFinishLoadingDocument`, and the tab has an address. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's main frame finishes loading a document, which the engines report through `webContentsDidFinishLoadingDocument`, and the tab has an address. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
 - `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
 
@@ -738,7 +738,7 @@ public enum AIHookAction: Sendable {
 
 The first hooks (`BuiltInHooks` in `Browsing`):
 
-- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips a restored tab's first load, so that launching sends no request, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
+- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips the first load of a restored tab and of a pinned tab that a browser import opened, so that launching and importing send no requests, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
 - `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
 - Both ask for at most 256 output tokens and take the reply's first line without the quotes, emphasis, or final period a model may add.
 
