@@ -163,11 +163,8 @@ public:
         dispatch_async(dispatch_get_main_queue(), ^{ [[ARCHCEFPump shared] scheduleWork:delay_ms]; });
     }
 
-    // Unsigned development builds lack a stable code identity. The login keychain would therefore prompt for the cookie
-    // encryption key on every launch, blocking startup. The mock keychain avoids this until the app is signed.
     void OnBeforeCommandLineProcessing(const CefString &process_type, CefRefPtr<CefCommandLine> command_line) override {
         if (process_type.empty()) {
-            command_line->AppendSwitch("use-mock-keychain");
             // Without it Chromium shows its own sign-in window and never asks GetAuthCredentials.
             command_line->AppendSwitch("disable-chrome-login-prompt");
             // The app feeds Now Playing and answers the media keys for both engines. Chromium's own media controls would use the same process-wide centers, so they stay off.
