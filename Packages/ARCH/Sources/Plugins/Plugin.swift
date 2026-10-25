@@ -5,9 +5,9 @@ import ARCHEngine
 /// A running plugin in one Persona.
 @MainActor
 public protocol Plugin: AnyObject {
-    /// Called once, before the plugin's first command runs. The context stays valid while the plugin runs.
+    /// Called once, before the plugin's first command runs. The context acts for this instance until it stops, when the user switches the plugin off or deletes its Persona, or the activation throws.
     func activate(in context: any PluginContext) async throws
-    /// Called when the user switches the plugin off or deletes its Persona, after which the manager drops it. Switching it on again starts a new instance.
+    /// Called when the user switches the plugin off or deletes its Persona, once the activation has ended, after which the manager drops the instance. Its context has stopped acting by then. Switching the plugin on again starts a new instance.
     func deactivate() async
     /// Runs one of the commands the manifest lists.
     func run(_ command: String, _ invocation: PluginInvocation) async throws
@@ -34,7 +34,7 @@ public protocol BuiltInPlugin: Plugin {
     init()
 }
 
-/// The plugin's handle on the browser, scoped to one plugin in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` when the grant does not cover it.
+/// The plugin's handle on the browser, scoped to one plugin instance in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` when the grant does not cover it. Once the instance stops, the storage and secrets only read, the other calls that act throw `PluginError.stopped`, and badges do nothing.
 @MainActor
 public protocol PluginContext: AnyObject {
     var pluginID: PluginID { get }
@@ -54,7 +54,7 @@ public protocol PluginContext: AnyObject {
 
 /// What a command runs on.
 public struct PluginInvocation: Sendable {
-    /// The tab the command acts on: the selected tab, or the tab of the page or tab row the user chose the item on. Nil when there is none or an internal page covers it.
+    /// The tab the command acts on: the selected tab, or the tab of the page or tab row the user chose the item on. Nil when there is none, when the selected tab belongs to another Persona, as a favorite's tab can, and while an internal page or the preview panel covers its page.
     public var tab: PluginTab?
     /// The space whose menu holds the item, for a space menu item.
     public var spaceID: UUID?
@@ -178,6 +178,8 @@ public protocol PluginSecrets: AnyObject {
 public enum PluginError: Error, Hashable, Sendable {
     /// The plugin's grant lacks the permission a call needs.
     case permissionDenied(PluginPermission)
+    /// The plugin instance whose context the call went through has stopped.
+    case stopped
     /// The command acts on a page, and the invocation has none.
     case noPage
     /// The text is not a match pattern.

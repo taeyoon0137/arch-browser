@@ -378,7 +378,9 @@ import Testing
         #expect(Recorder.activations.count == 2)
         #expect(Recorder.runs.isEmpty)
         // The second start finds the first one's storage, with any changes that have not reached the file.
-        #expect(Recorder.storages.count == 2 && Recorder.storages[0] === Recorder.storages[1])
+        #expect(Recorder.storageFiles.count == 2 && Recorder.storageFiles[0] === Recorder.storageFiles[1])
+        // The failed instance's context no longer acts.
+        #expect(throws: PluginError.stopped) { try Recorder.contexts[0].copyToClipboard("text") }
     }
 
     @Test func keepsStorageInThePersonasFolder() async throws {
@@ -388,8 +390,8 @@ import Testing
         await managers[0].run(ref, PluginInvocation(tab: nil))
         await managers[0].run(ref, PluginInvocation(tab: nil))
         await managers[1].run(ref, PluginInvocation(tab: nil))
-        for storage in Recorder.storages {
-            try #require(storage as? PluginStorageFile).saveChanges()
+        for file in Recorder.storageFiles {
+            file.saveChanges()
         }
         for (persona, runs) in zip(personas, [2.0, 1.0]) {
             let file = folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/org.example.counting/storage.json")
@@ -493,6 +495,8 @@ import Testing
         await Task.yield()
         #expect(Recorder.deactivations == 1)
         #expect(manager.plugins.isEmpty && manager.contributions.paletteCommands(matching: "record").isEmpty)
+        // What the instance left running cannot act, and nothing starts the plugin again.
+        #expect(throws: PluginError.stopped) { try Recorder.contexts[0].storage.setValue(.number(1), forKey: "key") }
         await manager.run(ref, PluginInvocation(tab: nil))
         #expect(Recorder.activations.count == 1)
         // The change that had not reached the file never does.
@@ -518,6 +522,31 @@ import Testing
         #expect(PluginManager.removeData(ofPersona: deleted, in: folder.url, secretStore: secrets))
     }
 
+    @Test func endsTheContextOfAStoppedInstance() async throws {
+        let manager = manager([PanelPlugin.self])
+        let ref = PluginCommandRef(plugin: PanelPlugin.manifest.id, command: "record")
+        await manager.run(ref, PluginInvocation(tab: nil))
+        manager.setEnabled(false, for: ref.plugin)
+        manager.setEnabled(true, for: ref.plugin)
+        await manager.run(ref, PluginInvocation(tab: nil))
+        try #require(Recorder.contexts.count == 2)
+        let (old, current) = (Recorder.contexts[0], Recorder.contexts[1])
+        let item = manager.contributions.sidebarItems[0]
+        // What the first instance left running cannot act, even on the items the new instance shares.
+        old.setBadge("1", onSidebarItem: "panel")
+        #expect(manager.badge(on: item) == nil)
+        #expect(throws: PluginError.stopped) { try old.copyToClipboard("text") }
+        #expect(throws: PluginError.stopped) { try old.storage.setValue(.number(1), forKey: "key") }
+        #expect(throws: PluginError.stopped) { try old.secrets.setSecret("token", forKey: "key") }
+        #expect(old.storage.allKeys().isEmpty && secrets.items.isEmpty)
+        // The new instance acts, within its grant, and the old one still reads.
+        current.setBadge("2", onSidebarItem: "panel")
+        try current.storage.setValue(.number(2), forKey: "key")
+        #expect(throws: PluginError.permissionDenied(.clipboard)) { try current.copyToClipboard("text") }
+        #expect(manager.badge(on: item) == "2")
+        #expect(old.storage.value(forKey: "key") == .number(2))
+    }
+
     @Test func readsSettingsWithTheirDefaults() throws {
         let manager = manager([SettingsPlugin.self])
         let id = SettingsPlugin.manifest.id
@@ -539,7 +568,7 @@ import Testing
         let persona = UUID()
         let manager = manager(persona: persona, [SettingsPlugin.self])
         try manager.setValue(.string("b"), of: SettingsPlugin.manifest.contributions.settings[1], for: SettingsPlugin.manifest.id)
-        let storage = try #require(try context(for: SettingsPlugin.self, in: manager).storage as? PluginStorageFile)
+        let storage = try #require(try context(for: SettingsPlugin.self, in: manager).storage as? ScopedPluginStorage).file
         try storage.setValue(.number(1), forKey: "text")
         #expect(throws: PluginError.reservedKey("arch.setting:text")) { try storage.setValue(.null, forKey: "arch.setting:text") }
         #expect(storage.allKeys() == ["text"] && storage.value(forKey: "arch.setting:text") == nil)
@@ -767,29 +796,30 @@ private final class TemporaryFolder {
     }
 }
 
-/// What the test plugins saw: the Persona and storage of each activation, each deactivation, the invocation of each run, and each page script value. Only `PluginManagerTests` uses it, because Swift Testing runs suites in parallel and `.serialized` orders the tests of one suite only.
+/// What the test plugins saw: the context of each activation, each deactivation, the invocation of each run, and each page script value. Only `PluginManagerTests` uses it, because Swift Testing runs suites in parallel and `.serialized` orders the tests of one suite only.
 @MainActor
 private enum Recorder {
-    static var activations: [PersonaID] = []
+    static var contexts: [any PluginContext] = []
     static var deactivations = 0
-    static var storages: [any PluginStorage] = []
     static var invocations: [PluginInvocation] = []
     static var pageMessages: [PluginPageMessage] = []
 
+    /// The Persona of each activation.
+    static var activations: [PersonaID] { contexts.map(\.personaID) }
+    /// The file behind the storage of each activation.
+    static var storageFiles: [PluginStorageFile] { contexts.compactMap { ($0.storage as? ScopedPluginStorage)?.file } }
     /// The tab of each run.
     static var runs: [PluginTab?] { invocations.map(\.tab) }
 
     static func reset() {
-        activations = []
+        contexts = []
         deactivations = 0
-        storages = []
         invocations = []
         pageMessages = []
     }
 
     static func record(_ context: any PluginContext) {
-        activations.append(context.personaID)
-        storages.append(context.storage)
+        contexts.append(context)
     }
 }
 

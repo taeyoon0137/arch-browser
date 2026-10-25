@@ -68,36 +68,51 @@ private struct PluginSidebarItemRow: View {
         case let .command(id):
             windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id))
         case .panel:
-            guard !anchor.isClosingClick else { return }
-            Task {
-                guard let panel = await plugins.panel(for: item), let view = anchor.view, view.window != nil else { return }
-                let popover = NSPopover()
-                popover.behavior = .transient
-                popover.contentViewController = panel
-                popover.delegate = anchor
-                popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxX)
-                anchor.popover = popover
-            }
+            anchor.showPanel { await plugins.panel(for: item) }
         }
     }
 }
 
-/// The row's view, which its panel's popover points at, and the popover while the row holds one.
+/// The row's view, which its panel's popover points at, and the popover from when it shows until it has closed.
 @MainActor
 private final class PluginPanelAnchor: NSObject, NSPopoverDelegate {
     weak var view: NSView?
-    var popover: NSPopover?
-    /// When the popover last closed, in the time base of event timestamps.
+    private var popover: NSPopover?
+    /// Whether the row waits for its plugin to hand over the panel.
+    private var isRequestingPanel = false
+    /// When the popover last began to close, in the time base of event timestamps.
     private var closedAt: TimeInterval = 0
 
-    /// Whether the click the row handles is the one that closed the popover. The popover closes as a click outside it goes down, before the row acts on the click, so the click only closes it.
-    var isClosingClick: Bool {
+    /// Shows the panel that `request` returns in a popover beside the row. A click while the row waits for the panel, while the popover shows or closes, or that closed the popover shows nothing more.
+    func showPanel(_ request: @escaping @MainActor () async -> NSViewController?) {
+        guard !isRequestingPanel, popover == nil, !isClosingClick else { return }
+        isRequestingPanel = true
+        Task {
+            let panel = await request()
+            isRequestingPanel = false
+            guard let panel, let view, view.window != nil else { return }
+            let popover = NSPopover()
+            popover.behavior = .transient
+            popover.contentViewController = panel
+            popover.delegate = self
+            popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxX)
+            self.popover = popover
+        }
+    }
+
+    /// Whether the click the row handles is the one that closed the popover. The popover begins to close as a click outside it goes down, and the row acts on the click as it comes up, which can be after the popover has closed.
+    private var isClosingClick: Bool {
         guard let event = NSApp.currentEvent else { return false }
         return event.timestamp - closedAt < NSEvent.doubleClickInterval
     }
 
-    func popoverDidClose(_ notification: Notification) {
+    func popoverWillClose(_ notification: Notification) {
         closedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// Releases the popover and with it the panel, which the plugin makes anew for the next opening.
+    func popoverDidClose(_ notification: Notification) {
+        popover = nil
     }
 }
 

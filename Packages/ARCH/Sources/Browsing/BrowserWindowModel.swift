@@ -547,27 +547,27 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Runs a plugin command on the selected tab through the plugins of the window's Persona, as the palette, the Plugins menu, and sidebar items do.
     @MainActor public func runPluginCommand(_ command: PluginCommandRef) {
+        let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID))
         let plugins = self.plugins
-        let invocation = PluginInvocation(tab: selectedPluginTab)
         Task { await plugins.run(command, invocation) }
     }
 
     /// Runs a plugin command from a tab row's context menu on that tab, with the plugins of the tab's Persona.
     @MainActor func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
-        let invocation = PluginInvocation(tab: tab.pluginTab(isSelected: tab.id == selectedTabID))
+        let invocation = PluginInvocation(tab: session.pluginTab(tab))
         Task { await session.plugins(in: tab.personaID).run(command, invocation) }
     }
 
     /// Runs a plugin command from a space's menu on the selected tab, with the space and the plugins of its Persona.
     @MainActor func runPluginCommand(_ command: PluginCommandRef, inSpace space: Space) {
-        let invocation = PluginInvocation(tab: selectedPluginTab, spaceID: space.id)
+        let invocation = PluginInvocation(tab: selectedPluginTab(of: space.resolvedPersonaID), spaceID: space.id)
         Task { await session.plugins(in: space.resolvedPersonaID).run(command, invocation) }
     }
 
-    /// The selected tab before the manager applies a plugin's grant. Plugins see no tab under an internal page.
-    private var selectedPluginTab: PluginTab? {
-        guard internalPage == nil, let tab = selectedTab else { return nil }
-        return tab.pluginTab(isSelected: true)
+    /// The selected tab, for the plugins of `personaID`, before the manager applies a plugin's grant. A plugin sees only its Persona's tabs, so it gets no tab of another Persona, such as a favorite's, and none while an internal page or the preview panel covers the tab's page.
+    @MainActor private func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
+        guard !isSelectedPageCovered, let tab = selectedTab, tab.personaID == personaID else { return nil }
+        return session.pluginTab(tab)
     }
 
     // MARK: Page reader and questions

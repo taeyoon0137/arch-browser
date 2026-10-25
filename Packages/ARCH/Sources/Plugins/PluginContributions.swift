@@ -60,7 +60,7 @@ public struct PluginCommand: Identifiable, Hashable, Sendable {
 
 /// What the user opened the page context menu on.
 public enum PluginPageContext: String, Hashable, Sendable {
-    /// The page itself: none of the other contexts and no media, which is where the app's menu offers Back, Forward, and Reload.
+    /// The page itself: no link, image, media, selected text, or field.
     case page
     case link, image, selection, editable
 }

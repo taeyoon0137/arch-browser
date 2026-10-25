@@ -89,12 +89,13 @@ final class PluginKeychain: PluginSecretStore {
     }
 }
 
-/// One plugin's secrets in one Persona.
+/// One plugin's secrets in one Persona. Those of a plugin instance's context only read once the instance stops, and writes throw `PluginError.stopped`.
 @MainActor
 final class ScopedPluginSecrets: PluginSecrets {
     private let store: any PluginSecretStore
     private let service: String
     private let personaID: PersonaID
+    private var hasEnded = false
 
     init(store: any PluginSecretStore, pluginID: PluginID, personaID: PersonaID) {
         self.store = store
@@ -102,11 +103,17 @@ final class ScopedPluginSecrets: PluginSecrets {
         self.personaID = personaID
     }
 
+    /// Called when the instance whose context holds the secrets stops.
+    func end() {
+        hasEnded = true
+    }
+
     func secret(forKey key: String) throws -> String? {
         try store.secret(service: service, account: account(key))
     }
 
     func setSecret(_ secret: String?, forKey key: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
         try store.setSecret(secret, service: service, account: account(key))
     }
 

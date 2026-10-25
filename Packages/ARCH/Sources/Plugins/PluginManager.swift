@@ -32,9 +32,10 @@ public final class PluginManager: ObservableObject {
     /// The storage of each plugin, made when the plugin starts or its settings are first read. It outlives a failed activation, so the plugin's next start finds the changes that have not reached the file.
     private var storages: [PluginID: PluginStorageFile] = [:]
 
-    /// A started plugin and its activation, which its commands, panels, and page script values wait for.
+    /// A started plugin, its context, and its activation, which its commands, panels, and page script values wait for.
     private struct RunningPlugin {
         let plugin: any Plugin
+        let context: ScopedPluginContext
         let activation: Task<Void, any Error>
     }
 
@@ -76,10 +77,11 @@ public final class PluginManager: ObservableObject {
         if !isEnabled { stop(id) }
     }
 
-    /// Drops the plugin's badges and its running instance, which deactivates once its activation ends.
+    /// Drops the plugin's badges and its running instance, whose context stops acting at once and which deactivates once its activation ends.
     private func stop(_ id: PluginID) {
         badges[id] = nil
         guard let stopped = running.removeValue(forKey: id) else { return }
+        stopped.context.end()
         Task {
             guard (try? await stopped.activation.value) != nil else { return }
             await stopped.plugin.deactivate()
@@ -216,12 +218,14 @@ public final class PluginManager: ObservableObject {
         } else {
             let plugin = type.init()
             let context = makeContext(for: installed)
-            started = RunningPlugin(plugin: plugin, activation: Task { try await plugin.activate(in: context) })
+            started = RunningPlugin(plugin: plugin, context: context, activation: Task { try await plugin.activate(in: context) })
             running[installed.id] = started
         }
         do {
             try await started.activation.value
         } catch {
+            // The failed instance is dropped, so whatever it left running cannot act for the plugin.
+            started.context.end()
             if running[installed.id]?.plugin === started.plugin { running[installed.id] = nil }
             throw error
         }
@@ -229,7 +233,8 @@ public final class PluginManager: ObservableObject {
     }
 
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
-        ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant, storage: storage(for: installed.id), secrets: secrets(for: installed.id))
+        ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
+                            storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id))
     }
 
     /// `<plugin id>/storage.json` in the Persona's folder.
@@ -258,23 +263,34 @@ private struct PluginListFile: Codable {
     var choices: [Choice]
 }
 
-/// The context the manager gives each plugin it starts.
+/// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the user switches the plugin off or deletes its Persona, or the activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
 final class ScopedPluginContext: PluginContext {
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
-    let storage: any PluginStorage
-    let secrets: any PluginSecrets
+    private let scopedStorage: ScopedPluginStorage
+    private let scopedSecrets: ScopedPluginSecrets
     private weak var manager: PluginManager?
+    private var hasEnded = false
 
-    init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: any PluginStorage, secrets: any PluginSecrets) {
+    init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets) {
         self.manager = manager
         self.pluginID = pluginID
         self.personaID = personaID
         self.grant = grant
-        self.storage = storage
-        self.secrets = secrets
+        scopedStorage = storage
+        scopedSecrets = secrets
+    }
+
+    var storage: any PluginStorage { scopedStorage }
+    var secrets: any PluginSecrets { scopedSecrets }
+
+    /// Stops the context, its storage, and its secrets from acting for the instance.
+    func end() {
+        hasEnded = true
+        scopedStorage.end()
+        scopedSecrets.end()
     }
 
     func setting(_ key: String) -> PluginValue? {
@@ -282,10 +298,12 @@ final class ScopedPluginContext: PluginContext {
     }
 
     func setBadge(_ text: String?, onSidebarItem id: String) {
+        guard !hasEnded else { return }
         manager?.setBadge(text, onSidebarItem: id, of: pluginID)
     }
 
     func copyToClipboard(_ text: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
         try require(.clipboard)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

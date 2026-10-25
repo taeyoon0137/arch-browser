@@ -112,9 +112,9 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 |---|---|---|
 | Command | The command palette, after the primary row and before history suggestions, when the typed text matches the title or a keyword; Settings ▸ Shortcuts, through its Plugins menu item | Menu items and sidebar items run commands too. A command with `takesArgument` shows its title as a token in the palette field and receives the text the user types after it |
 | Shortcut | The command's item in the Plugins menu, which a command with a shortcut gets after the plugin's own items when its manifest lists none | Settings ▸ Shortcuts lists the item under Plugins with the plugin's name, and the user can change the shortcut there. App shortcuts take priority over plugin shortcuts, and between plugins the first installed keeps a shortcut: a command goes without its default shortcut while an app command, a command the user gave it, or an earlier plugin's command has it, and its row in Settings ▸ Shortcuts names that command |
-| Menu item | A Plugins menu in the menu bar, before the Window menu, for the active window's Persona; the page context menu, after the app's items, when the click is on one of the listed contexts (page, link, image, selection, editable); a tab row's context menu and the space menu, after their items | In each menu, a plugin's items form a section under the plugin's name. A click is on `page` when it is on no link, image, media, selection, or field, where the app's menu offers Back, Forward, and Reload. Page context menu items run app-side, so they work alike on both engines, as row 49 requires. The command runs on the active window's selected tab from the Plugins menu, on the page's tab with the link, image, and selected text from the page context menu, on the row's tab from a tab row, and on the window's selected tab with the space from the space menu |
+| Menu item | A Plugins menu in the menu bar, before the Window menu, for the active window's Persona; the page context menu, after the app's items, when the click is on one of the listed contexts (page, link, image, selection, editable); a tab row's context menu and the space menu, after their items | In each menu, a plugin's items form a section under the plugin's name. A click is on `page` when it is on no link, image, media, selection, or field. Page context menu items run app-side, so they work alike on both engines, as row 49 requires. The command runs on the active window's selected tab from the Plugins menu, on the page's tab with the link, image, and selected text from the page context menu, on the row's tab from a tab row, and on the window's selected tab with the space from the space menu. The window's selected tab reaches a command only while it belongs to the plugin's Persona and no internal page or preview panel covers its page |
 | Sidebar item | A row below the favorites with a symbol, a title, and the badge the plugin sets | It runs a command on the window's selected tab or opens a panel |
-| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. A script plugin's panel uses one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
+| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel uses one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
 | Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin may add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
 | Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
@@ -182,7 +182,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable.
 4. Enable: Arch registers the contributions, adds the page scripts to the Persona's tabs from their next load, and sends `activate` when the background first starts.
 5. Update: installing the same `id` again replaces the package after review and keeps storage. A running background stops and restarts on the new code.
-6. Disable: Arch removes the contributions, closes page message channels, sends `deactivate`, and stops the background.
+6. Disable: Arch removes the contributions, closes page message channels, ends the plugin's context, sends `deactivate`, and stops the background.
 7. Remove: after a confirmation sheet, Arch disables the plugin and deletes its package, storage, and Keychain items. Built-in plugins cannot be removed, only disabled.
 8. Launch: each Persona's manager reads `plugins.json`, registers the built-in types, and shows enabled contributions. Installed plugin code runs only when needed.
 
@@ -206,11 +206,11 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 ## Personas
 
-- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them.
+- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it.
 - The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows the contributions of its Persona, its current space's, which for a small window is its tab's, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
-- Deleting a Persona closes its manager (`close()`): its plugins leave the list, so their contributions go and nothing starts them again, their running instances stop, and storage changes that have not reached the files are dropped. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
+- Deleting a Persona closes its manager (`close()`): its plugins leave the list, so their contributions go and nothing starts them again, their running instances stop and their contexts stop acting, and storage changes that have not reached the files are dropped. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
 
 ## Web extensions as plugins
 
@@ -436,7 +436,7 @@ public struct PluginPageScript: Hashable, Codable, Sendable {
 /// A running plugin in one Persona. Built-in plugins implement it in Swift; the runtimes implement it for installed plugins.
 @MainActor
 public protocol Plugin: AnyObject {
-    /// Called when the plugin starts. The context stays valid until `deactivate()`.
+    /// Called when the plugin starts. The context acts until the plugin stops, before `deactivate()`; from then on its storage and secrets only read, its other actions throw `stopped`, and its badges do nothing.
     func activate(in context: any PluginContext) async throws
     func deactivate() async
     func run(_ command: String, _ invocation: PluginInvocation) async throws
@@ -466,7 +466,7 @@ public protocol BuiltInPlugin: Plugin {
     init()
 }
 
-/// The plugin's handle on the browser, scoped to one plugin in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` or `.siteNotGranted` when it does not cover the call.
+/// The plugin's handle on the browser, scoped to one plugin instance in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` or `.siteNotGranted` when it does not cover the call. Once the instance stops, the storage and secrets only read, the other calls that act throw `.stopped`, and badges do nothing.
 @MainActor
 public protocol PluginContext: AnyObject {
     var pluginID: PluginID { get }
@@ -611,6 +611,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidPackage(String)
     case unsupportedAPIVersion(Int)
     case permissionDenied(PluginPermission?)
+    /// The plugin instance whose context the call went through has stopped.
+    case stopped
     case invalidMatchPattern(String)
     case invalidShortcut(String)
     /// A storage key that starts with `arch.setting:`, the prefix of the plugin's settings.

@@ -47,9 +47,9 @@ final class PluginPages {
         for tab in tabs where followedTabIDs.insert(tab.id).inserted {
             let plugins = session.plugins(in: tab.personaID)
             tab.webContents.setPageScripts(plugins.contributions.pageScripts)
-            tab.receivePageScriptMessage = { [weak self, weak tab] message, reply in
+            tab.receivePageScriptMessage = { [weak session, weak tab] message, reply in
                 MainActor.assumeIsolated {
-                    guard let tab, let pluginTab = self?.pluginTab(tab) else { return reply(nil) }
+                    guard let tab, let pluginTab = session?.pluginTab(tab) else { return reply(nil) }
                     Task { reply(await plugins.receive(message, from: pluginTab)) }
                 }
             }
@@ -61,17 +61,11 @@ final class PluginPages {
         }
     }
 
-    /// The tab as its plugins see it before their grants apply. It is selected while a window selects it.
-    private func pluginTab(_ tab: Tab) -> PluginTab? {
-        guard let session else { return nil }
-        return tab.pluginTab(isSelected: session.windows.contains { $0.selectedTabID == tab.id })
-    }
-
     /// Adds the items for the contexts of the click, one section per plugin under the plugin's name. Each runs its command on the tab with what the user clicked on.
     private func addMenuItems(for element: EngineContextMenuElement, in tab: Tab, to menu: NSMenu) {
-        guard let session, let pluginTab = pluginTab(tab) else { return }
+        guard let session else { return }
         let plugins = session.plugins(in: tab.personaID)
-        let invocation = PluginInvocation(tab: pluginTab, linkURL: element.linkURL, imageURL: element.imageURL, selection: element.selectedText)
+        let invocation = PluginInvocation(tab: session.pluginTab(tab), linkURL: element.linkURL, imageURL: element.imageURL, selection: element.selectedText)
         for section in plugins.contributions.menuSections(at: .pageContextMenu(Set(element))) {
             if menu.numberOfItems > 0 { menu.addItem(.separator()) }
             menu.addItem(.sectionHeader(title: section.pluginName))
@@ -82,9 +76,10 @@ final class PluginPages {
     }
 }
 
-extension Tab {
-    /// The tab as a plugin sees it before the manager applies the plugin's grant.
-    func pluginTab(isSelected: Bool) -> PluginTab {
-        PluginTab(id: id, spaceID: spaceID, title: displayTitle, url: url, engine: engineKind, isPinned: isPinned, isSelected: isSelected)
+extension BrowserSession {
+    /// The tab as its Persona's plugins see it before the manager applies a plugin's grant. It is selected while any window selects it.
+    func pluginTab(_ tab: Tab) -> PluginTab {
+        PluginTab(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, engine: tab.engineKind, isPinned: tab.isPinned,
+                  isSelected: windows.contains { $0.selectedTabID == tab.id })
     }
 }

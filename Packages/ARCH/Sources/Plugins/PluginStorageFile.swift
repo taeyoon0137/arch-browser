@@ -1,4 +1,4 @@
-// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, and at quit.
+// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, and at quit. Each instance of the plugin reaches it through a view of its own that stops writing when the instance stops.
 import AppKit
 
 @MainActor
@@ -102,5 +102,34 @@ final class PluginStorageFile: PluginStorage {
     /// Encodes the value inside an array, one level down as in the file's object, so that it throws for a value nested too deep for the file, and leaves out the brackets.
     private static func size(of value: PluginValue, forKey key: String) throws -> Int {
         try key.utf8.count + encoder.encode([value]).count - 2
+    }
+}
+
+/// One plugin instance's view of its plugin's storage, which the plugin's instances share. Once the instance stops, it only reads, and writes throw `PluginError.stopped`.
+@MainActor
+final class ScopedPluginStorage: PluginStorage {
+    let file: PluginStorageFile
+    private var hasEnded = false
+
+    init(file: PluginStorageFile) {
+        self.file = file
+    }
+
+    /// Called when the instance stops.
+    func end() {
+        hasEnded = true
+    }
+
+    func value(forKey key: String) -> PluginValue? {
+        file.value(forKey: key)
+    }
+
+    func setValue(_ value: PluginValue?, forKey key: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try file.setValue(value, forKey: key)
+    }
+
+    func allKeys() -> [String] {
+        file.allKeys()
     }
 }
