@@ -1,4 +1,4 @@
-// Plugin identifiers, match patterns, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
+// Plugin identifiers, match patterns, the grant an update's review offers, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -91,6 +91,18 @@ import Testing
         for (pattern, address, expected) in cases {
             #expect(try MatchPattern(pattern).matches(URL(string: address)!) == expected, "\(pattern) \(address)")
         }
+    }
+}
+
+@Suite struct PluginGrantTests {
+    @Test func offersAnUpdateWithoutTheSitesTheUserLeftOut() throws {
+        let sites = try ["https://a.example/*", "https://bank.example/*", "https://c.example/*"].map(MatchPattern.init)
+        let id = PluginID(rawValue: "org.example.update")!
+        let manifest = PluginManifest(id: id, name: "Update", version: "1", summary: "", permissions: [.tabs], sites: Array(sites[0...1]), contributions: PluginContributions())
+        let installed = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.tabs], sites: [sites[0]]), isEnabled: true)
+        let update = PluginManifest(id: id, name: "Update", version: "2", summary: "", permissions: [.tabs, .clipboard], sites: sites, contributions: PluginContributions())
+        // The site the user left out stays out, and the site the installed version did not ask for starts on.
+        #expect(PluginGrant(updating: installed, to: update) == PluginGrant(permissions: [.tabs, .clipboard], sites: [sites[0], sites[2]]))
     }
 }
 

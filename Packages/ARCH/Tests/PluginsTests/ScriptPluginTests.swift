@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders and archives, the packages Arch refuses, the scheme handler, and the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch.
+// Script plugins: reading and staging packages from folders and archives, the packages Arch refuses, the scheme handler, and the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept.
 import ARCHEngine
 import Foundation
 import Testing
@@ -77,6 +77,12 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         let linked = try writePackage("link", ["plugin.json": manifest + "}"])
         try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("passwd"), withDestinationURL: URL(fileURLWithPath: "/etc/passwd"))
         await #expect(throws: PluginError.invalidPackage("The package has a symbolic link, passwd, which could lead to files outside it.")) { try await manager.stage(linked) }
+        // ditto restores an archive's only entry, a link to a package folder, as the link.
+        let linkFolder = try writePackage("only link", [:])
+        try FileManager.default.createSymbolicLink(at: linkFolder.appendingPathComponent("package"), withDestinationURL: sampleFolder)
+        let linkArchive = folder.url.appendingPathComponent("link.zip")
+        try runDitto(["-c", "-k", linkFolder.path, linkArchive.path])
+        await #expect(throws: PluginError.invalidPackage("The package is a symbolic link, which could lead to files outside Arch.")) { try await manager.stage(linkArchive) }
         let notArchive = folder.url.appendingPathComponent("notes.txt")
         try Data("text".utf8).write(to: notArchive)
         await #expect(throws: PluginError.invalidPackage("notes.txt is not a folder or a .zip archive.")) { try await manager.stage(notArchive) }
@@ -197,7 +203,7 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         try await installSample(in: manager)
         await run("probe", in: manager)
         #expect(try stored("probe", in: manager) == .object([
-            "eval": .string("EvalError"), "fetch": .string("TypeError"), "copy": .string("permissionDenied"),
+            "eval": .string("EvalError"), "fetch": .string("TypeError"), "webRTC": .string("undefined,undefined"), "copy": .string("permissionDenied"),
             "reservedKey": .string("reservedKey"), "removed": .string("allowed"),
         ]))
     }
@@ -213,6 +219,19 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         let remembered = try #require(try stored("remembered", in: manager)?.fields)
         // A new start of the background script ran the second command.
         #expect(remembered["runs"] == .number(1))
+    }
+
+    @Test func runsACommandThatArrivesAsTheIdleLimitPasses() async throws {
+        let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.2))
+        try await installSample(in: manager)
+        await run("remember", in: manager)
+        // Once the idle stop waits, it comes due while the main actor is busy, so it waits in the actor's queue as the next command arrives.
+        try await Task.sleep(for: .milliseconds(50))
+        blockMainActor(for: 0.4)
+        await run("remember", in: manager)
+        let remembered = try #require(try stored("remembered", in: manager)?.fields)
+        // The start that ran the first command ran the second one too.
+        #expect(remembered["runs"] == .number(2))
     }
 
     @Test func switchesOffAPluginWhoseBackgroundHangsThreeTimes() async throws {
@@ -276,6 +295,22 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         await run("remember", in: relaunched)
         #expect(try stored("remembered", in: relaunched) != nil)
     }
+
+    @Test func keepsInstallsThisBuildCannotRead() async throws {
+        try await installSample(in: manager())
+        let listURL = folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/plugins.json")
+        // An install whose grant holds a permission that this build does not have, as a newer build may write.
+        let newer: [String: Any] = ["id": "org.example.newer", "source": "file:///Newer.zip", "grant": ["permissions": ["notifications"], "sites": [String]()], "installedAt": 1]
+        var list = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: listURL)) as? [String: Any])
+        list["installed"] = try #require(list["installed"] as? [Any]) + [newer]
+        try JSONSerialization.data(withJSONObject: list).write(to: listURL)
+        let relaunched = manager()
+        #expect(relaunched.plugins.map(\.id) == [sampleID] && relaunched.plugins[0].isEnabled)
+        relaunched.setEnabled(false, for: sampleID)
+        let installs = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: listURL)) as? [String: Any])["installed"] as? [[String: Any]]
+        #expect(installs?.map { $0["id"] as? String } == [sampleID.rawValue, "org.example.newer"])
+        #expect(installs.flatMap(\.last).map(NSDictionary.init) == NSDictionary(dictionary: newer))
+    }
 }
 
 private extension PluginValue {
@@ -284,6 +319,12 @@ private extension PluginValue {
         if case let .object(fields) = self { return fields }
         return nil
     }
+}
+
+/// Keeps the main actor from running anything else for the interval.
+@MainActor
+private func blockMainActor(for seconds: TimeInterval) {
+    Thread.sleep(forTimeInterval: seconds)
 }
 
 private func runDitto(_ arguments: [String]) throws {

@@ -23,6 +23,8 @@ arch.commands.onRun("probe", async () => {
   await arch.storage.set("probe", {
     eval: await outcome(() => eval("1")),
     fetch: await outcome(() => fetch("https://example.org/")),
+    // The content security policy and the rule list do not cover WebRTC, so neither the document nor a frame it adds may have it.
+    webRTC: [window, document.documentElement.appendChild(document.createElement("iframe")).contentWindow].map((realm) => typeof realm.RTCPeerConnection).join(),
     copy: await outcome(() => arch.ui.copy("text")),
     reservedKey: await outcome(() => arch.storage.set("arch.setting:label", 1)),
     removed: await outcome(async () => {

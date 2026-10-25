@@ -37,8 +37,8 @@ public final class PluginManager: ObservableObject {
     private var packages: [PluginID: PluginPackage]
     /// The choices `plugins.json` keeps, in the order the user made them, including those for plugins this build does not have.
     private var choices: [PluginListFile.Choice]
-    /// The installs `plugins.json` keeps, in the order the user installed the plugins, including those whose packages this build cannot read.
-    private var installs: [PluginListFile.Install]
+    /// The installs `plugins.json` keeps, in the order the user installed the plugins, including those this build or its packages cannot read.
+    private var installs: [PluginListFile.InstallEntry]
     private let secretStore: any PluginSecretStore
     private let scriptLimits: ScriptPluginLimits
     /// Plugins whose code has started. Each starts at its first command, panel, or page script value and runs until it stops: when the user switches it off, updates it, removes it, or deletes the Persona, or the app quits, and a script plugin also when it stops on its own.
@@ -53,9 +53,11 @@ public final class PluginManager: ObservableObject {
         let plugin: any Plugin
         let context: ScopedPluginContext
         let activation: Task<Void, any Error>
+        /// Whether the activation succeeded, after which uses reach the plugin without waiting.
+        var isActive = false
     }
 
-    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package; one whose package does not read stays in `plugins.json` but out of the list.
+    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package; one whose package or `plugins.json` entry does not read stays in the file but out of the list.
     public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type]) {
         self.init(persona: persona, directory: directory, builtIns: builtIns, secretStore: PluginKeychain())
     }
@@ -76,7 +78,7 @@ public final class PluginManager: ObservableObject {
             plugins.append(InstalledPlugin(manifest: type.manifest, grant: PluginGrant(requestedBy: type.manifest), isEnabled: choice?.isEnabled ?? type.isOnByDefault))
         }
         var packages: [PluginID: PluginPackage] = [:]
-        for install in installs {
+        for case let .readable(install) in installs {
             guard let id = PluginID(rawValue: install.id), types[id] == nil, packages[id] == nil,
                   let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), source: install.source),
                   package.manifest.id == id else { continue }
@@ -182,9 +184,9 @@ public final class PluginManager: ObservableObject {
         packages[id] = package.moved(to: installedRoot)
         let install = PluginListFile.Install(id: id.rawValue, source: package.sourceURL, grant: grant.limited(to: package.manifest), installedAt: Date())
         if let index = installs.firstIndex(where: { $0.id == install.id }) {
-            installs[index] = install
+            installs[index] = .readable(install)
         } else {
-            installs.append(install)
+            installs.append(.readable(install))
         }
         recordChoice(isEnabled, for: id)
         saveList()
@@ -348,10 +350,12 @@ public final class PluginManager: ObservableObject {
         plugins.first { $0.id == id && $0.isEnabled }
     }
 
-    /// The running plugin, started first if needed, or nil when it stopped while it activated. Commands, panels, and page script values that arrive while the plugin activates wait for the same activation. A failed activation leaves the plugin stopped, so its next use starts it again.
+    /// The running plugin, started first if needed, or nil when it stopped while it activated. Commands, panels, and page script values that arrive while the plugin activates wait for the same activation, and later ones reach the plugin at once. A failed activation leaves the plugin stopped, so its next use starts it again.
     private func start(_ installed: InstalledPlugin) async throws -> (any Plugin)? {
         let started: RunningPlugin
         if let existing = running[installed.id] {
+            // Waiting again, even for a finished activation, could let a script plugin stop at its idle limit before the use reaches it.
+            if existing.isActive { return existing.plugin }
             started = existing
         } else {
             guard let plugin = makePlugin(installed.id) else { return nil }
@@ -367,7 +371,9 @@ public final class PluginManager: ObservableObject {
             if running[installed.id]?.plugin === started.plugin { running[installed.id] = nil }
             throw error
         }
-        return running[installed.id]?.plugin === started.plugin ? started.plugin : nil
+        guard running[installed.id]?.plugin === started.plugin else { return nil }
+        running[installed.id]?.isActive = true
+        return started.plugin
     }
 
     /// A new instance of the plugin: of its built-in type, or of the script plugin in its package. A script plugin's instance that stops on its own leaves, so that the next use starts a new one, and its failures count towards switching the plugin off.
@@ -430,9 +436,43 @@ private struct PluginListFile: Codable {
         var installedAt: Date
     }
 
+    /// An install as the file holds it. One this build cannot read, such as one whose grant holds a permission that a newer build added, stays as the file has it, so that writing the file keeps it.
+    enum InstallEntry: Codable {
+        case readable(Install)
+        case unreadable(PluginValue)
+
+        /// The plugin's identifier, if the entry names one.
+        var id: String? {
+            switch self {
+            case let .readable(install):
+                return install.id
+            case let .unreadable(.object(fields)):
+                guard case let .string(id)? = fields["id"] else { return nil }
+                return id
+            case .unreadable:
+                return nil
+            }
+        }
+
+        init(from decoder: any Decoder) throws {
+            if let install = try? Install(from: decoder) {
+                self = .readable(install)
+            } else {
+                self = .unreadable(try PluginValue(from: decoder))
+            }
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            switch self {
+            case let .readable(install): try install.encode(to: encoder)
+            case let .unreadable(entry): try entry.encode(to: encoder)
+            }
+        }
+    }
+
     var choices: [Choice]
     /// Absent from files of builds before installed plugins.
-    var installed: [Install]?
+    var installed: [InstallEntry]?
 }
 
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.

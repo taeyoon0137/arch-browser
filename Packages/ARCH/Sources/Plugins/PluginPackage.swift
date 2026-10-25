@@ -14,7 +14,7 @@ public struct PluginPackage: Identifiable, Sendable {
     /// The package path of the background script, if the plugin has one.
     let background: String?
 
-    /// Reads the package at `root`. Throws as `ScriptManifest(packageAt:)` does, and `PluginError.invalidPackage` for a package with a symbolic link, which could lead to files outside it.
+    /// Reads the package at `root`. Throws as `ScriptManifest(packageAt:)` does, and `PluginError.invalidPackage` for a package that is or holds a symbolic link, which could lead to files outside it.
     init(at root: URL, source: URL) throws {
         let files = try Self.files(in: root)
         let declared = try ScriptManifest(packageAt: root)
@@ -87,8 +87,12 @@ public struct PluginPackage: Identifiable, Sendable {
         return extracted.appendingPathComponent(entries[0], isDirectory: true)
     }
 
-    /// The package paths of the regular files below `root`, in ascending order. Throws for a symbolic link.
+    /// The package paths of the regular files below `root`, in ascending order. Throws for a symbolic link, `root` itself included.
     private static func files(in root: URL) throws -> [String] {
+        // The attributes are those of a link itself, such as the only entry of an archive that ditto restored as a link.
+        guard (try? FileManager.default.attributesOfItem(atPath: root.path))?[.type] as? FileAttributeType != .typeSymbolicLink else {
+            throw PluginError.invalidPackage("The package is a symbolic link, which could lead to files outside Arch.")
+        }
         guard let enumerator = FileManager.default.enumerator(atPath: root.path) else { throw PluginError.invalidPackage("The package cannot be read.") }
         var files: [String] = []
         while let path = enumerator.nextObject() as? String {

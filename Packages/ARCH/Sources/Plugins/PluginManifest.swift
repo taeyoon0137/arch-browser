@@ -89,6 +89,12 @@ public struct PluginGrant: Hashable, Codable, Sendable {
         self.init(permissions: manifest.permissions, sites: manifest.sites)
     }
 
+    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out.
+    public init(updating installed: InstalledPlugin, to manifest: PluginManifest) {
+        let leftOut = Set(installed.manifest.sites).subtracting(installed.grant.sites)
+        self.init(permissions: manifest.permissions, sites: manifest.sites.filter { !leftOut.contains($0) })
+    }
+
     /// The grant without what the manifest does not ask for, so that a grant never exceeds the request.
     func limited(to manifest: PluginManifest) -> PluginGrant {
         PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains))

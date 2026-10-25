@@ -6,8 +6,10 @@ import SwiftUI
 struct PluginInstallSheet: View {
     @ObservedObject var plugins: PluginManager
     let package: PluginPackage
+    /// The installed plugin that the package updates, if any.
+    private let installed: InstalledPlugin?
     @Environment(\.dismiss) private var dismiss
-    /// The sites the user grants, all that the manifest asks for at first.
+    /// The sites the user grants: at first all that the manifest asks for, except, in an update, those that the installed version asked for and the user left out.
     @State private var sites: Set<MatchPattern>
     /// Why the last install failed.
     @State private var failure: String?
@@ -15,12 +17,10 @@ struct PluginInstallSheet: View {
     init(plugins: PluginManager, package: PluginPackage) {
         self.plugins = plugins
         self.package = package
-        _sites = State(initialValue: Set(package.manifest.sites))
-    }
-
-    /// The installed plugin that the package updates, if any.
-    private var installed: InstalledPlugin? {
-        plugins.plugins.first { $0.id == package.manifest.id }
+        let installed = plugins.plugins.first { $0.id == package.manifest.id }
+        self.installed = installed
+        let offered = installed.map { PluginGrant(updating: $0, to: package.manifest) } ?? PluginGrant(requestedBy: package.manifest)
+        _sites = State(initialValue: Set(offered.sites))
     }
 
     var body: some View {
@@ -39,11 +39,11 @@ struct PluginInstallSheet: View {
                         Text("None")
                     }
                     ForEach(permissions, id: \.self) { permission in
-                        RequestRow(text: permission.summary, isNew: installed.map { !$0.grant.permissions.contains(permission) } ?? false)
+                        RequestRow(text: permission.summary, isNew: installed.map { !$0.manifest.permissions.contains(permission) } ?? false)
                     }
                     ForEach(manifest.sites, id: \.self) { site in
                         Toggle(isOn: Binding(get: { sites.contains(site) }, set: { if $0 { sites.insert(site) } else { sites.remove(site) } })) {
-                            RequestRow(text: site.accessSummary, isNew: installed.map { !$0.grant.sites.contains(site) } ?? false)
+                            RequestRow(text: site.accessSummary, isNew: installed.map { !$0.manifest.sites.contains(site) } ?? false)
                             Text(site.description)
                         }
                     }

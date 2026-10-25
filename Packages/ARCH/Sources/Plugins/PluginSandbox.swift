@@ -1,4 +1,4 @@
-// The sandbox of a script plugin's web views. Their documents load only from the plugin's package through the `arch-plugin` scheme, under a content security policy that allows neither inline nor evaluated code and limits connections to the package. A rule list blocks every other load, a data store of their own keeps nothing, and the bridge is their only way to the app. Each web view runs in a WebKit web content process apart from the app and the tabs.
+// The sandbox of a script plugin's web views. Their documents load only from the plugin's package through the `arch-plugin` scheme, under a content security policy that allows neither inline nor evaluated code and limits connections to the package. A rule list blocks every other load, Lockdown Mode takes away WebRTC, whose connections neither covers, a data store of their own keeps nothing, and the bridge is their only way to the app. Each web view runs in a WebKit web content process apart from the app and the tabs.
 import UniformTypeIdentifiers
 import WebKit
 
@@ -18,6 +18,8 @@ enum PluginSandbox {
     static func configuration(for package: PluginPackage, bridge: ScriptPluginBridge) async throws -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        // Neither the policy nor the rule list covers WebRTC connections. Lockdown Mode takes WebRTC away from every frame of the web view.
+        configuration.defaultWebpagePreferences.isLockdownModeEnabled = true
         configuration.setURLSchemeHandler(PluginSchemeHandler(package: package), forURLScheme: scheme)
         let controller = configuration.userContentController
         controller.add(try await blockingRules())
