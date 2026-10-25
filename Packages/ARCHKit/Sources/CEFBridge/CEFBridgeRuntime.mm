@@ -225,25 +225,34 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     for (ARCHCEFRequestContext *context in gRequestContexts.allObjects) {
         [context detachContext];
     }
-    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashes once Chrome-style developer tools have opened. The closes run CEF's work for at most two seconds.
+    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashed once Chrome-style developer tools had opened. The tools in a view close first: once their browser has closed, their contents close on their own, unreported, and CEF would shut down over them. The closes run CEF's work for at most two seconds in all.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
+        if (browser.showsDevToolsInView) {
+            [browser closeDevTools];
+        }
+    }
+    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.showsDevToolsInView; }];
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
         [browser close];
     }
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
-    while ([self hasOpenBrowsers] && deadline.timeIntervalSinceNow > 0) {
-        CefDoMessageLoopWork();
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    }
+    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.isOpen; }];
     CefShutdown();
 }
 
-+ (BOOL)hasOpenBrowsers {
-    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
-        if (browser.isOpen) {
-            return YES;
+/// Runs CEF's work while any browser passes `test`, until `deadline`.
++ (void)runWorkUntil:(NSDate *)deadline whileAnyBrowser:(BOOL (^)(ARCHCEFBrowser *))test {
+    while (deadline.timeIntervalSinceNow > 0) {
+        BOOL passes = NO;
+        for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
+            passes = passes || test(browser);
         }
+        if (!passes) {
+            return;
+        }
+        CefDoMessageLoopWork();
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     }
-    return NO;
 }
 
 + (int)runHelperWithArgc:(int)argc argv:(char **)argv {

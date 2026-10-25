@@ -38,9 +38,9 @@ enum WebKitInspectorAPI {
 /// WebKit's Web Inspector for one page. WebKit attaches it beside the web view inside the page's view and resizes the web view; its own toolbar docks it to another side or moves it into a window of its own.
 final class WebKitDevTools: EngineDevTools {
     private unowned let webView: WKWebView
-    /// The inspector stays inside the page's view, so the app has no window to place.
-    var window: NSWindow? { nil }
-    var didChangeWindow: (() -> Void)?
+    /// The inspector stays inside the page's view, so the app has no view to place.
+    var view: NSView? { nil }
+    var didChangeView: (() -> Void)?
     var isPlacedByApp: Bool { false }
 
     init(webView: WKWebView) {

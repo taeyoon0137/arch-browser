@@ -832,7 +832,7 @@ public final class BrowserSession: ObservableObject {
             let window = self.windows.first { $0.selectedTabID == tab.id }
             if window?.isFindBarVisible == true { window?.hideFindBar() }
             tab.replaceWebContents(with: replacement)
-            window?.devToolsDock.track(replacement.devTools)
+            window?.devToolsDock.track(tab)
             self.retire(old, of: tab.personaID)
             self.scheduleSave()
         }
@@ -895,8 +895,9 @@ public final class BrowserSession: ObservableObject {
     func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
         guard let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
         if webContents.closingStopsDownloads {
-            // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers.
+            // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers. Its developer tools close with its tab.
             webContents.uiDelegate = nil
+            webContents.devTools?.close()
             webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
             downloadPages.append((runtime, webContents))
         } else {

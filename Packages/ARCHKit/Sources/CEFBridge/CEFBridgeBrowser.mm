@@ -273,6 +273,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 @property(nonatomic, readonly) BOOL suppressesDialogs;
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser;
 - (void)handleDoClose;
+- (void)handleDevToolsClosed;
 - (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
 - (void)handleLeavePageDialog:(void (^)(BOOL))completion;
 - (void)handleResetDialogs;
@@ -427,6 +428,10 @@ public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
     void Detach() { owner_ = nil; }
+
+    // The view that the developer tools fill while they are open. CEF holds only a raw handle to it, so the client, which CEF keeps until the browser has closed, keeps the view until the tools or the browser close, even after the owner goes.
+    NSView *DevToolsView() const { return devToolsView_; }
+    void SetDevToolsView(NSView *view) { devToolsView_ = view; }
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -636,8 +641,13 @@ public:
     }
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        // CEF reports no close of tools in a view whose browser closes first. It takes their front-end's view out of the container right after this.
+        FinishDevTools();
         [owner_ handleBeforeClose];
     }
+
+    // CEF calls this on a task after the tools' contents have gone and their view has left the container, so `showDevTools` may open new tools from here on.
+    void OnDevToolsInViewClosed(CefRefPtr<CefBrowser> browser) override { FinishDevTools(); }
 
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString &title) override {
         [owner_ handleTitle:ToNSString(title)];
@@ -717,7 +727,16 @@ public:
     }
 
 private:
+    void FinishDevTools() {
+        if (!devToolsView_) {
+            return;
+        }
+        devToolsView_ = nil;
+        [owner_ handleDevToolsClosed];
+    }
+
     __unsafe_unretained ARCHCEFBrowser *owner_;
+    NSView *devToolsView_ = nil;
     IMPLEMENT_REFCOUNTING(BridgeClient);
 };
 
@@ -796,42 +815,6 @@ private:
     std::map<int, NSData *> early_;
     bool isSending_ = false;
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
-};
-
-// Reports the developer tools' window to the inspected browser's delegate. CEF makes the window; the app places it.
-class BridgeDevToolsClient : public CefClient, public CefLifeSpanHandler {
-public:
-    explicit BridgeDevToolsClient(id<ARCHCEFBrowserDelegate> delegate) : delegate_(delegate) {}
-
-    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { ReportWindow(browser, 40); }
-
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        isClosed_ = true;
-        [delegate_ cefBrowserDevToolsDidClose];
-    }
-
-private:
-    // The tools' window appears a little after `OnAfterCreated`, so the handle is read again every 50 milliseconds, up to `attempts` times.
-    void ReportWindow(CefRefPtr<CefBrowser> browser, int attempts) {
-        if (isClosed_) {
-            return;
-        }
-        NSWindow *window = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle()).window;
-        if (window) {
-            [delegate_ cefBrowserDevToolsDidOpenWindow:window];
-        } else if (attempts > 1) {
-            CefRefPtr<BridgeDevToolsClient> client = this;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-                client->ReportWindow(browser, attempts - 1);
-            });
-        }
-    }
-
-    __weak id<ARCHCEFBrowserDelegate> delegate_;
-    bool isClosed_ = false;
-    IMPLEMENT_REFCOUNTING(BridgeDevToolsClient);
 };
 
 }  // namespace
@@ -1570,10 +1553,36 @@ private:
 }
 
 - (void)showDevTools {
-    if (_browser) {
-        // With no window info, CEF makes and owns the tools' window; the client reports it to the delegate. Open tools only take focus.
-        _browser->GetHost()->ShowDevTools(CefWindowInfo(), new BridgeDevToolsClient(_delegate), CefBrowserSettings(), CefPoint());
+    if (!_browser) {
+        return;
     }
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    if (_client->DevToolsView()) {
+        // Open tools take focus. Closing tools ignore the call until CEF reports their close.
+        if (host->HasDevTools()) {
+            host->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
+        }
+        return;
+    }
+    // CEF fills the container with the tools' front-end, without a browser of its own, and the app places the container beside the page or in a window.
+    NSView *container = [[NSView alloc] initWithFrame:_parentView.bounds];
+    container.wantsLayer = YES;
+    CefWindowInfo windowInfo;
+    windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(container), CefRect(0, 0, (int)NSWidth(container.bounds), (int)NSHeight(container.bounds)));
+    host->ShowDevTools(windowInfo, nullptr, CefBrowserSettings(), CefPoint());
+    // On the main thread CEF has shown the tools when the call returns, unless it refused them, as policy can.
+    if (host->HasDevTools()) {
+        _client->SetDevToolsView(container);
+        [_delegate cefBrowserDevToolsDidOpenView:container];
+    }
+}
+
+- (void)handleDevToolsClosed {
+    [_delegate cefBrowserDevToolsDidClose];
+}
+
+- (BOOL)showsDevToolsInView {
+    return _client && _client->DevToolsView() != nil;
 }
 
 - (void)closeDevTools {

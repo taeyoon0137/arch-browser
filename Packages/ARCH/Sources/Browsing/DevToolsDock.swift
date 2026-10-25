@@ -1,4 +1,4 @@
-// Places each browser window's selected tab's developer tools beside the page, on the side and at the size every window shares. The engine makes the tools' window; while the tools are docked, that window becomes a child of the browser window over the space the page leaves free, so it moves with the window. Docking inside the browser window itself needs a CEF patch (VI.3).
+// Places each browser window's selected tab's developer tools beside the page, on the side and at the size every window shares, or in a window of their own. The engine shows the tools inside a view: the page area makes room for that view on the docked side, and Undock moves the same view into an app window, so the tools keep their state.
 import AppKit
 import ARCHEngine
 import Combine
@@ -21,108 +21,211 @@ public enum DevToolsSide: String, CaseIterable {
 
 /// The side and sizes of docked developer tools, which every window's dock shares, saved in `UserDefaults`. The Developer menu sets the side.
 public final class DevToolsDockSettings: ObservableObject {
-    public static let shared = DevToolsDockSettings()
+    public static let shared = DevToolsDockSettings(defaults: .standard)
 
     @Published public var side: DevToolsSide {
-        didSet { UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey) }
+        didSet { defaults.set(side.rawValue, forKey: Self.sideKey) }
     }
     /// The tools' width beside the page.
     @Published var width: CGFloat {
-        didSet { UserDefaults.standard.set(Double(width), forKey: Self.widthKey) }
+        didSet { defaults.set(Double(width), forKey: Self.widthKey) }
     }
     /// The tools' height below the page.
     @Published var height: CGFloat {
-        didSet { UserDefaults.standard.set(Double(height), forKey: Self.heightKey) }
+        didSet { defaults.set(Double(height), forKey: Self.heightKey) }
     }
 
+    private let defaults: UserDefaults
     private static let sideKey = "ARCHDevToolsSide"
     private static let widthKey = "ARCHDevToolsWidth"
     private static let heightKey = "ARCHDevToolsHeight"
 
-    private init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
         side = defaults.string(forKey: Self.sideKey).flatMap(DevToolsSide.init(rawValue:)) ?? .right
         width = CGFloat(defaults.object(forKey: Self.widthKey) as? Double ?? 480)
         height = CGFloat(defaults.object(forKey: Self.heightKey) as? Double ?? 320)
     }
 }
 
-/// The window of one browser window's selected tab's tools, placed on the shared side (`DevToolsDockSettings`).
+/// The view of one browser window's selected tab's tools, placed on the shared side (`DevToolsDockSettings`): in the window's page area, or in the tools' own window while they float.
 public final class DevToolsDock: ObservableObject {
-    /// The selected tab's tools window while it is open.
-    @Published private(set) var window: NSWindow?
+    /// The selected tab's tools' view while they are open.
+    @Published private(set) var view: NSView?
 
-    private let settings = DevToolsDockSettings.shared
-    private var sideObserver: AnyCancellable?
+    private let settings: DevToolsDockSettings
+    private let undockedWindows: DevToolsUndockedWindows
+    private var observers: Set<AnyCancellable> = []
     private weak var devTools: (any EngineDevTools)?
-    private weak var browserWindow: NSWindow?
-    /// The space the page leaves free for the tools, in the browser window's coordinates.
-    private var region: NSRect?
+    /// The titles of the tools' tab, which name the tools' window while they float.
+    private var titles: AnyPublisher<String, Never> = Empty().eraseToAnyPublisher()
 
     static let minimumSize: CGFloat = 200
 
-    init() {
+    init(settings: DevToolsDockSettings = .shared, undockedWindows: DevToolsUndockedWindows = .shared) {
+        self.settings = settings
+        self.undockedWindows = undockedWindows
         // A side chosen in any window applies to this one at once. The settings publish a new side before they store it, so the placement takes the side it receives.
-        sideObserver = settings.$side.dropFirst().sink { [weak self] side in self?.place(on: side) }
+        settings.$side.dropFirst().sink { [weak self] side in self?.place(on: side) }.store(in: &observers)
+        // Every dock that follows the tools learns that they opened or closed, whichever dock followed them first.
+        undockedWindows.viewDidChange.sink { [weak self] devTools in
+            guard let self, devTools === self.devTools else { return }
+            self.view = devTools.view
+            self.place(on: self.settings.side)
+        }.store(in: &observers)
     }
 
     /// The side the page makes room on, or nil while the selected tab's tools are closed or float.
-    var dockedSide: DevToolsSide? { window != nil && settings.side != .floating ? settings.side : nil }
+    var dockedSide: DevToolsSide? { view != nil && settings.side != .floating ? settings.side : nil }
 
-    /// Follows the selected tab's tools. The docked window of the tab left behind hides until its tab returns, unless another browser window has docked it since; floating windows stay. A hidden window is no longer docked, so it returns as a window of its own when the tools float by then.
-    func track(_ devTools: (any EngineDevTools)?) {
+    /// Follows the tools of `tab`, the window's selected tab, or none.
+    func track(_ tab: Tab?) {
+        track(tab?.webContents.devTools, titles: tab.map(Self.titles(of:)) ?? Empty().eraseToAnyPublisher())
+    }
+
+    /// Follows `devTools`, whose window takes the names that `titles` sends while they float. The docked tools of the tab left behind leave the page area until their tab returns; floating tools keep their window.
+    func track(_ devTools: (any EngineDevTools)?, titles: AnyPublisher<String, Never>) {
         guard devTools !== self.devTools else { return }
-        if let previous = window, settings.side != .floating, previous.parent == nil || previous.parent === browserWindow {
-            previous.parent?.removeChildWindow(previous)
-            setDocked(false, previous)
-            previous.orderOut(nil)
-        }
         self.devTools = devTools
-        devTools?.didChangeWindow = { [weak self, weak devTools] in
-            guard let self, let devTools, devTools === self.devTools else { return }
-            self.window = devTools.window
-            self.place(on: self.settings.side)
-        }
-        window = devTools?.window
+        self.titles = titles
+        if let devTools { undockedWindows.follow(devTools) }
+        view = devTools?.view
         place(on: settings.side)
     }
 
-    /// Records the space the page leaves free, as the window lays it out.
-    func setRegion(_ region: NSRect?, in browserWindow: NSWindow?) {
-        self.region = region
-        if let browserWindow { self.browserWindow = browserWindow }
-        place(on: settings.side)
-    }
-
-    /// Moves the tools window over the free space as a child of the browser window, or lets it go when the tools float on `side`.
+    /// Shows the open tools' view in their own window on `.floating`. On another side their window gives the view back, and the page area's dock space takes it.
     private func place(on side: DevToolsSide) {
-        guard let window else { return }
-        guard side != .floating, let browserWindow, let region else {
-            if let parent = window.parent {
-                parent.removeChildWindow(window)
-                setDocked(false, window)
-            }
-            if side == .floating, !window.isVisible { window.orderFront(nil) }
-            return
+        guard let devTools, devTools.view != nil else { return }
+        if side == .floating {
+            undockedWindows.show(devTools, titles: titles)
+        } else {
+            undockedWindows.dock(devTools)
         }
-        if window.parent !== browserWindow {
-            browserWindow.addChildWindow(window, ordered: .above)
-            setDocked(true, window)
-        }
-        window.setFrame(browserWindow.convertToScreen(region), display: true)
-        if !window.isVisible { window.orderFront(nil) }
     }
 
-    /// A docked window moves only with the browser window, only its close button applies, and the Window menu leaves it out, so that the menu lists browser windows.
-    private func setDocked(_ isDocked: Bool, _ window: NSWindow) {
-        window.isMovable = !isDocked
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = isDocked
-        window.standardWindowButton(.zoomButton)?.isHidden = isDocked
-        window.isExcludedFromWindowsMenu = isDocked
+    /// The tab's title as it changes. The tab announces a change before it makes it, so the title is read on the next turn of the run loop.
+    private static func titles(of tab: Tab) -> AnyPublisher<String, Never> {
+        tab.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .compactMap { [weak tab] _ in tab?.displayTitle }
+            .prepend(tab.displayTitle)
+            .removeDuplicates()
+            .eraseToAnyPublisher()
     }
 }
 
-/// Makes room for docked developer tools beside the page: the page narrows by the tools' size, and the free space reports its frame so the tools window covers it. The margin between the page and the tools is a handle that resizes them.
+/// The windows of floating developer tools, one for each tools view, and the one listener of each tools object's view changes, which tells every dock. The tools' tab may be selected in no window while they float.
+final class DevToolsUndockedWindows: NSObject, NSWindowDelegate {
+    static let shared = DevToolsUndockedWindows(frameName: "ARCHDevToolsWindow")
+
+    /// Sends the tools whose view opened or closed.
+    let viewDidChange = PassthroughSubject<any EngineDevTools, Never>()
+    /// The tools' windows, oldest first.
+    private(set) var windows: [DevToolsWindow] = []
+    /// The name the windows' frame is saved under, or nil to save none.
+    private let frameName: String?
+
+    init(frameName: String?) {
+        self.frameName = frameName
+    }
+
+    /// Listens to the tools from the first time a dock follows them. The dock that shows their tab, other docks that followed them, and their window then all learn of a close.
+    func follow(_ devTools: any EngineDevTools) {
+        guard devTools.didChangeView == nil else { return }
+        devTools.didChangeView = { [weak self, weak devTools] in
+            guard let self, let devTools else { return }
+            // A window shows only the view it was given, so a closed view closes it.
+            if let window = self.window(of: devTools), window.toolsView !== devTools.view { window.close() }
+            self.viewDidChange.send(devTools)
+        }
+    }
+
+    /// The window of the tools while they float.
+    func window(of devTools: any EngineDevTools) -> DevToolsWindow? {
+        windows.first { $0.devTools === devTools }
+    }
+
+    /// Moves the tools' view into their window, named after their tab. A new window comes forward at the saved frame, cascaded from the last tools window.
+    func show(_ devTools: any EngineDevTools, titles: AnyPublisher<String, Never>) {
+        guard let view = devTools.view else { return }
+        let window = window(of: devTools) ?? makeWindow(for: devTools)
+        window.follow(titles)
+        guard let content = window.contentView, view.superview !== content else { return }
+        view.frame = content.bounds
+        view.autoresizingMask = [.width, .height]
+        content.addSubview(view)
+        window.toolsView = view
+        if !window.isVisible { window.makeKeyAndOrderFront(nil) }
+    }
+
+    /// Gives the tools' view back to the page area and closes their window.
+    func dock(_ devTools: any EngineDevTools) {
+        guard let window = window(of: devTools) else { return }
+        if let view = window.toolsView, view.superview === window.contentView { view.removeFromSuperview() }
+        window.close()
+    }
+
+    private func makeWindow(for devTools: any EngineDevTools) -> DevToolsWindow {
+        let window = DevToolsWindow(devTools: devTools)
+        if !(frameName.map { window.setFrameUsingName($0) } ?? false) { window.center() }
+        if let last = windows.last {
+            // The first call puts the window on the last one and returns the next cascade point.
+            window.cascadeTopLeft(from: window.cascadeTopLeft(from: NSPoint(x: last.frame.minX, y: last.frame.maxY)))
+        }
+        // The saved frame follows the user's moves, not this placement.
+        window.delegate = self
+        windows.append(window)
+        return window
+    }
+
+    /// The close button closes the tools. Their window closes once they have.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let devTools = (sender as? DevToolsWindow)?.devTools, devTools.view != nil else { return true }
+        devTools.close()
+        return false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? DevToolsWindow else { return }
+        saveFrame(of: window)
+        windows.removeAll { $0 === window }
+    }
+
+    func windowDidMove(_ notification: Notification) { saveFrame(of: notification.object as? NSWindow) }
+    func windowDidResize(_ notification: Notification) { saveFrame(of: notification.object as? NSWindow) }
+
+    private func saveFrame(of window: NSWindow?) {
+        if let frameName { window?.saveFrame(usingName: frameName) }
+    }
+}
+
+/// The window of one tools view while the tools float. The Window menu lists it under its title.
+final class DevToolsWindow: NSWindow {
+    private(set) weak var devTools: (any EngineDevTools)?
+    /// The view the window was given, until the page area takes it back.
+    weak var toolsView: NSView?
+    private var titleObserver: AnyCancellable?
+
+    convenience init(devTools: any EngineDevTools) {
+        self.init(contentRect: NSRect(x: 0, y: 0, width: 960, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true)
+        self.devTools = devTools
+        title = Self.title(for: nil)
+        isReleasedWhenClosed = false
+        tabbingMode = .disallowed
+        contentMinSize = NSSize(width: DevToolsDock.minimumSize, height: DevToolsDock.minimumSize)
+    }
+
+    /// Names the window after the tools' tab as its title changes.
+    func follow(_ titles: AnyPublisher<String, Never>) {
+        titleObserver = titles.sink { [weak self] in self?.title = Self.title(for: $0) }
+    }
+
+    static func title(for pageTitle: String?) -> String {
+        pageTitle.map { "Developer Tools \u{2013} \($0)" } ?? "Developer Tools"
+    }
+}
+
+/// Makes room for docked developer tools beside the page: the page narrows by the tools' size, and the tools' view fills the free space in the page's rounded frame. The margin between the page and the tools is a handle that resizes them.
 struct DevToolsDockSpace: ViewModifier {
     @ObservedObject var dock: DevToolsDock
     let isHidden: Bool
@@ -137,7 +240,6 @@ struct DevToolsDockSpace: ViewModifier {
         content
             .padding(side == .right ? .trailing : side == .left ? .leading : .bottom, side == nil ? 0 : size + gap(for: side!))
             .overlay(alignment: alignment) { if let side { space(for: side) } }
-            .onChange(of: side) { if $1 == nil { dock.setRegion(nil, in: nil) } }
     }
 
     private var size: CGFloat { side == .bottom ? settings.height : settings.width }
@@ -158,13 +260,13 @@ struct DevToolsDockSpace: ViewModifier {
             VStack(spacing: 0) {
                 DevToolsResizeHandle(axis: .vertical, size: $settings.height, sign: -1)
                     .frame(height: margins.bottom)
-                DevToolsRegionReader(dock: dock)
+                WebContentsHostView(contentView: dock.view)
                     .frame(height: settings.height)
             }
             .padding(EdgeInsets(top: 0, leading: margins.leading, bottom: margins.bottom, trailing: margins.trailing))
         case .left:
             HStack(spacing: 0) {
-                DevToolsRegionReader(dock: dock)
+                WebContentsHostView(contentView: dock.view)
                     .frame(width: settings.width)
                 DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: 1)
                     .frame(width: margins.leading)
@@ -174,7 +276,7 @@ struct DevToolsDockSpace: ViewModifier {
             HStack(spacing: 0) {
                 DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: -1)
                     .frame(width: margins.trailing)
-                DevToolsRegionReader(dock: dock)
+                WebContentsHostView(contentView: dock.view)
                     .frame(width: settings.width)
             }
             .padding(EdgeInsets(top: margins.top, leading: 0, bottom: margins.bottom, trailing: margins.trailing))
@@ -216,47 +318,5 @@ private struct DevToolsResizeHandle: View {
                     size = max(DevToolsDock.minimumSize, start + sign * delta)
                 }
                 .onEnded { _ in startSize = nil })
-    }
-}
-
-/// Reports the free space's frame in its window whenever the layout moves or resizes it.
-private struct DevToolsRegionReader: NSViewRepresentable {
-    let dock: DevToolsDock
-
-    func makeNSView(context: Context) -> RegionView {
-        let view = RegionView()
-        view.dock = dock
-        return view
-    }
-
-    func updateNSView(_ view: RegionView, context: Context) {
-        view.dock = dock
-        view.report()
-    }
-
-    final class RegionView: NSView {
-        weak var dock: DevToolsDock?
-
-        func report() {
-            guard let window else { return }
-            dock?.setRegion(convert(bounds, to: nil), in: window)
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            report()
-        }
-
-        override func setFrameSize(_ newSize: NSSize) {
-            super.setFrameSize(newSize)
-            report()
-        }
-
-        override func setFrameOrigin(_ newOrigin: NSPoint) {
-            super.setFrameOrigin(newOrigin)
-            report()
-        }
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

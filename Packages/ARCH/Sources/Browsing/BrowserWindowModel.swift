@@ -166,7 +166,7 @@ public final class BrowserWindowModel: ObservableObject {
         // 4.
         session.windowDidSelect(self)
         // 5.
-        devToolsDock.track(selectedTab?.webContents.devTools)
+        devToolsDock.track(selectedTab)
         // 6.
         followSelectedTab()
         focusSelectedPane()
@@ -776,7 +776,7 @@ public final class BrowserWindowModel: ObservableObject {
     public var canChooseDevToolsSide: Bool { selectedTab?.webContents.devTools?.isPlacedByApp == true }
     public func toggleDeveloperTools() {
         guard let devTools = selectedTab?.webContents.devTools else { return }
-        devToolsDock.track(devTools)
+        devToolsDock.track(selectedTab)
         devTools.isOpen ? devTools.close() : devTools.open()
     }
 

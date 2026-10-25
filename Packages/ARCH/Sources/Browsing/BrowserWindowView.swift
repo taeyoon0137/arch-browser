@@ -171,11 +171,11 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs, favorites, or space symbols is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before, and the docked developer tools, do not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs, favorites, or space symbols is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before do not count.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
-            || (window?.childWindows ?? []).contains { $0.isVisible && $0 !== windowModel.devToolsDock.window && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
+            || (window?.childWindows ?? []).contains { $0.isVisible && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
         let isEditingText = windowModel.renamingSpaceID != nil || windowModel.renamingTabID != nil || windowModel.renamingFolderID != nil || window?.firstResponder is NSText
         let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }

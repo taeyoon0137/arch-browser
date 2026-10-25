@@ -223,9 +223,9 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
 /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
 - (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
-/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own.
-- (void)cefBrowserDevToolsDidOpenWindow:(NSWindow *)window;
-/// Reports that the developer tools closed.
+/// Reports the view that the developer tools fill once they open. The view stays the same until `cefBrowserDevToolsDidClose`; the app may move it between superviews and windows.
+- (void)cefBrowserDevToolsDidOpenView:(NSView *)view;
+/// Reports that the developer tools closed and left their view.
 - (void)cefBrowserDevToolsDidClose;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
@@ -316,10 +316,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 /// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page. Calls `completion` once on the main thread, with nil when the capture fails, the page's process quits, or the browser closes first.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
-/// Opens Chromium's developer tools for this browser in their own window, or brings that window forward.
+/// Opens Chromium's developer tools for this browser inside a view that the bridge makes and reports through `cefBrowserDevToolsDidOpenView:`, or focuses the open tools. Does nothing while the tools close, from when `hasDevTools` turns NO until `cefBrowserDevToolsDidClose`.
 - (void)showDevTools;
 - (void)closeDevTools;
-/// Whether this browser's developer tools are open.
+/// Whether this browser's developer tools are open. NO as soon as they start closing.
 @property (nonatomic, readonly) BOOL hasDevTools;
 /// Leaves the fullscreen the page entered. `willResize` tells CEF that leaving also resizes the view.
 - (void)exitFullscreenWillResize:(BOOL)willResize NS_SWIFT_NAME(exitFullscreen(willResize:));

@@ -60,6 +60,8 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("cefroot"),
                 .define("WRAPPING_CEF_SHARED"),
+                // The bridge uses the experimental CEF API that Arch's engine adds, such as DevTools in a view, so the wrapper and the bridge build against that API version. CEF picks it when no version is set; this keeps the choice explicit.
+                .define("CEF_API_VERSION", to: "CEF_API_VERSION_EXPERIMENTAL"),
                 .unsafeFlags(["-fno-rtti", "-fno-exceptions", "-fno-threadsafe-statics", "-fobjc-call-cxx-cdtors", "-Wno-unused-parameter", "-Wno-narrowing"]),
             ],
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOSurface")]

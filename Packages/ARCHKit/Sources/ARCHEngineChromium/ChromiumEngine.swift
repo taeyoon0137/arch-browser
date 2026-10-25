@@ -454,7 +454,11 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func exitFullscreen() {
         if isFullscreen { browser?.exitFullscreen(willResize: true) }
     }
-    public func discard() { browser?.close() }
+    /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now.
+    public func discard() {
+        (devTools as? ChromiumDevTools)?.setView(nil)
+        browser?.close()
+    }
     public var closingStopsDownloads: Bool { browser?.hasDownloadsInProgress == true }
     public func tryToClose(completion: @escaping (Bool) -> Void) {
         guard let browser else { return completion(true) }
@@ -701,12 +705,12 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             completion(credential?.user, credential?.password)
         }
     }
-    public func cefBrowserDevToolsDidOpen(_ window: NSWindow) {
-        (devTools as? ChromiumDevTools)?.setWindow(window)
+    public func cefBrowserDevToolsDidOpen(_ view: NSView) {
+        (devTools as? ChromiumDevTools)?.setView(view)
     }
 
     public func cefBrowserDevToolsDidClose() {
-        (devTools as? ChromiumDevTools)?.setWindow(nil)
+        (devTools as? ChromiumDevTools)?.setView(nil)
     }
 
     public func cefBrowserDidChangeAudible(_ isAudible: Bool) {
@@ -785,20 +789,21 @@ public final class ChromiumNavigationController: EngineNavigationController {
     }
 }
 
-/// Chromium's developer tools in a window that CEF makes. CEF offers no way to pick a panel.
+/// Chromium's developer tools, which CEF shows inside a view of the bridge's, without a browser of their own; the app places the view beside the page or in a window. CEF offers no way to pick a panel.
 final class ChromiumDevTools: EngineDevTools {
     private unowned let webContents: ChromiumWebContents
-    private(set) var window: NSWindow?
-    var didChangeWindow: (() -> Void)?
+    private(set) var view: NSView?
+    var didChangeView: (() -> Void)?
     var isPlacedByApp: Bool { true }
 
     init(webContents: ChromiumWebContents) {
         self.webContents = webContents
     }
 
-    fileprivate func setWindow(_ window: NSWindow?) {
-        self.window = window
-        didChangeWindow?()
+    fileprivate func setView(_ view: NSView?) {
+        guard view !== self.view else { return }
+        self.view = view
+        didChangeView?()
     }
 
     var isOpen: Bool { webContents.hasDevTools }

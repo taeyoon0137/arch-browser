@@ -69,4 +69,6 @@ CefRefPtr<CefApp> MakeHelperApp();
 - (void)applyAccessibilityState;
 /// Whether CEF still has the browser, from its creation until `OnBeforeClose`.
 @property (nonatomic, readonly) BOOL isOpen;
+/// Whether the developer tools fill the browser's tools view, from `cefBrowserDevToolsDidOpenView:` until `cefBrowserDevToolsDidClose`.
+@property (nonatomic, readonly) BOOL showsDevToolsInView;
 @end

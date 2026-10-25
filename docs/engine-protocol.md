@@ -41,7 +41,7 @@
 | Capability | Chromium | WebKit |
 |---|---|---|
 | `extensions` (Manifest V3 extensions) | Planned (VI.1) | From macOS 15.4, `EngineBrowserContext.extensions` with one `WKWebExtensionController` per context, which every web view of the context uses. See Web extensions below |
-| `devTools` | CEF's developer tools in a window the adapter reports through `EngineDevTools.window`. The app places it beside the page. A panel cannot be chosen | WebKit's Web Inspector through the private `_inspector` object behind private API flags. It attaches inside the page view, so `window` is nil and `isPlacedByApp` is false. Without the flags, none; the adapter sets `isInspectable` |
+| `devTools` | CEF's developer tools inside a view the adapter reports through `EngineDevTools.view`, which Arch's engine fills with the DevTools front-end (an experimental CEF API, VI.3). The app places the view beside the page or in a window of its own and learns of opening and closing through `didChangeView`. A panel cannot be chosen | WebKit's Web Inspector through the private `_inspector` object behind private API flags. It attaches inside the page view, so `view` is nil and `isPlacedByApp` is false. Without the flags, none; the adapter sets `isInspectable` |
 | `pdfController` | Planned | Built-in PDF support |
 | `pictureInPicture` | Planned (VI.2): system PiP through AVKit using decoded video frames. Requires a patched CEF source build (needs verification) | System PiP through WebKit (AVKit). Users enter PiP from video controls. `closeAllMediaPresentations` exits PiP. No custom code |
 | `sessionRestore` (a page's back-forward list from `restorableState`) | None: CEF cannot fill a back-forward list, so a restored tab loads only its last address | `interactionState` |
