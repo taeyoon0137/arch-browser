@@ -6,7 +6,12 @@ import WebKit
 
 public final class WebKitEngine: Engine {
     public let kind: EngineKind = .webKit
-    public let capabilities: Set<EngineCapability> = [.pdfController, .translation, .pictureInPicture, .sessionRestore, .contentBlocking, .cookies]
+    /// Web extensions need macOS 15.4.
+    public var capabilities: Set<EngineCapability> {
+        let capabilities: Set<EngineCapability> = [.pdfController, .translation, .pictureInPicture, .sessionRestore, .contentBlocking, .cookies]
+        guard #available(macOS 15.4, *) else { return capabilities }
+        return capabilities.union([.extensions])
+    }
 
     public init() {}
 
@@ -16,11 +21,14 @@ public final class WebKitEngine: Engine {
         return WebKitApplication(configuration: configuration)
     }
 
-    /// WebKit keeps a store of its own in `~/Library/WebKit/<bundle identifier>/WebsiteDataStore/<UUID>`, and removing one that does not exist also succeeds. The WebKit application need not run.
+    /// WebKit keeps a store of its own in `~/Library/WebKit/<bundle identifier>/WebsiteDataStore/<UUID>`, and removing one that does not exist also succeeds. The data of the profile's web extensions goes too. The WebKit application need not run.
     public func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) {
         // WebKit sets up its run loop when it creates its first object, and the store's class methods crash before that.
         _ = WKWebViewConfiguration()
-        WKWebsiteDataStore.remove(forIdentifier: identifier) { error in completion(error == nil) }
+        WKWebsiteDataStore.remove(forIdentifier: identifier) { error in
+            guard #available(macOS 15.4, *) else { return completion(error == nil) }
+            WebKitExtensions.removeData(forStorage: identifier) { completion(error == nil) }
+        }
     }
 }
 
@@ -97,7 +105,18 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public var userVisibleName: String { attributes.userVisibleName }
     public var history: any EngineHistory { fatalError("skeleton") }
     public var downloads: any EngineDownloads { webKitDownloads }
-    public var extensions: (any EngineExtensions)? { nil }
+    /// From macOS 15.4, the profile's web extensions, whose controller every web view of the profile uses.
+    public var extensions: (any EngineExtensions)? {
+        guard #available(macOS 15.4, *) else { return nil }
+        return webExtensions
+    }
+    @available(macOS 15.4, *)
+    var webExtensions: WebKitExtensions? { webExtensionsObject as? WebKitExtensions }
+    /// The profile's `WebKitExtensions` on macOS 15.4 and later, made at first use. It is stored untyped, as a stored property cannot have a type of a newer system.
+    private lazy var webExtensionsObject: AnyObject? = {
+        guard #available(macOS 15.4, *) else { return nil }
+        return WebKitExtensions(context: self)
+    }()
 }
 
 /// The tabs of one context. Cookies use the context's `WKHTTPCookieStore`.
@@ -267,6 +286,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     private var findOrdinal = 0
     /// Set from a dismissed dialog until the navigation the user started finishes loading, so the page cannot hold that navigation with another dialog.
     private(set) var suppressesDialogs = false
+    /// What the profile's web extensions see of the web contents.
+    lazy var extensionTab = WebKitExtensionTab(contents: self)
 
     /// Version and engine tokens a full browser on this system adds to its user agent. `WKWebView` omits them, so some sites send pages for old browsers. The system's WebKit uses the system's version number.
     static let applicationNameForUserAgent: String = {
@@ -284,6 +305,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
         if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
+        if #available(macOS 15.4, *) { webConfiguration.webExtensionController = context.webExtensions?.controller }
         self.userContent = WebKitUserContentController()
         webConfiguration.userContentController = userContent
         self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
@@ -303,7 +325,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
 
-    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller and page scripts.
+    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions.
     init(sessionID: String, parentConfiguration: WKWebViewConfiguration, context: WebKitBrowserContext) {
         guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
             preconditionFailure("WebKit popups come from web views of WebKit web contents")

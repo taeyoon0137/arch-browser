@@ -1,4 +1,4 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the script plugins the user installed, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages script plugins from the files the user chooses and from the files AI writes, installs, updates, and removes them, and switches off a script plugin whose background script fails three times within five minutes.
+// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
 import AppKit
 import ARCHEngine
 import Combine
@@ -6,14 +6,24 @@ import Combine
 /// A plugin the manager knows, with its grant and whether it is enabled.
 public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var id: PluginID { manifest.id }
+    public var kind: PluginKind = .builtIn
     public var manifest: PluginManifest
     public var origin: PluginOrigin = .bundled
+    /// The folder of the installed package; nil for a built-in plugin.
+    public var packageURL: URL?
     public var grant: PluginGrant
     public var isEnabled: Bool
     /// When the user installed the plugin; nil for a built-in plugin.
     public var installedAt: Date?
     /// Why the manager switched the plugin off after repeated failures in this run, which Settings shows until the plugin is switched on again.
     public var failure: String?
+    /// Why the plugin's runtime cannot run it on this Mac, which Settings shows; its contributions stay out meanwhile.
+    public var unavailability: String?
+
+    /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
+    public var accessSummaries: [String] {
+        grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
+    }
 }
 
 @MainActor
@@ -27,12 +37,17 @@ public final class PluginManager: ObservableObject {
     private let directory: URL
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them.
     @Published public private(set) var plugins: [InstalledPlugin] {
-        didSet { contributions = PluginContributionIndex(plugins) }
+        didSet {
+            contributions = PluginContributionIndex(plugins)
+            runEnabledPlugins()
+        }
     }
     @Published public private(set) var contributions: PluginContributionIndex
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
+    /// The runtimes of the installed kinds that the manager does not run itself, which read their packages and run their plugins, by kind.
+    private let runtimes: [PluginKind: any PluginRuntime]
     /// The packages of the installed plugins.
     private var packages: [PluginID: PluginPackage]
     /// The choices `plugins.json` keeps, in the order the user made them, including those for plugins this build does not have.
@@ -57,14 +72,16 @@ public final class PluginManager: ObservableObject {
         var isActive = false
     }
 
-    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package; one whose package or `plugins.json` entry does not read stays in the file but out of the list.
-    public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type]) {
-        self.init(persona: persona, directory: directory, builtIns: builtIns, secretStore: PluginKeychain())
+    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. The runtimes learn the enabled plugins of their kinds at once.
+    public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = []) {
+        self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain())
     }
 
-    init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], secretStore: any PluginSecretStore, scriptLimits: ScriptPluginLimits = .standard) {
+    init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], secretStore: any PluginSecretStore,
+         scriptLimits: ScriptPluginLimits = .standard) {
         self.persona = persona
         self.directory = Self.folder(ofPersona: persona, in: directory)
+        self.runtimes = Dictionary(runtimes.map { ($0.kind, $0) }) { first, _ in first }
         self.secretStore = secretStore
         self.scriptLimits = scriptLimits
         let list = PluginFile.read(PluginListFile.self, at: self.directory.appendingPathComponent(PluginListFile.name))
@@ -80,11 +97,11 @@ public final class PluginManager: ObservableObject {
         var packages: [PluginID: PluginPackage] = [:]
         for case let .readable(install) in installs {
             guard let id = PluginID(rawValue: install.id), types[id] == nil, packages[id] == nil,
-                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin),
+                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin, runtimes: runtimes),
                   package.manifest.id == id else { continue }
             packages[id] = package
-            plugins.append(InstalledPlugin(manifest: package.manifest, origin: install.origin, grant: install.grant.limited(to: package.manifest),
-                                           isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false, installedAt: install.installedAt))
+            plugins.append(Self.installedPlugin(package, grant: install.grant, isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false,
+                                                installedAt: install.installedAt, unavailability: self.runtimes[package.kind]?.unavailability))
         }
         self.plugins = plugins
         self.builtIns = types
@@ -94,6 +111,23 @@ public final class PluginManager: ObservableObject {
         contributions = PluginContributionIndex(plugins)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
+        for runtime in self.runtimes.values {
+            runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: id, failure: reason) }
+        }
+        runEnabledPlugins()
+    }
+
+    /// The installed package as the list shows it, with the part of `grant` that its manifest asks for, and with why its runtime cannot run it, if it cannot.
+    private static func installedPlugin(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, installedAt: Date, unavailability: String?) -> InstalledPlugin {
+        InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, packageURL: package.rootURL, grant: grant.limited(to: package.manifest),
+                        isEnabled: isEnabled, installedAt: installedAt, unavailability: unavailability)
+    }
+
+    /// Tells each runtime the enabled plugins of its kind.
+    private func runEnabledPlugins() {
+        for (kind, runtime) in runtimes {
+            runtime.run(plugins.filter { $0.kind == kind && $0.isEnabled })
+        }
     }
 
     // MARK: Switching plugins on and off
@@ -148,9 +182,10 @@ public final class PluginManager: ObservableObject {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 
-    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one whose identifier `checkInstallable(_:)` refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
+    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one whose identifier `checkInstallable(_:of:)` refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
-        try await stage { root in try PluginPackage.stage(url, at: root) }
+        let runtimes = Array(runtimes.values)
+        return try await stage { root in try PluginPackage.stage(url, at: root, runtimes: runtimes) }
     }
 
     /// Writes the files of a plugin that AI wrote, `plugin.json` among them, at their package paths in the staging folder and reads its package there, as `stage(_:)` does for a folder.
@@ -158,12 +193,12 @@ public final class PluginManager: ObservableObject {
         try await stage { root in try PluginPackage.stage(files, at: root, origin: .generated(composition)) }
     }
 
-    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:)` accepts its identifier.
+    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:of:)` accepts its identifier.
     private func stage(_ make: @escaping @Sendable (URL) throws -> PluginPackage) async throws -> PluginPackage {
         let root = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let package = try await Task.detached { try make(root) }.value
         do {
-            try checkInstallable(package.manifest.id)
+            try checkInstallable(package.manifest.id, of: package.kind)
         } catch {
             discard(package)
             throw error
@@ -171,9 +206,12 @@ public final class PluginManager: ObservableObject {
         return package
     }
 
-    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin may have: a built-in plugin's, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
-    private func checkInstallable(_ id: PluginID) throws {
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    private func checkInstallable(_ id: PluginID, of kind: PluginKind) throws {
         guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
+        if let installed = packages[id], installed.kind != kind {
+            throw PluginError.invalidPackage("An installed plugin of another kind has the identifier \(id.rawValue).")
+        }
         let list = directory.appendingPathComponent(PluginListFile.name)
         guard ![list, PluginFile.unreadableURL(of: list)].contains(where: { $0.lastPathComponent == id.rawValue }) else {
             throw PluginError.invalidPackage("Arch keeps a file named \(id.rawValue) beside the installed plugins, so no plugin can have it as its identifier.")
@@ -189,7 +227,7 @@ public final class PluginManager: ObservableObject {
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says. A package with an installed plugin's identifier updates it: the new package replaces the old one, the plugin keeps its place, storage, and secrets, and its running instance stops, so that its next use starts the new code.
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws {
         let id = package.manifest.id
-        try checkInstallable(id)
+        try checkInstallable(id, of: package.kind)
         let destination = Self.packageFolder(of: id, in: directory)
         let fileManager = FileManager.default
         badges[id] = nil
@@ -202,7 +240,8 @@ public final class PluginManager: ObservableObject {
             try fileManager.moveItem(at: package.rootURL, to: destination)
             installedRoot = destination
         }
-        packages[id] = package.moved(to: installedRoot)
+        let installed = package.moved(to: installedRoot)
+        packages[id] = installed
         let install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date())
         if let index = installs.firstIndex(where: { $0.id == install.id }) {
             installs[index] = .readable(install)
@@ -212,7 +251,7 @@ public final class PluginManager: ObservableObject {
         recordChoice(isEnabled, for: id)
         saveList()
         failures[id] = nil
-        let plugin = InstalledPlugin(manifest: package.manifest, origin: install.origin, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt)
+        let plugin = Self.installedPlugin(installed, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtimes[installed.kind]?.unavailability)
         if let index = plugins.firstIndex(where: { $0.id == id }) {
             plugins[index] = plugin
         } else {
@@ -220,9 +259,9 @@ public final class PluginManager: ObservableObject {
         }
     }
 
-    /// Deletes an installed plugin from the Persona: it stops, and its package, storage, and secrets go. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
+    /// Deletes an installed plugin from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
     public func remove(_ id: PluginID) throws {
-        guard packages[id] != nil else { return }
+        guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil
         stop(id)
         try secrets(for: id).removeAll()
@@ -231,6 +270,7 @@ public final class PluginManager: ObservableObject {
         if FileManager.default.fileExists(atPath: folder.path) {
             try FileManager.default.removeItem(at: folder)
         }
+        runtimes[installed.kind]?.remove(installed)
         packages[id] = nil
         installs.removeAll { $0.id == id.rawValue }
         choices.removeAll { $0.id == id.rawValue }
@@ -367,8 +407,9 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Running plugins
 
+    /// The plugin while it is enabled and its runtime can run it.
     private func enabledPlugin(_ id: PluginID) -> InstalledPlugin? {
-        plugins.first { $0.id == id && $0.isEnabled }
+        plugins.first { $0.id == id && $0.isEnabled && $0.unavailability == nil }
     }
 
     /// The running plugin, started first if needed, or nil when it stopped while it activated. Commands, panels, and page script values that arrive while the plugin activates wait for the same activation, and later ones reach the plugin at once. A failed activation leaves the plugin stopped, so its next use starts it again.
@@ -379,7 +420,7 @@ public final class PluginManager: ObservableObject {
             if existing.isActive { return existing.plugin }
             started = existing
         } else {
-            guard let plugin = makePlugin(installed.id) else { return nil }
+            guard let plugin = makePlugin(installed) else { return nil }
             let context = makeContext(for: installed)
             started = RunningPlugin(plugin: plugin, context: context, activation: Task { try await plugin.activate(in: context) })
             running[installed.id] = started
@@ -397,10 +438,12 @@ public final class PluginManager: ObservableObject {
         return started.plugin
     }
 
-    /// A new instance of the plugin: of its built-in type, or of the script plugin in its package. A script plugin's instance that stops on its own leaves, so that the next use starts a new one, and its failures count towards switching the plugin off.
-    private func makePlugin(_ id: PluginID) -> (any Plugin)? {
+    /// A new instance of the plugin: of its built-in type, of the script plugin in its package, or from its kind's runtime. A script plugin's instance that stops on its own leaves, so that the next use starts a new one, and its failures count towards switching the plugin off.
+    private func makePlugin(_ installed: InstalledPlugin) -> (any Plugin)? {
+        let id = installed.id
         if let type = builtIns[id] { return type.init() }
         guard let package = packages[id] else { return nil }
+        guard package.kind == .script else { return runtimes[package.kind]?.makePlugin(installed) }
         let plugin = ScriptPlugin(package: package, limits: scriptLimits)
         plugin.onStop = { [weak self, weak plugin] reason in
             guard let self, let plugin, running[id]?.plugin === plugin else { return }

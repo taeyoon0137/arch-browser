@@ -15,6 +15,8 @@ public enum TabCloseReason: String {
     case archive
     /// The tab only pointed at a file. It closes once the file's download starts, or at once when restored, since a restored tab does not download the file again.
     case download
+    /// A web extension closed it with `tabs.remove`.
+    case webExtension
 
     var title: String {
         switch self {
@@ -23,6 +25,7 @@ public enum TabCloseReason: String {
         case .crash: return "Crash"
         case .archive: return "Archive"
         case .download: return "Download"
+        case .webExtension: return "Extension"
         }
     }
 
@@ -33,6 +36,7 @@ public enum TabCloseReason: String {
         case .crash: return "Closed by the page after its process quit"
         case .archive: return "Archived after the archive delay"
         case .download: return "Closed because it only pointed at a file"
+        case .webExtension: return "Closed by a web extension"
         }
     }
 }

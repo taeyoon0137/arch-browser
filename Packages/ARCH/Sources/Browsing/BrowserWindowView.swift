@@ -721,8 +721,9 @@ struct AddressPillView: View {
             .accessibilityLabel(host)
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
-                .background(ShareButtonAnchor(windowModel: windowModel))
+                .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
+                .background(SiteControlAnchor(windowModel: windowModel, button: \.siteSettingsButtonView))
                 .padding(.trailing, 4)
                 .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
                     SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
@@ -739,25 +740,39 @@ struct AddressPillView: View {
     }
 }
 
-/// Marks the share button for the picker. The docked sidebar and the floating card each have one; the one that joined the window last is the one on screen.
-struct ShareButtonAnchor: NSViewRepresentable {
+/// Marks one of the address pill's buttons for what points at it: the share button for the share picker, and the site settings button for web extensions' popups. The docked sidebar and the floating card each have one of each; the one that joined the window last is the one on screen.
+struct SiteControlAnchor: NSViewRepresentable {
     let windowModel: BrowserWindowModel
+    /// Where the window keeps the button.
+    let button: ReferenceWritableKeyPath<BrowserWindowModel, NSView?>
 
-    func makeNSView(context: Context) -> AnchorView { AnchorView() }
+    func makeNSView(context: Context) -> AnchorView { AnchorView(button: button) }
 
     func updateNSView(_ view: AnchorView, context: Context) {
         view.windowModel = windowModel
     }
 
     final class AnchorView: NSView {
+        private let button: ReferenceWritableKeyPath<BrowserWindowModel, NSView?>
+
+        init(button: ReferenceWritableKeyPath<BrowserWindowModel, NSView?>) {
+            self.button = button
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("AnchorView is created with its button")
+        }
+
         // Only joining the window registers the view, so an update of the other anchor does not take over.
         weak var windowModel: BrowserWindowModel? {
-            didSet { if oldValue == nil, window != nil { windowModel?.shareButtonView = self } }
+            didSet { if oldValue == nil, window != nil { windowModel?[keyPath: button] = self } }
         }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if window != nil { windowModel?.shareButtonView = self }
+            if window != nil { windowModel?[keyPath: button] = self }
         }
 
         // Clicks go to the button above it.
@@ -818,7 +833,7 @@ private struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
+/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -830,6 +845,9 @@ struct SiteSettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             if let tab {
                 TabEngineSection(session: session, tab: tab)
+                if let webExtensions = session.webExtensions(in: tab.personaID) {
+                    WebExtensionActionsSection(webExtensions: webExtensions, tab: tab, close: close)
+                }
                 SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
                     Button("Clear Site Data\u{2026}") {
                         close()

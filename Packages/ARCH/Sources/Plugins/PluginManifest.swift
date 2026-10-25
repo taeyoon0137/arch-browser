@@ -37,17 +37,37 @@ public struct PluginManifest: Hashable, Sendable {
     public var permissions: Set<PluginPermission>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
     public var sites: [MatchPattern]
+    /// The API permissions of a web extension that no `PluginPermission` stands for, as its manifest names them, such as `storage`. They come with the install, as in other browsers, and the install sheet and Settings list them. Empty for other kinds.
+    public var extensionPermissions: [String]
     public var contributions: PluginContributions
 
-    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [], contributions: PluginContributions) {
+    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [],
+                extensionPermissions: [String] = [], contributions: PluginContributions) {
         self.id = id
         self.name = name
         self.version = version
         self.summary = summary
         self.permissions = permissions
         self.sites = sites
+        self.extensionPermissions = extensionPermissions
         self.contributions = contributions
     }
+
+    /// The extension permissions as the sentence that the install sheet and Settings show, or nil without any.
+    public var extensionPermissionsSummary: String? {
+        guard !extensionPermissions.isEmpty else { return nil }
+        return "Use the extension APIs " + ListFormatter.localizedString(byJoining: extensionPermissions)
+    }
+}
+
+/// How a plugin's code comes and runs.
+public enum PluginKind: String, Hashable, Sendable {
+    /// A Swift type compiled into the app, which runs in the app.
+    case builtIn
+    /// A package with `plugin.json`, whose background script runs in the plugin sandbox.
+    case script
+    /// A Manifest V3 web extension, which runs in an engine's own extension runtime (`PluginRuntime`).
+    case webExtension
 }
 
 /// Where a plugin came from.
@@ -79,12 +99,15 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case tabs
     /// Writing text to the clipboard.
     case clipboard
+    /// Messages to native apps on the Mac that the plugin names. Web extensions only; granting it asks for Touch ID or the login password.
+    case nativeMessaging
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
         switch self {
         case .tabs: return "Read the titles and addresses of your tabs"
         case .clipboard: return "Write text to the clipboard"
+        case .nativeMessaging: return "Exchange messages with apps on this Mac"
         }
     }
 }

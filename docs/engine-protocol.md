@@ -40,7 +40,7 @@
 
 | Capability | Chromium | WebKit |
 |---|---|---|
-| `extensions` (Manifest V3 extensions) | Planned | None |
+| `extensions` (Manifest V3 extensions) | Planned (VI.1) | From macOS 15.4, `EngineBrowserContext.extensions` with one `WKWebExtensionController` per context, which every web view of the context uses. See Web extensions below |
 | `devTools` | CEF's developer tools in a window the adapter reports through `EngineDevTools.window`. The app places it beside the page. A panel cannot be chosen | WebKit's Web Inspector through the private `_inspector` object behind private API flags. It attaches inside the page view, so `window` is nil and `isPlacedByApp` is false. Without the flags, none; the adapter sets `isInspectable` |
 | `pdfController` | Planned | Built-in PDF support |
 | `importSources` | Planned | None |
@@ -51,6 +51,16 @@
 | `pictureInPicture` | System PiP through AVKit using decoded video frames. Requires a patched CEF source build (needs verification) | System PiP through WebKit (AVKit). Users enter PiP from video controls. `closeAllMediaPresentations` exits PiP. No custom code |
 | `sessionRestore`, `contentBlocking` | Planned | The platform supports these features; adapter methods are not yet implemented |
 | `cookies` | The cookie manager of the context's `CefRequestContext`, which is CEF's global context for the default profile: visit, set in batches, delete; no change reports | The context's `WKHTTPCookieStore`, with change reports through `WKHTTPCookieStoreObserver` |
+
+## Web extensions
+
+`EngineExtensions`, an engine's web extensions in one browser context, is shaped by what the app does around an extension, so that each engine that runs them answers the same calls:
+
+- The app hands an extension over as `EngineExtension`: its identifier, which the extension reads as `runtime.id`, its package folder, and the API permissions and match patterns the user granted. `load` replaces a loaded extension with the same identifier and starts its background and content scripts; `unload` stops it and keeps its storage; `removeData(of:)` deletes its storage.
+- `action(of:for:)` reads an extension's action for a tab (label, icon, badge, whether it is enabled), and `performAction(of:for:)` runs it as a click does. An engine answers only for its own web contents.
+- `setWindows(_:focusedWindowID:)` reports the app's windows (`EngineExtensionWindow`: an identity, tabs of any engine in order, the active tab, and the AppKit window that shows it) each time they change. The engine answers extensions' questions about windows and tabs from the last report and tells them what opened, closed, moved to another window, and became active since the report before.
+- `EngineExtensionsDelegate` is the app: it activates and closes tabs, learns that an action changed, shows the popover with an action's popup (on WebKit, `WKWebExtensionAction.popupPopover`, which sizes itself and closes with the popup), asks the user about access requested at run time (`EngineExtensionAccess`: a permission, a site pattern, or a page), and passes native messages and ports (`EngineNativeMessagingPort`) as JSON.
+- WebKit: the controller's configuration follows the context's store (non-persistent, default, or with the store's identifier), and its default data store is the context's. Each web contents is a `WKWebExtensionTab` through an object it keeps for its lifetime, each reported window a `WKWebExtensionWindow` object kept while the window stays. Content scripts run only in pages of a persistent store, since WebKit treats the web views of a non-persistent store as private. `removeStoredData(forStorage:)` also deletes the extension data records of the identifier.
 
 ## Excluded from the protocols
 

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Sample Extension",
+  "version": "1.0",
+  "description": "Marks example.org pages and shows the page its popup opens on.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://example.org/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Show Sample Popup", "default_popup": "popup.html" },
+  "content_scripts": [{ "matches": ["https://example.org/*"], "js": ["content.js"], "run_at": "document_end" }]
+}

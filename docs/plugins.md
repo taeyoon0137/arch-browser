@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-- This note designs Arch's plugin system for queue task V.11 and rows 44 and 50 of `docs/features.md`. It also covers how tasks that build on plugins fit: web extensions on WebKit (IV.12) and on Chromium (VI.1), the password manager plugins (IV.13, row 39), Personas (III.12), AI hooks (VII.6), and plugins that AI writes (VII.7, row 55).
+- This note designs Arch's plugin system for queue task V.11 and rows 44 and 50 of `docs/features.md`. It also covers how the parts that build on plugins fit: web extensions, which run on WebKit and later on Chromium (VI.1), the password manager plugins (IV.13, row 39), Personas (III.12), AI hooks (VII.6), and plugins that AI writes (VII.7, row 55).
 - A plugin can add sidebar items, palette commands, menu items, keyboard shortcuts, settings, panels, and page scripts that run on both engines. Plugins have more capabilities than browser extensions. Each capability uses the app's own interface.
 - Built-in plugins ship with the app. Later features can ship as built-in plugins and reach the browser only through the plugin API.
 - Installed plugins belong to one Persona. Manifest V3 web extensions are one kind of installed plugin.
@@ -22,9 +22,9 @@
 |---|---|---|---|---|
 | `builtIn` | Swift type in an Arch module, conforming to `BuiltInPlugin` | App process, main actor | The app bundle | Present in every Persona; enabled or disabled per Persona |
 | `script` | Arch package: `plugin.json`, HTML, JavaScript, CSS | A hidden `WKWebView` per running plugin; page scripts in the tab's engine | A folder or `.zip` the user chooses, or VII.7 | Installed in one Persona |
-| `webExtension` | Manifest V3 web extension package | `WKWebExtensionController` on WebKit tabs; CEF's extension runtime on Chromium tabs after VI.1 | A folder, `.zip`, or `.crx` file the user chooses | Installed in one Persona |
+| `webExtension` | Manifest V3 web extension package | `WKWebExtensionController` on WebKit tabs; CEF's extension runtime on Chromium tabs after VI.1 | A folder or `.zip` the user chooses; `.crx` files are not read yet | Installed in one Persona |
 
-A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` that has `manifest_version` 3 is a web extension. Arch refuses other folders, manifests with an `apiVersion` higher than the app supports, and manifest keys it does not read (see Keys the script runtime reads).
+A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` is a web extension, which must have `manifest_version` 3. Arch refuses other folders. For script plugins, it refuses manifests with an `apiVersion` higher than the app supports and keys it does not read (see Keys the script runtime reads); a web extension's manifest is read for what Arch shows and grants (see Web extensions as plugins), and the engines read the rest.
 
 ## Package and manifest
 
@@ -165,6 +165,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
 - Granting access to all sites or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table.
+- A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
 - Settings ▸ Plugins lists each grant and revokes any part of it. Calls that need a revoked permission get `permissionDenied`. Contributions that need it are hidden.
 - An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
 - Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other. Settings shows the grant, and the user can switch the plugin off.
@@ -195,7 +196,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `failed` | Disabled by the host after repeated failures, with the reason |
 | `unavailable` | Cannot run on this system or engine, with the reason, such as a web extension below macOS 15.4 |
 
-1. Stage: the user chooses a folder or archive with `NSOpenPanel` in Settings ▸ Plugins, or the composer (VII.7) hands over the files that AI wrote. Arch copies the folder, or writes the files, to `Staging/<UUID>/` in the Persona's folder, off the main thread, reads and validates the manifest, and lists the files. `ditto` extracts an archive and keeps every entry inside the destination; the package is the archive's top level or its only folder. A package that is or holds a symbolic link is refused, since a link could lead to files outside it, and so is one with a built-in plugin's identifier, or with `plugins.json` or `plugins.unreadable.json` as its identifier, since its folder would take that file's name in the Persona's folder. Nothing in the package runs before the user installs it. The manager clears `Staging/` when it starts.
+1. Stage: the user chooses a folder or archive with `NSOpenPanel` in Settings ▸ Plugins, or the composer (VII.7) hands over the files that AI wrote. Arch copies the folder, or writes the files, to `Staging/<UUID>/` in the Persona's folder, off the main thread, tells its kind by its manifest file, reads and validates the manifest through the kind's runtime for a kind other than script plugins, and lists the files. An update of an installed plugin must be of the same kind. `ditto` extracts an archive and keeps every entry inside the destination; the package is the archive's top level or its only folder. A package that is or holds a symbolic link is refused, since a link could lead to files outside it, and so is one with a built-in plugin's identifier, or with `plugins.json` or `plugins.unreadable.json` as its identifier, since its folder would take that file's name in the Persona's folder. Nothing in the package runs before the user installs it. The manager clears `Staging/` when it starts.
 2. Review: the install sheet shows the name, version, origin, permissions, sites, and files. For a plugin that AI wrote it also shows the requests it came from and every file's source, and offers Ask for Changes (`docs/ai.md`, Features that AI adds at run time).
 3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable. Cancel deletes the staged package.
 4. Enable: Arch registers the contributions, adds the page scripts to the Persona's tabs from their next load, and sends `activate` when the background first starts.
@@ -220,7 +221,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}], "installed": [{"id": "<plugin id>", "source": "file:///…/Sample.zip", "grant": {"permissions": ["clipboard"], "sites": ["https://example.org/*"]}, "installedAt": 814595493.0}]}`. A plugin that AI wrote has `"generated": {"requests": ["…"], "model": "…"}` in place of `source`: the request and each change the user asked for, and the model that wrote its last version as Settings ▸ AI named it. The choices are in the order the user made them; a new choice for a plugin replaces its old one. A built-in plugin without a choice follows `BuiltInPlugin.isOnByDefault`, and an installed one is off. The installs are in the order the user installed the plugins; an update keeps its place. `installedAt` is the default `Date` encoding, seconds since 2001. The manifest stays in the package, so the grant cannot drift from it: the manager limits the recorded grant to what the package's manifest asks for. Each choice, install, and removal writes the file at once. An install entry that this build cannot read, such as one whose grant holds a permission that a newer build added, stays in the file as it is and out of the list; installing a plugin with its identifier replaces it. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
 - Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing file counts as empty. A file that does not decode moves to `storage.unreadable.json`, replacing an older one, and the plugin starts empty, so its first change does not overwrite the old data. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
 - Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`, accessible when unlocked and not synchronizable, in the login keychain as the AI module's keys are. Settings ▸ Plugins shows only whether a secret is saved, which it reads without the secret, so macOS does not ask for the keychain password. Removing a plugin deletes the service's items whose accounts start with `<persona id>/`, which it finds by their attributes alone. A deleted Persona's items go at the next launch (see Personas).
-- Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
+- Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration, the default one for the default Persona and the one with the Persona's identifier for any other, in `~/Library/WebKit/<bundle identifier>/WebExtensions/`; Chromium will keep it in the Persona's CEF cache path. Removing an extension deletes its storage records in the engines that run in the Persona, which start for it, and deleting a Persona deletes its extensions' records at the next launch. WebKit keeps a small state file for each extension it loaded, which no public API removes.
 - Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
 
 ## Personas
@@ -233,22 +234,27 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 ## Web extensions as plugins
 
-The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesizes a `PluginManifest` from `manifest.json` and runs the extension in each engine's runtime.
+The `Extensions` module turns a web extension into a plugin of the `webExtension` kind. `WebExtensionRuntime`, one per Persona, is the kind's `PluginRuntime`: it reads `manifest.json` into a `PluginManifest` without any engine, so that one install serves every engine, and loads each enabled extension into the Persona's profiles in the engines that run extensions, through their `EngineExtensions` (`docs/engine-protocol.md`, Tier 2).
 
 | Extension feature | Plugin contribution or permission |
 |---|---|
-| `action` | An item in the site settings popover (IV.12) and a palette command with the extension's name. The popup shows in Arch's own popover on both engines |
-| `commands` | Commands with their suggested shortcuts |
-| `options_ui` or `options_page` | A settings page entry that opens the options page in a sheet |
-| `permissions` and `host_permissions` | The install sheet's permissions and sites; requests at run time show Arch's own sheet |
-| `content_scripts` | Run by the engine's extension runtime, not by Arch's page scripts |
-| `nativeMessaging` | Arch relays messages to the native helper (see below) |
+| `name`, `version`, `description` | The plugin's name, version, and summary. A whole `__MSG_<name>__` text comes from `_locales/<locale>/messages.json` in the user's preferred languages, then the default locale |
+| `action` | An item in the site settings popover with the action's icon, label, and badge for the tab, and an `action` command, titled with its default title or the extension's name, which the palette lists. The popup shows in a popover from the site settings button |
+| `permissions` | `tabs`, `clipboardWrite`, and `nativeMessaging` as Arch's permissions; the others as `extensionPermissions`, which come with the install |
+| `host_permissions` and `content_scripts[].matches` | The install sheet's sites, each with a switch. Patterns that Arch's match patterns cannot hold, such as `file:///*` or one with a port, are left out |
+| Requests at run time (`permissions.request` and the access WebKit asks about) | Arch's own sheet on the tab, in the install sheet's sentences; sites other than web pages are never granted, and every website or native apps need Touch ID or the login password. The answer lasts while the extension stays loaded |
+| `content_scripts`, `background` | Run by the engine's extension runtime, not by Arch's page scripts |
+| `nativeMessaging` | Arch relays messages to the native app (see below) |
+| `commands`, `options_ui` or `options_page` | Not built yet: commands with their suggested shortcuts, and a settings page entry that opens the options page in a sheet |
 
-- WebKit: one `WKWebExtensionController` per Persona, made with `WKWebExtensionController.Configuration(identifier:)` and the Persona's identifier, and set as each WebKit tab's `webExtensionController`. Arch adapts its tabs and windows to `WKWebExtensionTab` and `WKWebExtensionWindow`. It handles permission prompts, action popups, and options pages from the controller's delegate with its own sheets and popovers. Requires macOS 15.4; below it, web extension plugins are `unavailable`.
-- Chromium: after VI.1, CEF's extension runtime loads the same package into the Persona's `CefRequestContext` (needs verification). Until then, an extension runs on WebKit tabs only, and its contributions say so on Chromium tabs.
-- One install, two runtimes: each engine runs its own copy of the extension with its own background and storage. An extension's state, such as a password manager's lock, is not shared between engines. Each copy lists its own engine's tabs. Whether WebKit can list Chromium tabs as tabs without a web view needs verification.
-- Identifier: Arch uses one extension identifier for both engines. It takes the identifier from the package's public key if present; otherwise, it generates one at install. WebKit receives it as the context's `uniqueIdentifier` (needs verification for helpers that check the calling extension's origin).
-- Native messaging: Arch answers `webExtensionController(_:sendMessage:toApplicationWithIdentifier:for:)` and the matching port call on WebKit. It finds the helper through a host manifest in `~/Library/Application Support/Arch/NativeMessagingHosts/`, starts it with `Process`, and exchanges length-prefixed JSON over its standard input and output. Chromium's runtime does its own native messaging after VI.1. Whether the vendors' helpers install host manifests for Arch needs verification in IV.13.
+- Refusals: `PluginError.invalidPackage` with a sentence that names the field, for invalid JSON, a `manifest_version` other than 3, a missing `name` or `version`, a `key` that is not Base64 text, and a message that the default locale lacks.
+- Identifier: Arch uses Chromium's identifier, the first 128 bits of the SHA-256 digest of the public key in the manifest's `key`, each hexadecimal digit written as a letter from `a` to `p`, so each engine knows the extension alike. Without a key, the digest is of the path the user installs from, as Chromium names an unpacked extension, so installing from the same place again is an update. The plugin identifier is `extension.<identifier>`. WebKit receives the identifier as the context's `uniqueIdentifier` and the base URL `webkit-extension://<identifier>/`, so the extension's storage lasts across launches.
+- Loading: each change to the engines waits for the one before. An extension loads with the API permissions its grant covers, those that come with the install, and its granted sites; one whose install changed loads again; one switched off or removed unloads, and a removal also deletes its storage in the engines; an extension that an engine cannot start leaves every engine, and the manager switches it off with why. The plugin's instance runs the action on its invocation's tab and fails, so the manager beeps, without a tab whose engine runs the extension.
+- WebKit: one `WKWebExtensionController` per Persona's profile, which every web view of the profile uses (macOS 15.4 and later; below it, web extension plugins are `unavailable`). Its tabs are the profile's web contents and its windows the windows the app reports. Each space of the Persona is a window: its tabs in sidebar order, after the open favorites' tabs that a window shows on it (a favorite's tab that no window shows is in the Persona's first space), then the tabs of the space that small windows show; its active tab is the one a window shows there, or else the one selected last; and the space of the window that last became main is the focused window when it is the Persona's. An extension's `tabs.update` with `active` selects a tab, and `tabs.remove` closes it into the closed list. Content scripts run only in pages of a persistent store, since WebKit treats the web views of a non-persistent store as private.
+- Chromium: after VI.1, CEF's extension runtime loads the same package into the Persona's `CefRequestContext` (needs verification). Until then, an extension runs on WebKit tabs only: its row in the site settings popover is dimmed on a Chromium tab with a note that says so, and its palette command beeps there.
+- One install, two runtimes: each engine runs its own copy of the extension with its own background and storage. An extension's state, such as a password manager's lock, is not shared between engines. Each copy lists its own engine's tabs only.
+- Native messaging: Arch answers `webExtensionController(_:sendMessage:toApplicationWithIdentifier:for:replyHandler:)` and `webExtensionController(_:connectUsing:for:completionHandler:)` on WebKit for an extension whose grant has `nativeMessaging`. It finds the app through its host manifest in Chromium's format, `<name>.json` in `~/Library/Application Support/Arch/NativeMessagingHosts/`, whose `name` matches, whose `type` is `stdio`, whose `path` is absolute, and whose `allowed_origins` lists `chrome-extension://<identifier>/`; a name is dot-separated runs of lowercase letters, digits, and `_`, so it cannot lead out of the folder. Arch starts the app with that origin as its argument and exchanges messages over its standard input and output, each a 32-bit length in the Mac's byte order followed by UTF-8 JSON, up to 1 MB from the app. A single message ends the app after its first reply; a port lasts until the extension or the app ends it. Chromium's runtime does its own native messaging after VI.1. Whether the vendors' apps install host manifests for Arch needs verification in IV.13.
+- Not built yet: options pages, `commands`, tabs and windows that extensions open with `tabs.create` or `windows.create`, extension pages in tabs, `.crx` files, and grants made at run time that last across launches.
 
 ## Password manager plugins
 
@@ -270,7 +276,7 @@ The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesi
 
 ## Swift API
 
-The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine` and on `AI`, through which the composer writes plugins. `Browsing` and `Preferences` depend on it to show contributions. `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements. This avoids a dependency loop. `Extensions` (IV.12) depends on `Plugins` and supplies the web extension runtime. All types below are public.
+The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine` and on `AI`, through which the composer writes plugins. `Browsing` and `Preferences` depend on it to show contributions. `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements. This avoids a dependency loop. `Extensions` depends on `ARCHEngine` and `Plugins` and supplies the web extension runtime, which `Browsing` makes for each Persona; it reaches the Persona's engines, tabs, and windows through `WebExtensionHost`, which `Browsing` implements. All types below are public.
 
 ### Identity and manifest
 
@@ -283,7 +289,7 @@ public struct PluginID: RawRepresentable, Hashable, Codable, Sendable {
     public init?(rawValue: String)
 }
 
-public enum PluginKind: String, Codable, Sendable {
+public enum PluginKind: String, Hashable, Sendable {
     case builtIn, script, webExtension
 }
 
@@ -308,10 +314,11 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     public var name: String
     public var version: String
     public var summary: String
-    public var kind: PluginKind
     public var apiVersion: Int
     public var permissions: Set<PluginPermission>
     public var sites: [MatchPattern]
+    /// A web extension's API permissions that no `PluginPermission` stands for, such as `storage`, which come with its install. The package and the installed plugin carry the kind.
+    public var extensionPermissions: [String]
     public var siteAccess: SiteAccess
     public var network: [String]
     public var events: Set<PluginEventKind>
@@ -658,18 +665,26 @@ public enum PluginError: Error, Hashable, Sendable {
 ```swift
 public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var id: PluginID { manifest.id }
+    public var kind: PluginKind
     public var manifest: PluginManifest
     public var origin: PluginOrigin
+    /// The folder of the installed package; nil for a built-in plugin.
+    public var packageURL: URL?
     public var grant: PluginGrant
     public var isEnabled: Bool
     /// nil for a built-in plugin.
     public var installedAt: Date?
-    /// Why the manager switched the plugin off after repeated failures in this run, which Settings shows. IV.12 adds why a web extension is unavailable.
+    /// Why the manager switched the plugin off in this run, after repeated failures or because its runtime could not start it, which Settings shows.
     public var failure: String?
+    /// Why the plugin's runtime cannot run it on this Mac, such as a web extension below macOS 15.4. Its contributions stay out meanwhile.
+    public var unavailability: String?
+    /// The grant's sentences, then a web extension's other API permissions.
+    public var accessSummaries: [String] { get }
 }
 
 /// A validated package, staged for the review sheet or installed.
 public struct PluginPackage: Identifiable, Sendable {
+    public let kind: PluginKind
     public let manifest: PluginManifest
     public let rootURL: URL
     /// The folder or archive the user chose, or how AI wrote the package.
@@ -715,13 +730,23 @@ public struct PluginContributionIndex: Sendable {
     public var pageScripts: [EnginePageScript] { get }
 }
 
-/// Runs installed plugins of one kind in one Persona. `Plugins` provides the script runtime; `Extensions` provides the web extension runtime. While the script runtime is the only one, the manager makes script plugins itself; IV.12 adds this protocol with the second runtime.
+/// Runs the installed plugins of one kind that the manager does not run itself in one Persona; the manager runs built-in and script plugins. `Extensions` provides the web extension runtime.
 @MainActor
-public protocol PluginRuntime: AnyObject {
-    var kind: PluginKind { get }
-    /// Reads a staged folder of this kind into a manifest.
-    func manifest(forPackageAt url: URL) throws -> PluginManifest
-    func makePlugin(_ installed: InstalledPlugin, packageURL: URL) throws -> any Plugin
+public protocol PluginRuntime: AnyObject, Sendable {
+    nonisolated var kind: PluginKind { get }
+    /// The file at the top of a package of the kind, such as `manifest.json`, by which staging tells a package's kind.
+    nonisolated var manifestFileName: String { get }
+    /// Reads a staged or installed package of this kind into a manifest, off the main thread, without running any of it.
+    nonisolated func manifest(forPackageAt root: URL, source: URL) throws -> PluginManifest
+    /// Why plugins of the kind cannot run on this Mac, or nil.
+    var unavailability: String? { get }
+    /// Set by the manager, which switches off a plugin that the runtime cannot start, with why.
+    var onFailure: ((PluginID, String) -> Void)? { get set }
+    /// The enabled plugins of the kind, each time they change, so that the runtime runs what they run without a command.
+    func run(_ enabled: [InstalledPlugin])
+    func makePlugin(_ installed: InstalledPlugin) -> any Plugin
+    /// Deletes what the runtime keeps of a removed plugin.
+    func remove(_ installed: InstalledPlugin)
 }
 
 /// What `Browsing` provides so that plugins can act on tabs without `Plugins` depending on `Browsing`.
@@ -745,7 +770,7 @@ public final class PluginManager: ObservableObject {
 
     /// `directory` is the app's Application Support folder; the Persona's plugins live in `Plugins/<persona id>/` inside it.
     public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type],
-                runtimes: [any PluginRuntime], browser: any PluginBrowserHost)
+                runtimes: [any PluginRuntime] = [], browser: any PluginBrowserHost)
 
     /// Reads `plugins.json` and registers built-in plugins. Starts no installed code.
     public func load() throws
@@ -786,6 +811,43 @@ public final class PluginManager: ObservableObject {
     public func hasSecret(_ setting: PluginSetting, for id: PluginID) throws -> Bool
     /// nil deletes the Keychain item.
     public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) throws
+}
+```
+
+### Web extension runtime
+
+```swift
+/// What `Browsing` provides so that a Persona's web extensions reach its engines, tabs, and windows.
+@MainActor
+public protocol WebExtensionHost: AnyObject {
+    /// The Persona's profiles in the engines that run web extensions, which the host starts if they have not started.
+    func extensionEngines(in persona: PersonaID) -> [any EngineExtensions]
+    func webContents(ofTab id: UUID) -> (any EngineWebContents)?
+    func activate(_ tab: any EngineWebContents)
+    func close(_ tab: any EngineWebContents)
+    /// Shows an action's popover from the site settings button of the window that shows the tab. False when no window shows it.
+    func present(_ popup: NSPopover, for tab: (any EngineWebContents)?) -> Bool
+    func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
+}
+
+/// The web extensions of one Persona: the `webExtension` kind's runtime and the engines' extension delegate.
+@MainActor
+public final class WebExtensionRuntime: ObservableObject, PluginRuntime, EngineExtensionsDelegate {
+    /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach.
+    public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL)
+    /// The Persona's windows and the focused one, each time they change.
+    public func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?)
+    /// The actions of the enabled extensions that have one, for the site settings popover.
+    public func actions(for tab: any EngineWebContents) -> [WebExtensionActionItem]
+    /// False when no engine runs the extension for the tab.
+    @discardableResult public func performAction(of id: PluginID, for tab: any EngineWebContents) -> Bool
+}
+
+public struct WebExtensionActionItem: Identifiable {
+    public let id: PluginID
+    public let name: String
+    /// Nil while the tab's engine does not run the extension or before it loaded.
+    public let action: EngineExtensionAction?
 }
 ```
 
@@ -863,7 +925,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 2. Menus, shortcuts, sidebar items, panels for built-in plugins, and Settings ▸ Plugins in `Preferences`.
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
-5. IV.12 builds the web extension runtime on WebKit as a `PluginRuntime`; VI.1 adds Chromium; IV.13 follows both.
+5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; VI.1 adds Chromium; IV.13 follows both.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
 
 ## Open decisions
@@ -871,7 +933,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - Isolation on Chromium: plugin page scripts share the page's main world until a CEF patch adds isolated worlds. The alternative is to run plugin page scripts on WebKit tabs only.
 - Sandbox for script plugins: a hidden `WKWebView` per running plugin costs a web content process each. JavaScriptCore in the app process would cost less. It provides no process isolation, and its execution time limit is private API.
 - One extension, two runtimes: each engine keeps its own copy of an extension's state and storage, so the user may unlock a password manager once per engine.
-- Install sources: folders, `.zip`, and `.crx` files only. No direct installs from an online store.
+- Install sources: folders, `.zip`, and `.crx` files only, of which `.crx` files are not read yet. No direct installs from an online store.
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
 - Site access defaults to `whenInvoked` when a manifest asks for all sites.
 - The 10-second hang limit, 30-second idle stop, and 5 MB storage limit are starting values.

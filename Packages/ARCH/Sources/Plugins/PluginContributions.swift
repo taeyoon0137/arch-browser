@@ -241,10 +241,10 @@ public struct PluginContributionIndex: Sendable {
         let entry: PluginMenuEntry
     }
 
-    /// Menu items and sidebar items whose commands the manifest does not list are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
+    /// The plugins that are enabled and that their runtimes can run contribute. Menu items and sidebar items whose commands the manifest does not list are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
     @MainActor
     init(_ plugins: [InstalledPlugin]) {
-        let enabled = plugins.filter(\.isEnabled)
+        let enabled = plugins.filter { $0.isEnabled && $0.unavailability == nil }
         commands = enabled.flatMap { plugin in plugin.manifest.contributions.commands.map { plugin.attributed($0) } }
         menuItems = enabled.flatMap { plugin in
             let contributions = plugin.manifest.contributions

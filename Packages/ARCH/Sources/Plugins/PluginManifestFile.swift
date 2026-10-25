@@ -4,13 +4,15 @@ import Foundation
 
 /// What a package's `plugin.json` declares.
 struct ScriptManifest {
+    static let fileName = "plugin.json"
+
     let manifest: PluginManifest
     /// The package path of the background script, which commands and page script values reach. A plugin without one adds only page scripts and settings.
     let background: String?
 
     /// Reads `plugin.json` in the package folder at `root`. Throws `PluginError.unsupportedAPIVersion` for a newer plugin API, and `.invalidPackage`, `.invalidMatchPattern`, or `.invalidShortcut` for a manifest that breaks the rules of `docs/plugins.md`.
     init(packageAt root: URL) throws {
-        guard let data = try? Data(contentsOf: root.appendingPathComponent("plugin.json")) else {
+        guard let data = try? Data(contentsOf: root.appendingPathComponent(Self.fileName)) else {
             throw PluginError.invalidPackage("The package has no plugin.json at its top level.")
         }
         guard let json = try? JSONDecoder().decode(PluginValue.self, from: data) else {
@@ -27,6 +29,7 @@ struct ScriptManifest {
         let summary = try object.string("summary")
         let permissions = try object.strings("permissions").map { name in
             guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
+            guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
             return permission
         }
         let sites = try object.strings("sites").map(MatchPattern.init)

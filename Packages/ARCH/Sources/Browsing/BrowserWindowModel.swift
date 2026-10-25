@@ -924,10 +924,12 @@ public final class BrowserWindowModel: ObservableObject {
         session.enqueueSheet(alert, for: tab) { _ in }
     }
 
-    // MARK: Sharing
+    // MARK: Sharing and site controls
 
     /// The share button in the address pill, set when it joins the window.
     weak var shareButtonView: NSView?
+    /// The site settings button in the address pill, which web extensions' popups point at, set when it joins the window.
+    weak var siteSettingsButtonView: NSView?
     /// The picker holds its delegate weakly, so the last one stays here until the next share.
     private var sharePicker: PageSharePicker?
 
@@ -936,16 +938,20 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Shows the system share picker for the selected tab's address and title, below the share button, or from the top of the window while the sidebar or the library hides the button.
     public func shareSelectedPage() {
-        guard !isSelectedPageCovered, let tab = selectedTab, let url = tab.url else { return }
+        guard !isSelectedPageCovered, let tab = selectedTab, let url = tab.url, let anchor = siteControlAnchor(shareButtonView) else { return }
         let picker = PageSharePicker(url: url, title: tab.pageTitle, icon: tab.favicon)
         sharePicker = picker
-        if let button = shareButtonView, button.window != nil, !isLibraryVisible {
-            picker.show(relativeTo: button.bounds, of: button, preferredEdge: button.isFlipped ? .maxY : .minY)
-        } else if let content = nsWindow?.contentView {
-            let bounds = content.bounds
-            let top = NSRect(x: bounds.midX, y: content.isFlipped ? bounds.minY : bounds.maxY - 1, width: 1, height: 1)
-            picker.show(relativeTo: top, of: content, preferredEdge: content.isFlipped ? .maxY : .minY)
+        picker.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.edge)
+    }
+
+    /// Where a picker or popover for one of the address pill's buttons points: below `button`, or below the top of the window's content while the sidebar or the library hides it. Nil before the window has content.
+    func siteControlAnchor(_ button: NSView?) -> (view: NSView, rect: NSRect, edge: NSRectEdge)? {
+        if let button, button.window != nil, !isLibraryVisible {
+            return (button, button.bounds, button.isFlipped ? .maxY : .minY)
         }
+        guard let content = nsWindow?.contentView else { return nil }
+        let bounds = content.bounds
+        return (content, NSRect(x: bounds.midX, y: content.isFlipped ? bounds.minY : bounds.maxY - 1, width: 1, height: 1), content.isFlipped ? .maxY : .minY)
     }
 
     // MARK: Tab switcher

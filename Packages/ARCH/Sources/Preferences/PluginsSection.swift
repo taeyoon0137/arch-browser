@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
 import AI
 import Browsing
 import Plugins
@@ -52,7 +52,7 @@ private struct PluginList: View {
 
     var body: some View {
         Section {
-            LabeledContent("Install a plugin from a folder or a .zip archive") {
+            LabeledContent("Install a plugin or a web extension from a folder or a .zip archive") {
                 Button("Install Plugin…", action: choosePackage)
             }
             if AIService.shared.isAvailable(.pluginComposer) {
@@ -101,7 +101,7 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. The footer says where the plugin came from and why the manager switched it off, if it did.
+/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. The footer says where the plugin came from, where a web extension runs, why the plugin cannot run on this Mac, if it cannot, and why the manager switched it off, if it did.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -118,7 +118,7 @@ private struct PluginSection: View {
                 Text(plugin.manifest.summary)
             }
             LabeledContent("Access") {
-                let summaries = plugin.grant.summaries
+                let summaries = plugin.accessSummaries
                 Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
                     .multilineTextAlignment(.trailing)
             }
@@ -142,6 +142,14 @@ private struct PluginSection: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Version \(plugin.manifest.version), \(origin).")
                     .foregroundStyle(.secondary)
+                if let note = plugin.kind.note {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                }
+                if let reason = plugin.unavailability {
+                    Text(reason)
+                        .foregroundStyle(.red)
+                }
                 if let reason = plugin.failure {
                     Text(reason)
                         .foregroundStyle(.red)
@@ -273,6 +281,13 @@ private struct PluginSecretRow<Title: View>: View {
         } catch {
             onFailure(error)
         }
+    }
+}
+
+extension PluginKind {
+    /// What Settings and the install sheet say about plugins of the kind, if anything.
+    var note: String? {
+        self == .webExtension ? "A web extension, which runs on WebKit tabs." : nil
     }
 }
 

@@ -59,6 +59,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             ("unread key", ["plugin.json": manifest + #", "events": ["pageLoaded"]}"#], .invalidPackage("plugin.json: events is not a field Arch reads.")),
             ("unknown permission", ["plugin.json": manifest + #", "permissions": ["notifications"]}"#],
              .invalidPackage("plugin.json: permissions lists “notifications”, which Arch does not grant.")),
+            ("native messaging", ["plugin.json": manifest + #", "permissions": ["nativeMessaging"]}"#],
+             .invalidPackage("plugin.json: permissions lists “nativeMessaging”, which only web extensions may ask for.")),
             ("command without background", ["plugin.json": manifest + #", "contributes": {"commands": [{"id": "a", "title": "A"}]}}"#],
              .invalidPackage("plugin.json: commands need a background script.")),
             ("missing background", ["plugin.json": manifest + #", "background": "missing.js"}"#],

@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website asks for Touch ID or the login password.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password.
 import LocalAuthentication
 import Plugins
 import SwiftUI
@@ -34,6 +34,10 @@ struct PluginInstallSheet: View {
                     .font(.headline)
                 Text("Version \(manifest.version) \(origin). \(manifest.summary)")
                     .foregroundStyle(.secondary)
+                if let note = package.kind.note {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                }
             }
             Form {
                 if let composition {
@@ -43,11 +47,14 @@ struct PluginInstallSheet: View {
                 }
                 Section("Access") {
                     let permissions = PluginPermission.allCases.filter(manifest.permissions.contains)
-                    if permissions.isEmpty && manifest.sites.isEmpty {
+                    if permissions.isEmpty && manifest.sites.isEmpty && manifest.extensionPermissions.isEmpty {
                         Text("None")
                     }
                     ForEach(permissions, id: \.self) { permission in
                         RequestRow(text: permission.summary, isNew: installed.map { !$0.manifest.permissions.contains(permission) } ?? false)
+                    }
+                    if let summary = manifest.extensionPermissionsSummary {
+                        RequestRow(text: summary, isNew: installed.map { !Set(manifest.extensionPermissions).isSubset(of: $0.manifest.extensionPermissions) } ?? false)
                     }
                     ForEach(manifest.sites, id: \.self) { site in
                         Toggle(isOn: Binding(get: { sites.contains(site) }, set: { if $0 { sites.insert(site) } else { sites.remove(site) } })) {
@@ -118,12 +125,14 @@ struct PluginInstallSheet: View {
         }
     }
 
-    /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website.
+    /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website or of native apps.
     private func install(isEnabled: Bool) {
         let grant = PluginGrant(permissions: package.manifest.permissions, sites: package.manifest.sites.filter(sites.contains))
+        let confirmations = [grant.sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
+                             grant.permissions.contains(.nativeMessaging) ? "exchange messages with apps on this Mac" : nil].compactMap { $0 }
         Task {
-            if grant.sites.contains(where: \.coversEverySite) {
-                guard await Self.authorize("let “\(package.manifest.name)” run scripts on every website") else { return }
+            if !confirmations.isEmpty {
+                guard await Self.authorize("let “\(package.manifest.name)” \(confirmations.joined(separator: " and "))") else { return }
             }
             do {
                 try plugins.install(package, grant: grant, isEnabled: isEnabled)

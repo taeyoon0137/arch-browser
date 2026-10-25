@@ -1,27 +1,36 @@
-// Script plugin packages: a folder with `plugin.json` at its top, which the user chooses as the folder or as a `.zip` archive, or whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, and moves it into the Persona's plugin folder when the user installs it.
+// Plugin packages: a folder with `plugin.json` at its top for a script plugin, or with the manifest file of a runtime's kind, such as a web extension's `manifest.json`, which the user chooses as the folder or as a `.zip` archive, or a script plugin's folder whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, and moves it into the Persona's plugin folder when the user installs it.
 import Foundation
 
-/// A script plugin's package, with its manifest read and checked: staged for review, or installed.
+/// A plugin's package, with its manifest read and checked: staged for review, or installed.
 public struct PluginPackage: Identifiable, Sendable {
     public var id: URL { rootURL }
+    public let kind: PluginKind
     public let manifest: PluginManifest
-    /// The folder that holds `plugin.json`.
+    /// The folder that holds the manifest.
     public let rootURL: URL
     /// The folder or archive the user chose, or how AI wrote the package.
     public let origin: PluginOrigin
     /// The package paths of the package's files, such as `scripts/count.js`, in ascending order, as the install sheet lists them.
     public let files: [String]
-    /// The package path of the background script, if the plugin has one.
+    /// The package path of a script plugin's background script, if it has one.
     let background: String?
 
-    /// Reads the package at `root`. Throws as `ScriptManifest(packageAt:)` does, and `PluginError.invalidPackage` for a package that is or holds a symbolic link, which could lead to files outside it.
-    init(at root: URL, origin: PluginOrigin) throws {
+    /// Reads the package at `root`: a script plugin's when `plugin.json` is at its top, else, for a folder or archive the user chose, the package of the runtime whose manifest file is there. Throws as `ScriptManifest(packageAt:)` or the runtime does, and `PluginError.invalidPackage` for a package of no kind that Arch runs and for one that is or holds a symbolic link, which could lead to files outside it.
+    init(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = []) throws {
         let files = try Self.files(in: root)
-        let declared = try ScriptManifest(packageAt: root)
-        self.init(manifest: declared.manifest, rootURL: root, origin: origin, files: files, background: declared.background)
+        if FileManager.default.fileExists(atPath: root.appendingPathComponent(ScriptManifest.fileName).path) {
+            let declared = try ScriptManifest(packageAt: root)
+            self.init(kind: .script, manifest: declared.manifest, rootURL: root, origin: origin, files: files, background: declared.background)
+        } else if case let .file(source) = origin,
+                  let runtime = runtimes.first(where: { FileManager.default.fileExists(atPath: root.appendingPathComponent($0.manifestFileName).path) }) {
+            self.init(kind: runtime.kind, manifest: try runtime.manifest(forPackageAt: root, source: source.absoluteURL), rootURL: root, origin: origin, files: files, background: nil)
+        } else {
+            throw PluginError.invalidPackage("The package has no \(Self.manifestFiles(runtimes).joined(separator: " or ")) at its top level.")
+        }
     }
 
-    private init(manifest: PluginManifest, rootURL: URL, origin: PluginOrigin, files: [String], background: String?) {
+    private init(kind: PluginKind, manifest: PluginManifest, rootURL: URL, origin: PluginOrigin, files: [String], background: String?) {
+        self.kind = kind
         self.manifest = manifest
         self.rootURL = rootURL
         self.origin = origin
@@ -31,7 +40,7 @@ public struct PluginPackage: Identifiable, Sendable {
 
     /// The package once its folder has moved to `root`.
     func moved(to root: URL) -> PluginPackage {
-        PluginPackage(manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
+        PluginPackage(kind: kind, manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
     }
 
     /// The text of the file at a package path, as the review shows it. Nil for a path that names no file of the package, and for a file that is not UTF-8 text.
@@ -39,13 +48,18 @@ public struct PluginPackage: Identifiable, Sendable {
         Self.file(path, in: rootURL).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
     }
 
-    /// Copies the folder at `source`, or extracts the `.zip` archive there, to `root`, which must not exist yet, and reads the package. An archive's package is its top level or its only top folder, as an archive of a package folder has. A failure leaves nothing at `root`.
-    static func stage(_ source: URL, at root: URL) throws -> PluginPackage {
-        try stage(at: root, origin: .file(source.absoluteURL)) {
+    /// The manifest files that tell a package's kind: `plugin.json`, then the runtimes'.
+    private static func manifestFiles(_ runtimes: [any PluginRuntime]) -> [String] {
+        [ScriptManifest.fileName] + runtimes.map(\.manifestFileName)
+    }
+
+    /// Copies the folder at `source`, or extracts the `.zip` archive there, to `root`, which must not exist yet, and reads the package as `init(at:origin:runtimes:)` does. An archive's package is its top level or its only top folder, as an archive of a package folder has. A failure leaves nothing at `root`.
+    static func stage(_ source: URL, at root: URL, runtimes: [any PluginRuntime] = []) throws -> PluginPackage {
+        try stage(at: root, origin: .file(source.absoluteURL), runtimes: runtimes) {
             if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                 try FileManager.default.copyItem(at: source, to: root)
             } else {
-                try extractArchive(source, to: root)
+                try extractArchive(source, to: root, runtimes: runtimes)
             }
         }
     }
@@ -63,12 +77,12 @@ public struct PluginPackage: Identifiable, Sendable {
         }
     }
 
-    /// Has `fill` create the folder at `root`, then reads the package there. When either fails, it removes what `fill` left.
-    private static func stage(at root: URL, origin: PluginOrigin, filling fill: () throws -> Void) throws -> PluginPackage {
+    /// Has `fill` create the folder at `root`, then reads the package there as `init(at:origin:runtimes:)` does. When either fails, it removes what `fill` left.
+    private static func stage(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = [], filling fill: () throws -> Void) throws -> PluginPackage {
         try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
             try fill()
-            return try PluginPackage(at: root, origin: origin)
+            return try PluginPackage(at: root, origin: origin, runtimes: runtimes)
         } catch {
             try? FileManager.default.removeItem(at: root)
             throw error
@@ -91,7 +105,7 @@ public struct PluginPackage: Identifiable, Sendable {
     }
 
     /// Extracts the archive with `ditto`, which keeps every entry inside the destination, then moves the package folder in it to `root`.
-    private static func extractArchive(_ archive: URL, to root: URL) throws {
+    private static func extractArchive(_ archive: URL, to root: URL, runtimes: [any PluginRuntime]) throws {
         let extracted = root.appendingPathExtension("archive")
         defer { try? FileManager.default.removeItem(at: extracted) }
         let ditto = Process()
@@ -102,16 +116,17 @@ public struct PluginPackage: Identifiable, Sendable {
         try ditto.run()
         ditto.waitUntilExit()
         guard ditto.terminationStatus == 0 else { throw PluginError.invalidPackage("\(archive.lastPathComponent) is not a folder or a .zip archive.") }
-        try FileManager.default.moveItem(at: packageFolder(in: extracted), to: root)
+        try FileManager.default.moveItem(at: packageFolder(in: extracted, runtimes: runtimes), to: root)
     }
 
-    /// The extracted archive's top level when it holds `plugin.json`, else its only folder, leaving out the Finder's `.DS_Store`.
-    private static func packageFolder(in extracted: URL) throws -> URL {
-        if FileManager.default.fileExists(atPath: extracted.appendingPathComponent("plugin.json").path) { return extracted }
+    /// The extracted archive's top level when it holds a manifest file, else its only folder, leaving out the Finder's `.DS_Store`.
+    private static func packageFolder(in extracted: URL, runtimes: [any PluginRuntime]) throws -> URL {
+        let manifestFiles = manifestFiles(runtimes)
+        if manifestFiles.contains(where: { FileManager.default.fileExists(atPath: extracted.appendingPathComponent($0).path) }) { return extracted }
         let entries = ((try? FileManager.default.contentsOfDirectory(atPath: extracted.path)) ?? []).filter { $0 != ".DS_Store" }
         var isDirectory: ObjCBool = false
         guard entries.count == 1, FileManager.default.fileExists(atPath: extracted.appendingPathComponent(entries[0]).path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw PluginError.invalidPackage("The archive has no plugin.json at its top level or in its only folder.")
+            throw PluginError.invalidPackage("The archive has no \(manifestFiles.joined(separator: " or ")) at its top level or in its only folder.")
         }
         return extracted.appendingPathComponent(entries[0], isDirectory: true)
     }

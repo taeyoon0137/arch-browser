@@ -2,6 +2,7 @@
 import AppKit
 import ARCHEngine
 import Combine
+import Extensions
 import Foundation
 import Plugins
 
@@ -943,22 +944,43 @@ public final class BrowserSession: ObservableObject {
     private let builtInPlugins: [any BuiltInPlugin.Type]
     /// Connects each tab to its Persona's plugins.
     private let pluginPages = PluginPages()
+    /// Connects the windows and tabs to each Persona's web extensions.
+    private let webExtensionWindows = WebExtensionWindows()
 
-    /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use.
+    /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `NativeMessagingHosts/` there name.
     @MainActor public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
         if let plugins = engines.plugins { return plugins }
-        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins)
+        let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionWindows,
+                                                nativeMessagingHosts: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
+        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
         engines.plugins = plugins
+        engines.webExtensions = webExtensions
         pluginPages.follow(plugins, of: personaID)
+        webExtensionWindows.follow(webExtensions, of: personaID, in: self)
         return plugins
     }
 
-    /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch.
+    /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
+    @MainActor public func webExtensions(in personaID: Persona.ID) -> WebExtensionRuntime? {
+        _ = plugins(in: personaID)
+        return engines(of: personaID).webExtensions
+    }
+
+    /// The Persona's profiles in the engines that run web extensions, which start if they have not started.
+    func extensionEngines(in personaID: Persona.ID) -> [any EngineExtensions] {
+        guard personas.contains(where: { $0.id == personaID }) else { return [] }
+        return registry.registeredKinds.filter { registry.engine(for: $0)?.capabilities.contains(.extensions) == true }
+            .compactMap { runtime(for: $0, in: personaID).context.extensions }
+    }
+
+    /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch. Its web extensions leave the engines with them.
     @MainActor private func closePlugins(of engines: PersonaEngines) {
         pluginPages.stopFollowing(engines.personaID)
+        webExtensionWindows.stopFollowing(engines.personaID)
         engines.plugins?.close()
         engines.plugins = nil
+        engines.webExtensions = nil
     }
 
     /// Reloads the Persona's tabs whose pages the plugin's page scripts cover, so that the scripts of a plugin the user just switched on run there.

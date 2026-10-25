@@ -23,9 +23,18 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         super.init()
         let webView = owner.webView
         observations = [
-            webView.observe(\.title) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeTitle($0) } },
-            webView.observe(\.url) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeURL($0) } },
-            webView.observe(\.isLoading) { [weak owner] _, _ in owner?.loadingStateDidChange() },
+            webView.observe(\.title) { [weak owner] _, _ in
+                owner?.extensionTabDidChange(.title)
+                owner.map { $0.uiDelegate?.webContentsDidChangeTitle($0) }
+            },
+            webView.observe(\.url) { [weak owner] _, _ in
+                owner?.extensionTabDidChange(.url)
+                owner.map { $0.uiDelegate?.webContentsDidChangeURL($0) }
+            },
+            webView.observe(\.isLoading) { [weak owner] _, _ in
+                owner?.extensionTabDidChange(.loading)
+                owner?.loadingStateDidChange()
+            },
             webView.observe(\.estimatedProgress) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
             webView.observe(\.themeColor) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeThemeColor($0) } },
         ]

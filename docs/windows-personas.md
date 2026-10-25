@@ -456,7 +456,7 @@ public protocol Engine: AnyObject {
 - `WebKitBrowserContext.init(attributes:)` picks the store: `.nonPersistent()` for incognito; `.default()` without a storage identifier; `WKWebsiteDataStore(forIdentifier:)` with one. Each context keeps its store object for the app's lifetime.
 - Tabs, popups, the downloads' hidden web view, and the cookie observer already use the context's store and need no change.
 - `WebKitEngine.removeStoredData` calls `+removeDataStoreForIdentifier:completionHandler:` and reports success when the error is nil. It does not start the WebKit application.
-- IV.12: one `WKWebExtensionController` per Persona, from `configurationWithIdentifier:` with the Persona's UUID (the default Persona's too) and `defaultWebsiteDataStore` set to the Persona's store.
+- Web extensions: one `WKWebExtensionController` per context, so per Persona, whose configuration follows the store: `.nonPersistent()` for incognito, `.default()` without a storage identifier, as the default Persona keeps WebKit's default store, and `configurationWithIdentifier:` with one; its `defaultWebsiteDataStore` is the context's store.
 
 ### Chromium adapter
 

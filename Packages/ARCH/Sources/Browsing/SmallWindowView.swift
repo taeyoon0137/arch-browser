@@ -81,7 +81,7 @@ private struct SmallWindowTopRow: View {
             }
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
-                .background(ShareButtonAnchor(windowModel: windowModel))
+                .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
             SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Move to Main Window", shortcut: session.moveToMainWindowShortcut()) {
                 session.moveToMainWindow(windowModel)
             }
