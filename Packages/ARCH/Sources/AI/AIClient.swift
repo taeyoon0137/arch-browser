@@ -190,7 +190,7 @@ public struct AIReply: Sendable {
 }
 
 extension AIClient {
-    /// Collects the stream into one reply. A `.json` reply must parse, or this throws `malformedReply`.
+    /// Collects the stream into one reply. A `.json` reply must parse, or this throws `replyTooLong` for one that reached the length limit and `malformedReply` for any other.
     public func reply(_ request: AIRequest) async throws -> AIReply {
         var text = ""
         var toolCalls: [AIToolCall] = []
@@ -218,7 +218,7 @@ extension AIClient {
         if Task.isCancelled { throw AIError.cancelled }
         guard let model, let finishReason else { throw AIError.malformedReply("The reply ended without finishing.") }
         if case .json = request.output, (try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)) == nil {
-            throw AIError.malformedReply("The reply is not valid JSON.")
+            throw finishReason == .lengthLimit ? AIError.replyTooLong : AIError.malformedReply("The reply is not valid JSON.")
         }
         return AIReply(text: text, toolCalls: toolCalls, model: model, usage: usage, finishReason: finishReason)
     }

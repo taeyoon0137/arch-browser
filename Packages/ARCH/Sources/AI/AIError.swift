@@ -12,6 +12,8 @@ public enum AIError: Error, Sendable {
     case invalidRequest(String)
     case refused(String)
     case malformedReply(String)
+    /// A `.json` reply that reached the request's output limit before its value was complete.
+    case replyTooLong
     case toolRoundLimit
     case cancelled
 }
@@ -55,7 +57,7 @@ extension AIError {
         switch self {
         case .providerUnavailable, .authentication, .rateLimited, .contextTooLong, .malformedReply:
             return true
-        case .notConfigured, .blockedByPolicy, .budgetReached, .invalidRequest, .refused, .toolRoundLimit, .cancelled:
+        case .notConfigured, .blockedByPolicy, .budgetReached, .invalidRequest, .refused, .replyTooLong, .toolRoundLimit, .cancelled:
             return false
         }
     }
@@ -98,6 +100,8 @@ extension AIError: LocalizedError {
             return message.isEmpty ? "The model declined to answer." : "The model declined to answer: \(message)"
         case .malformedReply(let message):
             return "The reply could not be read: \(message)"
+        case .replyTooLong:
+            return "The reply reached its length limit before it was complete."
         case .toolRoundLimit:
             return "The model made too many rounds of tool calls."
         case .cancelled:

@@ -379,4 +379,16 @@ import Testing
             Issue.record("Expected malformedReply, got \(error)")
         }
     }
+
+    @Test func replyReportsJSONCutAtTheLengthLimit() async {
+        let service = scriptedService(providers: [provider("First", models: [AIModelConfiguration(name: "model-a")])], script: ["model-a": [.event(.text(#"{"a": "#)), .event(.finished(.lengthLimit))]])
+        service.register(userFeature)
+        do {
+            _ = try await service.reply(AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.text("x")])], output: .json(schema: Data("{}".utf8))))
+            Issue.record("Expected replyTooLong")
+        } catch AIError.replyTooLong {
+        } catch {
+            Issue.record("Expected replyTooLong, got \(error)")
+        }
+    }
 }

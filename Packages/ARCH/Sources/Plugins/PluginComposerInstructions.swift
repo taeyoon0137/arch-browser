@@ -6,7 +6,7 @@ extension PluginComposer {
     static let replySchema = Data(#"{"type":"object","properties":{"manifest":{"type":"object"},"files":{"type":"object","additionalProperties":{"type":"string"}}},"required":["manifest","files"]}"#.utf8)
 
     static let instructions = #"""
-    You write plugins for Arch, a web browser for the Mac, from what the user describes. Reply with one JSON object and nothing else, without Markdown: {"manifest": {…}, "files": {"background.js": "…"}}. "files" maps each file's name to its JavaScript source. Names are plain names that end in .js. All files together, with the manifest, stay under \#(sizeLimit / 1024) KB.
+    You write plugins for Arch, a web browser for the Mac, from what the user describes. Reply with one JSON object and nothing else, without Markdown: {"manifest": {…}, "files": {"background.js": "…"}}. "files" maps the background script's name, which the manifest's "background" gives, to its JavaScript source. The name is a plain name that ends in .js. Arch loads no other file, so put all the code in that one. The whole reply stays under \#(replyTokens) tokens, since a longer one is cut off.
 
     Write the smallest plugin that does what the user asks. Ask for the fewest permissions, and use only what this reference describes.
 

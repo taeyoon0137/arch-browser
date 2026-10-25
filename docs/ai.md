@@ -175,7 +175,7 @@ extension AIClient {
 ```
 
 - Events arrive in this order: `waiting` (zero or more times), `started`, then `text` and `toolCall` in any order, then `usage` (when the provider reports it), then `finished`.
-- A `.json` reply arrives as `text` events whose concatenation is the JSON value. `reply` checks that it parses and throws `malformedReply` otherwise.
+- A `.json` reply arrives as `text` events whose concatenation is the JSON value. `reply` checks that it parses; when it does not, `reply` throws `replyTooLong` if the reply reached the length limit and `malformedReply` otherwise.
 
 ### Tool calls
 
@@ -749,9 +749,9 @@ AI writes a script plugin (row 55) from the user's request. The plugin runs on t
 ### Composing
 
 1. Settings ▸ Plugins shows New Feature with AI… while a provider can serve `pluginComposer` (Plugin Writer), which Settings registers when its window opens. The user describes the feature in a sheet. The command palette does not offer it yet.
-2. `PluginComposer` in `Plugins` sends the description as the only message, with instructions that hold Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form, the manifest keys plugins that AI writes may use, the background script's sandbox and limits, and the `arch` calls, with the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}` and at most 8,192 output tokens. It sends no page data.
-3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; each file name is letters, digits, `-`, `_`, and `.`, starts with no dot, and ends in `.js`; each file parses as a classic script, as the background document runs it, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` come to at most 256 KB. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `local.arch.generated.<UUID>`, which the composer gives every version it writes, so that no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the checks of every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
-4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is asked for again without being sent back, and one over 256 KB ends the request at once, since it would cost more to send back than the model can fix. Then the request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
+2. `PluginComposer` in `Plugins` sends the description as the only message, with instructions that hold Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form and its limit of 8,192 output tokens, which the request also sets; the manifest keys plugins that AI writes may use; the background script, the only file that runs, with its sandbox and limits; the `arch` calls; and the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}`. It sends no page data.
+3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; the files hold only the background script that the manifest names, since the background document loads no other file; its name is letters, digits, `-`, `_`, and `.`, starts with no dot, and ends in `.js`; it parses as a classic script, as the background document runs it, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` come to at most 256 KB, which only a command-line tool can pass, since it gets no output limit. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `local.arch.generated.<UUID>`, which the composer gives every version it writes, so that no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the checks of every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
+4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is asked for again without being sent back. One over 256 KB ends the request at once, since it would cost more to send back than the model can fix, and so does one that the output limit cut (`replyTooLong`), with the problem that the plugin is too long for one reply, since the same request would be cut again. Then the request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
 5. Plugins that AI writes may ask for the permissions the script runtime has, `tabs` and `clipboard`, and run in the same sandbox as any script plugin: no network, no files, and no page scripts. Nothing runs before the user installs and enables the plugin.
 
 ### Review
@@ -781,6 +781,7 @@ public enum AIError: Error, Sendable {
     case invalidRequest(String)
     case refused(String)
     case malformedReply(String)
+    case replyTooLong
     case toolRoundLimit
     case cancelled
 }
@@ -802,6 +803,7 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A stop reason that reports a content filter | `refused` |
 | A missing tool executable, or a nonzero exit | `providerUnavailable` with the last line of standard error |
 | A tool that exits 0 without output | `malformedReply` |
+| A `.json` reply that the length limit cut before its value was complete | `replyTooLong` |
 
 The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, and `budgetReached`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; and Retry for the rest except `cancelled`, which shows nothing.
 

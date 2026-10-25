@@ -11,9 +11,10 @@ import Testing
     private let persona = UUID()
     private let log = ProviderLog()
 
-    /// A composer whose model gives `replies` in order, one per request, and finishes without text after the last, with the manager it stages in.
-    private func composer(replying replies: [String], model: AIModelConfiguration = AIModelConfiguration(name: "model-a")) -> (PluginComposer, PluginManager) {
-        let queue = ReplyQueue(replies)
+    /// A composer whose model gives `replies` in order, one per request, each finishing for `reason`, and finishes without text after the last, with the manager it stages in.
+    private func composer(replying replies: [String], finishing reason: AIFinishReason = .completed,
+                          model: AIModelConfiguration = AIModelConfiguration(name: "model-a")) -> (PluginComposer, PluginManager) {
+        let queue = ReplyQueue(replies, finishing: reason)
         let service = stubService(providers: [provider("First", models: [model])]) { [log] configuration in
             ScriptedProvider(configuration: configuration, script: [model.name: queue.next()], log: log)
         }
@@ -62,10 +63,12 @@ import Testing
              "plugin.json: contributes.pageScripts is not offered to plugins that AI writes."),
             (reply(files: ["lib/background.js": ""]), "files names “lib/background.js”, which is not a plain file name that ends in .js."),
             (reply(files: ["notes.txt": ""]), "files names “notes.txt”, which is not a plain file name that ends in .js."),
+            (reply(files: ["background.js": "", "format.js": ""]),
+             "files names “format.js”, which is not the manifest's background script. Only the background script runs, so put all the code in it."),
             (reply(files: ["background.js": 1]), "files.background.js must be text."),
             // Staging checks what it checks for every package.
             (reply(["permissions": ["notifications"]]), "plugin.json: permissions lists “notifications”, which Arch does not grant."),
-            (reply(["background": NSNull()]), "plugin.json: commands need a background script."),
+            (reply(["background": NSNull()], files: [:]), "plugin.json: commands need a background script."),
         ]
         for (unusable, problem) in cases {
             let (composer, _) = composer(replying: Array(repeating: unusable, count: 3))
@@ -79,6 +82,12 @@ import Testing
     @Test func endsAtOnceWithAReplyLargerThanAPlugin() async throws {
         let (composer, _) = composer(replying: [reply(files: ["background.js": "//" + String(repeating: "a", count: 256 * 1024)])])
         await #expect(throws: PluginComposerError.unusableReply("The plugin's files come to more than 256 KB.")) { try await composer.write(request) }
+        #expect(log.requests.count == 1 && stagedPackages().isEmpty)
+    }
+
+    @Test func endsAtOnceWithAReplyCutAtTheLengthLimit() async throws {
+        let (composer, _) = composer(replying: [String(reply().prefix(100))], finishing: .lengthLimit)
+        await #expect(throws: PluginComposerError.unusableReply("The plugin is too long for one reply.")) { try await composer.write(request) }
         #expect(log.requests.count == 1 && stagedPackages().isEmpty)
     }
 
@@ -140,14 +149,17 @@ private func texts(of messages: [AIMessage]) -> [String] {
 @MainActor
 private final class ReplyQueue {
     private var replies: [String]
+    /// How each reply finishes.
+    private let reason: AIFinishReason
 
-    init(_ replies: [String]) {
+    init(_ replies: [String], finishing reason: AIFinishReason) {
         self.replies = replies
+        self.reason = reason
     }
 
     /// The next reply as a scripted provider's steps.
     func next() -> [Step] {
         guard !replies.isEmpty else { return [.event(.finished(.completed))] }
-        return [.event(.text(replies.removeFirst())), .event(.finished(.completed))]
+        return [.event(.text(replies.removeFirst())), .event(.finished(reason))]
     }
 }

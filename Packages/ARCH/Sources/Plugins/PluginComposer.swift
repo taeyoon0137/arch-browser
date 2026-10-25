@@ -15,10 +15,10 @@ extension AIFeature {
 public final class PluginComposer {
     /// The replies one request may take, so that the model can correct the problems Arch finds twice before the user sees them.
     private static let attemptLimit = 3
-    /// The UTF-8 bytes that a plugin's files, `plugin.json` among them, may hold together.
-    static let sizeLimit = 256 * 1024
-    /// Room for a whole plugin in one reply.
-    private static let replyTokens = 8_192
+    /// The UTF-8 bytes that a plugin's files, `plugin.json` among them, may hold together. A command-line tool gets no output limit, so its reply can be larger.
+    private static let sizeLimit = 256 * 1024
+    /// Room for a whole plugin in one reply, which the instructions give the model as the reply's limit.
+    static let replyTokens = 8_192
 
     private let plugins: PluginManager
     private let service: AIService
@@ -35,7 +35,7 @@ public final class PluginComposer {
         self.service = service
     }
 
-    /// Asks the model for the plugin that `request` describes, or, once a version exists, for the change it describes to that version, and stages the new version in the composer's Persona for the review without running any of it. A reply that breaks a rule goes back to the model with the problem, at most twice, unless it is larger than a plugin may be. Throws the AI interface's errors, `PluginComposerError.unusableReply` when no reply could be used, and file errors from staging.
+    /// Asks the model for the plugin that `request` describes, or, once a version exists, for the change it describes to that version, and stages the new version in the composer's Persona for the review without running any of it. A reply that breaks a rule goes back to the model with the problem, at most twice, unless it is larger than a plugin may be; one cut at the output limit ends the request. Throws the AI interface's errors, `PluginComposerError.unusableReply` when no reply could be used, and file errors from staging.
     public func write(_ request: String) async throws -> PluginPackage {
         var messages = [AIMessage(role: .user, parts: [.text(requests.first ?? request)])]
         if let currentReply {
@@ -51,6 +51,9 @@ public final class PluginComposer {
                 // Without the reply to send back, the same request goes again.
                 problem = message
                 continue
+            } catch AIError.replyTooLong {
+                // The same request would be cut at the same limit.
+                throw PluginComposerError.unusableReply("The plugin is too long for one reply.")
             }
             let composition = PluginComposition(requests: requests + [request], model: service.settings.title(of: reply.model))
             do {
@@ -94,6 +97,10 @@ public final class PluginComposer {
         let context = JSContext()
         for (name, value) in written.sorted(by: { $0.key < $1.key }) {
             guard Self.isScriptName(name) else { throw PluginError.invalidPackage("files names “\(name)”, which is not a plain file name that ends in .js.") }
+            // The background document loads the background script and no other file.
+            guard manifest["background"] == .string(name) else {
+                throw PluginError.invalidPackage("files names “\(name)”, which is not the manifest's background script. Only the background script runs, so put all the code in it.")
+            }
             guard case let .string(source) = value else { throw PluginError.invalidPackage("files.\(name) must be text.") }
             if let error = Self.syntaxError(in: source, context: context) {
                 throw PluginError.invalidPackage("\(name) does not parse as a script: \(error).")
