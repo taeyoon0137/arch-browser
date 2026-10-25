@@ -113,6 +113,6 @@ public protocol EngineExtensions: AnyObject {
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction?
     /// Runs the action for the tab, as a click on it does: the extension shows its popup or receives the click.
     func performAction(of id: String, for tab: any EngineWebContents)
-    /// The app's windows and the focused one, if extensions may see it, each time they change. The engine answers extensions' questions about windows and tabs from the last call and tells them what opened, closed, moved, and became active since the call before.
+    /// The app's windows and the focused one, if extensions may see it, each time they change. The engine answers extensions' questions about windows and tabs from the last call and tells them what opened, closed, moved, and became active since the call before. A window whose identity an earlier window in the list has is left out.
     func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?)
 }

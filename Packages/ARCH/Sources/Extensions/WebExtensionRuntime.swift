@@ -116,12 +116,13 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         objectWillChange.send()
     }
 
-    /// The extension as the engines load it: its package, the API permissions its grant covers with those that come with the install, and its granted sites.
+    /// The extension as the engines load it: its package, the API permissions its grant covers with those that come with the install, and its granted sites. Every web page, which Arch's patterns write as `*://*/*`, goes as `<all_urls>`, which covers `*://*/*` and which extensions check for with `permissions.contains`; WebKit's `<all_urls>` reaches no file pages.
     private static func engineExtension(_ installed: InstalledPlugin) -> EngineExtension? {
         guard let packageURL = installed.packageURL else { return nil }
         let mapped = WebExtensionManifest.mappedPermissions.filter { installed.grant.permissions.contains($0.value) }.keys
+        let sites = installed.grant.sites.map { $0.description == "*://*/*" ? "<all_urls>" : $0.description }
         return EngineExtension(id: WebExtensionManifest.extensionID(of: installed.id), packageURL: packageURL,
-                               permissions: Set(installed.manifest.extensionPermissions).union(mapped), sites: Set(installed.grant.sites.map(\.description)))
+                               permissions: Set(installed.manifest.extensionPermissions).union(mapped), sites: Set(sites))
     }
 
     /// The Persona's engines that run extensions, attached at first use with the runtime as their delegate and the windows the host reported.
@@ -195,7 +196,7 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host?.present(popup, for: tab) ?? false
     }
 
-    /// Asks with a sheet for the tab. Access that reaches every website or native apps also needs Touch ID or the login password, as at install.
+    /// Asks with a sheet for the tab. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, requests access: Set<EngineExtensionAccess>, in tab: (any EngineWebContents)?,
                            completion: @escaping (Set<EngineExtensionAccess>) -> Void) {
         guard let host, let installed = loadedExtension(id) else { return completion([]) }

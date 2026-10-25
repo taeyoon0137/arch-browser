@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data.
 import LocalAuthentication
 import Plugins
 import SwiftUI
@@ -37,6 +37,11 @@ struct PluginInstallSheet: View {
                 if let note = package.kind.note {
                     Text(note)
                         .foregroundStyle(.secondary)
+                }
+                if let installed, let otherSource {
+                    Label("This package replaces \u{201C}\(installed.manifest.name)\u{201D}, which you installed from \(otherSource.lastPathComponent), and takes over its data. Update only if both come from the same developer.",
+                          systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
                 }
             }
             Form {
@@ -125,14 +130,19 @@ struct PluginInstallSheet: View {
         }
     }
 
+    /// Where the installed plugin came from, when the package that updates it comes from another place.
+    private var otherSource: URL? {
+        guard case let .file(source) = installed?.origin else { return nil }
+        if case let .file(packageSource) = package.origin, packageSource.standardizedFileURL.path == source.standardizedFileURL.path { return nil }
+        return source
+    }
+
     /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website or of native apps.
     private func install(isEnabled: Bool) {
         let grant = PluginGrant(permissions: package.manifest.permissions, sites: package.manifest.sites.filter(sites.contains))
-        let confirmations = [grant.sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
-                             grant.permissions.contains(.nativeMessaging) ? "exchange messages with apps on this Mac" : nil].compactMap { $0 }
         Task {
-            if !confirmations.isEmpty {
-                guard await Self.authorize("let “\(package.manifest.name)” \(confirmations.joined(separator: " and "))") else { return }
+            if let reason = grant.confirmationReason(for: package.manifest.name) {
+                guard await Self.authorize(reason) else { return }
             }
             do {
                 try plugins.install(package, grant: grant, isEnabled: isEnabled)

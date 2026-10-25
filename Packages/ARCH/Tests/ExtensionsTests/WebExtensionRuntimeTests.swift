@@ -1,4 +1,4 @@
-// The web extension runtime: what it loads into the engines and with which grant, how it follows switching extensions on and off, updates, removals, and engines that refuse an extension, and the questions about access an extension asks while it runs.
+// The web extension runtime: what it loads into the engines and with which grant, how it follows switching extensions on and off, updates, removals, and engines that refuse an extension, the questions about access an extension asks while it runs, and, below macOS 15.4, that it runs nothing.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -6,7 +6,8 @@ import ARCHEngine
 import Testing
 
 @MainActor
-@Suite struct WebExtensionRuntimeTests {
+@Suite(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+struct WebExtensionRuntimeTests {
     private let folder = TemporaryFolder()
     private let host = RecordingHost()
     private let engine = RecordingEngine()
@@ -40,6 +41,14 @@ import Testing
         let loaded = try #require(engine.loaded[sampleID])
         #expect(loaded.packageURL == installed.packageURL && loaded.permissions == ["storage", "tabs"] && loaded.sites == ["https://example.org/*"])
         #expect(engine.delegate === runtime)
+        #expect(installed.unavailability == nil && manager.contributions.paletteCommands(matching: "sample").map(\.item.id) == [WebExtensionManifest.actionCommand])
+    }
+
+    @Test func grantsEveryWebPageAsAllURLs() async throws {
+        let installed = try await installLoaded(from: folder.package("everywhere", [
+            "manifest.json": #"{"manifest_version": 3, "name": "E", "version": "1", "host_permissions": ["<all_urls>", "https://example.org/*"]}"#,
+        ]))
+        #expect(engine.loaded[WebExtensionManifest.extensionID(of: installed.id)]?.sites == ["<all_urls>", "https://example.org/*"])
     }
 
     @Test func grantsOnlyTheSitesTheUserLeftIn() async throws {
@@ -85,20 +94,21 @@ import Testing
         }
     }
 
-    @Test func asksAboutAccessAndConfirmsOnlyWhatReachesEverySiteOrApps() async throws {
+    @Test func asksAboutAccessAndConfirmsOnlyWhatReachesEverySite() async throws {
         try await installLoaded(from: sampleExtensionFolder)
-        let access: Set<EngineExtensionAccess> = [.permission("cookies"), .site("https://example.com/*"), .site("file:///*"), .page(URL(string: "about:blank")!)]
+        let access: Set<EngineExtensionAccess> = [.permission("cookies"), .permission("nativeMessaging"), .site("https://example.com/*"), .site("file:///*"),
+                                                  .page(URL(string: "about:blank")!)]
         var allowed: Set<EngineExtensionAccess>?
         runtime.extensions(engine, extension: sampleID, requests: access, in: nil) { allowed = $0 }
         #expect(await eventually { allowed != nil })
+        // Native messaging, which only the install grants, and sites and pages other than web pages are never asked about.
         #expect(allowed == [.permission("cookies"), .site("https://example.com/*")])
         #expect(host.sheets.first?.informativeText.hasPrefix("Use the extension API cookies\nRun scripts on pages from example.com\n") == true)
         host.sheetAnswer = .alertSecondButtonReturn
         runtime.extensions(engine, extension: sampleID, requests: [.permission("cookies")], in: nil) { allowed = $0 }
         #expect(allowed == [])
-        #expect(WebExtensionAccessPrompt(requested: [.site("<all_urls>")], extensionName: "A").needsConfirmation)
-        #expect(WebExtensionAccessPrompt(requested: [.permission("nativeMessaging")], extensionName: "A").needsConfirmation)
-        #expect(!WebExtensionAccessPrompt(requested: [.permission("cookies"), .site("https://example.com/*")], extensionName: "A").needsConfirmation)
+        #expect(WebExtensionAccessPrompt(requested: [.site("<all_urls>")], extensionName: "A").grant.confirmationReason(for: "A") != nil)
+        #expect(WebExtensionAccessPrompt(requested: [.permission("cookies"), .site("https://example.com/*")], extensionName: "A").grant.confirmationReason(for: "A") == nil)
     }
 
     @Test func passesNativeMessagesOnlyWithTheGrant() async throws {
@@ -110,5 +120,22 @@ import Testing
         runtime.extensions(engine, extension: WebExtensionManifest.extensionID(of: messenger.id), sendNativeMessage: Data("{}".utf8), toApplication: "org.example.echo") { reply = $0 }
         // With the grant, the message reaches native messaging, which finds no host manifest in the test's folder.
         #expect(throws: NativeMessagingError.notFound("org.example.echo")) { try reply?.get() }
+    }
+}
+
+/// Below macOS 15.4, where WebKit runs no web extensions.
+@MainActor
+@Suite(.enabled(if: !systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+struct UnavailableWebExtensionRuntimeTests {
+    @Test func leavesEnabledExtensionsOutOfThePaletteAndTheTabs() async throws {
+        let folder = TemporaryFolder()
+        let runtime = WebExtensionRuntime(persona: UUID(), host: RecordingHost(), nativeMessagingHosts: folder.url)
+        let manager = PluginManager.withWebExtensions(runtime, in: folder)
+        let installed = try await manager.installEverything(from: sampleExtensionFolder)
+        #expect(installed.unavailability == "Web extensions need macOS 15.4 or later.")
+        #expect(manager.contributions.paletteCommands(matching: installed.manifest.name).isEmpty)
+        try await WebKitProfile.run { profile in
+            #expect(runtime.actions(for: profile.makeTab()).isEmpty)
+        }
     }
 }

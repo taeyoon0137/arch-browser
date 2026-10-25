@@ -1,4 +1,4 @@
-// Plugin identifiers, match patterns, the grant an update's review offers, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
+// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -103,6 +103,14 @@ import Testing
         let update = PluginManifest(id: id, name: "Update", version: "2", summary: "", permissions: [.tabs, .clipboard], sites: sites, contributions: PluginContributions())
         // The site the user left out stays out, and the site the installed version did not ask for starts on.
         #expect(PluginGrant(updating: installed, to: update) == PluginGrant(permissions: [.tabs, .clipboard], sites: [sites[0], sites[2]]))
+    }
+
+    @Test func asksToConfirmEveryWebsiteAndNativeApps() throws {
+        let everySite = try MatchPattern("<all_urls>")
+        #expect(PluginGrant(permissions: [.nativeMessaging], sites: [everySite]).confirmationReason(for: "A")
+            == "let \u{201C}A\u{201D} run scripts on every website and exchange messages with apps on this Mac")
+        #expect(PluginGrant(permissions: [.nativeMessaging], sites: []).confirmationReason(for: "A") == "let \u{201C}A\u{201D} exchange messages with apps on this Mac")
+        #expect(PluginGrant(permissions: [.tabs, .clipboard], sites: [try MatchPattern("https://*.example.com/*")]).confirmationReason(for: "A") == nil)
     }
 }
 

@@ -944,20 +944,20 @@ public final class BrowserSession: ObservableObject {
     private let builtInPlugins: [any BuiltInPlugin.Type]
     /// Connects each tab to its Persona's plugins.
     private let pluginPages = PluginPages()
-    /// Connects the windows and tabs to each Persona's web extensions.
-    private let webExtensionWindows = WebExtensionWindows()
+    /// Hosts each Persona's web extensions in the windows and tabs.
+    private let webExtensionHost = SessionWebExtensionHost()
 
     /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `NativeMessagingHosts/` there name.
     @MainActor public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
         if let plugins = engines.plugins { return plugins }
-        let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionWindows,
+        let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost,
                                                 nativeMessagingHosts: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
         engines.plugins = plugins
         engines.webExtensions = webExtensions
         pluginPages.follow(plugins, of: personaID)
-        webExtensionWindows.follow(webExtensions, of: personaID, in: self)
+        webExtensionHost.follow(webExtensions, of: personaID, in: self)
         return plugins
     }
 
@@ -977,7 +977,7 @@ public final class BrowserSession: ObservableObject {
     /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch. Its web extensions leave the engines with them.
     @MainActor private func closePlugins(of engines: PersonaEngines) {
         pluginPages.stopFollowing(engines.personaID)
-        webExtensionWindows.stopFollowing(engines.personaID)
+        webExtensionHost.stopFollowing(engines.personaID)
         engines.plugins?.close()
         engines.plugins = nil
         engines.webExtensions = nil

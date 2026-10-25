@@ -84,7 +84,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | State that… | Owner | Lifetime |
 |---|---|---|
 | can differ between two windows open at once: what is shown, focused, or being edited | `BrowserWindowModel` | One window |
-| is bound to one Persona's engine storage: contexts, browsers, cookie copying, and plugin manager, and later its extension controller | `PersonaEngines` | One Persona, from first use until quit |
+| is bound to one Persona's engine storage: contexts, browsers, cookie copying, plugin manager, and web extension runtime | `PersonaEngines` | One Persona, from first use until quit |
 | belongs to an engine process: the engine applications, CEF initialization, crash totals, the primary engine | `BrowserSession`, engine section | The app |
 | is anything else the user owns: Personas, spaces, favorites, tabs, the closed list, downloads and the pages kept open for them (each with its runtime), permissions, zoom, persistence | `BrowserSession` | The app |
 

@@ -123,10 +123,10 @@ public final class PluginManager: ObservableObject {
                         isEnabled: isEnabled, installedAt: installedAt, unavailability: unavailability)
     }
 
-    /// Tells each runtime the enabled plugins of its kind.
+    /// Tells each runtime the enabled plugins of its kind, none while it cannot run them on this Mac.
     private func runEnabledPlugins() {
         for (kind, runtime) in runtimes {
-            runtime.run(plugins.filter { $0.kind == kind && $0.isEnabled })
+            runtime.run(plugins.filter { $0.kind == kind && $0.isEnabled && $0.unavailability == nil })
         }
     }
 

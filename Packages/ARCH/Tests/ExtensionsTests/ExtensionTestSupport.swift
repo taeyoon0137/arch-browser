@@ -1,4 +1,4 @@
-// What the web extension tests share: the sample extension, temporary folders, a plugin manager whose secrets stay out of the Keychain, a host that records what the runtime asks of the browser, and an engine that records what the runtime loads.
+// What the web extension tests share: the sample extension, whether this Mac runs web extensions, temporary folders, a plugin manager whose secrets stay out of the Keychain, a host that records what the runtime asks of the browser, and an engine that records what the runtime loads.
 import AppKit
 import ARCHEngine
 import ARCHEngineWebKit
@@ -9,6 +9,9 @@ import Testing
 
 /// The sample web extension's package folder.
 let sampleExtensionFolder = Bundle.module.resourceURL!.appendingPathComponent("Fixtures/Sample", isDirectory: true).absoluteURL
+
+/// Whether this Mac runs web extensions, as WebKit does from macOS 15.4.
+let systemRunsWebExtensions = ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0))
 
 /// A folder of its own for one test's files, removed when the test ends.
 final class TemporaryFolder {

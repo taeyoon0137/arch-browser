@@ -147,4 +147,12 @@ public struct PluginGrant: Hashable, Codable, Sendable {
     public var summaries: [String] {
         PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map(\.accessSummary)
     }
+
+    /// The reason that Touch ID or the login password states before Arch gives the grant to `pluginName`, at install and when a web extension asks while it runs, or nil when the grant needs no confirmation: access to every website and to native apps need it.
+    public func confirmationReason(for pluginName: String) -> String? {
+        let access = [sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
+                      permissions.contains(.nativeMessaging) ? "exchange messages with apps on this Mac" : nil].compactMap { $0 }
+        guard !access.isEmpty else { return nil }
+        return "let \u{201C}\(pluginName)\u{201D} \(access.joined(separator: " and "))"
+    }
 }

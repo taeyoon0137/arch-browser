@@ -98,13 +98,14 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         windows.first { window in window.tabs.contains { $0 === tab } }
     }
 
-    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed: windows that opened and closed, tabs that opened, closed, and moved to another window, the active tab of each window, and the focused window. Tabs that only changed their place in a window are not reported; extensions read their index when they need it.
+    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed: windows that opened and closed, tabs that opened, closed, and moved to another window, the active tab of each window, and the focused window. Tabs that only changed their place in a window are not reported; extensions read their index when they need it. A window with the identity of a window before it in the report is left out, so that each identity names one window.
     func setWindows(_ reported: [EngineExtensionWindow], focusedWindowID: UUID?) {
         let previousWindows = windows
         let previousFocus = focusedWindow
         let previousPlaces = Self.places(in: previousWindows)
         let previousActiveTabs = Dictionary(uniqueKeysWithValues: previousWindows.map { ($0.id, $0.activeTab) })
-        windows = reported.map { report in
+        var reportedIDs: Set<UUID> = []
+        windows = reported.filter { reportedIDs.insert($0.id).inserted }.map { report in
             let window = previousWindows.first { $0.id == report.id } ?? WebKitExtensionWindow(id: report.id)
             window.tabs = report.tabs.compactMap(extensionTab(of:))
             window.activeTab = report.activeTab.flatMap(extensionTab(of:))

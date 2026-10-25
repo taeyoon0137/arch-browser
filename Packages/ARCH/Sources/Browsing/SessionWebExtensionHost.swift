@@ -1,4 +1,4 @@
-// Connects the session to the web extensions of its Personas. Arch's tabs live in spaces, which windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a window shows there or else the one selected last. The window that last became main has the focused one. The session's windows show the extensions' popups and sheets for their tabs.
+// The session as the host of its Personas' web extensions: it starts their profiles in the engines, selects and closes tabs for them, shows their popups and access sheets in its windows, and reports its windows to them. Arch's tabs live in spaces, which windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a window shows there or else the one selected last. The window that last became main has the focused one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -6,7 +6,7 @@ import Extensions
 import Plugins
 
 @MainActor
-final class WebExtensionWindows: WebExtensionHost {
+final class SessionWebExtensionHost: WebExtensionHost {
     private weak var session: BrowserSession?
     /// The runtimes of the Personas whose extensions see the windows, until the Persona goes.
     private var runtimes: [Persona.ID: WebExtensionRuntime] = [:]
@@ -30,10 +30,12 @@ final class WebExtensionWindows: WebExtensionHost {
         runtimes[personaID] = nil
     }
 
-    /// Changes to what the windows hold: the spaces, the tabs and the favorites' tabs, a tab's engine or space, and each window's space and selection, and their order, which follows the window that last became main. The publishers send before the change, so a report reads the session on the next turn of the run loop.
+    /// Changes to what the windows hold: the spaces, the tabs and the favorites' tabs, a tab's engine, space, and the pinned state and folder that place it in its space's order, and each window's space and selection, and their order, which follows the window that last became main. The publishers send before the change, so a report reads the session on the next turn of the run loop.
     private static func windowChanges(of session: BrowserSession) -> AnyPublisher<Void, Never> {
         let tabs = session.$tabs.combineLatest(session.$favoriteTabs).map { tabs, favoriteTabs in
-            Publishers.MergeMany((tabs + favoriteTabs.values).map { $0.$webContents.map { _ in () }.merge(with: $0.$spaceID.map { _ in () }) })
+            Publishers.MergeMany((tabs + favoriteTabs.values).map { tab in
+                tab.$webContents.map { _ in () }.merge(with: tab.$spaceID.map { _ in () }, tab.$isPinned.map { _ in () }, tab.$folderID.map { _ in () })
+            })
         }.switchToLatest()
         let windows = session.$windows.map { windows in
             Publishers.MergeMany(windows.map { $0.$currentSpaceID.map { _ in () }.merge(with: $0.$selectedTabID.map { _ in () }) })

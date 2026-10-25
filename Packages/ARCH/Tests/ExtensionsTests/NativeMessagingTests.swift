@@ -1,4 +1,4 @@
-// Native messaging: finding a native app through its host manifest, the apps and extensions Arch refuses, one message and its reply, a port's messages both ways, and an app that breaks the message format. A shell script stands for the app.
+// Native messaging: finding a native app through its host manifest, the apps and extensions Arch refuses, one message and its reply, an app that does not start, a port's messages both ways, and an app that breaks the message format. A shell script stands for the app.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -51,6 +51,20 @@ import Testing
         let broken = try installApp("org.example.broken", script: #"printf '\377\377\377\177'"#)
         let tooLarge = await reply(to: "1", from: "org.example.broken", through: broken)
         #expect(throws: NativeMessagingError.messageTooLarge) { try tooLarge.get() }
+    }
+
+    @Test func failsAndLetsGoOfAnAppThatDoesNotStart() async throws {
+        let messaging = try installApp("org.example.gone", script: "exit 0")
+        try FileManager.default.removeItem(at: folder.url.appendingPathComponent("org.example.gone.sh"))
+        let result = await reply(to: "1", from: "org.example.gone", through: messaging)
+        #expect(throws: (any Error).self) { try result.get() }
+        weak var released: NativeMessagingConnection?
+        do {
+            let connection = NativeMessagingConnection(executable: try messaging.executable(of: "org.example.gone", for: extensionID), origin: "")
+            released = connection
+            #expect(throws: (any Error).self) { try connection.start() }
+        }
+        #expect(released == nil)
     }
 
     @Test func connectsAPortBothWays() async throws {

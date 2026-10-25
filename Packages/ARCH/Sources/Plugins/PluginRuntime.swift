@@ -13,7 +13,7 @@ public protocol PluginRuntime: AnyObject, Sendable {
     var unavailability: String? { get }
     /// Set by the manager: tells it that an enabled plugin cannot run, with why as a sentence, so that it switches the plugin off and Settings shows why.
     var onFailure: ((PluginID, String) -> Void)? { get set }
-    /// The enabled plugins of the kind, each time they change.
+    /// The enabled plugins of the kind, each time they change; none while `unavailability` says why the kind cannot run.
     func run(_ enabled: [InstalledPlugin])
     /// A new instance of an enabled plugin of the kind, which the manager starts at the plugin's first command.
     func makePlugin(_ installed: InstalledPlugin) -> any Plugin

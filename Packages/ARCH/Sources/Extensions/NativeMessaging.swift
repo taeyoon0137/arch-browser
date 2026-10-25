@@ -124,8 +124,9 @@ final class NativeMessagingConnection {
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
 
-    /// Starts the app and reads its messages until it closes its output, as it does when it ends.
+    /// Starts the app and reads its messages until it closes its output, as it does when it ends. Reading starts once the app runs, since the reading handler keeps the connection: an app that cannot start leaves nothing that keeps it.
     func start() throws {
+        try process.run()
         let reader = NativeMessageReader()
         output.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
@@ -144,7 +145,6 @@ final class NativeMessagingConnection {
                 }
             }
         }
-        try process.run()
     }
 
     /// Writes one message, its length first, to the app's standard input.
