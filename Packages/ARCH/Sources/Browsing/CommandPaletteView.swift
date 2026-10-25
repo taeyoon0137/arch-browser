@@ -62,59 +62,59 @@ struct CommandPaletteView: View {
     /// The palette's distance from the window's top.
     static let top: CGFloat = 120
     /// The height of the search field.
-    static let fieldHeight: CGFloat = 56
+    static let fieldHeight: CGFloat = 62
+    /// The space between the search field and the results panel.
+    static let surfaceSpacing: CGFloat = 12
 
     /// The results appear once there is something to act on, as in Spotlight.
     private var showsResults: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        PaletteGlassGroup {
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                    TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 22))
-                        .focused($isFocused)
-                        .onSubmit { windowModel.submitCommandPalette(text) }
-                        .onExitCommand { windowModel.dismissCommandPalette() }
-                }
-                .padding(.horizontal, 20)
-                .frame(height: Self.fieldHeight)
-                .modifier(PaletteSurface(shape: Capsule()))
-                if showsResults {
-                    VStack(spacing: 2) {
-                        PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
-                            .paletteAction { windowModel.submitCommandPalette(text) }
-                        ForEach(pluginCommands, id: \.ref) { command in
-                            PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
-                                .paletteAction { windowModel.runPluginCommand(command.ref) }
-                        }
-                        if offersAskAboutPage {
-                            PaletteRow(symbol: "sparkles", title: "Ask About This Page")
-                                .paletteAction {
-                                    windowModel.dismissCommandPalette()
-                                    windowModel.askAboutPage()
-                                }
-                        }
-                        ForEach(matchingTabs) { tab in
-                            PaletteTabRow(tab: tab)
-                                .paletteAction {
-                                    windowModel.selectedTabID = tab.id
-                                    windowModel.dismissCommandPalette()
-                                }
-                        }
-                        ForEach(historySuggestions) { entry in
-                            PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
-                                .paletteAction { windowModel.submitCommandPalette(entry.url.absoluteString) }
-                        }
+        VStack(spacing: Self.surfaceSpacing) {
+            HStack(spacing: 14) {
+                Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 22))
+                    .focused($isFocused)
+                    .onSubmit { windowModel.submitCommandPalette(text) }
+                    .onExitCommand { windowModel.dismissCommandPalette() }
+            }
+            .padding(.horizontal, 26)
+            .frame(height: Self.fieldHeight)
+            .modifier(PaletteSurface(shape: Capsule()))
+            if showsResults {
+                VStack(spacing: 2) {
+                    PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
+                        .paletteAction { windowModel.submitCommandPalette(text) }
+                    ForEach(pluginCommands, id: \.ref) { command in
+                        PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
+                            .paletteAction { windowModel.runPluginCommand(command.ref) }
                     }
-                    .padding(PaletteRowHighlight.panelInset)
-                    .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)))
+                    if offersAskAboutPage {
+                        PaletteRow(symbol: "sparkles", title: "Ask About This Page")
+                            .paletteAction {
+                                windowModel.dismissCommandPalette()
+                                windowModel.askAboutPage()
+                            }
+                    }
+                    ForEach(matchingTabs) { tab in
+                        PaletteTabRow(tab: tab)
+                            .paletteAction {
+                                windowModel.selectedTabID = tab.id
+                                windowModel.dismissCommandPalette()
+                            }
+                    }
+                    ForEach(historySuggestions) { entry in
+                        PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
+                            .paletteAction { windowModel.submitCommandPalette(entry.url.absoluteString) }
+                    }
                 }
+                .padding(PaletteRowHighlight.panelInset)
+                .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)))
             }
         }
         // A window narrower than the palette, such as a small window, keeps the page margin on both sides of it.
@@ -208,26 +208,13 @@ struct CommandPaletteLayer: View {
     }
 }
 
-/// Groups the palette's glass surfaces so they render together on macOS 26 and later.
-struct PaletteGlassGroup<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        if #available(macOS 26, *) {
-            GlassEffectContainer(spacing: 8) { content }
-        } else {
-            content
-        }
-    }
-}
-
-/// Uses the system's glass, as Spotlight does, on macOS 26 and later; earlier versions use the system material with a shadow.
+/// Uses the system's glass on macOS 26 and later; earlier versions use the system material with a shadow. The glass is a separate layer behind the content, outside any glass container: glass applied to the content draws its text vibrant, as gray as the placeholder, and a container draws its glass over the content.
 struct PaletteSurface<S: Shape>: ViewModifier {
     let shape: S
 
     @ViewBuilder func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            content.glassEffect(.regular, in: shape)
+            content.background(Color.clear.glassEffect(.regular, in: shape))
         } else {
             content
                 .background(.regularMaterial, in: shape)
@@ -272,7 +259,7 @@ struct PaletteRow: View {
     var isPrimary = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -288,8 +275,8 @@ struct PaletteRow: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 40)
+        .padding(.horizontal, 14)
+        .frame(height: 44)
         .contentShape(Rectangle())
         .modifier(PaletteRowHighlight(isPrimary: isPrimary))
     }
@@ -299,7 +286,7 @@ struct PaletteTabRow: View {
     @ObservedObject var tab: Tab
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             TabIconView(tab: tab)
                 .frame(width: 20, height: 18)
             Text(tab.displayTitle)
@@ -310,8 +297,8 @@ struct PaletteTabRow: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 40)
+        .padding(.horizontal, 14)
+        .frame(height: 44)
         .contentShape(Rectangle())
         .modifier(PaletteRowHighlight())
     }
@@ -329,8 +316,8 @@ extension View {
 
 /// Highlights a row under the pointer. The primary row, which Return opens, keeps an accent highlight. The highlight's corners follow the results panel's corners, offset inward by the panel's inset.
 struct PaletteRowHighlight: ViewModifier {
-    static let panelRadius: CGFloat = 24
-    static let panelInset: CGFloat = 6
+    static let panelRadius: CGFloat = 26
+    static let panelInset: CGFloat = 8
 
     var isPrimary = false
     @State private var isHovering = false
