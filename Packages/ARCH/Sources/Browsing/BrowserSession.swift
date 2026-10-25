@@ -692,10 +692,10 @@ public final class BrowserSession: ObservableObject {
         tab.didCancelDialogs = { [weak self, weak tab] in
             if let self, let tab { self.sheets.cancel(for: tab, pageDialogsOnly: true) }
         }
-        // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and the sidebar target selects a tab that no window shows.
+        // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in
             guard let self, let tab else { return }
-            guard let window = self.window(showing: tab) else { return self.sidebarTarget().selectedTabID = tab.id }
+            guard let window = self.window(showing: tab) else { return self.selectUnshownTab(tab) }
             if window.selectedTabID != tab.id {
                 window.selectedTabID = tab.id
             } else if window.internalPage != nil {
@@ -752,6 +752,14 @@ public final class BrowserSession: ObservableObject {
         // Every change to a tab, such as a new address or name, is saved.
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self] _ in self?.scheduleSave() }
         return tab
+    }
+
+    /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
+    private func selectUnshownTab(_ tab: Tab) {
+        guard tab.spaceID == nil else { return sidebarTarget().selectedTabID = tab.id }
+        let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
+        if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
+        window.selectedTabID = tab.id
     }
 
     /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.

@@ -451,10 +451,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(moveToMainWindow) {
             return activeWindow?.kind == .small
         }
-        // The default Persona stays.
+        // The Persona items ask with a sheet on the sidebar target, so they wait while that window shows another sheet; without a main window, New and Rename open one. The default Persona stays.
+        if item.action == #selector(newPersona) || item.action == #selector(renamePersona) {
+            return session?.lastMainWindow?.canShowPersonaSheet ?? true
+        }
         if item.action == #selector(deletePersona) {
             guard let session, let window = session.lastMainWindow else { return false }
-            return session.canDeletePersona(window.personaID)
+            return window.canShowPersonaSheet && session.canDeletePersona(window.personaID)
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true

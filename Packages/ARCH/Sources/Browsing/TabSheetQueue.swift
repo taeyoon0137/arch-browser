@@ -25,24 +25,22 @@ final class TabSheetQueue {
         showNext()
     }
 
-    /// Each window that has an AppKit window and shows no sheet shows the oldest waiting sheet of the tabs on its screen, the selected tab's first. Nothing runs an app-modal alert inside an engine callback.
+    /// Each window that has an AppKit window and shows no sheet shows the oldest waiting sheet of the tabs on its screen, the selected tab's first. A sheet that does not come from a tab, such as a Persona's name prompt or the print panel, keeps the tabs' sheets waiting, and the window controller calls this again once AppKit has taken any sheet off the window. Nothing runs an app-modal alert inside an engine callback.
     func showNext() {
         for window in windows() where window.visibleSheet == nil {
-            guard let nsWindow = window.nsWindow, let tab = window.tabsOnScreen.first(where: { pending[$0.id]?.isEmpty == false }),
-                  var queue = pending[tab.id] else { continue }
+            guard let nsWindow = window.nsWindow, nsWindow.attachedSheet == nil,
+                  let tab = window.tabsOnScreen.first(where: { pending[$0.id]?.isEmpty == false }), var queue = pending[tab.id] else { continue }
             let sheet = queue.removeFirst()
             pending[tab.id] = queue.isEmpty ? nil : queue
             window.visibleSheet = sheet
             sheet.alert.beginSheetModal(for: nsWindow) { [weak self, weak window] response in
                 window?.visibleSheet = nil
-                guard let self else { return sheet.completion(response) }
                 // AppKit calls this before the sheet leaves its window, which keeps another window from showing it, so a deferred sheet shows again only once `deferSheet(of:)` has returned.
-                if response == Self.deferredResponse {
+                if response == Self.deferredResponse, let self {
                     self.pending[sheet.tabID, default: []].insert(sheet, at: 0)
-                    return
+                } else {
+                    sheet.completion(response)
                 }
-                sheet.completion(response)
-                self.showNext()
             }
         }
     }

@@ -170,6 +170,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Personas
 
+    /// Whether New Persona…, Rename Persona…, and Delete Persona… can ask with their sheet: the window shows no other sheet, which theirs would wait behind.
+    public var canShowPersonaSheet: Bool { nsWindow?.attachedSheet == nil }
+
     /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. An empty name adds none.
     public func promptForNewPersona() {
         askForPersonaName(title: "New Persona", message: "A Persona has spaces of its own, and its tabs keep their own cookies, website data, and plugins.", name: "", button: "Create") { [weak self] name in
@@ -189,7 +192,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Asks with a sheet on the window before deleting a Persona other than the default one, saying what goes with it.
     public func confirmDeletePersona(_ id: Persona.ID) {
-        guard session.canDeletePersona(id), let persona = session.persona(withID: id), let nsWindow else { return }
+        guard canShowPersonaSheet, session.canDeletePersona(id), let persona = session.persona(withID: id), let nsWindow else { return }
         let spaceCount = session.spaces(in: id).count
         let favoriteCount = session.favorites(in: id).count
         let tabCount = session.tabs.filter { $0.personaID == id }.count
@@ -207,7 +210,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels or leaves it empty.
     private func askForPersonaName(title: String, message: String?, name: String, button: String, then use: @escaping (String) -> Void) {
-        guard let nsWindow else { return }
+        guard canShowPersonaSheet, let nsWindow else { return }
         let alert = NSAlert()
         alert.messageText = title
         if let message { alert.informativeText = message }

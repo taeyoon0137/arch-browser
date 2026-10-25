@@ -1,4 +1,4 @@
-// Personas partition the session: every space, favorite, tab, and closed tab belongs to exactly one, and a tab keeps its Persona for its whole life. The default Persona always exists; the user adds, renames, and deletes the others from the space menu and the Spaces menu.
+// Personas partition the session: every space, favorite, tab, and closed tab belongs to exactly one, and a tab keeps its Persona for its whole life. The default Persona always exists. From the space menu and the Spaces menu, the user adds and renames Personas and deletes any but the default one.
 import ARCHEngine
 import Foundation
 
