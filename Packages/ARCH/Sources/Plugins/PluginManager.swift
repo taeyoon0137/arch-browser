@@ -54,7 +54,7 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         return engineChecks.values.contains(true) ? nil : "No engine on this Mac runs it."
     }
 
-    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each engine of a pair among `running`, the engines that run the kind on this Mac, while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. None in a pair.
+    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each of the engines that a pair divides (`PluginEngineVersions.engines`) that is among `running`, the engines that run the kind on this Mac, while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. None in a pair.
     public func versionEngines(among running: Set<EngineKind>) -> [EngineKind] {
         guard counterpart == nil else { return [] }
         return PluginEngineVersions.engines.filter { engine in running.contains(engine) && engines.contains { $0 != engine } }
@@ -413,7 +413,7 @@ public final class PluginManager: ObservableObject {
         return (versions[0].id, versions.map(\.id))
     }
 
-    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, the install entry's identifier of a version that joined under its counterpart's identifier, such as `extension.<identifier>.chromium`, which an install would otherwise replace although its package names another identifier, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
     private func checkInstallable(_ id: PluginID, of kind: PluginKind) throws {
         guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
         if let renamed = PluginIdentifierMigration.renamed(id.rawValue) {
@@ -421,6 +421,9 @@ public final class PluginManager: ObservableObject {
         }
         if packages.values.contains(where: { $0.manifest.id == id && $0.kind != kind }) {
             throw PluginError.invalidPackage("An installed plugin of another kind has the identifier \(id.rawValue).")
+        }
+        if packages.contains(where: { $0.key == id && $0.value.manifest.id != id }) {
+            throw PluginError.invalidPackage("A version of an installed plugin has the identifier \(id.rawValue).")
         }
         let list = directory.appendingPathComponent(PluginListFile.name)
         guard ![list, PluginFile.unreadableURL(of: list)].contains(where: { $0.lastPathComponent == id.rawValue }) else {
@@ -495,7 +498,7 @@ public final class PluginManager: ObservableObject {
         return id
     }
 
-    /// The entry identifier, the pair, and the switch of a package that joins the plugin `id` as its version for `engine`: the package's identifier, or, when the plugin's version has it too, that followed by the engine's name. The plugin keeps the pair's other engine, and the version takes its switch. Throws `PluginError.invalidPackage` for a plugin that is not an installed web extension outside a pair, a package that the engine has not checked or refused, a plugin whose answer refuses the other engine, and a package with the identifier of another installed plugin.
+    /// The entry identifier, the pair, and the switch of a package that joins the plugin `id` as its version for `engine`: the package's identifier, or, when the plugin's version has it too, that followed by the engine's name. The plugin keeps the pair's other engine, and the version takes its switch. Throws `PluginError.invalidPackage` for a plugin that is not an installed web extension outside a pair, a package that the engine has not checked or refused, a plugin whose current answer does not run it on the other engine, and a package with the identifier of another installed plugin.
     private func versionJoin(_ package: PluginPackage, joining id: PluginID, for engine: EngineKind) throws -> (id: PluginID, pair: PluginEngineVersions, isEnabled: Bool) {
         guard let plugin = plugins.first(where: { $0.id == id }), plugin.kind == .webExtension, plugin.kind == package.kind, plugin.packageURL != nil,
               let other = PluginEngineVersions.other(than: engine) else {
@@ -507,7 +510,7 @@ public final class PluginManager: ObservableObject {
         case let .refused(reason)?: throw PluginError.invalidPackage(reason)
         case nil: throw PluginError.invalidPackage("\(engine.displayName) has not checked this package.")
         }
-        guard plugin.engineChecks[other] != false else {
+        guard plugin.engineChecks[other] == true else {
             throw PluginError.invalidPackage("\(other.displayName) does not run \u{201C}\(plugin.manifest.name)\u{201D}, so it cannot keep \(other.displayName) tabs.")
         }
         let manifestID = package.manifest.id
@@ -529,6 +532,15 @@ public final class PluginManager: ObservableObject {
         } catch {
             return error.localizedDescription
         }
+    }
+
+    /// The review's warning for a package that joins the plugin `id` as its version for `engine` under the plugin's own identifier, from another place than the plugin's, while the plugin's package runs on that engine: the engine knows both by that identifier, so the version takes over the extension storage that the plugin's copy keeps there, as an update from another place takes over the plugin's data. Nil otherwise.
+    public func versionTakeover(for package: PluginPackage, joining id: PluginID, for engine: EngineKind) -> String? {
+        guard let plugin = plugins.first(where: { $0.id == id }), plugin.manifest.id == package.manifest.id, plugin.enginesRunningPackage.contains(engine),
+              case let .file(source) = plugin.origin, case let .file(packageSource) = package.origin,
+              source.standardizedFileURL.path != packageSource.standardizedFileURL.path else { return nil }
+        let name = "\u{201C}\(plugin.manifest.name)\u{201D}"
+        return "\(name), which you installed from \(source.lastPathComponent), has this package's identifier, so as its \(engine.displayName) version the package takes over the data that \(name) keeps on \(engine.displayName) tabs. Join only if both come from the same developer."
     }
 
     /// Why the package cannot update the plugin `id`, or `package.updates`, while its pair lasts: its check refuses the engine that the pair's record gives that version, such as "WebKit cannot run this package, and the other version of “Reader” runs on Chromium tabs." Nil when it can.
@@ -559,13 +571,30 @@ public final class PluginManager: ObservableObject {
         return plugin.versionEngines(among: Set(runtime.engines.keys))
     }
 
+    /// Where the plugin runs, as Settings says it (`InstalledPlugin.enginesNote`), or, for a version of a pair whose engine runs no web extensions on this Mac now, as when its application did not start, such as "Chromium runs no web extensions on this Mac."
+    public func enginesNote(of id: PluginID) -> String? {
+        guard let plugin = plugins.first(where: { $0.id == id }) else { return nil }
+        if let engine = plugin.pairEngine, let runtime = runtimes[plugin.kind], runtime.engines[engine] == nil {
+            return "\(engine.displayName) runs no web extensions on this Mac."
+        }
+        return plugin.enginesNote
+    }
+
+    /// The other installed web extension plugins outside a pair that Join With… in the plugin's section lists, in the order the user installed them. None for a plugin in a pair, and none while an engine that a pair divides runs no web extensions on this Mac, as Chromium before VI.1, since its version would run nowhere.
+    public func joinCandidates(of id: PluginID) -> [InstalledPlugin] {
+        let unpaired = { (plugin: InstalledPlugin) in plugin.kind == .webExtension && plugin.packageURL != nil && plugin.counterpart == nil }
+        guard let plugin = plugins.first(where: { $0.id == id }), unpaired(plugin), let runtime = runtimes[plugin.kind],
+              PluginEngineVersions.engines.allSatisfy({ runtime.engines[$0] != nil }) else { return [] }
+        return plugins.filter { $0.id != id && unpaired($0) }
+    }
+
     /// The types the open panel of Install <Engine> Version… accepts for the plugin's version for the engine.
     public func packageTypes(forVersionOf id: PluginID, for engine: EngineKind) -> [UTType] {
         guard let plugin = plugins.first(where: { $0.id == id }), let runtime = runtimes[plugin.kind] else { return [] }
         return runtime.packageTypes(for: engine)
     }
 
-    /// The pair that Join With… starts on for two plugins: each engine to the plugin whose current answer alone runs its package there, else to the one installed first unless it refuses the engine; and where that leaves a plugin without an engine, the other plugin takes the engine where its answer is best.
+    /// The pair that Join With… starts on for two plugins: each engine to the plugin whose current answer alone runs its package there, else to the one installed first unless it refuses the engine; and where that leaves a plugin without an engine, the other plugin takes the engine where its answer is best, of two alike the one that leaves the version installed first the earlier engine of `PluginEngineVersions.engines`.
     public func proposedJoin(of id: PluginID, with otherID: PluginID) -> PluginEngineVersions? {
         guard id != otherID, let firstIndex = plugins.firstIndex(where: { $0.id == id || $0.id == otherID }),
               let secondIndex = plugins.lastIndex(where: { $0.id == id || $0.id == otherID }), firstIndex != secondIndex else { return nil }
@@ -585,12 +614,14 @@ public final class PluginManager: ObservableObject {
                 case false?: return 0
                 }
             }
-            if let engine = PluginEngineVersions.engines.max(by: { score($0) < score($1) }), score(engine) > 0 { versions[engine] = taker.id }
+            // `max(by:)` keeps the first of the engines that score alike, so the version installed first, as `kept` or `taker`, keeps or takes the earlier engine.
+            let order = taker.id == first.id ? PluginEngineVersions.engines : Array(PluginEngineVersions.engines.reversed())
+            if let engine = order.max(by: { score($0) < score($1) }), score(engine) > 0 { versions[engine] = taker.id }
         }
         return PluginEngineVersions(versions)
     }
 
-    /// Makes the two plugins of `versions` one plugin with a version per engine, at the place of the version installed first, whose switch the pair takes. The join drops each record of the file that names one of its plugins, those it ignores among them. Throws `PluginError.invalidVersions` for a record that does not give each engine one of two plugins, a plugin that is not an installed web extension or is in a pair, and a version whose current answer refuses the engine the record gives it.
+    /// Makes the two plugins of `versions` one plugin with a version per engine, at the place of the version installed first, whose switch the pair takes. The join drops each record of the file that names one of its plugins, those it ignores among them. Throws `PluginError.invalidVersions` for a record that does not give each engine one of two plugins, a plugin that is not an installed web extension or is in a pair, an engine that runs no web extensions on this Mac, and a version whose current answer does not run its package on the engine the record gives it, as one that refuses it or has not checked it, since such a version would run nowhere.
     public func join(_ versions: PluginEngineVersions) throws {
         guard versions.isComplete else { throw PluginError.invalidVersions("Each engine needs one of the two versions.") }
         let members = try versions.plugins.map { id -> InstalledPlugin in
@@ -600,9 +631,17 @@ public final class PluginManager: ObservableObject {
             guard plugin.counterpart == nil else { throw PluginError.invalidVersions("\u{201C}\(plugin.manifest.name)\u{201D} is already one of two versions.") }
             return plugin
         }
-        for (engine, id) in versions.versions {
-            guard let plugin = members.first(where: { $0.id == id }), plugin.engineChecks[engine] != false else {
-                throw PluginError.invalidVersions("\(engine.displayName) does not run \u{201C}\(members.first { $0.id == id }?.manifest.name ?? "")\u{201D}, so it cannot be the \(engine.displayName) version.")
+        let running = runtimes[.webExtension]?.engines ?? [:]
+        for engine in PluginEngineVersions.engines {
+            guard let plugin = members.first(where: { $0.id == versions.versions[engine] }) else { continue }
+            guard running[engine] != nil else { throw PluginError.invalidVersions("\(engine.displayName) runs no web extensions on this Mac, so no version can run on it.") }
+            switch plugin.engineChecks[engine] {
+            case true?:
+                continue
+            case false?:
+                throw PluginError.invalidVersions("\(engine.displayName) does not run \u{201C}\(plugin.manifest.name)\u{201D}, so it cannot be the \(engine.displayName) version.")
+            case nil:
+                throw PluginError.invalidVersions("\(engine.displayName) has not checked \u{201C}\(plugin.manifest.name)\u{201D} yet, so it cannot be the \(engine.displayName) version.")
             }
         }
         guard let lead = plugins.first(where: { versions.plugins.contains($0.id) }) else { return }

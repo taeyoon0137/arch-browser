@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 /// What `Browsing` provides so that a Persona's web extensions reach its engines, tabs, and windows.
 @MainActor
 public protocol WebExtensionHost: AnyObject {
-    /// The engines whose runtime runs web extensions on this Mac, each with its runtime's version, read without starting any profile. An engine whose application did not start is not one of them.
-    var extensionEngineVersions: [EngineKind: String] { get }
+    /// The engines whose runtime runs web extensions on this Mac, each with its extension runtime's version (`Engine.extensionRuntimeVersion`), which engine checks record, read without starting any profile. An engine whose application did not start is not one of them.
+    var extensionRuntimeVersions: [EngineKind: String] { get }
     /// The Persona's profiles in the engines that run web extensions, by engine, which the host starts if they have not started. An engine whose application or profile does not start is left out, and no engine's profile stands in for another's.
     func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions]
     /// The web contents of the tab while it is open.
@@ -70,7 +70,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
 
     /// The engines that the host reports as running web extensions, with their runtimes' versions, less, once the runtime has attached them, those whose profile did not start for the Persona: WebKit from macOS 15.4; Chromium does not run them yet.
     public var engines: [EngineKind: String] {
-        let versions = host?.extensionEngineVersions ?? [:]
+        let versions = host?.extensionRuntimeVersions ?? [:]
         guard let attached else { return versions }
         return versions.filter { attached[$0.key] != nil }
     }
@@ -325,11 +325,14 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host?.present(popup, for: tab) ?? false
     }
 
-    /// Asks with a sheet for the tab. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
+    /// Asks with a sheet for the tab, which for a version of a pair names the pair and the calling engine's version, whose copy alone the answer reaches. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, requests access: Set<EngineExtensionAccess>, in tab: (any EngineWebContents)?,
                            completion: @escaping (Set<EngineExtensionAccess>) -> Void) {
-        guard let host, let installed = loadedExtension(id, in: extensions) else { return completion([]) }
-        let prompt = WebExtensionAccessPrompt(requested: access, extensionName: installed.manifest.name)
+        guard let host, let loaded = loadedExtension(id, in: extensions) else { return completion([]) }
+        // The pair as the manager last listed it, since separating leaves a running copy loaded as it was.
+        let installed = plugins.first { $0.id == loaded.id } ?? loaded
+        let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
+        let prompt = WebExtensionAccessPrompt(requested: access, extensionName: lead.manifest.name, version: installed.pairEngine)
         guard !prompt.access.isEmpty else { return completion([]) }
         host.presentSheet(prompt.alert(), for: tab) { response in
             guard response == .alertFirstButtonReturn else { return completion([]) }

@@ -1035,7 +1035,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// The registered engines that run web extensions on this Mac, each with its extension runtime's version, without starting any of them. An engine whose application did not start is not one of them.
-    var extensionEngineVersions: [EngineKind: String] {
+    var extensionRuntimeVersions: [EngineKind: String] {
         var versions: [EngineKind: String] = [:]
         for kind in registry.registeredKinds where !enginesThatDidNotStart.contains(kind) {
             guard let engine = registry.engine(for: kind), engine.capabilities.contains(.extensions), let version = engine.extensionRuntimeVersion else { continue }
@@ -1049,7 +1049,7 @@ public final class BrowserSession: ObservableObject {
         guard personas.contains(where: { $0.id == personaID }) else { return [:] }
         let personaEngines = engines(of: personaID)
         var engines: [EngineKind: any EngineExtensions] = [:]
-        for kind in extensionEngineVersions.keys {
+        for kind in extensionRuntimeVersions.keys {
             engines[kind] = (personaEngines.runtimes[kind] ?? startRuntime(kind, in: personaEngines))?.context.extensions
         }
         return engines

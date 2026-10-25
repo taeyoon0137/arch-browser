@@ -70,7 +70,7 @@ final class RecordingHost: WebExtensionHost {
     private(set) var sheets: [NSAlert] = []
     var sheetAnswer = NSApplication.ModalResponse.alertFirstButtonReturn
 
-    var extensionEngineVersions: [EngineKind: String] {
+    var extensionRuntimeVersions: [EngineKind: String] {
         Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
     }
 

@@ -77,8 +77,8 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     // MARK: WebExtensionHost
 
-    var extensionEngineVersions: [EngineKind: String] {
-        session?.extensionEngineVersions ?? [:]
+    var extensionRuntimeVersions: [EngineKind: String] {
+        session?.extensionRuntimeVersions ?? [:]
     }
 
     func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions] {

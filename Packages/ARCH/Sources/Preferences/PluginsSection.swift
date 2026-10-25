@@ -146,7 +146,7 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version… for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
+/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version… for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -167,14 +167,10 @@ private struct PluginSection: View {
         return [plugin, counterpart].sorted { order($0) < order($1) }
     }
 
-    /// The other unpaired web extension plugins that Join With… lists.
-    private var joinCandidates: [InstalledPlugin] {
-        plugins.plugins.filter { $0.id != plugin.id && $0.kind == .webExtension && $0.packageURL != nil && $0.counterpart == nil }
-    }
-
     var body: some View {
         let isPair = plugin.counterpart != nil
         let missingEngine = plugins.missingEngine(of: plugin.id)
+        let joinCandidates = plugins.joinCandidates(of: plugin.id)
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)
@@ -326,7 +322,7 @@ private struct VersionRow: View {
             Button("Remove Version\u{2026}", action: remove)
         } label: {
             Text("\(version.pairEngine?.displayName ?? "") Version")
-            Text(["Version \(version.manifest.version), \(origin(of: version)).", version.enginesNote].compactMap { $0 }.joined(separator: " "))
+            Text(["Version \(version.manifest.version), \(origin(of: version)).", plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
         }
         AccessRow(plugin: version)
         VStack(alignment: .leading, spacing: 4) {

@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data. A web extension that may be another engine's version of an installed plugin can join it as that version, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
 import ARCHEngine
 import LocalAuthentication
 import Plugins
@@ -156,6 +156,10 @@ private struct PluginReviewView: View {
                         Label("\(engine.displayName) tabs lose \u{201C}\(name(of: target))\u{201D}.", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                     }
+                }
+                if let joined, let engine = choiceEngine, refusal == nil, let takeover = plugins.versionTakeover(for: package, joining: joined.id, for: engine) {
+                    Label(takeover, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
                 }
                 if let joined, review.versionOf != nil, refusal == nil, differsInNameOrDeveloper(from: joined) {
                     Label("Its name or developer differs from \u{201C}\(name(of: joined))\u{201D}. Join only if both come from the same developer.", systemImage: "exclamationmark.triangle")

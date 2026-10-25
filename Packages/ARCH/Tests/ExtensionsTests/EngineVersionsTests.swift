@@ -181,6 +181,11 @@ struct EngineVersionsTests {
         #expect(throws: PluginError.permissionDenied(.nativeMessaging)) { try reply?.get() }
         runtime.extensions(chromium, extension: keyID, sendNativeMessage: Data("{}".utf8), toApplication: "org.example.echo") { reply = $0 }
         #expect(throws: NativeMessagingError.notFound("org.example.echo")) { try reply?.get() }
+        // A request at run time names the pair and the version that asks.
+        runtime.extensions(chromium, extension: keyID, requests: [.permission("cookies")], in: nil) { _ in }
+        #expect(host.sheets.last?.messageText == "Allow the Chromium version of \u{201C}Reader\u{201D} more access?")
+        runtime.extensions(webKit, extension: keyID, requests: [.permission("cookies")], in: nil) { _ in }
+        #expect(host.sheets.last?.messageText == "Allow the WebKit version of \u{201C}Reader\u{201D} more access?")
         manager.close()
 
         // A new manager lists both versions and the pair.
@@ -199,6 +204,44 @@ struct EngineVersionsTests {
         #expect(update.updates == version && update.updateChoices.isEmpty && update.counterpart == nil)
         try third.install(update, grant: PluginGrant(requestedBy: update.manifest), isEnabled: true)
         #expect(third.plugins.map(\.manifest.version) == ["1", "2"] && third.engineVersions.count == 1)
+    }
+
+    @Test func refusesAPackageWithTheEntryIdentifierOfAVersion() async throws {
+        let (manager, _) = launch()
+        let (reader, version) = try await installComplementaryPair(in: manager)
+        // A script plugin may name itself `extension.<identifier>.chromium`, which the Chromium version's entry has while its package names `extension.<identifier>`.
+        let script = try folder.package("script", ["plugin.json": #"{"id": "\#(version.rawValue)", "name": "Tools", "version": "1", "apiVersion": 1, "summary": "T."}"#])
+        await #expect(throws: PluginError.invalidPackage("A version of an installed plugin has the identifier \(version.rawValue).")) { try await manager.stage(script) }
+        #expect(try plugin(version, in: manager).kind == .webExtension && manager.engineVersions == [PluginEngineVersions([.webKit: reader, .chromium: version])])
+    }
+
+    @Test func warnsThatAVersionUnderItsCounterpartsIdentifierTakesOverItsCopy() async throws {
+        let (manager, runtime) = launch()
+        // Both engines run "Reader", so Chromium has its copy, which keeps its data under the identifier.
+        let reader = try await manager.installEverything(from: package("reader", name: "Reader", key: key))
+        await runtime.waitForEngines()
+        #expect(chromium.loaded[keyID] != nil)
+        // From the plugin's own place, nothing warns.
+        let same = try await manager.stage(package("reader", name: "Reader", version: "2", key: key))
+        #expect(manager.versionTakeover(for: same, joining: reader.id, for: .chromium) == nil)
+        manager.discard(same)
+        let staged = try await manager.stage(package("elsewhere", name: "Reader", version: "2", key: key))
+        #expect(staged.joinableEngines == [.webKit, .chromium])
+        #expect(manager.versionTakeover(for: staged, joining: reader.id, for: .chromium)
+            == "\u{201C}Reader\u{201D}, which you installed from reader, has this package's identifier, so as its Chromium version the package takes over the data that \u{201C}Reader\u{201D} keeps on Chromium tabs. Join only if both come from the same developer.")
+        let id = try manager.install(staged, grant: PluginGrant(requestedBy: staged.manifest), isEnabled: true, asVersionOf: reader.id, for: .chromium)
+        await runtime.waitForEngines()
+        // Chromium runs the version under the identifier it knew "Reader" by, with the data that "Reader"'s copy left there.
+        #expect(try chromium.loaded[keyID]?.packageURL == plugin(id, in: manager).packageURL && chromium.removedData.isEmpty && webKit.loaded[keyID]?.packageURL == reader.packageURL)
+
+        // A plugin whose package Chromium refuses has no copy there to take over.
+        let notesKey = Data("notes key".utf8).base64EncodedString()
+        chromium.refusedNames = ["Notes"]
+        webKit.refusedNames = ["Notes for Chromium"]
+        let notes = try await manager.installEverything(from: package("notes", name: "Notes", key: notesKey))
+        let notesVersion = try await manager.stage(package("notes-chromium", name: "Notes for Chromium", key: notesKey))
+        #expect(notesVersion.suggestedEngine == .chromium && manager.versionTakeover(for: notesVersion, joining: notes.id, for: .chromium) == nil)
+        manager.discard(notesVersion)
     }
 
     @Test func sendsAnUpdateToTheSameSourceThenTheSameAnswersThenTheChoice() async throws {
@@ -345,6 +388,39 @@ struct EngineVersionsTests {
         #expect(try list()["engineVersions"] as? [[String: String]] == [["webKit": a.id.rawValue, "chromium": b.id.rawValue]])
         #expect(manager.missingEngine(of: a.id) == nil && manager.versionEngines(of: a.id).isEmpty)
         #expect(throws: PluginError.self) { try manager.join(PluginEngineVersions([.webKit: a.id, .chromium: b.id])) }
+    }
+
+    @Test func offersNoJoinWhileAnEngineRunsNoExtensions() async throws {
+        // With WebKit alone, as before Chromium runs extensions, Join With… lists nothing, and a join that gives Chromium a version is refused.
+        host.engines = [.webKit: webKit]
+        let (alone, _) = launch()
+        let a = try await alone.installEverything(from: package("a", name: "A"))
+        let b = try await alone.installEverything(from: package("b", name: "B"))
+        #expect(alone.joinCandidates(of: a.id).isEmpty && alone.joinCandidates(of: b.id).isEmpty)
+        #expect(throws: PluginError.invalidVersions("Chromium runs no web extensions on this Mac, so no version can run on it.")) {
+            try alone.join(PluginEngineVersions([.webKit: b.id, .chromium: a.id]))
+        }
+        #expect(alone.engineVersions.isEmpty && alone.plugins.allSatisfy { $0.engines == [.webKit] })
+        alone.close()
+
+        // Once Chromium runs extensions, Join With… lists the other plugin, and a version that Chromium has not checked yet cannot join for it.
+        host.engines = [.webKit: webKit, .chromium: chromium]
+        let (manager, runtime) = launch()
+        #expect(manager.joinCandidates(of: a.id).map(\.id) == [b.id])
+        #expect(throws: PluginError.invalidVersions("Chromium has not checked \u{201C}A\u{201D} yet, so it cannot be the Chromium version.")) {
+            try manager.join(PluginEngineVersions([.webKit: b.id, .chromium: a.id]))
+        }
+        await runtime.waitForEngines()
+        // Both engines run both packages, so the choice starts with the version installed first on WebKit.
+        #expect(manager.proposedJoin(of: b.id, with: a.id) == PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
+        try manager.join(PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
+        #expect(try plugin(a.id, in: manager).engines == [.webKit] && plugin(b.id, in: manager).engines == [.chromium] && manager.joinCandidates(of: a.id).isEmpty)
+        manager.close()
+
+        // A pair whose engine runs no extensions now says so in its version's row.
+        host.engines = [.webKit: webKit]
+        let (later, _) = launch()
+        #expect(later.engineVersions.count == 1 && later.enginesNote(of: b.id) == "Chromium runs no web extensions on this Mac." && later.enginesNote(of: a.id) == "Runs on WebKit tabs.")
     }
 
     @Test func separatesVersionsButNotThoseThatShareAnIdentifier() async throws {
