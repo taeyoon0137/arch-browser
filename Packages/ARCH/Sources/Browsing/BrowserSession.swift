@@ -1,4 +1,4 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
@@ -27,8 +27,10 @@ public final class BrowserSession: ObservableObject {
     private let userDataDirectory: URL
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
-    /// Each Persona's runtimes, from the Persona's first tab until quit.
+    /// Each Persona's runtimes, from the Persona's first tab until quit, and its plugins.
     private var personaEngines: [Persona.ID: PersonaEngines] = [:]
+    /// The runtimes of Personas deleted since launch, kept without tabs until quit, because the download items in their rows refer to their download lists and profiles unowned.
+    private var retiredPersonaEngines: [PersonaEngines] = []
     /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
     private let primaryEngine: EngineKind
     /// The deleted Personas whose stored data is still on disk.
@@ -43,8 +45,8 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var focusedTabID: UUID?
     /// Downloads reported by the engine and not removed by the user, oldest first.
     @Published public private(set) var downloads: [DownloadEntry] = []
-    /// Downloads that finished while no window showed the library. The library button shows their count.
-    @Published public private(set) var unseenDownloadIDs: Set<String> = []
+    /// The entries of downloads that finished while no window showed the library. The library button shows their count.
+    @Published public private(set) var unseenDownloadIDs: Set<UUID> = []
     /// Counts the most recently closed tabs the user closed since they last pressed another key or clicked in the page. ⌘Z reopens them one at a time, newest first.
     public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
@@ -79,16 +81,17 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Loads the saved session, has the engines remove deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them.
-    public init(registry: EngineRegistry = .shared, userDataDirectory: URL) throws {
+    /// Loads the saved session, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships.
+    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type]) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
+        self.builtInPlugins = builtInPlugins
         store = SessionStore(directory: userDataDirectory)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
-                                                configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory))
+                                                configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory), directory: userDataDirectory)
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
@@ -284,9 +287,10 @@ public final class BrowserSession: ObservableObject {
         return openSmallWindow(makeWebContents(url: url, engine: nil, state: nil, in: personaID), spaceID: spaceID, personaID: personaID)
     }
 
-    /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
+    /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
     func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
+        let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
         tab.isInSmallWindow = true
         tabs.append(tab)
@@ -350,7 +354,7 @@ public final class BrowserSession: ObservableObject {
         return application
     }
 
-    /// The Persona's runtimes, created empty on first use.
+    /// The Persona's runtimes and plugins, created empty on first use.
     private func engines(of personaID: Persona.ID) -> PersonaEngines {
         if let engines = personaEngines[personaID] { return engines }
         let engines = PersonaEngines(personaID: personaID)
@@ -408,12 +412,12 @@ public final class BrowserSession: ObservableObject {
         folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
     }
 
-    /// Adds a space to the Persona and returns it. The space goes last in that Persona's group, because each Persona's spaces stay together in the order `normalized()` restores at launch.
-    func makeSpace(in personaID: Persona.ID) -> Space {
+    /// Adds a space to the Persona and returns it, named `name` or else "Space" with the lowest number no space uses, and with the next tint of the rotation. The space goes last in that Persona's group, because each Persona's spaces stay together in the order `normalized()` restores at launch.
+    func makeSpace(in personaID: Persona.ID, named name: String? = nil) -> Space {
         let tint = SpaceTint.colors[spaces.count % SpaceTint.colors.count]
         // The lowest number no space uses, so names do not repeat after a deletion.
-        let number = (1...).first { number in !spaces.contains { $0.name == "Space \(number)" } }!
-        let space = Space(name: "Space \(number)", tint: tint, personaID: personaID)
+        let name = name ?? (1...).lazy.map { "Space \($0)" }.first { name in !spaces.contains { $0.name == name } }!
+        let space = Space(name: name, tint: tint, personaID: personaID)
         let groupEnd = spaces.lastIndex { $0.resolvedPersonaID == personaID }.map { $0 + 1 } ?? spaces.endIndex
         spaces.insert(space, at: groupEnd)
         return space
@@ -434,10 +438,17 @@ public final class BrowserSession: ObservableObject {
         spaces.swapAt(index, index + offset)
     }
 
-    /// Removes a space. Its tabs and folders move to the space before it, or to the next one for the first space, so no tab closes, and every window on the space switches there.
+    /// Whether the space can go: every Persona keeps at least one space.
+    func canDeleteSpace(_ id: UUID) -> Bool {
+        spaces.first { $0.id == id }.map { spaces(in: $0.resolvedPersonaID).count > 1 } == true
+    }
+
+    /// Removes a space, unless it is its Persona's last. Its tabs and folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
-        guard spaces.count > 1, let index = spaces.firstIndex(where: { $0.id == id }) else { return }
-        let destination = spaces[index == 0 ? 1 : index - 1].id
+        guard canDeleteSpace(id), let space = spaces.first(where: { $0.id == id }) else { return }
+        let group = spaces(in: space.resolvedPersonaID)
+        guard let index = group.firstIndex(where: { $0.id == id }) else { return }
+        let destination = group[index == 0 ? 1 : index - 1].id
         // The space's split view goes with it; its tabs join the destination as separate tabs.
         splitTabIDs[id] = nil
         // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders.
@@ -450,12 +461,97 @@ public final class BrowserSession: ObservableObject {
         for folderIndex in movedFolders.indices { movedFolders[folderIndex].spaceID = destination }
         folders = folders.filter { $0.spaceID != id } + movedFolders
         for window in windows where window.currentSpaceID == id { window.switchToSpace(destination) }
-        spaces.remove(at: index)
+        spaces.removeAll { $0.id == id }
     }
 
     func updateSpace(_ id: UUID, _ change: (inout Space) -> Void) {
         guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         change(&spaces[index])
+    }
+
+    // MARK: Personas
+
+    /// The Persona's spaces in switcher order.
+    public func spaces(in personaID: Persona.ID) -> [Space] {
+        spaces.filter { $0.resolvedPersonaID == personaID }
+    }
+
+    /// The Persona's favorites in their order.
+    public func favorites(in personaID: Persona.ID) -> [Favorite] {
+        favorites.filter { $0.resolvedPersonaID == personaID }
+    }
+
+    /// The listed Persona with the ID, or nil once it is deleted.
+    func persona(withID id: Persona.ID) -> Persona? {
+        personas.first { $0.id == id }
+    }
+
+    /// The Persona's name where the interface shows it, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one.
+    func displayedName(ofPersona id: Persona.ID) -> String? {
+        personas.count > 1 ? persona(withID: id)?.name : nil
+    }
+
+    /// The space a tab of the Persona joins when no space of the Persona is given: the last main window's current space while it belongs to the Persona, else the Persona's first space. Every listed Persona has a space; for one that is gone, the first space.
+    func preferredSpace(in personaID: Persona.ID) -> Space {
+        if let space = lastMainWindow?.currentSpace, space.resolvedPersonaID == personaID { return space }
+        return spaces.first { $0.resolvedPersonaID == personaID } ?? spaces[0]
+    }
+
+    /// The guard of every move of a tab to another space, drop targets included: a tab's pages keep their Persona's storage, so the tab moves only to a space of its Persona (Persona rule 3).
+    func canMoveTab(_ id: UUID, toSpace spaceID: UUID) -> Bool {
+        guard let tab = tabs.first(where: { $0.id == id }), let space = spaces.first(where: { $0.id == spaceID }) else { return false }
+        return space.resolvedPersonaID == tab.personaID
+    }
+
+    /// Appends a Persona with one space named Personal and returns it. Its profiles and plugins start when a window of it first needs them.
+    func addPersona(named name: String) -> Persona {
+        let persona = Persona(name: name)
+        personas.append(persona)
+        _ = makeSpace(in: persona.id, named: "Personal")
+        return persona
+    }
+
+    /// The window's sheet passes only a name with text in it.
+    func renamePersona(_ id: Persona.ID, to name: String) {
+        guard let index = personas.firstIndex(where: { $0.id == id }) else { return }
+        personas[index].name = name
+    }
+
+    /// Every Persona but the default one can go.
+    public func canDeletePersona(_ id: Persona.ID) -> Bool {
+        id != Persona.defaultID && persona(withID: id) != nil
+    }
+
+    /// Removes a Persona other than the default one with everything it owns. Its tabs close into the closed list without asking their pages, and its cookies, website data, and plugin data leave the Mac at the next launch, when no engine has its profiles loaded.
+    func deletePersona(_ id: Persona.ID) {
+        guard canDeletePersona(id), let destination = spaces.first(where: { $0.resolvedPersonaID != id }) else { return }
+        // Its previews close, and every main window on its spaces moves to the first space of the first remaining Persona, where window rule 3 picks the tab. A small window closes below with its tab.
+        for window in windows {
+            if window.preview?.personaID == id { window.closePreview() }
+            if window.kind == .main, window.personaID == id { window.switchToSpace(destination.id) }
+        }
+        for tab in allTabs where tab.personaID == id { closeTab(tab) }
+        undoableCloseCount = 0
+        // Its unfinished downloads stop, and the pages kept for them close. Finished rows stay in the library.
+        downloads.filter { $0.personaID == id && !$0.isFinished }.forEach { $0.item.cancel() }
+        for page in downloadPages where page.runtime.personaID == id { page.runtime.browser.closeWebContents(page.webContents) }
+        downloadPages.removeAll { $0.runtime.personaID == id }
+        // Its spaces go with their folders and split views, and its favorites with the tabs saved for them.
+        let spaceIDs = Set(spaces(in: id).map(\.id))
+        spaceIDs.forEach { splitTabIDs[$0] = nil }
+        folders.removeAll { spaceIDs.contains($0.spaceID) }
+        favorites(in: id).forEach { savedFavoriteTabs[$0.id] = nil }
+        favorites.removeAll { $0.resolvedPersonaID == id }
+        spaces.removeAll { $0.resolvedPersonaID == id }
+        personas.removeAll { $0.id == id }
+        // Its browsers close, and its plugins stop. Download items refer to their lists and profiles unowned, so its runtimes stay until quit.
+        if let engines = personaEngines.removeValue(forKey: id) {
+            engines.plugins = nil
+            engines.runtimes.values.forEach { $0.browser.tryToClose(skipBeforeUnloadHandlers: true) { _ in } }
+            retiredPersonaEngines.append(engines)
+        }
+        personaDataRemoval.removeAtNextLaunch(id)
+        saveNow()
     }
 
     // MARK: Home pages
@@ -560,9 +656,14 @@ public final class BrowserSession: ObservableObject {
         (spaces.first { $0.id == id } ?? sidebarTarget().currentSpace).resolvedPersonaID
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's first space if it has one. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
+    /// The space `id` while it belongs to the Persona, or else the Persona's preferred space, so that a page's tab joins only a space of the page's Persona (Persona rule 3).
+    private func spaceID(_ id: UUID, orPreferredIn personaID: Persona.ID) -> UUID {
+        spaces.first { $0.id == id }?.resolvedPersonaID == personaID ? id : preferredSpace(in: personaID).id
+    }
+
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool) -> Tab {
-        let spaceID = self.personaID(ofSpace: spaceID) == personaID ? spaceID : spaces.first { $0.resolvedPersonaID == personaID }?.id ?? spaceID
+        let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tabs.append(tab)
         if select { sidebarTarget().selectedTabID = tab.id }
@@ -572,12 +673,12 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, the sidebar target's current space.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.sidebarTarget().currentSpaceID, personaID: personaID, pinned: false, select: false)
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false)
             opened.opener = tab.webContents
             opened.isUnread = true
         }
@@ -634,10 +735,10 @@ public final class BrowserSession: ObservableObject {
                 DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
             }
         }
-        // A link opened from a page's context menu opens behind the current tab, in the page's space (the current space for a favorite's page) and engine, marked unread.
+        // A link opened from a page's context menu opens behind the current tab, in the page's space (its Persona's preferred space for a favorite's page) and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.openTab(url: url, in: tab.spaceID, select: false, engine: tab.engineKind).isUnread = true
+            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.engineKind).isUnread = true
         }
         // A web link the user clicks with Shift opens in the preview panel of the page's window, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
@@ -729,11 +830,17 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab under its own ID in its original space and folder, or the sidebar target's current space if the original is gone, and selects it in the sidebar target.
+    /// Reopens the newest closed tab under its own ID in its original space and folder, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
-        let spaceID = spaces.contains(where: { $0.id == record.spaceID }) ? record.spaceID : sidebarTarget().currentSpaceID
+        let spaceID = if spaces.contains(where: { $0.id == record.spaceID }) {
+            record.spaceID
+        } else if let personaID = record.personaID, persona(withID: personaID) != nil {
+            preferredSpace(in: personaID).id
+        } else {
+            sidebarTarget().currentSpaceID
+        }
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
@@ -755,15 +862,16 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona leaves the tab where it is.
     public func moveTab(_ id: UUID, to target: Tab) {
-        guard id != target.id, let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
+        guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID),
+              let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
         let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
         guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
-        tab.spaceID = target.spaceID
+        tab.spaceID = spaceID
         tab.isPinned = target.isPinned
         tab.folderID = target.folderID
         reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
@@ -816,12 +924,16 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Plugins
 
-    /// The plugins of the default Persona, to which every plugin belongs until each Persona has plugins of its own. `nil` until the app loads its built-in plugins at launch.
-    public private(set) var plugins: PluginManager?
+    /// The plugins the app ships, which every Persona's manager offers.
+    private let builtInPlugins: [any BuiltInPlugin.Type]
 
-    /// Creates the plugin manager with the built-in plugins the app ships. The app calls it once at launch.
-    @MainActor public func loadPlugins(builtIns: [any BuiltInPlugin.Type]) {
-        plugins = PluginManager(persona: Persona.defaultID, directory: userDataDirectory, builtIns: builtIns)
+    /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use.
+    @MainActor func plugins(in personaID: Persona.ID) -> PluginManager {
+        let engines = engines(of: personaID)
+        if let plugins = engines.plugins { return plugins }
+        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins)
+        engines.plugins = plugins
+        return plugins
     }
 
     // MARK: Downloads
@@ -1074,9 +1186,9 @@ public final class BrowserSession: ObservableObject {
         spaces = reordered
     }
 
-    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab.
+    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. A space of another Persona refuses the tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
-        guard spaces.contains(where: { $0.id == spaceID }), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
+        guard canMoveTab(id, toSpace: spaceID), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
         // The other panes of its split view stay together in the space it leaves.
         leaveSplitView(tabs[index])
         var reordered = tabs
@@ -1340,7 +1452,12 @@ extension BrowserSession: EngineBrowserDelegate {}
 extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
         guard let personaID = runtime(owning: downloads)?.personaID else { return }
-        self.downloads += items.filter { item in !self.downloads.contains { $0.id == item.id } }.map { DownloadEntry(item: $0, personaID: personaID) }
+        self.downloads += items.filter { entry(for: $0) == nil }.map { DownloadEntry(item: $0, personaID: personaID) }
+    }
+
+    /// The download's entry. Engines number downloads per profile, so the item, not its ID, names one download among every Persona's.
+    private func entry(for item: any EngineDownloadItem) -> DownloadEntry? {
+        downloads.first { $0.item === item }
     }
 
     /// The library button shows a new download's progress, so the library itself stays as it is.
@@ -1380,7 +1497,7 @@ extension BrowserSession: EngineDownloadsDelegate {
     /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
         objectWillChange.send()
-        guard let entry = self.downloads.first(where: { $0.id == item.id }) else { return }
+        guard let entry = entry(for: item) else { return }
         let wasFinished = entry.isFinished
         entry.refresh()
         if !wasFinished, entry.state == .completed, !windows.contains(where: \.isLibraryVisible) { unseenDownloadIDs.insert(entry.id) }
@@ -1389,8 +1506,8 @@ extension BrowserSession: EngineDownloadsDelegate {
     }
 
     public func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem) {
-        self.downloads.removeAll { $0.id == item.id }
-        unseenDownloadIDs.remove(item.id)
+        if let entry = entry(for: item) { unseenDownloadIDs.remove(entry.id) }
+        self.downloads.removeAll { $0.item === item }
         closeDownloadPagesIfIdle()
     }
 

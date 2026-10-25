@@ -20,17 +20,17 @@ struct CommandPaletteView: View {
     /// Set as the palette appears to animate its arrival as a state change.
     @State private var hasArrived = false
 
-    /// Matching commands of enabled plugins.
+    /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
-        Array((session.plugins?.contributions.paletteCommands(matching: text) ?? []).prefix(5))
+        Array(session.plugins(in: windowModel.personaID).contributions.paletteCommands(matching: text).prefix(5))
     }
 
-    /// The listed tabs to switch to. A small window shows only its own tab, so its palette offers none.
+    /// The listed tabs of the window's Persona to switch to. A small window shows only its own tab, so its palette offers none.
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty, windowModel.kind == .main else { return [] }
         return Array(session.allTabs.filter { tab in
-            tab.id != windowModel.selectedTabID && tab.isListedInSidebar &&
+            tab.id != windowModel.selectedTabID && tab.isListedInSidebar && tab.personaID == windowModel.personaID &&
                 (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
     }

@@ -1,8 +1,8 @@
-// Personas partition the session: every space, favorite, tab, and closed tab belongs to exactly one, and a tab keeps its Persona for its whole life. Until Personas have an interface, the session holds only the default Persona.
+// Personas partition the session: every space, favorite, tab, and closed tab belongs to exactly one, and a tab keeps its Persona for its whole life. The default Persona always exists; the user adds, renames, and deletes the others from the space menu and the Spaces menu.
 import ARCHEngine
 import Foundation
 
-/// A set of spaces whose tabs share one engine context per engine: cookies, site storage, caches, and, with V.11, installed plugins.
+/// A set of spaces whose tabs share one engine context per engine, with its cookies, site storage, and caches, and one set of installed plugins.
 public struct Persona: Identifiable, Codable, Hashable {
     public var id: UUID
     public var name: String
@@ -12,7 +12,7 @@ public struct Persona: Identifiable, Codable, Hashable {
         self.name = name
     }
 
-    /// The Persona that holds everything from builds before Personas. It keeps each engine's default storage. Sync names its record `default`; V.11 uses it for `Plugins/<id>/`.
+    /// The Persona that holds everything from builds before Personas. It keeps each engine's default storage and cannot be deleted. Sync names its record `default`, and its plugins live in `Plugins/<id>/`.
     public static let defaultID = UUID(uuidString: "D59DAF4B-E372-4AF9-890E-455B8B3860F3")!
     public var isDefault: Bool { id == Self.defaultID }
 

@@ -56,7 +56,7 @@ Every record also has `modifiedAt` and `schemaVersion`.
 - `schemaVersion` is the record format version that wrote the record, starting at 1.
 - `url` is the absolute address string; `engine` is the raw value of `EngineKind`; `tint` is the raw value of `SpaceTint`; `value` is the setting's value as a string.
 - Sync stores every field except the references, `order`, `modifiedAt`, and `schemaVersion` in `encryptedValues`. CloudKit encrypts those fields end to end with keys in the user's iCloud Keychain. The server cannot read addresses, titles, or names. Encrypted fields cannot be queried, and sync never queries: it reads zone changes. CloudKit cannot encrypt references.
-- Until III.12 adds Personas, Sync writes one `Persona` record named `default`, and every space and favorite refers to it. III.12 gives the default Persona the record name `default` on every Mac. Two Macs that convert older `session.json` files to a default Persona therefore share one record instead of creating two.
+- The default Persona, `Persona.defaultID` (`D59DAF4B-E372-4AF9-890E-455B8B3860F3`), has the record name `default` on every Mac, and every other Persona its UUID string. Two Macs that converted older `session.json` files to the default Persona therefore share one record instead of creating two.
 
 ### Settings list
 

@@ -726,7 +726,7 @@ AI writes a plugin (row 55) from the user's request. The plugin runs on the plug
 - A plugin is a folder with `manifest.json` and JavaScript files. AI-written plugins are always this kind; Swift plugins are only built in.
 - Plugins run in JavaScriptCore in a helper process that Arch can terminate. JavaScriptCore has no public way to stop a running script, so Arch ends the process to stop a stuck plugin. The process has no network or file access of its own.
 - The plugin sees one `arch` object. Every call goes to the app, which checks the manifest's permissions on each call.
-- Installed plugins belong to a Persona, under `Application Support/Arch/Plugins/<plugin ID>/` until III.12 adds Persona folders.
+- Installed plugins belong to a Persona, under `Application Support/Arch/Plugins/<persona id>/<plugin ID>/`.
 
 ### Permissions
 

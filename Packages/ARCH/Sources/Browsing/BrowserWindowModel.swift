@@ -117,9 +117,12 @@ public final class BrowserWindowModel: ObservableObject {
         session.spaces.first { $0.id == currentSpaceID } ?? session.spaces[0]
     }
 
-    /// Adds a space to the current space's Persona and shows it.
+    /// The Persona whose favorites, tabs, and plugins the window offers: the current space's, which for a small window is its tab's.
+    public var personaID: Persona.ID { currentSpace.resolvedPersonaID }
+
+    /// Adds a space to the window's Persona and shows it.
     public func addSpace() {
-        switchToSpace(session.makeSpace(in: currentSpace.resolvedPersonaID).id)
+        switchToSpace(session.makeSpace(in: personaID).id)
     }
 
     public func switchToSpace(_ id: UUID) {
@@ -163,6 +166,62 @@ public final class BrowserWindowModel: ObservableObject {
     /// Does not interrupt renaming another tab that may have started meanwhile.
     public func endRenaming(_ id: UUID) {
         if renamingTabID == id { renamingTabID = nil }
+    }
+
+    // MARK: Personas
+
+    /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. An empty name adds none.
+    public func promptForNewPersona() {
+        askForPersonaName(title: "New Persona", message: "A Persona has spaces of its own, and its tabs keep their own cookies, website data, and plugins.", name: "", button: "Create") { [weak self] name in
+            guard let self else { return }
+            let persona = self.session.addPersona(named: name)
+            if let space = self.session.spaces(in: persona.id).first { self.switchToSpace(space.id) }
+        }
+    }
+
+    /// Asks for the Persona's new name in a sheet on the window. An empty name keeps the old one.
+    public func promptToRenamePersona(_ id: Persona.ID) {
+        guard let persona = session.persona(withID: id) else { return }
+        askForPersonaName(title: "Rename Persona", message: nil, name: persona.name, button: "Rename") { [weak self] name in
+            self?.session.renamePersona(id, to: name)
+        }
+    }
+
+    /// Asks with a sheet on the window before deleting a Persona other than the default one, saying what goes with it.
+    public func confirmDeletePersona(_ id: Persona.ID) {
+        guard session.canDeletePersona(id), let persona = session.persona(withID: id), let nsWindow else { return }
+        let spaceCount = session.spaces(in: id).count
+        let favoriteCount = session.favorites(in: id).count
+        let tabCount = session.tabs.filter { $0.personaID == id }.count
+        let removed = "Its \(spaceCount) \(spaceCount == 1 ? "space" : "spaces") and \(favoriteCount) \(favoriteCount == 1 ? "favorite" : "favorites") are removed"
+        let closed = tabCount == 1 ? "its 1 tab closes" : "its \(tabCount) tabs close"
+        let alert = NSAlert()
+        alert.messageText = "Delete the Persona \u{201C}\(persona.name)\u{201D}?"
+        alert.informativeText = "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens."
+        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: nsWindow) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.session.deletePersona(id) }
+        }
+    }
+
+    /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels or leaves it empty.
+    private func askForPersonaName(title: String, message: String?, name: String, button: String, then use: @escaping (String) -> Void) {
+        guard let nsWindow else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        if let message { alert.informativeText = message }
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: name)
+        field.placeholderString = "Persona Name"
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: nsWindow) { response in
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if response == .alertFirstButtonReturn, !name.isEmpty { use(name) }
+        }
     }
 
     // MARK: Home pages
@@ -321,7 +380,7 @@ public final class BrowserWindowModel: ObservableObject {
         selectedTabID = session.openTab(url: url, in: currentSpaceID, select: false).id
     }
 
-    /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). `opener` is the page that opened it, which the window returns to when the new page closes itself.
+    /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). A page of another Persona, as from a preview that stayed open while the window moved to another Persona's space, goes to its Persona's preferred space instead. `opener` is the page that opened it, which the window returns to when the new page closes itself.
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
         switch kind {
         case .main:
@@ -478,9 +537,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Plugins
 
-    /// Closes the palette and runs a plugin command chosen in it on the selected tab.
+    /// Closes the palette and runs a plugin command chosen in it on the selected tab, through the plugins of the window's Persona.
     @MainActor public func runPluginCommand(_ command: PluginCommandRef) {
-        guard let plugins = session.plugins else { return }
+        let plugins = session.plugins(in: personaID)
         let invocation = PluginInvocation(tab: selectedPluginTab)
         dismissCommandPalette()
         Task { await plugins.run(command, invocation) }
@@ -874,9 +933,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     public var isTabSwitcherVisible: Bool { tabSwitcherHighlightID != nil }
 
-    /// The current space's listed tabs and the favorites' open tabs, which every space shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
+    /// The current space's listed tabs and the open tabs of the favorites that every space of the window's Persona shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
     public var recentTabs: [Tab] {
-        let candidates = session.tabs.filter { $0.spaceID == currentSpaceID && $0.isListedInSidebar } + session.openFavoriteTabs
+        let candidates = session.tabs.filter { $0.spaceID == currentSpaceID && $0.isListedInSidebar } + session.openFavoriteTabs.filter { $0.personaID == personaID }
         let selected = activationOrder.compactMap { id in candidates.first { $0.id == id } }
         let selectedIDs = Set(activationOrder)
         return selected + candidates.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }
@@ -936,9 +995,11 @@ public final class BrowserWindowModel: ObservableObject {
     /// Asks with a sheet on the selected tab before clearing the data of its page's host.
     public func confirmClearSiteData() {
         guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
+        // With several Personas, the sheet names the one whose data goes.
+        let inPersona = session.displayedName(ofPersona: tab.personaID).map { " in the Persona \u{201C}\($0)\u{201D}" } ?? ""
         let alert = NSAlert()
         alert.messageText = "Clear the data stored by \u{201C}\(site.displayName)\u{201D}?"
-        alert.informativeText = "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again."
+        alert.informativeText = "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again."
         alert.addButton(withTitle: "Clear").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         let personaID = tab.personaID

@@ -63,11 +63,17 @@ Checked at runtime for step 12, with the bundled app, the screen unlocked, and A
 - A link with `target=_blank` and a `window.open` from a click in a small window each opened another small window, cascaded by 29 points. The popup kept `window.opener`, and its `postMessage` reached the page on both engines. The main window's sidebar listed none of the small windows' tabs. A small window's close button closed its tab, and quitting saved the small windows' tabs as open tabs of their destination space, with one window record.
 - A popup that calls `window.close()` closed at once on WebKit and, as a tab of the main window, on Chromium. In a Chromium small window, its page went blank but the window stayed open until another window became key, so something tied to the key window keeps CEF's view until then (plan task I.14).
 
+Checked at runtime for step 13, with the bundled app on the Chromium engine, test Personas added to `session.json` by hand, and Arch driven through accessibility while another app was in front
+- A Persona listed in `removedPersonaIDs` with a `Plugins/<UUID>` folder and `Persona-<UUID>` directories under both Chromium roots: at launch the folder and both directories went and the list emptied. WebKit reports removal for an identifier that has no store, so a Persona that never used WebKit leaves the list too.
+- With a Work Persona and the window on its space, a link that launched Arch opened in Work's Chromium profile, which appeared in `Cache/Chromium/Persona-<UUID>` and its `~/Library/Caches` counterpart. The window title read "Example Domain — Work", Work showed above the space's name, a divider separated Work's symbol from the default group, and typing `copy` in the palette listed Copy Page Address from Work's plugin manager. A cookie that httpbin.org set in Work showed on its page; Clear Site Data's sheet said "removed from both engines in the Persona “Work”", and Clear left the page with no cookies. Clicking a default space's symbol retitled the window "Space 7 — Default", and the palette there offered no Work tab to switch to. Clear Site Data had started WebKit for Work, which created its store in `~/Library/WebKit/local.arch.browser/WebsiteDataStore`; with Work removed from `session.json` and listed in `removedPersonaIDs`, the next launch removed both Chromium directories and the WebKit store and emptied the list. With the default Persona alone, the title and the space header named no Persona and the bottom bar showed no divider.
+- On Chromium in a main window, a sign-in popup that a button opened became the selected tab with `window.opener`, its `postMessage` reached the page, and its `window.close()` returned the window to the page's tab.
+- Through accessibility in the background, every item of the menu bar reported itself disabled, and the space menu and web content in WebKit pages could not be pressed, so the checks below that need them stay open.
+
 Not verified; the implementation order checks each
 - That a CEF Alloy browser keeps input, IME, focus, accessibility, and backing scale when its parent view moves to another `NSWindow`.
 - The order in which app activation and the URL event arrive when Terminal, Mail, or Notes opens a link while the screen is unlocked, which sets the 0.5-second threshold, and whether activation brings only the small window forward. Step 12's run had the screen unlocked but took no log, clicked no link in Mail or Notes, and recorded no window order, so plan task I.15 makes these checks.
 - On WebKit, that text typed into a form field survives Move to Main Window: typing did not reach a WebKit page in the background. With a print or Export as PDF panel on a small window, that ⌥⌘N and ⌘W end the panel with Cancel; that a download-only small window's save panel opens as a panel of its own and saves; and the palette's width in a 480-point small window. Step 12's run drove Arch through accessibility while another app was in front and did not cover these; plan task I.15 makes them with Arch in front.
-- That Chromium's developer tools for a tab use that tab's request context. The check needs the screen, so step 13 makes it.
+- That Chromium's developer tools for a tab use that tab's request context, and the Persona commands and guards through the interface: New Persona…, Rename Persona…, and Delete Persona… from the space menu and the Spaces menu with their sheets, Delete Persona's teardown in a running session, a tab dragged onto another Persona's space symbol, and Move Left on a Persona's first space. Step 13's run reached Arch only through accessibility in the background, where the menus and the space menu do not respond, so plan task I.16 makes these checks with Arch in front.
 
 ## Decisions
 
@@ -78,7 +84,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | State that… | Owner | Lifetime |
 |---|---|---|
 | can differ between two windows open at once: what is shown, focused, or being edited | `BrowserWindowModel` | One window |
-| is bound to one Persona's engine storage: contexts, browsers, cookie copying, and later its plugin manager and extension controller | `PersonaEngines` | One Persona, from first use until quit |
+| is bound to one Persona's engine storage: contexts, browsers, cookie copying, and plugin manager, and later its extension controller | `PersonaEngines` | One Persona, from first use until quit |
 | belongs to an engine process: the engine applications, CEF initialization, crash totals, the primary engine | `BrowserSession`, engine section | The app |
 | is anything else the user owns: Personas, spaces, favorites, tabs, the closed list, downloads and the pages kept open for them (each with its runtime), permissions, zoom, persistence | `BrowserSession` | The app |
 
@@ -140,7 +146,7 @@ public struct Persona: Identifiable, Codable, Hashable {
     public var name: String
     public init(id: UUID = UUID(), name: String)
 
-    /// The Persona that holds everything from builds before Personas. It keeps each engine's default storage. Sync names its record `default`; V.11 uses it for `Plugins/<id>/`.
+    /// The Persona that holds everything from builds before Personas. It keeps each engine's default storage and cannot be deleted. Sync names its record `default`, and its plugins live in `Plugins/<id>/`.
     public static let defaultID = UUID(uuidString: "D59DAF4B-E372-4AF9-890E-455B8B3860F3")!
     public var isDefault: Bool { id == Self.defaultID }
 
@@ -208,8 +214,12 @@ public final class BrowserWindowModel: ObservableObject {
     var visibleSheet: TabSheet?
     public var selectedTab: Tab? { get }
     public var currentSpace: Space { get }
-    /// A small window's tab's Persona, or the current space's.
+    /// The current space's Persona, which for a small window is its tab's. The window offers its favorites, tabs, and plugins.
     public var personaID: Persona.ID { get }
+    /// Step 13: New Persona…, Rename Persona…, and Delete Persona…, each with a sheet on this window (Personas in the interface).
+    public func promptForNewPersona()
+    public func promptToRenamePersona(_ id: Persona.ID)
+    public func confirmDeletePersona(_ id: Persona.ID)
     public var recentTabs: [Tab] { get }
     /// Whether the selected tab's page fills the window, without margins or the controls around the page.
     var isPageFullscreen: Bool { get }
@@ -246,11 +256,13 @@ public final class BrowserWindowModel: ObservableObject {
 `PersonaEngines` (new, internal, `PersonaEngines.swift`)
 
 ```swift
-/// One Persona's engine contexts: a context and browser per engine, started on first use, and the CookieSync that copies cookies between them.
+/// One Persona's engine contexts: a context and browser per engine, started on first use, the CookieSync that copies cookies between them, and the Persona's plugin manager.
 final class PersonaEngines {
     let personaID: Persona.ID
     var runtimes: [EngineKind: EngineRuntime] = [:]
     let cookieSync = CookieSync()
+    /// Step 13: created when a window of the Persona first lists or runs a plugin command; deleting the Persona drops it.
+    var plugins: PluginManager?
     init(personaID: Persona.ID)
 }
 ```
@@ -355,17 +367,24 @@ func windowDidBecomeMain(_ window: BrowserWindowModel)
 /// Stops the reader's replies about the tabs `window` shows while another window shows the reader, or every reply once no other window does.
 @MainActor func pageReaderDidHide(in window: BrowserWindowModel)
 
-public func persona(ofSpace id: UUID) -> Persona
+// Step 13
 public func spaces(in persona: Persona.ID) -> [Space]
 public func favorites(in persona: Persona.ID) -> [Favorite]
+func persona(withID id: Persona.ID) -> Persona?
+/// The Persona's name where the interface shows it, or nil while the default Persona is the only one.
+func displayedName(ofPersona id: Persona.ID) -> String?
 /// The last main window's space when it belongs to the Persona, else the Persona's first space.
-public func preferredSpace(in persona: Persona.ID) -> Space
+func preferredSpace(in persona: Persona.ID) -> Space
 /// The guard of Persona rule 3. Drop targets use it too.
-public func canMoveTab(_ id: UUID, toSpace spaceID: UUID) -> Bool
-@discardableResult public func addPersona(named name: String) -> Persona
-public func renamePersona(_ id: Persona.ID, to name: String)
+func canMoveTab(_ id: UUID, toSpace spaceID: UUID) -> Bool
+/// Every Persona keeps a space.
+func canDeleteSpace(_ id: UUID) -> Bool
+func addPersona(named name: String) -> Persona
+func renamePersona(_ id: Persona.ID, to name: String)
 public func canDeletePersona(_ id: Persona.ID) -> Bool
-public func deletePersona(_ id: Persona.ID)
+func deletePersona(_ id: Persona.ID)
+/// The Persona's plugin manager, created on first use with the built-in plugins that the app passes to `init(registry:userDataDirectory:builtInPlugins:)`.
+@MainActor func plugins(in persona: Persona.ID) -> PluginManager
 
 // Step 11
 /// Whether a link from another app opens in a small window, judged by timing alone; the caller checks the preference first: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
@@ -385,7 +404,8 @@ public static let opensLinksInSmallWindowByDefault: Bool
 ```
 
 - Every existing app-wide mutator keeps its name. `openTab(url:in:pinned:select:engine:state:)` keeps its signature, so parallel tasks compile: a nil space means the sidebar target's current space, and `select: true` selects the tab in the sidebar target. The tab takes the space's Persona. Views and menus use `BrowserWindowModel.openTab` instead.
-- `addFavorites(_:)` gains `to persona: Persona.ID? = nil`, where nil means the current space's Persona (from step 7, the last main window's), so `ImportController` compiles unchanged. `addFavorite(_ tab:)` uses the tab's Persona. Duplicate addresses are checked within one Persona.
+- `addFavorites(_:)` adds to the Persona of the sidebar target's current space, so `ImportController` compiles unchanged. `addFavorite(_ tab:)` uses the tab's Persona. Duplicate addresses are checked within one Persona.
+- The Persona mutators stay internal: the app reaches them through the window's sheets, and Sync (V.9) makes public what it needs. A page's tab joins a space of the page's Persona through one helper that `adopt` and `openSmallWindow` share: the given space while it belongs to that Persona, else `preferredSpace(in:)`.
 - Engine section: `applications: [EngineKind: any EngineApplication]`, each started once (`makeApplication`, `delegate = self`, `run()`); `personaEngines: [Persona.ID: PersonaEngines]`; `retiredPersonaEngines: [PersonaEngines]` for deleted Personas, kept until quit; `runtime(for kind:, in persona:) -> EngineRuntime`, which creates the context from `contextAttributes` and its browser on first use and falls back to the primary engine within the same Persona; `runtime(of tab:) -> EngineRuntime?`; and `allRuntimes`.
 - The session's implementation of `EngineBrowserDelegate.browser(_:didCreateNewWebContents:isActive:)` is deleted, and the protocol's default applies, because no adapter calls it.
 - `validateMenuItem` and other checks read `lastMainWindow` and never create a window.
@@ -613,17 +633,17 @@ Preference
   - The window title adds the Persona's name.
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.
   - The Clear Site Data sheet names the Persona: "…removed from both engines in the Persona “Work”…".
-- Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the active window; an empty name changes nothing. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
-- Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the target filter at BrowserWindowView.swift:1160 uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette lists only tabs of the window's Persona.
+- Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the window the command acts on: the window of the space menu, or for the Spaces menu the sidebar target, which comes forward from behind a small window; an empty name changes nothing. The Spaces menu's items act on the sidebar target's Persona. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
+- Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the drop target filter in `SpaceTabsView` uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette and the tab switcher list only tabs of the window's Persona, and palette commands run through its plugins. A page that a page or a preview opens joins a space of its own Persona, the window's current space or else `preferredSpace(in:)`, as does Open Link in New Tab from a favorite's page.
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:
-  1. Every window on its spaces switches to the first space of the first remaining Persona; window rule 3 picks the tab.
+  1. Previews of its pages close, and every main window on its spaces switches to the first space of the first remaining Persona; window rule 3 picks the tab.
   2. Its small windows close, and their tabs close as in item 3.
-  3. Its tabs close with reason `.user` into the closed list, without asking their pages, as `docs/sync.md` states for a deleted Persona. The undo count resets. The records keep `personaID`; reopening one whose space is gone uses the sidebar target's current space.
+  3. Its tabs close with reason `.user` into the closed list, without asking their pages, as `docs/sync.md` states for a deleted Persona. The undo count resets. The records keep `personaID`; reopening one whose space is gone uses its Persona's preferred space, or the sidebar target's current space once its Persona is gone.
   4. Its unfinished downloads are cancelled, and its kept download pages close through their runtimes. Finished rows stay in the library.
-  5. Its spaces and favorites are removed.
-  6. Each of its browsers is asked to close, and its `PersonaEngines` moves to `retiredPersonaEngines` until quit, because download items hold their lists and contexts `unowned`.
+  5. Its spaces are removed with their folders and split views, and its favorites with the tabs saved for them.
+  6. Each of its browsers is asked to close, its plugin manager goes, so its plugins write nothing more, and its `PersonaEngines` moves to `retiredPersonaEngines` until quit, because download items hold their lists and contexts `unowned`.
   7. Its ID joins `removedPersonaIDs`, and the session saves at once.
-  8. At the next launch, before any engine starts, the session calls each registered engine's `removeStoredData` for each listed ID. An ID leaves the list once both WebKit and Chromium have reported removal; while the Chromium framework is missing, it stays. Once V.11 exists, the same pass removes `Plugins/<id>/` and the Keychain items whose account starts with `<id>/`.
+  8. At the next launch, before any engine starts, the session calls each registered engine's `removeStoredData` for each listed ID. An ID leaves the list once both WebKit and Chromium have reported removal; while the Chromium framework is missing, it stays. The same pass first deletes `Plugins/<id>/`, which no engine holds open; an ID whose folder stays asks the engines at the next launch instead. Once plugin secrets exist (`docs/plugins.md`, Build order step 2), the pass also removes the Keychain items whose account starts with `<id>/`.
 
 ## Interactions with other features
 
@@ -657,7 +677,7 @@ Folders (III.3)
 - A folder belongs to a space and so to the space's Persona. Moving a folder to another Persona's space goes through the same guard. Its snapshot fields are optional and take the next free version number.
 
 Downloads
-- One app-wide list. Each entry records its Persona, from the runtime that owns its list, so a WebKit download resumes in its own store and plugins see their own downloads. The downloads folder comes from `UserDefaults` directly, through the helper that `followDownloadSettings` already uses.
+- One app-wide list. Each entry records its Persona, from the runtime that owns its list, so a WebKit download resumes in its own store and plugins see their own downloads. Chromium numbers downloads within each request context, so item IDs repeat across Personas: an entry has an ID of its own, and the session finds the entry of an engine item by the item itself. The downloads folder comes from `UserDefaults` directly, through the helper that `followDownloadSettings` already uses.
 
 Coordination
 - Until step 6 lands, parallel tasks keep any new window-scoped state in one `// MARK: Window state` block of `BrowserSession`. After it, they add such state to `BrowserWindowModel`.
@@ -777,7 +797,7 @@ Coordination
       - Clear Site Data in Work leaves the default Persona signed in.
       - Window 2 on Work shows Work's favorites while window 1 shows the default Persona's; a favorite added in Work does not appear in the default Persona.
       - Dragging a default-Persona tab onto a Work space symbol neither lights the symbol nor moves the tab. Move Left on Work's first space does not cross into the default group.
-      - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directories, under Application Support and under `~/Library/Caches`, and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona has no Delete Persona item.
+      - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directories, under Application Support and under `~/Library/Caches`, and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona's Delete Persona… is disabled.
       - The developer tools of a Work Chromium tab show Work's cookies under Application ▸ Cookies.
       - Separate plugins per Persona are checked when V.11 lands.
 

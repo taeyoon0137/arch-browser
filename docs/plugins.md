@@ -194,7 +194,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
-- V.11 builds after III.12. If it starts first, every plugin belongs to one default Persona whose identifier III.12 adopts.
+- The session creates a Persona's manager when a window of the Persona first lists or runs a plugin command, and runs palette commands through the manager of the window's Persona. Deleting a Persona drops its manager, and the next launch deletes its `Plugins/<persona id>/` folder before any engine starts; the same pass removes its Keychain items once secret settings exist (Build order step 2).
 
 ## Web extensions as plugins
 

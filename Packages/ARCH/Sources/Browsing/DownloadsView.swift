@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 
 /// Publishes an engine download item's state for the downloads list. The session refreshes it with each engine update.
 public final class DownloadEntry: ObservableObject, Identifiable {
-    public let id: String
+    /// Unique among the downloads of every Persona. An engine numbers downloads within one profile, so its item IDs can repeat across Personas, and the session finds an entry by its item.
+    public let id = UUID()
     let item: any EngineDownloadItem
     /// The Persona whose profile in the engine keeps the download.
     let personaID: Persona.ID
@@ -18,7 +19,6 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     init(item: any EngineDownloadItem, personaID: Persona.ID) {
         self.item = item
         self.personaID = personaID
-        id = item.id
         state = item.state
         completedBytes = item.completedBytes
         totalBytes = item.totalBytes

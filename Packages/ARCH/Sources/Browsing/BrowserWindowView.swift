@@ -482,9 +482,10 @@ struct SidebarView: View {
                 }
                 // Space pages reach the sidebar's edges to slide in from outside. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
                 VStack(alignment: .leading, spacing: 8) {
-                    if !session.favorites.isEmpty {
+                    if !session.favorites(in: windowModel.personaID).isEmpty {
                         FavoritesGridView(session: session)
                             .padding(.horizontal, Self.inset)
+                            .transition(.opacity)
                     }
                     SpacePagesView(session: session, translation: swipeTranslation)
                 }
@@ -882,7 +883,7 @@ struct SiteSettingsSection<Content: View>: View {
     }
 }
 
-/// Shows favorites shared by all spaces as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
+/// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -892,9 +893,20 @@ struct FavoritesGridView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
+        // Each Persona has its own grid, so the tiles cross-fade as the window moves to another Persona's space.
+        ZStack {
+            grid(of: session.favorites(in: windowModel.personaID))
+                .id(windowModel.personaID)
+                .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.25), value: windowModel.personaID)
+        .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
+    }
+
+    private func grid(of favorites: [Favorite]) -> some View {
         let selectedFavoriteID = windowModel.selectedFavoriteID
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(session.favorites) { favorite in
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasTab(favorite))
                     // The release that ends a drag does not also open the favorite.
                     .onTapGesture { if tabDrag.item == nil { windowModel.openFavorite(favorite) } }
@@ -909,12 +921,11 @@ struct FavoritesGridView: View {
                     .modifier(ShiftHoverPreview { if tabDrag.item == nil { windowModel.previewFavorite(favorite) } })
             }
         }
-        .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
     }
 
     /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
     private func reorder(_ favorite: Favorite, at location: CGPoint) {
-        guard let target = session.favorites.first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
+        guard let target = session.favorites(in: windowModel.personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { session.moveFavorite(favorite.id, to: target) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
@@ -1134,8 +1145,8 @@ struct SpaceTabsView: View {
         }
         tabDrag.move(to: value.location)
         let isOverList = listFrame.contains(value.location)
-        // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it.
-        setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID ? nil : $0 })
+        // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
+        setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID || !session.canMoveTab(tab.id, toSpace: $0) ? nil : $0 })
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
@@ -1580,7 +1591,7 @@ struct NewTabButton: View {
     }
 }
 
-/// The space's symbol and name above its tabs, with a button for the space menu. Double-clicking the name renames the space in place.
+/// The space's symbol and name above its tabs, with a button for the space menu, and with several Personas the space's Persona above them. Double-clicking the name renames the space in place.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -1590,6 +1601,22 @@ struct SpaceHeaderView: View {
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
+                Text(personaName)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            nameRow
+        }
+        // Another space's page takes over the keyboard, so the name in this one is kept.
+        .onChange(of: windowModel.currentSpaceID) { _, id in
+            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+        }
+    }
+
+    private var nameRow: some View {
         HStack(spacing: 6) {
             Image(systemName: space.symbol)
                 .font(.system(size: 10))
@@ -1637,20 +1664,17 @@ struct SpaceHeaderView: View {
             .accessibilityLabel("Space Options")
         }
         .frame(height: 22)
-        // Another space's page takes over the keyboard, so the name in this one is kept.
-        .onChange(of: windowModel.currentSpaceID) { _, id in
-            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-        }
     }
 }
 
-/// The space menu, shared by the button beside a space's name and the context menu of its symbol at the bottom of the sidebar.
+/// The space menu, shared by the button beside a space's name and the context menu of its symbol at the bottom of the sidebar. Its Persona items act on the space's Persona.
 struct SpaceMenuItems: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
 
-    private var index: Int? { session.spaces.firstIndex { $0.id == space.id } }
+    /// The spaces of the space's Persona, among which it moves.
+    private var personaSpaces: [Space] { session.spaces(in: space.resolvedPersonaID) }
     private var homeURL: URL? { session.spaces.first { $0.id == space.id }?.homeURL }
 
     var body: some View {
@@ -1676,18 +1700,23 @@ struct SpaceMenuItems: View {
             .disabled(homeURL == nil)
         Divider()
         Button("Move Left") { session.moveSpace(space.id, by: -1) }
-            .disabled(index == 0)
+            .disabled(personaSpaces.first?.id == space.id)
         Button("Move Right") { session.moveSpace(space.id, by: 1) }
-            .disabled(index == session.spaces.count - 1)
+            .disabled(personaSpaces.last?.id == space.id)
         Divider()
         Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
         Button("New Space", action: windowModel.addSpace)
         Button("Delete Space") { session.deleteSpace(space.id) }
-            .disabled(session.spaces.count < 2)
+            .disabled(!session.canDeleteSpace(space.id))
+        Divider()
+        Button("New Persona\u{2026}", action: windowModel.promptForNewPersona)
+        Button("Rename Persona\u{2026}") { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
+        Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(space.resolvedPersonaID) }
+            .disabled(!session.canDeletePersona(space.resolvedPersonaID))
     }
 }
 
-/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. Dragging a symbol moves its space among the others; a tab dragged over another space's symbol lights it up.
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab dragged over another space's symbol of its Persona lights it up.
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -1712,10 +1741,13 @@ struct SidebarBottomBar: View {
         return max(0.3, pow(0.7, CGFloat(distance)))
     }
 
-    /// The symbols followed by the new space button. When scrolling, items also shrink toward the strip's ends so none appears cut off.
+    /// The symbols followed by the new space button, with a divider before each Persona's group but the first. When scrolling, items also shrink toward the strip's ends so none appears cut off; dividers keep their size.
     private func strip(shrinksAtEdges: Bool) -> some View {
         HStack(spacing: 2) {
             ForEach(Array(session.spaces.enumerated()), id: \.element.id) { index, space in
+                if index > 0, session.spaces[index - 1].resolvedPersonaID != space.resolvedPersonaID {
+                    PersonaDivider()
+                }
                 let isCurrent = space.id == windowModel.currentSpaceID
                 let isTabTarget = tabDrag.targetSpaceID == space.id
                 // The release that ends a drag of the symbol does not also switch spaces.
@@ -1745,9 +1777,10 @@ struct SidebarBottomBar: View {
         .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
     }
 
-    /// The symbol under the pointer makes room for the dragged space, with a light haptic at each new position. Only the strip animates the move; the space pages move at once, so the current page stays in view.
+    /// The symbol under the pointer makes room for the dragged space, with a light haptic at each new position, while it belongs to the same Persona. Only the strip animates the move; the space pages move at once, so the current page stays in view.
     private func reorder(_ space: Space, at location: CGPoint) {
-        guard let id = tabDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }) else { return }
+        guard let id = tabDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }),
+              target.resolvedPersonaID == space.resolvedPersonaID else { return }
         session.moveSpace(space.id, to: target)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
@@ -1803,6 +1836,17 @@ private struct EdgeShrink: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Separates two Personas' groups of space symbols: a 1-point line with 6 points of extra space around it.
+private struct PersonaDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.15))
+            .frame(width: 1, height: 12)
+            .padding(.horizontal, 3)
+            .accessibilityHidden(true)
     }
 }
 

@@ -33,7 +33,7 @@ public final class PluginManager {
     /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts.
     public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type]) {
         self.persona = persona
-        self.directory = directory.appendingPathComponent("Plugins", isDirectory: true).appendingPathComponent(persona.uuidString, isDirectory: true)
+        self.directory = Self.folder(of: persona, in: directory)
         var plugins: [InstalledPlugin] = []
         var types: [PluginID: any BuiltInPlugin.Type] = [:]
         for type in builtIns where types[type.manifest.id] == nil {
@@ -43,6 +43,11 @@ public final class PluginManager {
         self.plugins = plugins
         self.builtIns = types
         contributions = PluginContributionIndex(plugins)
+    }
+
+    /// The Persona's plugin folder, `Plugins/<persona id>/` in `directory`, the app's Application Support folder.
+    nonisolated public static func folder(of persona: PersonaID, in directory: URL) -> URL {
+        directory.appendingPathComponent("Plugins", isDirectory: true).appendingPathComponent(persona.uuidString, isDirectory: true)
     }
 
     /// Runs a command of an enabled plugin, starting the plugin first if it has not started. The plugin receives the invocation without what its grant does not cover. A command that fails, or whose plugin fails to start, beeps.

@@ -32,12 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             registry.register(chromium)
         }
         let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
-        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them.
-        guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory) else { fatalError("No engine could start") }
+        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app.
+        guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self]) else { fatalError("No engine could start") }
         self.session = session
         session.showSettings = { PreferencesWindowController.shared.show() }
-        // The built-in plugins that ship with the app.
-        session.loadPlugins(builtIns: [PageAddressPlugin.self])
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -238,6 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         nextSpaceItem.keyEquivalentModifierMask = [.command, .control]
         let previousSpaceItem = spacesMenu.addItem(withTitle: "Previous Space", action: #selector(previousSpace), keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
         previousSpaceItem.keyEquivalentModifierMask = [.command, .control]
+        spacesMenu.addItem(.separator())
+        spacesMenu.addItem(withTitle: "New Persona\u{2026}", action: #selector(newPersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: "Rename Persona\u{2026}", action: #selector(renamePersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: "Delete Persona\u{2026}", action: #selector(deletePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
 
         let historyMenu = NSMenu(title: "History")
@@ -381,6 +383,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func newSpace() { frontSidebarTarget().addSpace() }
     @objc private func nextSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: true) }
     @objc private func previousSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: false) }
+    // The Persona items ask with a sheet on the sidebar target and act on its Persona.
+    @objc private func newPersona() { frontSidebarTarget().promptForNewPersona() }
+    @objc private func renamePersona() {
+        let target = frontSidebarTarget()
+        target.promptToRenamePersona(target.personaID)
+    }
+    @objc private func deletePersona() {
+        let target = frontSidebarTarget()
+        target.confirmDeletePersona(target.personaID)
+    }
     @objc private func moveToMainWindow() {
         guard let window = session.activeWindow, window.kind == .small else { return }
         session.moveToMainWindow(window)
@@ -438,6 +450,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(moveToMainWindow) {
             return activeWindow?.kind == .small
+        }
+        // The default Persona stays.
+        if item.action == #selector(deletePersona) {
+            guard let session, let window = session.lastMainWindow else { return false }
+            return session.canDeletePersona(window.personaID)
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true

@@ -51,7 +51,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         model.nsWindow = window
         model.restorableFrame = window.frame
         // The model announces a change before it makes it, so the title is read on the next turn of the run loop.
-        titleObserver = Publishers.Merge(model.objectWillChange, model.session.$spaces.map { _ in })
+        titleObserver = Publishers.Merge3(model.objectWillChange, model.session.$spaces.map { _ in }, model.session.$personas.map { _ in })
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.updateTitle() }
         updateTitle()
@@ -98,10 +98,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return CGRect(x: area.midX - fitted.width / 2, y: area.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
     }
 
-    /// The title bar hides the title. The Window menu and Mission Control show it: the selected tab's title, or the space's name with no tab selected.
+    /// The title bar hides the title. The Window menu and Mission Control show it: the selected tab's title, or the space's name with no tab selected, followed with several Personas by the window's Persona.
     private func updateTitle() {
         guard let window else { return }
-        let title = model.selectedTab?.displayTitle ?? model.currentSpace.name
+        let name = model.selectedTab?.displayTitle ?? model.currentSpace.name
+        let title = model.session.displayedName(ofPersona: model.personaID).map { "\(name) \u{2014} \($0)" } ?? name
         if window.title != title { window.title = title }
     }
 
