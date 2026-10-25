@@ -27,7 +27,7 @@ import Testing
 
     private static func profile(_ folder: String, name: String? = nil, isFirst: Bool = false, favorites: Int = 0, spaces: [SidebarImport.SourceSpace] = [],
                                 bookmarkFolders: [SidebarImport.Folder] = [], history: [HistoryEntry] = [], searchKeywords: Result<SearchKeywords, Error>? = nil) -> ImportedProfile {
-        var profile = ImportedProfile(profile: SidebarImport.Profile(source: source.id, folder: folder), name: name ?? folder, favorites: .success(items(folder, favorites)),
+        var profile = ImportedProfile(id: SidebarImport.Profile(source: source.id, folder: folder), name: name ?? folder, favorites: .success(items(folder, favorites)),
                                       spaces: .success(spaces), bookmarkFolders: .success(bookmarkFolders), history: .success(history), searchKeywords: searchKeywords)
         profile.isFirst = isFirst
         return profile
@@ -115,12 +115,16 @@ import Testing
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let entry = HistoryEntry(url: URL(string: "https://h.example/")!, title: "H", visitCount: 2, lastVisit: Date())
-        let unreadable = ImportError.unreadableFile(folder.url.appendingPathComponent("Bookmarks"))
+        let unreadable = ImportError.unreadableFile(folder.url.appendingPathComponent("Sidebar.json"))
+        let blockedHistory = ImportError.blockedByPrivacy(folder.url.appendingPathComponent("History.db"))
         let browser = ImportedBrowser(source: Self.source, profiles: .success([
             Self.profile("Default", isFirst: true, favorites: 1, spaces: [Self.space("home", pinnedTabs: 1)], bookmarkFolders: [Self.folder("docs", bookmarks: 1)]),
             Self.profile("Profile 2", history: [entry], searchKeywords: .success(try Self.searchKeywords(in: folder))),
             Self.profile("Profile 3", favorites: 1),
-            ImportedProfile(profile: SidebarImport.Profile(source: Self.source.id, folder: "Profile 4"), name: "Profile 4", favorites: .failure(unreadable), history: .success([entry])),
+            // Its favorites and spaces come from one file that cannot be read.
+            ImportedProfile(id: SidebarImport.Profile(source: Self.source.id, folder: "Profile 4"), name: "Profile 4", favorites: .failure(unreadable), spaces: .failure(unreadable), history: .success([entry])),
+            // Nothing in it can be checked, so it brings nothing.
+            ImportedProfile(id: SidebarImport.Profile(source: Self.source.id, folder: "Profile 5"), name: "Profile 5", history: .failure(blockedHistory)),
         ]), defaultEngine: nil)
         let blocked = BrowserSource(name: "Other Browser", bundleIdentifier: "test.other", layout: .chromium(userData: folder.url, sidebarFile: nil), privacySetting: .fullDiskAccess)
         let localState = folder.url.appendingPathComponent("Local State")
@@ -140,10 +144,8 @@ import Testing
         #expect(selection.shortcuts.map(\.keyword) == ["d"])
         #expect(selection.skippedShortcutCount == 1)
         #expect(selection.searchEngine == nil)
-        #expect(selection.failures == [
-            "Other Browser: \(ImportError.blockedByPrivacy(localState).localizedDescription)",
-            "Test Browser \u{25B8} Profile 4: \(unreadable.localizedDescription)",
-        ])
+        // Only the profiles that bring something report what could not be read, each reason once; the browser whose profiles cannot be read brings nothing.
+        #expect(selection.failures == ["Test Browser \u{25B8} Profile 4: \(unreadable.localizedDescription)"])
     }
 
     @Test func aBrowserOffersItsEngineOnlyWhenItIsNotArchsAlready() throws {

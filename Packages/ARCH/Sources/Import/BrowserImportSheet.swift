@@ -66,7 +66,7 @@ final class BrowserImportModel: ObservableObject {
 
     /// The pinned tabs that the checked parts of the included profiles open, before duplicates are left out.
     var checkedPinnedTabCount: Int {
-        includedProfiles.reduce(0) { total, row in total + row.choice.parts.reduce(0) { $0 + row.profile.pinnedTabCount(of: $1) } }
+        includedProfiles.reduce(0) { total, included in total + included.choice.parts.reduce(0) { $0 + included.profile.pinnedTabCount(of: $1) } }
     }
 
     /// Import needs a checked item: a part of an included profile, or the search engine.
@@ -112,19 +112,14 @@ final class BrowserImportModel: ObservableObject {
         var skippedShortcutCount = 0
         var history: [HistoryEntry] = []
         var searchEngine: SearchEngine?
-        /// Why browsers or parts of the included profiles could not be read.
+        /// Why parts of the included profiles with checked items could not be read, each reason once per profile. A profile with nothing checked and a browser whose profiles cannot be read bring nothing, and the sheet showed why.
         var failures: [String] = []
     }
 
     /// The selection as the sheet's choices stand.
     var selection: Selection {
         var selection = Selection()
-        for browser in browsers ?? [] {
-            if case .failure(let error) = browser.profiles {
-                selection.failures.append("\(browser.source.name): \(error.localizedDescription)")
-            }
-        }
-        for (browser, profile, choice) in includedProfiles {
+        for (browser, profile, choice) in includedProfiles where !choice.parts.isEmpty {
             let row = profile.sidebarImport(of: choice.parts, browserName: browser.source.name)
             if !row.favorites.isEmpty || !row.spaces.isEmpty { selection.rows.append((row, choice.destination)) }
             if choice.parts.contains(.history), let history = try? profile.history?.get() { selection.history += history }

@@ -50,18 +50,27 @@ public final class HistoryStore {
         }
     }
 
-    /// Adds pages read from another app's history. A page already in the store keeps its title unless that is empty, and takes the later last visit and the larger visit count, so importing the same file again changes nothing. Each batch commits on its own, so suggestions wait for one batch at most.
-    public func importEntries(_ entries: [HistoryEntry]) {
+    /// Adds pages read from another app's history. A page already in the store keeps its title unless that is empty, and takes the later last visit and the larger visit count, so importing the same file again changes nothing. Each batch commits on its own, so suggestions wait for one batch at most. `completion`, when given, runs on the main queue after the last batch with the number of pages the import added or changed, counting each address once.
+    public func importEntries(_ entries: [HistoryEntry], completion: ((Int) -> Void)? = nil) {
+        // The batches and the block after them run in order on the serial queue, so they share the set without a lock.
+        var changedURLs: Set<URL> = []
         for start in stride(from: 0, to: entries.count, by: 1_000) {
             let batch = entries[start..<min(start + 1_000, entries.count)]
             queue.async {
                 self.execute("BEGIN")
                 for entry in batch {
-                    self.execute("INSERT INTO visits (url, title, visit_count, last_visit) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(url) DO UPDATE SET visit_count = MAX(visits.visit_count, excluded.visit_count), last_visit = MAX(visits.last_visit, excluded.last_visit), title = CASE WHEN visits.title = '' THEN excluded.title ELSE visits.title END",
-                                 bindings: [.text(entry.url.absoluteString), .text(entry.title), .integer(entry.visitCount), .double(entry.lastVisit.timeIntervalSince1970)])
+                    // The update applies only when it changes the page, so that a page the import leaves as it was does not count.
+                    let changesPage = self.changesRow("INSERT INTO visits (url, title, visit_count, last_visit) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(url) DO UPDATE SET visit_count = MAX(visits.visit_count, excluded.visit_count), last_visit = MAX(visits.last_visit, excluded.last_visit), title = CASE WHEN visits.title = '' THEN excluded.title ELSE visits.title END WHERE excluded.visit_count > visits.visit_count OR excluded.last_visit > visits.last_visit OR (visits.title = '' AND excluded.title <> '')",
+                                                      bindings: [.text(entry.url.absoluteString), .text(entry.title), .integer(entry.visitCount), .double(entry.lastVisit.timeIntervalSince1970)])
+                    if changesPage { changedURLs.insert(entry.url) }
                 }
                 self.execute("COMMIT")
             }
+        }
+        guard let completion else { return }
+        queue.async {
+            let count = changedURLs.count
+            DispatchQueue.main.async { completion(count) }
         }
     }
 
@@ -131,6 +140,13 @@ public final class HistoryStore {
         guard let statement = prepare(sql, bindings: bindings) else { return }
         sqlite3_step(statement)
         sqlite3_finalize(statement)
+    }
+
+    /// Runs an INSERT, UPDATE, or DELETE statement and returns whether it changed a row.
+    private func changesRow(_ sql: String, bindings: [Binding]) -> Bool {
+        guard let statement = prepare(sql, bindings: bindings) else { return false }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_DONE && sqlite3_changes(database) > 0
     }
 
     private func entries(_ sql: String, bindings: [Binding]) -> [HistoryEntry] {

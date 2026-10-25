@@ -68,7 +68,8 @@ public final class ImportController {
                 summary.failures.append(error.localizedDescription)
             }
         }
-        show(summary, emptyLine: summary.failures.count < results.count ? "No bookmarks or history pages with web addresses were found." : nil, in: window)
+        // Only files without bookmarks or pages get this line; bookmarks already in favorites have a line of their own.
+        show(summary, emptyLine: summary.lines.isEmpty && summary.failures.count < results.count ? "No bookmarks or history pages with web addresses were found." : nil, in: window)
     }
 
     // MARK: Import from Browser
@@ -130,7 +131,7 @@ public final class ImportController {
         isImporting = false
     }
 
-    /// Applies the selection in one turn of the run loop, as `docs/import-browsers.md` describes: each profile's sidebar items to its destination, then the shortcuts, the history pages, the search engine, and the record of what the profiles brought. The session saves through its usual debounce.
+    /// Applies the selection in one turn of the run loop, as `docs/import-browsers.md` describes: each profile's sidebar items to its destination, then the shortcuts, the search engine, the record of what the profiles brought, and the history pages. The session saves through its usual debounce. The summary follows once the history store has taken the pages, since it counts those that the store added or changed.
     private func add(_ selection: BrowserImportModel.Selection, record: SidebarImport.Record, in window: NSWindow) {
         var record = record
         var summary = ImportSummary()
@@ -140,25 +141,26 @@ public final class ImportController {
         let addedShortcutCount = siteSearch.add(selection.shortcuts)
         summary.shortcuts = addedShortcutCount
         summary.skippedShortcuts = selection.shortcuts.count - addedShortcutCount + selection.skippedShortcutCount
-        history.importEntries(selection.history)
-        summary.historyPages = selection.history.count
         if let engine = selection.searchEngine {
             UserDefaults.standard.set(engine.rawValue, forKey: SearchEngine.defaultsKey)
             summary.searchEngine = engine
         }
         if !selection.rows.isEmpty { record.write() }
         summary.failures = selection.failures
-        show(summary, emptyLine: "Everything checked was in Arch already.", in: window)
+        history.importEntries(selection.history) { [weak self] pageCount in
+            summary.historyPages = pageCount
+            self?.show(summary, emptyLine: "Everything checked was in Arch already.", in: window)
+        }
     }
 
     // MARK: Summary
 
-    /// Sums up an import in a sheet on `window`, with `emptyLine` when nothing came in, and ends the import once the sheet closes.
+    /// Sums up an import in a sheet on `window` and ends the import once the sheet closes. When nothing came in, the title says so, and `emptyLine`, if any, takes the place of the lines.
     private func show(_ summary: ImportSummary, emptyLine: String?, in window: NSWindow) {
-        let lines = summary.lines
+        let lines = summary.hasAdditions ? summary.lines : emptyLine.map { [$0] } ?? summary.lines
         let alert = NSAlert()
-        alert.messageText = lines.isEmpty ? "Nothing Was Imported" : "Import Finished"
-        alert.informativeText = ((lines.isEmpty ? [emptyLine].compactMap { $0 } : lines) + summary.failures).joined(separator: "\n")
+        alert.messageText = summary.hasAdditions ? "Import Finished" : "Nothing Was Imported"
+        alert.informativeText = (lines + summary.failures).joined(separator: "\n")
         alert.beginSheetModal(for: window) { [weak self] _ in
             self?.isImporting = false
         }
@@ -173,6 +175,7 @@ struct ImportSummary {
     var favorites = 0
     /// The favorites, or bookmarks that would have become favorites, whose addresses the Persona's favorites had already.
     var presentFavorites = 0
+    /// The pages that came into history: for the browser import, those the history store added or changed; for the file import, those the files held.
     var historyPages = 0
     var shortcuts = 0
     /// The shortcuts left out because another shortcut uses their keyword or Arch cannot use them.
@@ -190,7 +193,12 @@ struct ImportSummary {
         presentFavorites += counts.presentFavorites
     }
 
-    /// One line for each kind that came in, without the failures.
+    /// Whether anything came in, which the title says. Favorites already present and skipped shortcuts do not count.
+    var hasAdditions: Bool {
+        personas + spaces + pinnedTabs + favorites + historyPages + shortcuts > 0 || searchEngine != nil
+    }
+
+    /// One line for each kind that came in or was already present or skipped, without the failures.
     var lines: [String] {
         var lines: [String] = []
         if personas > 0 {

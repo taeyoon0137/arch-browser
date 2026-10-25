@@ -68,8 +68,8 @@ import Testing
         #expect(browser.defaultEngine == .bing)
         // The profile without anything to bring is left out, and the folder that only the sidebar file names comes last.
         let profiles = try browser.profiles.get()
-        #expect(profiles.map(\.profile.folder) == ["Default", "Profile 2", "Profile 9"])
-        #expect(profiles.map(\.profile.source) == ["test.browser", "test.browser", "test.browser"])
+        #expect(profiles.map(\.id.folder) == ["Default", "Profile 2", "Profile 9"])
+        #expect(profiles.map(\.id.source) == ["test.browser", "test.browser", "test.browser"])
         #expect(profiles.map(\.name) == ["Personal", "Work", "Profile 9"])
         #expect(profiles.map(\.isFirst) == [true, false, false])
 
@@ -119,7 +119,8 @@ import Testing
         #expect(throws: ImportError.unreadableFile(sidebarFile)) { try profile.spaces?.get() }
         #expect(throws: ImportError.unreadableFile(bookmarksFile)) { try profile.bookmarkFolders?.get() }
         #expect(try profile.count(of: .history)?.get() == 1)
-        #expect(profile.errors.count == 3)
+        // The favorites and spaces share the sidebar file's failure, which the profile reports once.
+        #expect(profile.errors.map(\.localizedDescription) == [ImportError.unreadableFile(sidebarFile), ImportError.unreadableFile(bookmarksFile)].map(\.localizedDescription))
         #expect(profile.pinnedTabCount(of: .spaces) == 0)
         #expect(!browser.isBlockedByPrivacy)
 
@@ -146,7 +147,7 @@ import Testing
         let profiles = try browser.profiles.get()
         #expect(profiles.map(\.name) == ["Test Browser"])
         #expect(profiles.map(\.isFirst) == [true])
-        #expect(profiles.map(\.profile) == [SidebarImport.Profile(source: "test.webkit", folder: "Default")])
+        #expect(profiles.map(\.id) == [SidebarImport.Profile(source: "test.webkit", folder: "Default")])
         #expect(try profiles[0].favorites?.get().map(\.url) == [Self.url("a.example")])
         #expect(try profiles[0].bookmarkFolders?.get().map(\.name) == ["Bookmarks / Trips"])
         #expect(try profiles[0].count(of: .history)?.get() == 1)

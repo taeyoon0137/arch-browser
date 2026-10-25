@@ -45,7 +45,7 @@ struct ImportedBrowser: Identifiable {
             let bookmarks = attempt { try chromiumProfile.bookmarks() }?.map { $0.split() }
             let searchKeywords = attempt { try chromiumProfile.searchKeywords() }
             if chromiumProfile.isLastUsed { defaultEngine = (try? searchKeywords?.get())?.defaultEngine }
-            return ImportedProfile(profile: SidebarImport.Profile(source: source.id, folder: folderName), name: chromiumProfile.name,
+            return ImportedProfile(id: SidebarImport.Profile(source: source.id, folder: folderName), name: chromiumProfile.name,
                                    favorites: joined(sidebarProfile?.map { $0?.favorites ?? [] }, bookmarks?.map { $0.barItems }),
                                    spaces: sidebarProfile?.map { $0?.spaces ?? [] }, bookmarkFolders: bookmarks?.map { $0.folders },
                                    history: attempt { try chromiumProfile.history() }, searchKeywords: searchKeywords)
@@ -54,7 +54,7 @@ struct ImportedBrowser: Identifiable {
         if case .success(let file)? = sidebar {
             let listedFolders = Set(chromiumProfiles.map(\.folder.lastPathComponent))
             for sidebarProfile in file.profiles where !listedFolders.contains(sidebarProfile.folderName) {
-                let profile = ImportedProfile(profile: SidebarImport.Profile(source: source.id, folder: sidebarProfile.folderName), name: sidebarProfile.folderName,
+                let profile = ImportedProfile(id: SidebarImport.Profile(source: source.id, folder: sidebarProfile.folderName), name: sidebarProfile.folderName,
                                               favorites: .success(sidebarProfile.favorites), spaces: .success(sidebarProfile.spaces))
                 if profile.hasItems { profiles.append(profile) }
             }
@@ -65,7 +65,7 @@ struct ImportedBrowser: Identifiable {
     /// The one profile of a WebKit-format browser, the default one, named after the browser: the bar's bookmarks as favorites, the other bookmarks as folders, and the history.
     private static func readWebKit(_ source: BrowserSource, bookmarks: URL, history: URL) -> ImportedBrowser {
         let tree = attempt { try FileAccess.parse(bookmarks, with: BookmarkFile.webKitTree(from:)) }?.map { $0.split() }
-        var profile = ImportedProfile(profile: SidebarImport.Profile(source: source.id, folder: "Default"), name: source.name,
+        var profile = ImportedProfile(id: SidebarImport.Profile(source: source.id, folder: "Default"), name: source.name,
                                       favorites: tree?.map { $0.barItems }, bookmarkFolders: tree?.map { $0.folders },
                                       history: attempt { try FileAccess.read(history, with: HistoryDatabase.historyItemEntries(at:)) })
         profile.isFirst = true
@@ -96,8 +96,8 @@ struct ImportedBrowser: Identifiable {
 
 /// One profile of a browser, one row of the sheet. Each part is what the profile's files hold, or why they cannot be read; a part the profile lacks or that holds nothing is nil, so the sheet hides it.
 struct ImportedProfile: Identifiable {
-    /// The profile as the import record keys it.
-    let profile: SidebarImport.Profile
+    /// The profile as the import record keys it, which also identifies the row.
+    let id: SidebarImport.Profile
     /// The name the browser shows for the profile.
     let name: String
     /// Whether the profile is the first in its browser's order with something to bring, which makes the current Persona its default destination. The rows for profile folders that only the sidebar file names never are.
@@ -111,11 +111,9 @@ struct ImportedProfile: Identifiable {
     /// The search keywords, present only with shortcuts to bring.
     let searchKeywords: Result<SearchKeywords, Error>?
 
-    var id: SidebarImport.Profile { profile }
-
-    init(profile: SidebarImport.Profile, name: String, favorites: Result<[SidebarImport.Item], Error>? = nil, spaces: Result<[SidebarImport.SourceSpace], Error>? = nil,
+    init(id: SidebarImport.Profile, name: String, favorites: Result<[SidebarImport.Item], Error>? = nil, spaces: Result<[SidebarImport.SourceSpace], Error>? = nil,
          bookmarkFolders: Result<[SidebarImport.Folder], Error>? = nil, history: Result<[HistoryEntry], Error>? = nil, searchKeywords: Result<SearchKeywords, Error>? = nil) {
-        self.profile = profile
+        self.id = id
         self.name = name
         self.favorites = Self.nonEmpty(favorites)
         self.spaces = Self.nonEmpty(spaces?.map { spaces in spaces.filter { !$0.pinnedItems.isEmpty || !$0.folders.isEmpty } })
@@ -159,7 +157,7 @@ struct ImportedProfile: Identifiable {
             spaces.append(SidebarImport.SourceSpace(origin: .bookmarks, name: browserName, tint: nil, pinnedItems: [], folders: folders))
         }
         let favorites = parts.contains(.favorites) ? (try? self.favorites?.get()) ?? [] : []
-        return SidebarImport(profile: profile, profileName: name, favorites: favorites, spaces: spaces)
+        return SidebarImport(profile: id, profileName: name, favorites: favorites, spaces: spaces)
     }
 
     /// Whether the sheet shows the row: it has at least one part, readable or not.
@@ -167,10 +165,11 @@ struct ImportedProfile: Identifiable {
         Part.allCases.contains { count(of: $0) != nil }
     }
 
-    /// Why the parts that cannot be read failed.
+    /// Why the parts that cannot be read failed, each reason once, since the parts read from one file share its failure.
     var errors: [Error] {
-        Part.allCases.compactMap { part in
-            guard case .failure(let error)? = count(of: part) else { return nil }
+        var descriptions: Set<String> = []
+        return Part.allCases.compactMap { part in
+            guard case .failure(let error)? = count(of: part), descriptions.insert(error.localizedDescription).inserted else { return nil }
             return error
         }
     }

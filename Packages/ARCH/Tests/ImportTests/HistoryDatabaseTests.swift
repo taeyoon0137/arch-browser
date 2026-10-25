@@ -1,4 +1,4 @@
-// History from synthetic SQLite databases: a `history_items` database and a Chromium-format History database, both read from copies, including one behind a symbolic link and one damaged partway through.
+// History from synthetic SQLite databases: a `history_items` database and a Chromium-format History database, both read from copies, including one behind a symbolic link, one damaged partway through, and one written to while it is copied.
 import Foundation
 import History
 import Testing
@@ -87,5 +87,44 @@ import Testing
         try handle.write(contentsOf: Data(repeating: 0xFF, count: pageSize))
         try handle.close()
         #expect(throws: ImportError.unreadableHistory(file)) { try HistoryDatabase.entries(at: file) }
+    }
+
+    @Test func aDatabaseWrittenToWhileItIsCopiedIsCopiedAgain() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let source = try folder.databaseWithLog("Default/History", [
+            ChromiumDatabases.urlsTable,
+            "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES ('https://a.example/', 'A', 1, 0, 1, 0)",
+        ])
+        let log = URL(fileURLWithPath: source.path + "-wal")
+        let copy = folder.url.appendingPathComponent("Copy/History")
+        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // Copies as the import does and, as a browser might, writes to the log right after the database is copied in each attempt listed in `writes`.
+        func copyDatabase(writingIn writes: Set<Int>) throws -> (isCopied: Bool, copiedFiles: [String]) {
+            var copiedFiles: [String] = []
+            var attempt = 0
+            let isCopied = try DatabaseCopy.copyDatabase(at: source, to: copy) { from, to in
+                try FileManager.default.copyItem(at: from, to: to)
+                copiedFiles.append(from.lastPathComponent)
+                guard from == source else { return }
+                attempt += 1
+                guard writes.contains(attempt) else { return }
+                let handle = try FileHandle(forWritingTo: log)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data([0]))
+                try handle.close()
+            }
+            return (isCopied, copiedFiles)
+        }
+
+        // A write during the first copy makes a second one, which matches the files.
+        let once = try copyDatabase(writingIn: [1])
+        #expect(once.isCopied)
+        #expect(once.copiedFiles == ["History", "History-wal", "History", "History-wal"])
+        #expect(try Data(contentsOf: URL(fileURLWithPath: copy.path + "-wal")) == Data(contentsOf: log))
+        // A browser that writes during every copy leaves the database unread.
+        let always = try copyDatabase(writingIn: [1, 2, 3])
+        #expect(!always.isCopied)
+        #expect(always.copiedFiles.count == 6)
     }
 }

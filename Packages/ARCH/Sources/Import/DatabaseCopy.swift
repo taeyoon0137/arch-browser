@@ -5,25 +5,47 @@ import SQLite3
 enum DatabaseCopy {
     /// Starts the name of each temporary folder that holds a copy.
     private static let folderPrefix = "ArchImport-"
+    /// How many times `copyDatabase` copies a database's files before it gives up on one that the browser keeps writing.
+    private static let copyAttempts = 3
 
-    /// Runs `body` on a copy of the database at `url` in a new temporary folder, which only the user can open, and deletes the copy afterward. The owning browser may hold the file open and locked, so the copy takes the journal or write-ahead log beside it to have the last committed changes. A symbolic link is followed, since copying it would copy the link: the copy takes the target's contents and the files beside the target, where SQLite keeps them. Throws `unreadable` when SQLite cannot open the copy.
+    /// Runs `body` on a copy of the database at `url` in a new temporary folder, which only the user can open, and deletes the copy afterward. A symbolic link is followed, since copying it would copy the link: the copy takes the target's contents and the files beside the target, where SQLite keeps them. Throws `unreadable` when the browser kept writing to the files while they were copied (see `copyDatabase`) or SQLite cannot open the copy.
     static func read<Value>(_ url: URL, unreadable: ImportError, _ body: (OpaquePointer?) throws -> Value) throws -> Value {
         let files = FileManager.default
         let folder = files.temporaryDirectory.appendingPathComponent("\(folderPrefix)\(UUID().uuidString)")
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: folder) }
-        let source = url.resolvingSymlinksInPath()
         let copy = folder.appendingPathComponent(url.lastPathComponent)
-        try files.copyItem(at: source, to: copy)
-        for suffix in ["-journal", "-wal"] where files.fileExists(atPath: source.path + suffix) {
-            try? files.copyItem(at: URL(fileURLWithPath: source.path + suffix).resolvingSymlinksInPath(), to: URL(fileURLWithPath: copy.path + suffix))
-        }
+        guard try copyDatabase(at: url.resolvingSymlinksInPath(), to: copy) else { throw unreadable }
 
         var database: OpaquePointer?
         defer { sqlite3_close(database) }
         // Read-write, so that SQLite can apply the copied write-ahead log.
         guard sqlite3_open_v2(copy.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { throw unreadable }
         return try body(database)
+    }
+
+    /// Copies the database at `source` to `copy` with the journal or write-ahead log beside it, since the owning browser may hold the database open and locked with its last committed changes still in those files. The files are copied one after another, so a write in between could pair the database with a log of another moment: while any of the files changed during a copy, they are copied again. Returns false when they still changed after `copyAttempts` copies. `copyFile` copies one file.
+    static func copyDatabase(at source: URL, to copy: URL, copyFile: (URL, URL) throws -> Void = FileManager.default.copyItem(at:to:)) throws -> Bool {
+        let logs = ["-journal", "-wal"].map { (source: URL(fileURLWithPath: source.path + $0).resolvingSymlinksInPath(), copy: URL(fileURLWithPath: copy.path + $0)) }
+        let sources = [source] + logs.map(\.source)
+        for _ in 0..<copyAttempts {
+            let states = sources.map(fileState)
+            for file in [copy] + logs.map(\.copy) { try? FileManager.default.removeItem(at: file) }
+            try copyFile(source, copy)
+            // A log can disappear while it is copied, as when a transaction ends; the states then differ.
+            for log in logs where FileManager.default.fileExists(atPath: log.source.path) {
+                try? copyFile(log.source, log.copy)
+            }
+            if sources.map(fileState) == states { return true }
+        }
+        return false
+    }
+
+    /// The size and the time of the last change of the file at `url`, both of which a write changes, or nil when the file does not exist.
+    private static func fileState(_ url: URL) -> [Int]? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        return [Int(info.st_size), info.st_mtimespec.tv_sec, info.st_mtimespec.tv_nsec]
     }
 
     /// Passes each row of `query` to `body`. Throws `unreadable` when the query does not compile, as when the database lacks its table or columns, or when a step fails before the last row, as in a damaged copy, so that part of the rows never passes for all of them.
