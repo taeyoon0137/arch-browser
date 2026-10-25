@@ -108,10 +108,17 @@ public final class AIUsageStore: ObservableObject {
     init(fileURL: URL, now: @escaping () -> Date = Date.init) {
         self.fileURL = fileURL
         self.now = now
-        if let data = try? Data(contentsOf: fileURL), let file = try? JSONDecoder().decode(File.self, from: data) {
-            months = file.months
-            day = file.day
-            automaticRequests = file.automaticRequests
+        if let data = try? Data(contentsOf: fileURL) {
+            if let file = try? JSONDecoder().decode(File.self, from: data) {
+                months = file.months
+                day = file.day
+                automaticRequests = file.automaticRequests
+            } else {
+                // Like `ai.json`, a file that does not decode is set aside, so the first save does not overwrite its totals.
+                let unreadable = fileURL.appendingPathExtension("unreadable")
+                try? FileManager.default.removeItem(at: unreadable)
+                try? FileManager.default.moveItem(at: fileURL, to: unreadable)
+            }
         }
         NotificationCenter.default.addObserver(forName: Notification.Name("NSApplicationWillTerminateNotification"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveNow() }

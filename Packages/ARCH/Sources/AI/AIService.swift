@@ -171,6 +171,7 @@ public final class AIService: ObservableObject, AIClient {
             continuation.yield(.waiting(reason))
         }
         var reported: AIUsage?
+        var outcome: Result<AIFinishReason, AIError>
         do {
             let key = try await storedKey(for: candidate.provider)
             var finishReason: AIFinishReason?
@@ -190,23 +191,26 @@ public final class AIService: ObservableObject, AIClient {
             // A cancelled request's stream ends without an error, so cancellation is checked here.
             try Task.checkCancellation()
             guard let finishReason else { throw AIError.malformedReply("The reply ended without finishing.") }
-            await limiter.release()
-            await limiter.recordSuccess()
-            entry.usage = reported
-            usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: reported, isError: false)
-            return finishReason
+            outcome = .success(finishReason)
         } catch {
-            await limiter.release()
-            var error = Task.isCancelled ? AIError.cancelled : AIError(error)
-            if case .rateLimited(let provider, let retryAfter) = error {
-                error = .rateLimited(provider, until: await limiter.coolDown(retryAfter: retryAfter))
-            }
-            entry.usage = reported
-            let isCancelled: Bool
-            if case .cancelled = error { isCancelled = true } else { isCancelled = false }
-            usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: reported, isError: !isCancelled)
-            throw error
+            outcome = .failure(Task.isCancelled ? .cancelled : AIError(error))
         }
+        // One limiter call frees the slot and starts a 429's cool-down, so a request waiting for the slot waits for the cool-down as well.
+        let isError: Bool
+        switch outcome {
+        case .success:
+            await limiter.release(after: .answered)
+            isError = false
+        case .failure(.rateLimited(let provider, let retryAfter)):
+            outcome = .failure(.rateLimited(provider, until: await limiter.release(after: .rateLimited(retryAfter: retryAfter))))
+            isError = true
+        case .failure(let error):
+            await limiter.release(after: .other)
+            if case .cancelled = error { isError = false } else { isError = true }
+        }
+        entry.usage = reported
+        usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: reported, isError: isError)
+        return try outcome.get()
     }
 
     /// The budget that keeps the feature from starting a request now: an automatic feature's daily request limit, or the monthly spending limit, which stops automatic and user requests alike until the user raises it.

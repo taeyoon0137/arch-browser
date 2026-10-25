@@ -2,6 +2,16 @@
 import Foundation
 
 actor AIRateLimiter {
+    /// How a request that held a slot ended, for `release(after:)`.
+    enum Outcome {
+        /// The provider answered, which resets the doubling.
+        case answered
+        /// The provider answered 429, with the time its `retry-after` header gave, if any.
+        case rateLimited(retryAfter: Date?)
+        /// The request ended another way, such as an error or cancellation, which leaves the cool-down as it is.
+        case other
+    }
+
     private struct Waiter {
         var id: UUID
         var isUser: Bool
@@ -36,7 +46,7 @@ actor AIRateLimiter {
         handOverFreeSlots()
     }
 
-    /// Waits for a slot, then for any cool-down and the per-minute bucket, reporting each wait through `onWait`. Every successful call must be balanced by `release()`. A user request waits until it is cancelled; an automatic one throws `rateLimited` after the wait limit.
+    /// Waits for a slot, then for any cool-down and the per-minute bucket, reporting each wait through `onWait`. Every successful call must be balanced by `release(after:)` or `release()`. A user request waits until it is cancelled; an automatic one throws `rateLimited` after the wait limit.
     func acquire(isUser: Bool, onWait: @Sendable (AIWaitReason) -> Void) async throws {
         let deadline: ContinuousClock.Instant? = isUser ? nil : .now + automaticWaitLimit
         if slotsInUse < max(limits.concurrentRequests, 1), isUser || !waiters.contains(where: \.isUser) {
@@ -55,7 +65,8 @@ actor AIRateLimiter {
                 }
                 try await Task.sleep(until: wake, clock: .continuous)
             }
-            recentStarts.append(.now)
+            // Starts are kept only for a per-minute bucket, which prunes them.
+            if let perMinute = limits.requestsPerMinute, perMinute > 0 { recentStarts.append(.now) }
         } catch {
             release()
             throw error
@@ -68,23 +79,32 @@ actor AIRateLimiter {
         handOverFreeSlots()
     }
 
-    /// Starts a cool-down after a 429: until `retryAfter`, or for 20 seconds doubling up to 5 minutes when the provider sent no time. Returns the end of the cool-down.
+    /// Frees the slot of a request that ended as `outcome`. A 429 starts its cool-down before the slot goes to a waiting request, so that request waits for the cool-down too. Returns the end of the cool-down after a 429, and nil otherwise.
     @discardableResult
-    func coolDown(retryAfter: Date?) -> Date {
+    func release(after outcome: Outcome) -> Date? {
+        var until: Date?
+        switch outcome {
+        case .answered: backoff = initialBackoff
+        case .rateLimited(let retryAfter): until = coolDown(retryAfter: retryAfter)
+        case .other: break
+        }
+        release()
+        return until
+    }
+
+    /// Starts a cool-down after a 429: until `retryAfter`, or for 20 seconds doubling up to 5 minutes when the provider sent no time. A 429 without a time during a cool-down belongs to the requests that were already running when it started, so it keeps that cool-down and does not double it. Returns the end of the cool-down.
+    private func coolDown(retryAfter: Date?) -> Date {
         let until: Date
         if let retryAfter {
             until = retryAfter
+        } else if let current = coolDownUntil, current > Date() {
+            until = current
         } else {
             until = Date() + backoff.timeInterval
             backoff = min(backoff * 2, maximumBackoff)
         }
         coolDownUntil = max(coolDownUntil ?? until, until)
         return coolDownUntil ?? until
-    }
-
-    /// A request the provider answered resets the doubling.
-    func recordSuccess() {
-        backoff = initialBackoff
     }
 
     /// When the cool-down or the per-minute bucket next lets a request start, or nil if one can start now.

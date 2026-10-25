@@ -108,7 +108,8 @@ struct ChatCompletionsCodec: AIWireCodec {
         guard let object = try? JSONSerialization.jsonObject(with: Data(event.data.utf8)) as? [String: Any] else {
             throw AIError.malformedReply("The stream sent data that is not JSON.")
         }
-        if object["error"] != nil {
+        // Some compatible servers send `"error": null` in every chunk.
+        if let error = object["error"], !(error is NSNull) {
             throw ProviderErrorInfo(json: object).streamError(provider: provider)
         }
         if let reported = object["usage"] as? [String: Any] {

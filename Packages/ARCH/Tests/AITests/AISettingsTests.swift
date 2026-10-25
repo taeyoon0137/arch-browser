@@ -1,4 +1,4 @@
-// Site patterns, the rate limiter, and the `ai.json` file: its shape, unreadable files, and keys kept out of it.
+// Site patterns, the rate limiter, and the `ai.json` file: its shape, unreadable files (and an unreadable `ai-usage.json`), and keys kept out of it.
 import Foundation
 import Testing
 @testable import AI
@@ -73,7 +73,8 @@ import Testing
 
     @Test func coolDownDelaysTheNextRequest() async throws {
         let limiter = AIRateLimiter(provider: AIProviderID(), limits: .http)
-        await limiter.coolDown(retryAfter: Date() + 0.3)
+        try await limiter.acquire(isUser: true) { _ in }
+        await limiter.release(after: .rateLimited(retryAfter: Date() + 0.3))
         let waits = WaitLog()
         let start = ContinuousClock.now
         try await limiter.acquire(isUser: true) { waits.append($0) }
@@ -111,14 +112,60 @@ import Testing
         await limiter.release()
     }
 
-    @Test func backoffDoublesWithoutRetryAfterAndResetsOnSuccess() async {
-        let doubling = AIRateLimiter(provider: AIProviderID(), limits: .http)
-        #expect(abs(await doubling.coolDown(retryAfter: nil).timeIntervalSinceNow - 20) < 2)
-        #expect(abs(await doubling.coolDown(retryAfter: nil).timeIntervalSinceNow - 40) < 2)
-        let resetting = AIRateLimiter(provider: AIProviderID(), limits: .http)
-        await resetting.coolDown(retryAfter: nil)
-        await resetting.recordSuccess()
-        #expect(abs(await resetting.coolDown(retryAfter: nil).timeIntervalSinceNow - 20) < 2)
+    /// The request the freed slot goes to sees the cool-down the 429 started.
+    @Test func aRequestWaitingForTheSlotWaitsForTheCoolDown() async throws {
+        let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 1))
+        try await limiter.acquire(isUser: true) { _ in }
+        let waits = WaitLog()
+        let waiting = Task { try await limiter.acquire(isUser: true) { waits.append($0) } }
+        try await Task.sleep(for: .milliseconds(30))
+        let start = ContinuousClock.now
+        await limiter.release(after: .rateLimited(retryAfter: Date() + 0.3))
+        try await waiting.value
+        #expect(ContinuousClock.now - start >= .milliseconds(250))
+        #expect(waits.reasons.first == .queued)
+        guard case .rateLimited = waits.reasons.last else {
+            Issue.record("Expected a rate-limit wait after the queue")
+            return
+        }
+        await limiter.release()
+    }
+
+    @Test func backoffDoublesAcrossCoolDownsAndResetsOnSuccess() async throws {
+        let limiter = AIRateLimiter(provider: AIProviderID(), limits: .http, initialBackoff: .milliseconds(100))
+        try await limiter.acquire(isUser: true) { _ in }
+        let first = try #require(await limiter.release(after: .rateLimited(retryAfter: nil)))
+        #expect(abs(first.timeIntervalSinceNow - 0.1) < 0.05)
+        // The next request waits out the cool-down, and a 429 after it doubles the next one.
+        try await limiter.acquire(isUser: true) { _ in }
+        let second = try #require(await limiter.release(after: .rateLimited(retryAfter: nil)))
+        #expect(abs(second.timeIntervalSinceNow - 0.2) < 0.05)
+        try await limiter.acquire(isUser: true) { _ in }
+        #expect(await limiter.release(after: .answered) == nil)
+        try await limiter.acquire(isUser: true) { _ in }
+        let reset = try #require(await limiter.release(after: .rateLimited(retryAfter: nil)))
+        #expect(abs(reset.timeIntervalSinceNow - 0.1) < 0.05)
+    }
+
+    @Test func thePerMinuteBucketHoldsBackTheNextStart() async throws {
+        let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 2, requestsPerMinute: 1), automaticWaitLimit: .milliseconds(100))
+        try await limiter.acquire(isUser: false) { _ in }
+        do {
+            try await limiter.acquire(isUser: false) { _ in }
+            Issue.record("Expected rateLimited")
+        } catch AIError.rateLimited {
+        }
+        await limiter.release()
+    }
+
+    /// Requests that were running together and all got a 429 without a time count as one failure.
+    @Test func requestsLimitedTogetherShareOneCoolDown() async throws {
+        let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 4))
+        for _ in 0..<4 { try await limiter.acquire(isUser: true) { _ in } }
+        var ends: [Date] = []
+        for _ in 0..<4 { ends.append(try #require(await limiter.release(after: .rateLimited(retryAfter: nil)))) }
+        #expect(Set(ends).count == 1)
+        #expect(abs(ends[0].timeIntervalSinceNow - 20) < 2)
     }
 }
 
@@ -202,6 +249,17 @@ private final class WaitLog: @unchecked Sendable {
         #expect(store.route(for: .defaultRoute).models == [AIModelRef(provider: AIProviderID(rawValue: "6F1C"), model: "model-a")])
         #expect(store.route(for: .downloadNameHook) == AIRoute(isEnabled: false))
         #expect(store.route(for: .pageQuestion) == AIRoute(isEnabled: true))
+    }
+
+    @Test func setsAsideAnUnreadableUsageFile() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai-usage.json")
+        try Data("not json".utf8).write(to: file)
+        let store = AIUsageStore(fileURL: file)
+        #expect(store.months.isEmpty)
+        store.saveNow()
+        #expect(try Data(contentsOf: file.appendingPathExtension("unreadable")) == Data("not json".utf8))
     }
 
     @Test func renamesAnUnreadableFile() throws {

@@ -96,6 +96,17 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
         #expect(detail == "Server overloaded")
     }
 
+    @Test func aNullErrorFieldIsNoError() async {
+        let host = StubURLProtocol.host(replying: .init(chunks: sse([
+            #"data: {"choices":[{"index":0,"delta":{"content":"Hi"}}],"error":null}"#,
+            #"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"error":null}"#,
+            "data: [DONE]",
+        ])))
+        let result = await collect(httpProvider(host: host, format: .chatCompletions).stream(request()))
+        #expect(result.error == nil)
+        #expect(result.events == ["text:Hi", "finished:completed"])
+    }
+
     @Test func reportsACutStream() async {
         let host = StubURLProtocol.host(replying: .init(chunks: sse([#"data: {"choices":[{"index":0,"delta":{"content":"Hi"}}]}"#])))
         let result = await collect(httpProvider(host: host, format: .chatCompletions).stream(request()))

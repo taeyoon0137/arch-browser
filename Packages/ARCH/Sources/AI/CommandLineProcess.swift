@@ -17,11 +17,13 @@ enum CommandLineTermination: Equatable, Sendable {
 final class CommandLineProcess: @unchecked Sendable {
     /// Seconds between SIGTERM and SIGKILL.
     private static let terminationGrace: TimeInterval = 2
+    /// Seconds standard output stays open after the process exits, for what it wrote to be read.
+    private static let outputGrace: TimeInterval = 1
     private static let errorTailLimit = 8_192
 
     /// The process ID, which is also the ID of its process group.
     let id: pid_t
-    /// Standard output as it arrives. It finishes at the end of the output, or when the task reading it is cancelled.
+    /// Standard output as it arrives. It finishes at the end of the output, a second after the process exits if a process it started keeps the output open, or when the task reading it is cancelled.
     let output: AsyncStream<Data>
     /// The end of standard error, kept for an error's detail.
     private let errorTail: Task<Data, Never>
@@ -70,8 +72,10 @@ final class CommandLineProcess: @unchecked Sendable {
             Self.write(input, to: pipes.inputWrite)
             close(pipes.inputWrite)
         }
-        output = Self.stream(reading: pipes.outputRead)
-        let errors = Self.stream(reading: pipes.errorRead)
+        let standardOutput = Self.stream(reading: pipes.outputRead)
+        output = standardOutput.stream
+        let outputSource = standardOutput.source
+        let errors = Self.stream(reading: pipes.errorRead).stream
         errorTail = Task.detached {
             var tail = Data()
             for await chunk in errors {
@@ -85,6 +89,8 @@ final class CommandLineProcess: @unchecked Sendable {
             var status: Int32 = 0
             while waitpid(processID, &status, 0) == -1, errno == EINTR {}
             exit.record(CommandLineTermination(waitStatus: status))
+            // A background process the tool started, such as an update check, can hold standard output open after the tool exits; reading stops once the tool's own output has been read.
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.outputGrace) { outputSource.cancel() }
         }
     }
 
@@ -138,10 +144,10 @@ final class CommandLineProcess: @unchecked Sendable {
         return Pipes(inputRead: descriptors[0], inputWrite: descriptors[1], outputRead: descriptors[2], outputWrite: descriptors[3], errorRead: descriptors[4], errorWrite: descriptors[5])
     }
 
-    /// The data read from `descriptor` until its end, after which the descriptor closes. Reading stops early once the stream is dropped or the task reading it is cancelled.
-    private static func stream(reading descriptor: Int32) -> AsyncStream<Data> {
-        AsyncStream { continuation in
-            let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: .global(qos: .userInitiated))
+    /// The data read from `descriptor` until its end, after which the descriptor closes, and the source that reads it. Reading stops early once the stream is dropped, the task reading it is cancelled, or the source is cancelled.
+    private static func stream(reading descriptor: Int32) -> (stream: AsyncStream<Data>, source: DispatchSourceRead) {
+        let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: .global(qos: .userInitiated))
+        let stream = AsyncStream<Data> { continuation in
             source.setEventHandler {
                 var buffer = [UInt8](repeating: 0, count: 16_384)
                 let count = read(descriptor, &buffer, buffer.count)
@@ -158,6 +164,7 @@ final class CommandLineProcess: @unchecked Sendable {
             continuation.onTermination = { _ in source.cancel() }
             source.resume()
         }
+        return (stream, source)
     }
 
     /// Writes all of `data` unless the reader goes away.

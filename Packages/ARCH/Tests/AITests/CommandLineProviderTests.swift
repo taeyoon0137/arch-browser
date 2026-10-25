@@ -1,4 +1,4 @@
-// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
+// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, output held open by a background process, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
 import Darwin
 import Foundation
 import Testing
@@ -128,6 +128,18 @@ import Testing
         #expect(folder.contains("/Arch-"))
         #expect(lines.last?.trimmingCharacters(in: .whitespaces) == "0")
         #expect(!FileManager.default.fileExists(atPath: folder))
+    }
+
+    /// A tool that exits while a process it started keeps standard output open still ends its reply then, not at the output timeout.
+    @Test func aBackgroundProcessDoesNotHoldTheReplyOpen() async throws {
+        let pidFile = pidFileURL()
+        let tool = try toolScript("echo $$ > \"$PID_FILE\"\necho reply\nsleep 30 &\nexit 0")
+        let start = ContinuousClock.now
+        let result = await collect(commandLineProvider(tool, environment: ["PID_FILE": pidFile.path]).stream(providerRequest()))
+        #expect(ContinuousClock.now - start < .seconds(10))
+        #expect(result.error == nil)
+        #expect(result.events == ["text:reply", "finished:completed"])
+        if let group = try? await processGroup(in: pidFile) { kill(-group, SIGKILL) }
     }
 
     @Test func cancellingEndsTheProcessGroup() async throws {
