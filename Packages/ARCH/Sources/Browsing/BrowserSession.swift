@@ -256,13 +256,16 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Small windows
 
-    /// Settings ▸ General saves under this key whether links from other apps may open in small windows. While nothing is saved, they may.
+    /// Settings ▸ General saves under this key whether links from other apps may open in small windows.
     public static let opensLinksInSmallWindowKey = "ARCHOpensLinksInSmallWindow"
+
+    /// Whether links from other apps may open in small windows while nothing is saved under `opensLinksInSmallWindowKey`.
+    public static let opensLinksInSmallWindowByDefault = true
 
     /// How long after Arch becomes active a link still counts as arriving while Arch was in the background, because the app that sends a link can activate Arch just before the link arrives. `docs/windows-personas.md` (Small window) says how the value was chosen.
     static let smallWindowActivationGrace: TimeInterval = 0.5
 
-    /// Whether a link from another app opens in a small window while the preference under `opensLinksInSmallWindowKey` allows it: Arch was not active when the link arrived, or became active at `becameActiveAt`, less than `smallWindowActivationGrace` before `now`. A nil `becameActiveAt` means Arch has been active since it launched.
+    /// Whether a link from another app opens in a small window, judged by timing alone, so the caller checks the preference under `opensLinksInSmallWindowKey` first: Arch was not active when the link arrived, or became active at `becameActiveAt`, less than `smallWindowActivationGrace` before `now`. A nil `becameActiveAt` means Arch has been active since it launched.
     public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool {
         guard isAppActive else { return true }
         guard let becameActiveAt else { return false }

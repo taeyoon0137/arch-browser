@@ -10,7 +10,7 @@ let sectionWidth: CGFloat = 540
 /// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, and where downloads go.
 struct GeneralSection: View {
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
-    @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = true
+    @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = BrowserSession.opensLinksInSmallWindowByDefault
     @State private var defaultEngine = EngineRegistry.shared.defaultKind
     @AppStorage(SearchEngine.defaultsKey) private var searchEngine = SearchEngine.google
     @AppStorage(BrowserSession.downloadsFolderKey) private var downloadsFolderPath: String?

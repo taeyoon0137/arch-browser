@@ -65,8 +65,8 @@ Checked at runtime for step 12, with the bundled app, the screen unlocked, and A
 
 Not verified; the implementation order checks each
 - That a CEF Alloy browser keeps input, IME, focus, accessibility, and backing scale when its parent view moves to another `NSWindow`.
-- The order in which app activation and the URL event arrive when another app opens a link while the screen is unlocked, links from Mail and Notes among them, and whether activation brings only the small window forward. These need the screen.
-- On WebKit, that text typed into a form field survives Move to Main Window: typing did not reach a WebKit page in the background. With a print or Export as PDF panel on a small window, that ⌥⌘N and ⌘W end the panel with Cancel; that a download-only small window's save panel opens as a panel of its own and saves; and the palette's width in a 480-point small window. These need the screen.
+- The order in which app activation and the URL event arrive when Terminal, Mail, or Notes opens a link while the screen is unlocked, which sets the 0.5-second threshold, and whether activation brings only the small window forward. Step 12's run had the screen unlocked but took no log, clicked no link in Mail or Notes, and recorded no window order, so plan task I.15 makes these checks.
+- On WebKit, that text typed into a form field survives Move to Main Window: typing did not reach a WebKit page in the background. With a print or Export as PDF panel on a small window, that ⌥⌘N and ⌘W end the panel with Cancel; that a download-only small window's save panel opens as a panel of its own and saves; and the palette's width in a 480-point small window. Step 12's run drove Arch through accessibility while another app was in front and did not cover these; plan task I.15 makes them with Arch in front.
 - That Chromium's developer tools for a tab use that tab's request context. The check needs the screen, so step 13 makes it.
 
 ## Decisions
@@ -368,7 +368,7 @@ public func canDeletePersona(_ id: Persona.ID) -> Bool
 public func deletePersona(_ id: Persona.ID)
 
 // Step 11
-/// Whether a link from another app opens in a small window while the preference allows it: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
+/// Whether a link from another app opens in a small window, judged by timing alone; the caller checks the preference first: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
 public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool
 /// The app sets it to name Move to Main Window's shortcut, which Settings ▸ Shortcuts can change, in the small window's button.
 public var moveToMainWindowShortcut: () -> String?
@@ -378,8 +378,10 @@ public var moveToMainWindowShortcut: () -> String?
 public func moveToMainWindow(_ smallWindow: BrowserWindowModel)
 
 // Step 12
-/// Settings ▸ General saves under this key whether links from other apps may open in small windows. While nothing is saved, they may.
+/// Settings ▸ General saves under this key whether links from other apps may open in small windows.
 public static let opensLinksInSmallWindowKey: String
+/// The preference's value while nothing is saved, which the toggle and the link routing share: true.
+public static let opensLinksInSmallWindowByDefault: Bool
 ```
 
 - Every existing app-wide mutator keeps its name. `openTab(url:in:pinned:select:engine:state:)` keeps its signature, so parallel tasks compile: a nil space means the sidebar target's current space, and `select: true` selects the tab in the sidebar target. The tab takes the space's Persona. Views and menus use `BrowserWindowModel.openTab` instead.
@@ -575,7 +577,7 @@ Engine and tab events
 ## Small window (III.7)
 
 When
-- `application(_:open:)` opens a link in a small window when three things hold: the preference is on, the first windows have been restored, and Arch was not active when the link arrived. Not active means `!NSApp.isActive`, or the app became active less than 0.5 seconds before. Step 11's log was taken with the screen locked, when Arch never became active, so it could not set the threshold, which stays at the proposed value (Facts). Otherwise the link opens a tab in the sidebar target, as today, and the sidebar target comes forward from behind a small window. Links that arrive during launch reach `application(_:open:)` before the session exists and open in the main window, so regression check 4's launch case holds. `open location` arrives the same way and follows the same rule. The global shortcut always uses the main window.
+- `application(_:open:)` opens a link in a small window when three things hold: the preference is on, the first windows have been restored, and Arch was not active when the link arrived. Not active means `!NSApp.isActive`, or the app became active less than 0.5 seconds before. Step 11's log was taken with the screen locked, when Arch never became active, so it could not set the threshold, which stays at the proposed value (Facts) until plan task I.15 sets it. Otherwise the link opens a tab in the sidebar target, as today, and the sidebar target comes forward from behind a small window. Links that arrive during launch reach `application(_:open:)` before the session exists and open in the main window, so regression check 4's launch case holds. `open location` arrives the same way and follows the same rule. The global shortcut always uses the main window.
 
 The tab
 - Its destination space is the last main window's current space when the small window opens, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.

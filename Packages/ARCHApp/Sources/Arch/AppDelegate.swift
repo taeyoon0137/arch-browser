@@ -93,9 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Settings ▸ General's preference, read for each link so that a change applies to the next one. It is on until the user turns it off, as the toggle shows.
+    /// Settings ▸ General's preference, read for each link so that a change applies to the next one.
     private var allowsSmallWindowsForLinks: Bool {
-        UserDefaults.standard.object(forKey: BrowserSession.opensLinksInSmallWindowKey) as? Bool ?? true
+        UserDefaults.standard.object(forKey: BrowserSession.opensLinksInSmallWindowKey) as? Bool ?? BrowserSession.opensLinksInSmallWindowByDefault
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
