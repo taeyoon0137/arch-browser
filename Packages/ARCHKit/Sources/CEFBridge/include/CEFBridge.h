@@ -168,12 +168,15 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks its last report.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
-/// Reports a popup the page opened, which CEF has created in this browser's browsing context, so the page reaches it through the window `window.open` returned and the popup reaches the page through `window.opener`. `targetURL` is the address the page opened, empty when it gave none. Set the popup's `delegate` to keep it; a popup that has none when this returns closes.
+/// Asks whether a popup the page opens now would be adopted through `cefBrowserDidOpenPopup:targetURL:disposition:`. Return NO to stop the popup before CEF creates it.
+- (BOOL)cefBrowserCanAdoptPopup;
+/// Reports a popup the page opened, which CEF has created in this browser's browsing context, so the page reaches it through the window `window.open` returned and the popup reaches the page through `window.opener`. `targetURL` is the address the page opened, empty when it gave none. Set the popup's `delegate` to keep it. A popup that has none when this returns closes on the next turn of the run loop: CEF owns its page only once the opener shows it, after this callback.
 - (void)cefBrowserDidOpenPopup:(ARCHCEFBrowser *)popup targetURL:(NSString *)targetURL disposition:(ARCHCEFPopupDisposition)disposition;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
 /// Asks whether a link the user clicked with Shift, which Chromium opens in a new window, may open. Return NO to stop it; with YES it opens as an Alloy style browser opens it: in this browser or, for a link to a new browsing context, as a popup.
 - (BOOL)cefBrowserShouldOpenNewWindowWithURL:(NSString *)url;
+/// Reports that the browser closed, or that its page closed itself with `window.close()` while one of its downloads needs the browser. The browser then stays open, so the download goes on, until `close` or `tryCloseWithCompletion:`.
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
 - (BOOL)cefBrowserShouldDownloadURL:(NSString *)url hasDocument:(BOOL)hasDocument;

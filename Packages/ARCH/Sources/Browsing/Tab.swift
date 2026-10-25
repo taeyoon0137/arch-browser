@@ -39,6 +39,8 @@ public final class Tab: ObservableObject, Identifiable {
     public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
+    /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
+    weak var opener: (any EngineWebContents)?
     /// Removes the tab when its page closes itself with `window.close()`. Set by the session.
     var didClose: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.

@@ -1748,14 +1748,15 @@ public:
         [owner_ handleAfterCreated:browser];
     }
 
-    // A popup that the delegate allows and that belongs to no other app opens in a browser object of its own, which CEF creates in the opener's browsing context, so the page keeps the window `window.open` returns and the popup keeps `window.opener`. Returning true stops the popup.
+    // A popup that the opener's delegate would adopt, that the delegate allows, and that belongs to no other app opens in a browser object of its own, which CEF creates in the opener's browsing context, so the page keeps the window `window.open` returns and the popup keeps `window.opener`. The runtime opens none while it shuts down. A Document Picture-in-Picture window would become a tab, so the page keeps its own interface instead. Returning true stops the popup.
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id, const CefString &target_url,
                        const CefString &target_frame_name, CefLifeSpanHandler::WindowOpenDisposition target_disposition,
                        bool user_gesture, const CefPopupFeatures &popupFeatures, CefWindowInfo &windowInfo,
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
-        if (!owner_.delegate || ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] ||
+        if (!gInitialized || target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE || ![owner_.delegate cefBrowserCanAdoptPopup] ||
+            ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] ||
             [owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             return true;
         }
@@ -1774,7 +1775,7 @@ public:
         gPendingPopups.erase({browser->GetIdentifier(), popup_id});
     }
 
-    // Returning false would make CEF close the window that holds the browser's view, which is the app's window. The view leaves its parent instead, and CEF finishes closing the browser once the view is released.
+    // Returning false would make CEF close the window that holds the browser's view, which is the app's window. The view leaves its parent instead, and CEF finishes closing the browser once the view is released. While the view stays, as for a page's own close that the owner refuses, CEF keeps the browser open.
     bool DoClose(CefRefPtr<CefBrowser> browser) override {
         if (!owner_) {
             return false;
@@ -1970,6 +1971,8 @@ private:
     NSArray<ARCHCEFPageScript *> *_pageScripts;
     /// Whether the page scripts changed after they went to the renderer in the browser's extra info.
     BOOL _pageScriptsChanged;
+    /// Set from `close` or `tryCloseWithCompletion:` until the browser closes or the user chooses to stay, so that `DoClose` tells the app's closes from the page's own.
+    BOOL _closeRequested;
 }
 
 @synthesize delegate = _delegate;
@@ -2051,12 +2054,13 @@ private:
     _browserView = view;
     [self applyAccessibilityState];
     if (popup) {
-        if (gInitialized) {
-            [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
-        }
-        // A popup that nobody adopted, as when its opener has gone or the runtime shuts down, closes. CEF finishes closing it once its view goes with this object.
+        [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
+        // `OnBeforePopup` asked the opener's delegate in the same task, so a popup without a delegate here is one the delegate dropped. CEF owns the popup's page only once the opener shows the popup, later in this task, and closing the popup before then crashes CEF, so the block keeps this object until the next turn of the run loop and closes the popup then.
         if (!_delegate) {
-            [self close];
+            ARCHCEFBrowser *unadopted = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [unadopted close];
+            });
         }
     }
     [_delegate cefBrowserDidCreateView];
@@ -2183,7 +2187,15 @@ private:
     extraInfo = [popup creationExtraInfo];
 }
 
+/// The view leaves its parent, so the browser closes. CEF stops downloads with their browser, so while the runtime runs, the page's own `window.close()`, or its opener's, leaves the view in place while a download needs the browser; the delegate learns on the next turn of the run loop, outside CEF's callback, that the page closed itself.
 - (void)handleDoClose {
+    if (gInitialized && !_closeRequested && self.hasDownloadsInProgress) {
+        __weak ARCHCEFBrowser *weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf.delegate cefBrowserDidClose];
+        });
+        return;
+    }
     [_browserView removeFromSuperview];
     _browserView = nil;
     [self finishPendingClose:YES];
@@ -2193,6 +2205,10 @@ private:
     void (^completion)(BOOL) = _pendingClose;
     _pendingClose = nil;
     if (completion) {
+        // A close the user stays from no longer counts as the app's.
+        if (!closing) {
+            _closeRequested = NO;
+        }
         completion(closing);
     }
 }
@@ -2739,6 +2755,7 @@ private:
 
 - (void)close {
     if (_browser) {
+        _closeRequested = YES;
         _browser->GetHost()->CloseBrowser(true);
     }
 }
@@ -2749,6 +2766,7 @@ private:
         return;
     }
     _pendingClose = [completion copy];
+    _closeRequested = YES;
     _browser->GetHost()->CloseBrowser(false);
 }
 

@@ -216,7 +216,7 @@ public final class BrowserWindowModel: ObservableObject {
         showPreview(of: favorite.url, engine: session.defaultEngine, in: favorite.resolvedPersonaID)
     }
 
-    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview that opened with the same address stays as it is. The page cannot download, so closing the panel always closes the page at once.
+    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview that opened with the same address stays as it is. The preview refuses the page's downloads, so closing the panel always closes the page at once.
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
         guard preview?.openedURL != url else { return }
         closePreview()
@@ -224,15 +224,16 @@ public final class BrowserWindowModel: ObservableObject {
         hideFindBar()
         cancelRegionCapture()
         let runtime = session.runtime(for: engine, in: personaID)
-        let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
+        let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
         let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
-        // A page the preview opens, as for a link to a new window, comes from the preview's runtime, so it becomes a tab of the preview's Persona and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
+        // A page the preview opens, as for a link to a new window or a sign-in popup, comes from the preview's runtime and keeps the previewed page as its opener. The previewed page becomes a tab of the preview's Persona, as Open in Tab makes one but without loading again, and the page it opened becomes the selected tab after it, taking the panel's place. The engine is still in its callback, so the panel goes on the next turn of the run loop.
         preview.openNewTab = { [weak self, weak preview] popup in
-            guard let self else { return }
+            guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
-            self.showOpenedPage(popup, personaID: personaID)
+            self.showOpenedPage(preview.webContents, personaID: personaID)
+            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents)
             DispatchQueue.main.async { [weak self] in
-                if let self, let preview, self.preview === preview { self.closePreview() }
+                if let self, self.preview === preview { self.removePreview(closingPage: false) }
             }
         }
         // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
@@ -252,15 +253,22 @@ public final class BrowserWindowModel: ObservableObject {
         focusPage()
     }
 
-    /// Closes the panel and its page. Keyboard focus returns to the selected tab's page when it was in the panel, unless the click that closed the panel gave it to a field.
+    /// Closes the panel and its page.
     func closePreview() {
+        removePreview(closingPage: true)
+    }
+
+    /// Removes the panel and, with `closingPage`, closes its page; without, a tab has taken the page. Keyboard focus returns to the selected tab's page when it was in the panel, unless the click that closed the panel gave it to a field.
+    private func removePreview(closingPage: Bool) {
         guard let preview else { return }
         self.preview = nil
         let view = preview.webContents.view
         let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
-        // The page stops reporting to the panel before it closes.
-        preview.webContents.uiDelegate = nil
-        session.retire(preview.webContents, of: preview.personaID)
+        if closingPage {
+            // The page stops reporting to the panel before it closes.
+            preview.webContents.uiDelegate = nil
+            session.retire(preview.webContents, of: preview.personaID)
+        }
         if hadFocus { focusPage(leaving: view) }
     }
 
@@ -311,11 +319,14 @@ public final class BrowserWindowModel: ObservableObject {
         selectedTabID = session.openTab(url: url, in: currentSpaceID, select: false).id
     }
 
-    /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11).
-    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID) {
+    /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). `opener` is the page that opened it, which the window returns to when the new page closes itself.
+    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
         switch kind {
-        case .main: selectedTabID = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false).id
-        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID)
+        case .main:
+            let tab = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false)
+            tab.opener = opener
+            selectedTabID = tab.id
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID).selectedTab?.opener = opener
         }
     }
 

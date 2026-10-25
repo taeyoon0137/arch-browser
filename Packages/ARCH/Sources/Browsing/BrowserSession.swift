@@ -566,12 +566,14 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, the sidebar target's current space.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, the sidebar target's current space.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
-            if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID) }
-            self.adopt(popup, spaceID: tab.spaceID ?? self.sidebarTarget().currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
+            if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.sidebarTarget().currentSpaceID, personaID: personaID, pinned: false, select: false)
+            opened.opener = tab.webContents
+            opened.isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -705,7 +707,8 @@ public final class BrowserSession: ObservableObject {
             closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
-        // Each main window that selected the tab selects one that no other window shows (window rule 3): the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
+        // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
+        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         for window in windows where window.selectedTabID == tab.id {
             guard window.kind == .main else {
@@ -713,7 +716,7 @@ public final class BrowserSession: ObservableObject {
                 continue
             }
             let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
-            let candidates = [splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
+            let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectedTabID = candidates.first { !window.isShownInAnotherWindow($0) }?.id
         }
     }

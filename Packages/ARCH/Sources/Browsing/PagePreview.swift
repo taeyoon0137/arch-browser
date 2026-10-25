@@ -1,9 +1,9 @@
-// Previews show a page in a floating panel over the page area without opening a tab: Shift held while the pointer rests on a favorite, or a link in a page clicked with Shift. The panel's web contents belongs to no tab and closes with the panel, so the page never enters the tab list, the saved session, or history. Open in Tab loads the panel's page in a new tab; Escape or a click outside the panel closes it.
+// Previews show a page in a floating panel over the page area without opening a tab: Shift held while the pointer rests on a favorite, or a link in a page clicked with Shift. The panel's web contents belongs to no tab and closes with the panel, so the page never enters the tab list, the saved session, or history, unless it opens a page of its own and becomes a tab. Open in Tab loads the panel's page in a new tab; Escape or a click outside the panel closes it.
 import AppKit
 import ARCHEngine
 import SwiftUI
 
-/// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to its window. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing.
+/// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to its window. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing, and downloads are refused.
 final class PagePreview: ObservableObject {
     let webContents: any EngineWebContents
     /// The Persona whose profile the page uses, as the tab or favorite it came from does.
@@ -14,7 +14,7 @@ final class PagePreview: ObservableObject {
     /// The page's address, which follows the page as the user moves around in it.
     @Published private(set) var url: URL
     @Published private(set) var isLoading: Bool
-    /// The window that shows the preview sets this callback to open a page that the previewed page opens, such as a link to a new window, as a tab.
+    /// The window that shows the preview sets this callback to open a page that the previewed page opens, such as a link to a new window, as a tab. The previewed page becomes a tab as well, which then reports to the tab instead.
     var openNewTab: ((any EngineWebContents) -> Void)?
     /// The window that shows the preview sets this callback to answer the page's permission requests. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
@@ -48,6 +48,8 @@ extension PagePreview: EngineWebContentsUIDelegate {
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
     }
+    /// A preview's page does not download, so closing the panel always closes the page at once. Once a tab takes the page, the tab decides.
+    func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool { false }
 }
 
 // MARK: Panel
