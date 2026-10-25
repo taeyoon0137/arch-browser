@@ -512,13 +512,14 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
     public func exitFullscreen() { webView.closeAllMediaPresentations(completionHandler: nil) }
-    /// Ends the page. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates.
+    /// Ends the page. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates. The bridge goes first: its observations would report the blank page's address, which the load sets before it returns, to the tab and the profile's extensions.
     public func discard() {
         webView.stopLoading()
         webView.closeAllMediaPresentations(completionHandler: nil)
         webView.pauseAllMediaPlayback(completionHandler: nil)
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
+        bridge = nil
         webView.load(URLRequest(url: URL(string: "about:blank")!))
     }
     /// A `WKDownload` continues after its web view closes.

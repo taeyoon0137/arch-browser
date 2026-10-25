@@ -38,9 +38,8 @@ struct PluginInstallSheet: View {
                     Text(note)
                         .foregroundStyle(.secondary)
                 }
-                if let installed, let otherSource {
-                    Label("This package replaces \u{201C}\(installed.manifest.name)\u{201D}, which you installed from \(otherSource.lastPathComponent), and takes over its data. Update only if both come from the same developer.",
-                          systemImage: "exclamationmark.triangle")
+                if let otherSourceWarning {
+                    Label(otherSourceWarning, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
             }
@@ -130,11 +129,20 @@ struct PluginInstallSheet: View {
         }
     }
 
-    /// Where the installed plugin came from, when the package that updates it comes from another place.
-    private var otherSource: URL? {
-        guard case let .file(source) = installed?.origin else { return nil }
-        if case let .file(packageSource) = package.origin, packageSource.standardizedFileURL.path == source.standardizedFileURL.path { return nil }
-        return source
+    /// The warning for a package that updates the installed plugin from another place: another file than the one it was installed from, or a file for a plugin that AI wrote.
+    private var otherSourceWarning: String? {
+        guard let installed else { return nil }
+        let replaces = "This package replaces \u{201C}\(installed.manifest.name)\u{201D}"
+        switch (installed.origin, package.origin) {
+        case let (.file(source), .file(packageSource)) where packageSource.standardizedFileURL.path == source.standardizedFileURL.path:
+            return nil
+        case let (.file(source), _):
+            return "\(replaces), which you installed from \(source.lastPathComponent), and takes over its data. Update only if both come from the same developer."
+        case (.generated, .file):
+            return "\(replaces), which AI wrote, and takes over its data. Update only if you made this package from it."
+        default:
+            return nil
+        }
     }
 
     /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website or of native apps.

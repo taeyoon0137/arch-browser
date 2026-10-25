@@ -85,10 +85,14 @@ final class SessionWebExtensionHost: WebExtensionHost {
         session?.allTabs.first { $0.id == id }?.webContents
     }
 
-    /// The window that shows the tab selects it again; otherwise the last main window does.
+    /// The window that shows the tab selects it again; otherwise a window selects it as for a tab no window shows, which takes a favorite's tab to a window of its Persona.
     func activate(_ tab: any EngineWebContents) {
         guard let session, let tab = self.tab(tab) else { return }
-        (session.window(showing: tab) ?? session.lastMainWindow)?.selectedTabID = tab.id
+        if let window = session.window(showing: tab) {
+            window.selectedTabID = tab.id
+        } else {
+            session.selectUnshownTab(tab)
+        }
     }
 
     func close(_ tab: any EngineWebContents) {

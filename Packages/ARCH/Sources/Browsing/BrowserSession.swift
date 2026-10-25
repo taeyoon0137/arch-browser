@@ -763,7 +763,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
-    private func selectUnshownTab(_ tab: Tab) {
+    func selectUnshownTab(_ tab: Tab) {
         guard tab.spaceID == nil else { return sidebarTarget().selectedTabID = tab.id }
         let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
         if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }

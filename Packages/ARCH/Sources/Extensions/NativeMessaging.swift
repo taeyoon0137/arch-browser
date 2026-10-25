@@ -111,7 +111,7 @@ final class NativeMessagingConnection {
     private let process = Process()
     private let input = Pipe()
     private let output = Pipe()
-    private let writes = DispatchQueue(label: "local.arch.browser.native-messaging")
+    private let writes = DispatchQueue(label: "xyz.taeyoon.arch.native-messaging")
     private var hasEnded = false
 
     init(executable: URL, origin: String) {
