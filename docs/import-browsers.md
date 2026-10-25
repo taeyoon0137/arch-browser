@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-- This note describes importing from Chrome, Dia, Arc, and Safari, row 57 of `docs/features.md`. Queue task V.13 in `docs/plan.md` follows the steps under Implementation order.
+- This note describes importing from Chrome, Dia, Arc, and Safari, row 57 of `docs/features.md`. Queue task I.17 in `docs/plan.md` makes the Checks with the app.
 - File ▸ Import from Browser… finds those browsers and their profiles on the Mac, reads their files in place, and adds the user's selections to the session, history store, and site search in one step. File ▸ Import Bookmarks and History… (row 33) remains unchanged for exported files.
 - Arch reads the other browsers' files and never writes to them. It reads SQLite databases from copies, as the file import does.
 - Passwords, passkeys, cards, and addresses are excluded: Arch stores none and leaves them to the Passwords app and 1Password, which have their own imports. Cookies are excluded: each browser encrypts them with its own key in the Keychain, and a copied session cookie would sign the user in where they had not signed in. Extensions are excluded until Arch runs them (rows 44 and 50). Open and unpinned tabs, windows, reading lists, downloads, and site permissions are also excluded.
@@ -101,7 +101,7 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
 ## Personas
 
 - Each row's destination menu lists the current Persona (the last main window's), the other Personas, and New Persona "<profile name>". The profile name comes from `Local State`, and Safari's row uses "Safari".
-- Defaults: the Persona that the record under Duplicates names for the profile, while it exists. Otherwise a Persona with the profile's name. Otherwise the browser's first profile in `profiles_order` goes to the current Persona, and the others, including rows for missing profile folders, go to new Personas. Repeat imports thus use the same Persona whichever window opens the sheet.
+- Defaults: the Persona that the record under Duplicates names for the profile, while it exists. Otherwise a Persona with the profile's name. Otherwise the browser's first profile in `profiles_order` with something to bring goes to the current Persona, and the others, including rows for missing profile folders, go to new Personas. Repeat imports thus use the same Persona whichever window opens the sheet.
 - A new Persona gets the row's imported spaces. If there are none, it gets one space named Personal, as New Persona does, so every Persona has a space.
 - Several rows may share a destination; they merge into it in row order.
 - A Persona created by the import starts with empty storage and is signed out of every site because cookies are excluded.
@@ -124,11 +124,11 @@ Importing the same source again adds only what is not there yet. Names and addre
 ## Interface
 
 - File ▸ Import from Browser… sits above Import Bookmarks and History…. It follows the same rules: one import at a time, a main window opens when none is open, and the item is disabled while the window shows a sheet.
-- A sheet on the last main window shows "Looking for browsers…" while a background queue finds the sources and reads their data. The sheet shows each item's full count; the summary reports additions after skipping duplicates.
+- A sheet on the last main window shows "Looking for browsers…" while a background queue finds the sources and reads their data. The sheet shows each item's full count, except that Spaces counts only the spaces with pinned tabs or folders, since no other space is made; the summary reports additions after skipping duplicates.
 - One section per browser found, with the app's icon from `NSWorkspace` by bundle identifier, then one row per profile:
   - A checkbox and the profile's name, with a destination menu (see Personas).
   - A checkbox per item with its count: Favorites (12), Spaces (3) with 24 pinned tabs, Bookmark Folders (6) with 40 bookmarks, History (5,210 pages), Search Shortcuts (3). Missing items are hidden. Unreadable items show the reason and are unchecked and disabled.
-  - Spaces and Bookmark Folders say that each of their pinned tabs loads whenever Arch opens. When the sheet opens, these boxes start checked in sheet order only while the checked ones add at most 50 pinned tabs in all; the rest start unchecked. While more are checked, the sheet says how many pinned tabs will load at each launch.
+  - Spaces and Bookmark Folders say that each of their pinned tabs loads whenever Arch opens. When the sheet opens, each of these boxes starts checked when, with the boxes checked before it in sheet order, it adds at most 50 pinned tabs in all; the others start unchecked. While more are checked, the sheet says how many pinned tabs will load at each launch.
   - History and Search Shortcuts say that they apply to every Persona.
 - Below the sections, "Use <engine> as the search engine, as in <browser>" for each browser that offers one (see What each source brings), unchecked. Checking one unchecks the others.
 - A browser whose files macOS keeps Arch from reading shows "Arch needs <setting> to read <browser>'s bookmarks and history." Each source's definition names the setting and its pane in Privacy & Security: Full Disk Access for Safari, and for Chrome the setting that check 1 under Checks with the app finds, Full Disk Access until then. The section has:
@@ -136,12 +136,12 @@ Importing the same source again adds only what is not there yet. Names and addre
   - Choose Exported File…, which closes the sheet and opens the file import's panel for a bookmarks file exported by the browser.
 - No browser found: "No other browsers were found on this Mac." with Choose Exported File… and Close.
 - Import is enabled while any item is checked. Cancel closes the sheet without changes.
-- After import, an alert sheet summarizes the results with one line per kind, as the file import does: Personas created, spaces and pinned tabs added, favorites added and already present, history pages, search shortcuts added and skipped, the search engine, and unreadable rows.
+- After import, an alert sheet summarizes the results with one line per kind, as the file import does: Personas created, spaces and pinned tabs added, favorites added and already present, history pages, search shortcuts added and skipped, the search engine, and the browsers and items of checked rows that could not be read. When nothing came in, it says that everything checked was in Arch already.
 
 ## Applying the import
 
 - Data is read once, off the main thread, before the sheet shows its rows. The sheet keeps the result, so Import does not reread it.
-- Import runs on the main thread in one turn of the run loop: for each checked row in order, `BrowserSession.addImport(_:to:record:)`, then `SiteSearchStore.add(_:)` once with every row's shortcuts, then `HistoryStore.importEntries` with every row's history, then the search engine, then the record. The session saves once after the turn through its usual debounce.
+- Import runs on the main thread in one turn of the run loop: for each checked row that brings favorites or spaces, in order, `BrowserSession.addImport(_:to:record:)`, then `SiteSearchStore.add(_:)` once with every row's shortcuts, then `HistoryStore.importEntries` with every row's history, then the search engine, then the record, which is written when a row went to a Persona. A row that brings only history or search shortcuts goes to no Persona, so it creates none. The session saves once after the turn through its usual debounce.
 - `addImport` first computes a `SidebarImport.Plan`, a value that resolves the destination and duplicates against the row's record entry and the session's Personas, spaces, folders, favorites, and pinned tabs. It applies the plan by adding the Persona, spaces, folders, and favorites, and opening each pinned tab in the default engine without selecting it. It then puts the row's entry, with the Arch IDs it made, into the record it takes `inout`, drops the IDs of items that are gone from every entry, and returns the counts. The plan is pure, so tests check it without engines.
 - Each pinned tab opens as a restored tab does: its first load does not count as a visit, and a bookmark whose address turns out to be a file downloads nothing. Such a tab then closes, as a restored one does, so that bookmark is lost, although the summary, written before pages load, counts it.
 - `session.json` needs no additions: imported items are ordinary Personas, spaces, folders, tabs, and favorites, and the record is a separate file.
@@ -168,8 +168,9 @@ Only `BrowserSource.swift` names browser products in code, as `AGENTS.md` allows
   - `BookmarkFile.swift`: bookmark trees for Chromium-format JSON and WebKit-format property lists, split into bar bookmarks and folders by the path rule. The file import's flattened favorites use the same trees in the same order.
   - New `DatabaseCopy.swift`: the copy step, the loop over a query's rows, and `removeLeftovers()`, shared by the history and `Web Data` readers.
   - `HistoryDatabase.swift`: a second query for `history_items` databases.
-  - New `BrowserImportSheet.swift`: the SwiftUI sheet and its model (detection state, choices).
-  - `ImportController.swift`: `importFromBrowser(in:)` beside `chooseFiles(in:)`, sharing `isImporting`, `canImport(in:)`, and the removal of leftover copies, and the summary lines shared by both imports.
+  - New `ImportedBrowser.swift`: what the sheet shows of each detected browser, read once off the main thread: its profiles, each with its parts (favorites, spaces, bookmark folders, history, search shortcuts) read or failed, and its last used profile's default engine.
+  - New `BrowserImportSheet.swift`: the SwiftUI sheet and its model (the browsers read, each profile's choices, the engine choice, and the selection Import applies).
+  - `ImportController.swift`: `importFromBrowser(in:)` beside `chooseFiles(in:)`, sharing `isImporting`, `canImport(in:)`, and the removal of leftover copies, and `ImportSummary`, the summary lines shared by both imports.
 - `Packages/ARCH/Sources/Browsing`:
   - New `SidebarImport.swift`: what a row brings (favorites, spaces with pinned tabs and folders), which the readers produce directly, the destination and its default, the record (`SidebarImport.Record`, which reads and writes `imports.json` and moves one that does not decode to `imports.unreadable.json`), the sidebar values the plan reads, the `Plan`, and the counts it returns.
   - `BrowserSession.swift`: `addImport(_:to:record:)`; `addFavorites(_:in:)` with a Persona parameter, which the file import calls with the current Persona; a Persona created with given spaces.
@@ -193,6 +194,9 @@ Every fixture is synthetic and built by the tests: JSON and property lists from 
   - Database copies: a database behind a symbolic link, with its changes only in the `-wal` beside the target, is read without changing the target's files; a database with a damaged last page is unreadable.
   - Sidebar file: two spaces on two profile references with themes, `containerIDs` listing `unpinned` before `pinned`, folders, a nested folder, a split view, unpinned tabs, and non-web addresses; favorites per profile; a reference to a missing folder; an unknown item kind; a file without the container; a space labeled only in `newContainerIDs`; spaces without a pinned container, which make the file unreadable.
   - Detection: a data folder without the key file is not listed; a key file without read permission (mode 000) is reported unreadable for its permissions, not as needing a privacy setting.
+  - Browsers read for the sheet: a Chromium-format browser with a sidebar file gives the profiles of `Local State` in order without one that has nothing to bring, then a row for a folder that only the sidebar file names; favorites come from the sidebar file and the bar, spaces leave out one with nothing pinned, and the last used profile gives the default engine. A sidebar file and a `Bookmarks` file that do not parse make the favorites, spaces, and bookmark folders unreadable while history still comes in. A WebKit-format browser has one row named after it.
+  - The sheet's model: parts with pinned tabs start checked in sheet order up to 50 pinned tabs; default destinations follow the record, a Persona's name, and the first profile, and a destination Persona deleted while the sheet is open becomes a new Persona; the selection holds only the checked parts of included rows, a row without favorites or spaces goes to no Persona, and the failures name the browser and profile; a browser offers its engine only when it is not Arch's; a browser read again takes its default choices.
+  - The summary: one line per kind that came in, singular or plural, and none for kinds without anything.
 - `BrowsingTests`, with the plan's tests in a new `SidebarImportTests.swift`:
   - Without a record entry, the plan merges spaces and folders by name, skips favorites and pinned addresses already present, gives a new Persona its imported spaces or, when they bring nothing to pin, Personal, and is empty for a second identical import.
   - With the entry from the first import, a second import adds nothing after the recorded pinned tab moved to another address and the recorded space was renamed; an untitled space merges into the "Space <n>" it became; a recorded item that is gone imports again; a recorded space the user deleted, after its folder and tab moved to another space, does not come back empty; the default destination is the recorded Persona.

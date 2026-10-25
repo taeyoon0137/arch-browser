@@ -5,18 +5,10 @@ import Testing
 @testable import Import
 
 @Suite struct HistoryDatabaseTests {
-    /// The Chromium-format `urls` table.
-    private static let urlsTable = "CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER, hidden INTEGER)"
-
     @Test func historyItemsCountOnlyVisitsThatLoadedWithoutRedirecting() throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
-        let file = try folder.database("History.db", [
-            "CREATE TABLE history_items (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE, visit_count INTEGER NOT NULL)",
-            """
-            CREATE TABLE history_visits (id INTEGER PRIMARY KEY AUTOINCREMENT, history_item INTEGER NOT NULL, visit_time REAL NOT NULL, title TEXT NULL,
-                load_successful BOOLEAN NOT NULL DEFAULT 1, redirect_source INTEGER NULL, redirect_destination INTEGER NULL)
-            """,
+        let file = try folder.database("History.db", WebKitDatabases.historyTables + [
             "INSERT INTO history_items (id, url, visit_count) VALUES (1, 'https://a.example/', 5), (2, 'https://b.example/', 2), (3, 'file:///tmp/page.html', 1), (4, 'https://c.example/', 0)",
             """
             INSERT INTO history_visits (history_item, visit_time, title, load_successful, redirect_destination) VALUES
@@ -39,7 +31,7 @@ import Testing
         // Chromium times visits in microseconds since 1601; this one is 2001-01-01, the reference date.
         let referenceDate = 12_622_780_800_000_000
         let file = try folder.database("History", [
-            Self.urlsTable,
+            ChromiumDatabases.urlsTable,
             "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES ('https://a.example/', 'A', 3, 0, \(referenceDate), 0), ('https://frame.example/', 'Frame', 1, 0, \(referenceDate), 1)",
         ])
         let entries = try HistoryDatabase.entries(at: file)
@@ -58,7 +50,7 @@ import Testing
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let target = try folder.databaseWithLog("Elsewhere/History", [
-            Self.urlsTable,
+            ChromiumDatabases.urlsTable,
             "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES ('https://a.example/', 'A', 1, 0, 1, 0)",
         ])
         let link = folder.url.appendingPathComponent("Default/History")
@@ -82,7 +74,7 @@ import Testing
         let pageSize = 4_096
         let file = try folder.database("History", [
             "PRAGMA page_size = \(pageSize)",
-            Self.urlsTable,
+            ChromiumDatabases.urlsTable,
             """
             WITH RECURSIVE page(number) AS (SELECT 1 UNION ALL SELECT number + 1 FROM page WHERE number < 200)
             INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden)

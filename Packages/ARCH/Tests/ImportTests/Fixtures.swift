@@ -105,3 +105,68 @@ enum WebKitBookmarks {
         ["WebBookmarkType": "WebBookmarkTypeList", "WebBookmarkUUID": uuid, "Title": title, "Children": children]
     }
 }
+
+/// A sidebar file's items, spaces, and profile references.
+enum SidebarItems {
+    static let defaultProfile: [String: Any] = ["default": true]
+    static func customProfile(_ folder: String) -> [String: Any] {
+        ["custom": ["_0": ["directoryBasename": folder, "machineID": "machine"]]]
+    }
+
+    static func container(_ id: String, _ children: [String]) -> [String: Any] {
+        ["id": id, "parentID": NSNull(), "childrenIds": children, "data": ["itemContainer": ["containerType": ["spaceItems": ["_0": "space"]]]]]
+    }
+
+    static func tab(_ id: String, _ address: String, savedTitle: String, title: String? = nil) -> [String: Any] {
+        ["id": id, "title": title ?? NSNull(), "childrenIds": [String](), "data": ["tab": ["savedURL": address, "savedTitle": savedTitle]]]
+    }
+
+    static func item(_ id: String, _ kind: String, title: String? = nil, _ children: [String]) -> [String: Any] {
+        ["id": id, "title": title ?? NSNull(), "childrenIds": children, "data": [kind: [String: Any]()]]
+    }
+
+    static func space(_ id: String, title: String?, profile: [String: Any], pinned: String, unpinned: String, theme: [String: Double]? = nil) -> [String: Any] {
+        var space: [String: Any] = ["id": id, "containerIDs": ["unpinned", unpinned, "pinned", pinned], "profile": profile]
+        space["title"] = title
+        space["customInfo"] = theme.map { ["windowTheme": ["primaryColorPalette": ["midTone": $0.merging(["alpha": 1]) { first, _ in first }]]] }
+        return space
+    }
+
+    /// An array that alternates each object's ID with the object, as the file stores `items` and `spaces`.
+    static func flat(_ objects: [[String: Any]]) -> [Any] {
+        objects.flatMap { [$0["id"]!, $0] }
+    }
+
+    static func file(version: Int = 1, containers: [[String: Any]]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["version": version, "sidebar": ["containers": containers], "sidebarSyncState": ["containers": [[String: Any]]()]])
+    }
+}
+
+/// Chromium-format databases: the `urls` table of History and the `keywords` table of Web Data.
+enum ChromiumDatabases {
+    static let urlsTable = "CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER, hidden INTEGER)"
+
+    static let keywordsTable = """
+        CREATE TABLE keywords (id INTEGER PRIMARY KEY, short_name VARCHAR NOT NULL, keyword VARCHAR NOT NULL, url VARCHAR NOT NULL,
+            safe_for_autoreplace INTEGER, prepopulate_id INTEGER DEFAULT 0, created_by_policy INTEGER DEFAULT 0, sync_guid VARCHAR,
+            is_active INTEGER DEFAULT 0, starter_pack_id INTEGER DEFAULT 0)
+        """
+
+    /// Inserts a `keywords` row; the defaults describe an active shortcut the user created.
+    static func keyword(_ name: String, _ keyword: String, _ template: String, guid: String = "", safe: Int = 0, prepopulateID: Int = 0,
+                        starterPackID: Int = 0, policy: Int = 0, active: Int = 1) -> String {
+        "INSERT INTO keywords (short_name, keyword, url, sync_guid, safe_for_autoreplace, prepopulate_id, starter_pack_id, created_by_policy, is_active) "
+            + "VALUES ('\(name)', '\(keyword)', '\(template)', '\(guid)', \(safe), \(prepopulateID), \(starterPackID), \(policy), \(active))"
+    }
+}
+
+/// The tables of a `history_items` database.
+enum WebKitDatabases {
+    static let historyTables = [
+        "CREATE TABLE history_items (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE, visit_count INTEGER NOT NULL)",
+        """
+        CREATE TABLE history_visits (id INTEGER PRIMARY KEY AUTOINCREMENT, history_item INTEGER NOT NULL, visit_time REAL NOT NULL, title TEXT NULL,
+            load_successful BOOLEAN NOT NULL DEFAULT 1, redirect_source INTEGER NULL, redirect_destination INTEGER NULL)
+        """,
+    ]
+}

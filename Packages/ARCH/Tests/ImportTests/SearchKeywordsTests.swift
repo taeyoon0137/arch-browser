@@ -5,34 +5,21 @@ import Testing
 @testable import Import
 
 @Suite struct SearchKeywordsTests {
-    private static let schema = """
-        CREATE TABLE keywords (id INTEGER PRIMARY KEY, short_name VARCHAR NOT NULL, keyword VARCHAR NOT NULL, url VARCHAR NOT NULL,
-            safe_for_autoreplace INTEGER, prepopulate_id INTEGER DEFAULT 0, created_by_policy INTEGER DEFAULT 0, sync_guid VARCHAR,
-            is_active INTEGER DEFAULT 0, starter_pack_id INTEGER DEFAULT 0)
-        """
-
-    /// Inserts a row; the defaults describe an active shortcut the user created.
-    private static func row(_ name: String, _ keyword: String, _ template: String, guid: String = "", safe: Int = 0, prepopulateID: Int = 0,
-                            starterPackID: Int = 0, policy: Int = 0, active: Int = 1) -> String {
-        "INSERT INTO keywords (short_name, keyword, url, sync_guid, safe_for_autoreplace, prepopulate_id, starter_pack_id, created_by_policy, is_active) "
-            + "VALUES ('\(name)', '\(keyword)', '\(template)', '\(guid)', \(safe), \(prepopulateID), \(starterPackID), \(policy), \(active))"
-    }
-
     @Test func onlyActiveShortcutsTheUserCreatedWithWebTemplatesComeIn() throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let file = try folder.database("Web Data", [
-            Self.schema,
-            Self.row("Built In", "builtin.example", "{google:baseURL}search?q={searchTerms}", safe: 1, prepopulateID: 1),
-            Self.row("Starter", "@starter", "about:starter?q={searchTerms}", starterPackID: 1),
-            Self.row("Offered", "offered.example", "https://offered.example/?q={searchTerms}", safe: 1, active: 0),
-            Self.row("Videos", "v", "https://videos.example/results?q={searchTerms}&ie={inputEncoding}"),
-            Self.row("Localized", "loc", "https://loc.example/{language}/?q={searchTerms}"),
-            Self.row("Spaced", "two words", "https://spaced.example/?q={searchTerms}"),
-            Self.row("Not Web", "nw", "ftp://files.example/{searchTerms}"),
-            Self.row("Deactivated", "off", "https://off.example/?q={searchTerms}", active: 2),
-            Self.row("Policy", "pol", "https://policy.example/?q={searchTerms}", policy: 1),
-            Self.row("Unspecified", "un", "https://unspecified.example/?s={searchTerms}", active: 0),
+            ChromiumDatabases.keywordsTable,
+            ChromiumDatabases.keyword("Built In", "builtin.example", "{google:baseURL}search?q={searchTerms}", safe: 1, prepopulateID: 1),
+            ChromiumDatabases.keyword("Starter", "@starter", "about:starter?q={searchTerms}", starterPackID: 1),
+            ChromiumDatabases.keyword("Offered", "offered.example", "https://offered.example/?q={searchTerms}", safe: 1, active: 0),
+            ChromiumDatabases.keyword("Videos", "v", "https://videos.example/results?q={searchTerms}&ie={inputEncoding}"),
+            ChromiumDatabases.keyword("Localized", "loc", "https://loc.example/{language}/?q={searchTerms}"),
+            ChromiumDatabases.keyword("Spaced", "two words", "https://spaced.example/?q={searchTerms}"),
+            ChromiumDatabases.keyword("Not Web", "nw", "ftp://files.example/{searchTerms}"),
+            ChromiumDatabases.keyword("Deactivated", "off", "https://off.example/?q={searchTerms}", active: 2),
+            ChromiumDatabases.keyword("Policy", "pol", "https://policy.example/?q={searchTerms}", policy: 1),
+            ChromiumDatabases.keyword("Unspecified", "un", "https://unspecified.example/?s={searchTerms}", active: 0),
         ])
         let keywords = try SearchKeywords.read(at: file, preferences: nil)
         #expect(keywords.shortcuts.map(\.keyword) == ["v", "un"])
@@ -46,10 +33,10 @@ import Testing
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let file = try folder.database("Web Data", [
-            Self.schema,
-            Self.row("Built In", "builtin.example", "https://builtin.example/search?q={searchTerms}", guid: "built-in", safe: 1, prepopulateID: 3),
-            Self.row("Own", "own", "https://www.duckduckgo.com/?q={searchTerms}", guid: "own"),
-            Self.row("Elsewhere", "else", "https://elsewhere.example/?q={searchTerms}", guid: "elsewhere"),
+            ChromiumDatabases.keywordsTable,
+            ChromiumDatabases.keyword("Built In", "builtin.example", "https://builtin.example/search?q={searchTerms}", guid: "built-in", safe: 1, prepopulateID: 3),
+            ChromiumDatabases.keyword("Own", "own", "https://www.duckduckgo.com/?q={searchTerms}", guid: "own"),
+            ChromiumDatabases.keyword("Elsewhere", "else", "https://elsewhere.example/?q={searchTerms}", guid: "elsewhere"),
         ])
         func engine(guid: String, mirrored: [String: Any]? = nil) throws -> SearchEngine? {
             var preferences: [String: Any] = ["default_search_provider": ["guid": guid]]

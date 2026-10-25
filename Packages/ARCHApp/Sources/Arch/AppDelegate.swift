@@ -157,6 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
         fileMenu.addItem(.separator())
@@ -478,8 +479,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
             return activeWindow?.canTogglePageReader == true
         }
-        // Import waits while another import runs or the last main window shows a sheet, and opens a main window when none is open. It touches no tab, so an internal page does not disable it.
-        if item.action == #selector(importBookmarksAndHistory) {
+        // Both imports wait while another import runs or the last main window shows a sheet, and open a main window when none is open. They touch no tab, so an internal page does not disable them.
+        if item.action == #selector(importBookmarksAndHistory) || item.action == #selector(importFromBrowser) {
             guard let window = session?.lastMainWindow?.nsWindow else { return true }
             return importController.canImport(in: window)
         }
@@ -620,6 +621,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func importBookmarksAndHistory() {
         guard let window = frontSidebarTarget().nsWindow else { return }
         importController.chooseFiles(in: window)
+    }
+
+    @objc private func importFromBrowser() {
+        guard let window = frontSidebarTarget().nsWindow else { return }
+        importController.importFromBrowser(in: window)
     }
 
     // MARK: Default browser
