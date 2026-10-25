@@ -6,11 +6,13 @@ import SQLite3
 enum HistoryDatabase {
     /// Chromium counts time in microseconds since 1601-01-01 UTC.
     private static let secondsFrom1601To1970: Double = 11_644_473_600
+    /// Starts the name of each temporary folder that holds a copy.
+    private static let copyFolderPrefix = "ArchImport-"
 
     /// Returns the pages the browser lists in its history and that have web addresses, with their titles, visit counts, and last visits. The browser may hold the file open and locked, so the reader opens a copy in a temporary folder, with the journal or write-ahead log beside it so the copy has the last committed changes.
     static func entries(at url: URL) throws -> [HistoryEntry] {
         let files = FileManager.default
-        let folder = files.temporaryDirectory.appendingPathComponent("ArchImport-\(UUID().uuidString)")
+        let folder = files.temporaryDirectory.appendingPathComponent("\(copyFolderPrefix)\(UUID().uuidString)")
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: folder) }
         let copy = folder.appendingPathComponent("History")
@@ -36,5 +38,14 @@ enum HistoryDatabase {
             entries.append(HistoryEntry(url: pageURL, title: title, visitCount: max(Int(sqlite3_column_int64(statement, 2)), 1), lastVisit: lastVisit))
         }
         return entries
+    }
+
+    /// Deletes the copies that an earlier import left behind when Arch quit while reading them. The import controller calls it before reading, when no read uses a copy, since imports run one at a time.
+    static func removeLeftoverCopies() {
+        let files = FileManager.default
+        let items = (try? files.contentsOfDirectory(at: files.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
+        for item in items where item.lastPathComponent.hasPrefix(copyFolderPrefix) {
+            try? files.removeItem(at: item)
+        }
     }
 }
