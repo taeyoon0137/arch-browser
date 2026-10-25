@@ -8,7 +8,7 @@ import Testing
 
 @Suite struct PluginIDTests {
     @Test func acceptsReverseDNSIdentifiers() {
-        for id in ["org.example.reading-time", "local.arch.browser.page-address", "a.b", "Example2.x-y"] {
+        for id in ["org.example.reading-time", "xyz.taeyoon.arch.page-address", "a.b", "Example2.x-y"] {
             #expect(PluginID(rawValue: id) != nil, "\(id)")
         }
         #expect(PluginID(rawValue: "a." + String(repeating: "b", count: 126)) != nil)
@@ -538,7 +538,7 @@ import Testing
         let plugins = folder.url.appendingPathComponent("Plugins", isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: plugins.appendingPathComponent(deleted.uuidString).path))
         #expect(FileManager.default.fileExists(atPath: plugins.appendingPathComponent(kept.uuidString).path))
-        #expect(secrets.items == ["local.arch.browser.plugin.org.example.settings \(kept.uuidString)/secret": "token"])
+        #expect(secrets.items == ["xyz.taeyoon.arch.plugin.org.example.settings \(kept.uuidString)/secret": "token"])
         // Data that is gone counts as removed.
         #expect(PluginManager.removeData(ofPersona: deleted, in: folder.url, secretStore: secrets))
     }
@@ -607,7 +607,7 @@ import Testing
         try manager.setSecret("token", of: setting, for: id)
         #expect(try manager.hasSecret(setting, for: id))
         #expect(try context(for: SettingsPlugin.self, in: manager).secrets.secret(forKey: "secret") == "token")
-        #expect(secrets.items == ["local.arch.browser.plugin.org.example.settings \(persona.uuidString)/secret": "token"])
+        #expect(secrets.items == ["xyz.taeyoon.arch.plugin.org.example.settings \(persona.uuidString)/secret": "token"])
         #expect(try self.manager([SettingsPlugin.self]).hasSecret(setting, for: id) == false)
         try manager.setSecret(nil, of: setting, for: id)
         #expect(secrets.items.isEmpty)

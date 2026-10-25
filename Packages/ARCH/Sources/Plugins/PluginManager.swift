@@ -206,9 +206,12 @@ public final class PluginManager: ObservableObject {
         return package
     }
 
-    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
     private func checkInstallable(_ id: PluginID, of kind: PluginKind) throws {
         guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
+        if let renamed = PluginIdentifierMigration.renamed(id.rawValue) {
+            throw PluginError.invalidPackage("Arch renames the identifier \(id.rawValue) to \(renamed) at launch, so no plugin can have it as its identifier.")
+        }
         if let installed = packages[id], installed.kind != kind {
             throw PluginError.invalidPackage("An installed plugin of another kind has the identifier \(id.rawValue).")
         }
@@ -481,7 +484,7 @@ public final class PluginManager: ObservableObject {
 }
 
 /// `plugins.json` in the Persona's folder: whether each plugin the user switched on or off is enabled, and the plugins the user installed. A built-in plugin without a choice follows `BuiltInPlugin.isOnByDefault`, and an installed one is off.
-private struct PluginListFile: Codable {
+struct PluginListFile: Codable {
     static let name = "plugins.json"
 
     struct Choice: Codable {

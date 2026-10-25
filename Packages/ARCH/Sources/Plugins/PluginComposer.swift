@@ -22,8 +22,10 @@ public final class PluginComposer {
 
     private let plugins: PluginManager
     private let service: AIService
+    /// The start of the identifiers that the composer gives plugins, which a UUID follows.
+    nonisolated static let identifierPrefix = "xyz.taeyoon.arch.generated."
     /// The identifier of every version. Arch gives it rather than the model, so that a version written here can replace no other plugin. A UUID's text is always a valid label.
-    private let pluginID = PluginID(rawValue: "local.arch.generated.\(UUID().uuidString)")!
+    private let pluginID = PluginID(rawValue: PluginComposer.identifierPrefix + UUID().uuidString)!
     /// What the user asked for so far: the request, then each change.
     private var requests: [String] = []
     /// The last version's reply, from which a change starts.

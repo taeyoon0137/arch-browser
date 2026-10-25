@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 public final class PageAddressPlugin: BuiltInPlugin {
     public static let manifest = PluginManifest(
-        id: PluginID(rawValue: "local.arch.browser.page-address")!,
+        id: PluginID(rawValue: "xyz.taeyoon.arch.page-address")!,
         name: "Page Address",
         version: "1.0",
         summary: "Copies the address of a tab.",

@@ -9,7 +9,7 @@ private let sampleFolder = Bundle.module.resourceURL!.appendingPathComponent("Fi
 private let sampleID = PluginID(rawValue: "org.example.sample")!
 /// The files of a plugin as the composer writes them, with one command.
 private let writtenFiles = [
-    "plugin.json": #"{"id": "local.arch.generated.test", "name": "Copier", "version": "1.0", "apiVersion": 1, "summary": "Copies.", "background": "background.js", "contributes": {"commands": [{"id": "copy", "title": "Copy It"}]}}"#,
+    "plugin.json": #"{"id": "xyz.taeyoon.arch.generated.test", "name": "Copier", "version": "1.0", "apiVersion": 1, "summary": "Copies.", "background": "background.js", "contributes": {"commands": [{"id": "copy", "title": "Copy It"}]}}"#,
     "background.js": #"arch.commands.onRun("copy", () => arch.ui.copy("text"));"#,
 ]
 private let composition = PluginComposition(requests: ["Copy some text"], model: "Provider \u{2014} model")
@@ -74,8 +74,12 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
              .invalidPackage("plugin.json: contributes.menus[0].command names “b”, which contributes.commands does not list.")),
             ("default out of range", ["plugin.json": manifest + #", "contributes": {"settings": [{"key": "a", "title": "A", "type": "number", "default": 0, "min": 1, "max": 2}]}}"#],
              .invalidPackage("plugin.json: contributes.settings[0].default does not suit a number setting.")),
-            ("built-in identifier", ["plugin.json": #"{"id": "local.arch.browser.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
-             .invalidPackage("A plugin built into Arch has the identifier local.arch.browser.page-address.")),
+            ("built-in identifier", ["plugin.json": #"{"id": "xyz.taeyoon.arch.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("A plugin built into Arch has the identifier xyz.taeyoon.arch.page-address.")),
+            ("previous built-in identifier", ["plugin.json": #"{"id": "local.arch.browser.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("Arch renames the identifier local.arch.browser.page-address to xyz.taeyoon.arch.page-address at launch, so no plugin can have it as its identifier.")),
+            ("previous generated identifier", ["plugin.json": #"{"id": "local.arch.generated.test", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("Arch renames the identifier local.arch.generated.test to xyz.taeyoon.arch.generated.test at launch, so no plugin can have it as its identifier.")),
             ("plugin list identifier", ["plugin.json": #"{"id": "Plugins.JSON", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
              .invalidPackage("Arch keeps a file named plugins.json beside the installed plugins, so no plugin can have it as its identifier.")),
             ("unreadable plugin list identifier", ["plugin.json": #"{"id": "plugins.unreadable.json", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
@@ -300,7 +304,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         try await installSample(in: manager)
         let installed = try #require(manager.plugins.first)
         try manager.makeContext(for: installed).secrets.setSecret("token", forKey: "key")
-        try secrets.setSecret("other", service: "local.arch.browser.plugin.org.example.sample", account: "\(UUID().uuidString)/key")
+        try secrets.setSecret("other", service: "xyz.taeyoon.arch.plugin.org.example.sample", account: "\(UUID().uuidString)/key")
         try manager.setValue(.string("Kept"), of: installed.manifest.contributions.settings[0], for: sampleID)
         try manager.remove(sampleID)
         #expect(manager.plugins.isEmpty && manager.contributions.pageScripts.isEmpty)

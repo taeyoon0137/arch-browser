@@ -28,8 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Data kept under the previous bundle identifier moves before the engines start and the preferences are read.
+        // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
+        PluginIdentifierMigration.runAtLaunch()
         let registry = EngineRegistry.shared
         registry.register(WebKitEngine())
         if let chromium = ChromiumEngine(frameworkPath: Self.cefFrameworkPath, helperPath: Self.cefHelperPath) {

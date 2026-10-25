@@ -27,7 +27,7 @@ import Testing
         let (composer, plugins) = composer(replying: [reply()])
         let package = try await composer.write(request)
         #expect(package.origin == .generated(PluginComposition(requests: [request], model: "First \u{2014} model-a")))
-        #expect(package.manifest.id.rawValue.hasPrefix("local.arch.generated.") && package.manifest.name == "Markdown Link")
+        #expect(package.manifest.id.rawValue.hasPrefix("xyz.taeyoon.arch.generated.") && package.manifest.name == "Markdown Link")
         #expect(package.manifest.permissions == [.tabs, .clipboard] && package.manifest.contributions.commands.map(\.id) == ["copy"])
         #expect(package.files == ["background.js", "plugin.json"] && package.text(of: "background.js")?.contains("arch.ui.copy") == true)
         // Nothing is installed, so nothing can run.
