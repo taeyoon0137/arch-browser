@@ -23,7 +23,7 @@ struct PageAreaView: View {
                             if windowModel.shows(tab) {
                                 PagePaneView(session: session, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
                             } else {
-                                ShownElsewherePaneView(tab: tab)
+                                ShownElsewherePaneView(tab: tab, isSplit: panes.count > 1)
                             }
                         }
                         // A pane appears and leaves at once, as a page does when another tab is selected.
@@ -99,10 +99,11 @@ private struct PagePaneView: View {
     }
 }
 
-/// Stands in for a pane whose tab another window shows. Show Here selects the tab, which moves its page to this window (window rule 2); a click elsewhere in the pane leaves it where it is.
+/// Stands in for a pane whose tab another window shows. Show Here selects the tab, which moves its page to this window (window rule 2); a click elsewhere in the pane leaves it where it is. In a split view, the pane keeps its close control.
 private struct ShownElsewherePaneView: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var tab: Tab
+    let isSplit: Bool
 
     var body: some View {
         VStack(spacing: 10) {
@@ -123,6 +124,12 @@ private struct ShownElsewherePaneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PageBackgroundView(isEmpty: true))
         .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
+        .overlay(alignment: .topLeading) {
+            if isSplit {
+                PaneCloseButton { windowModel.closePane(tab) }
+                    .padding(6)
+            }
+        }
     }
 }
 

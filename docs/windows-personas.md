@@ -605,7 +605,7 @@ Live favorites (III.13)
 - A favorite and its live tab belong to one Persona. The live tab follows window rule 1: selecting a favorite whose tab another window shows moves the tab here. It stays alive, hidden, while its window shows another Persona's space. Whether the live tab keeps a `spaceID` is III.13's choice; if it leaves space lists, III.13 extends `isListedInSidebar`.
 
 Split view (III.5)
-- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows, a pane of its `paneTabs` outside its `shownTabIDs`; Show Here selects the tab, which applies rule 2, and a click elsewhere in the placeholder leaves the tab where it is. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
+- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows, a pane of its `paneTabs` outside its `shownTabIDs`; Show Here selects the tab, which applies rule 2, and a click elsewhere in the placeholder leaves the tab where it is. The placeholder keeps the pane's close control, which takes the tab out of the split view. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
 
 Previews (III.11)
 - A preview's secondary web contents comes from the runtime of the window's Persona, so it carries that Persona's cookies. The window model owns the panel, which closes with the window.
@@ -695,7 +695,7 @@ Coordination
      - Page fullscreen in window 2 ends with Escape. ⌃Tab works in each window with its own order. An `alert` in window 2 shows while window 1 shows its own sheet. Renaming a tab in window 1 shows no field in window 2. A link dragged onto window 2's tab list opens in its space. A two-finger swipe over an inactive window switches that window's space.
      - ⇧⌘W on window 2 keeps its tabs in window 1's sidebar.
      - The Window menu lists both windows by tab title and not the docked tools; Minimize, Zoom, and Bring All to Front work; no tab bar items appear.
-     - Settings ▸ Shortcuts lists New Window, Close Window, Minimize, Zoom, Move to Main Window, and Bring All to Front, and no window names or system items.
+     - Settings ▸ Shortcuts lists New Window, Close Window, Minimize, Zoom, and Bring All to Front, and no window names or system items.
      - ⌘Q with two windows and an open sheet quits without a crash report.
      - ⌥Space brings the last main window forward with the palette.
      - With Settings open, closing every browser window keeps the app running, and a Dock click opens a main window.
@@ -712,6 +712,7 @@ Coordination
     - New checks:
       - With Arch in the background, each link opens a small window in front with no sidebar, and only that window comes forward.
       - The button and ⌥⌘N move the tab into the last main window's current space, selected, and the small window closes. Text typed into a form field there survives on both engines.
+      - Settings ▸ Shortcuts lists Move to Main Window with ⌥⌘N.
       - An `alert` shows on the small window. ⌘F and ⌘L work there. ⌘T opens the palette in the main window.
       - Closing the small window puts its tab in the closed list, and ⇧⌘T reopens it in the main window.
       - A popup from it opens a second small window. Open Link in New Tab adds an unread row to the destination space.
