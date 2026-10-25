@@ -147,7 +147,7 @@ struct CommandPaletteLayer: View {
     let addressPillFrame: CGRect?
     /// The window's width, which with the pill's frame sets the line that such a palette travels along.
     let windowWidth: CGFloat
-    /// How far the address pill's contents have moved toward the palette.
+    /// How far the address pill has moved toward the palette.
     @Binding var addressPillPull: CGSize
     /// The displayed palette mode. It stays set while the palette closes because removal transitions do not run in this window.
     @State private var shownPaletteMode: CommandPaletteMode?
@@ -195,7 +195,7 @@ struct CommandPaletteLayer: View {
                 return withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) { shownPaletteMode = mode }
             }
             withAnimation(.paletteOut) { isPaletteLeaving = true }
-            // The pill's contents return as the palette leaves.
+            // The pill returns as the palette leaves.
             withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero }
             let generation = windowModel.commandPaletteGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {

@@ -666,7 +666,7 @@ struct SidebarIconButton: View {
     }
 }
 
-/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The buttons at its end share the page and open the site settings. While the palette it opened is visible, the pill's contents move out toward it.
+/// Shows the site's host. Clicking it opens the command palette with the full address, or for a new tab when no tab is open. The buttons at its end share the page and open the site settings. While the palette it opened is visible, the whole pill moves toward it and fades out.
 struct AddressPillView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -713,9 +713,6 @@ struct AddressPillView: View {
                 }
                 .padding(.leading, 10)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
-                .offset(pull)
-                // The contents leave through the pill's edges without crossing the buttons at its end. Only the contents are clipped, so the focus ring stays visible.
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -732,6 +729,9 @@ struct AddressPillView: View {
         }
         .font(.system(size: 14))
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+        .offset(pull)
+        .opacity(pull == .zero ? 1 : 0)
+        // Outside the motion, so the frame stays where the pill rests.
         .background(GeometryReader { proxy in
             Color.clear.preference(key: AddressPillFrameKey.self, value: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))
         })
@@ -785,14 +785,16 @@ final class PageSharePicker: NSObject, NSSharingServicePickerDelegate {
     }
 }
 
-/// The palette's entry motion: where it starts and how far the address pill's contents move toward it.
+/// The palette's entry motion: where it starts and how far the address pill moves toward it.
 struct PaletteMotion {
     var arrival = CommandPaletteAppearance.offset(from: .keyboard)
     var pull = CGSize.zero
+    /// How far the palette travels into place from the pill, and the pill toward it.
+    static let distance: CGFloat = 40
 
     init() {}
 
-    /// From the address pill, the palette moves along the line from the pill's center to the search field's center. The pill's contents move in the same direction until they leave the pill.
+    /// From the address pill, the palette moves along the line from the pill's center to the search field's center. The pill moves the same distance in the same direction as it fades out.
     init(origin: CommandPaletteOrigin, pill: CGRect?, windowWidth: CGFloat) {
         guard origin == .addressPill, let pill, windowWidth > 0 else {
             arrival = CommandPaletteAppearance.offset(from: origin)
@@ -802,9 +804,8 @@ struct PaletteMotion {
         let dy = CommandPaletteView.top + CommandPaletteView.fieldHeight / 2 - pill.midY
         let length = max((dx * dx + dy * dy).squareRoot(), 1)
         let (ux, uy) = (dx / length, dy / length)
-        arrival = CGSize(width: -ux * 40, height: -uy * 40)
-        let travel = min(pill.width / max(abs(ux), 0.01), pill.height / max(abs(uy), 0.01))
-        pull = CGSize(width: ux * travel, height: uy * travel)
+        arrival = CGSize(width: -ux * Self.distance, height: -uy * Self.distance)
+        pull = CGSize(width: ux * Self.distance, height: uy * Self.distance)
     }
 }
 
@@ -1907,7 +1908,7 @@ extension EnvironmentValues {
         set { self[IsDraggingTabKey.self] = newValue }
     }
 
-    /// How far the address pill's contents have moved toward the palette it opened.
+    /// How far the address pill has moved toward the palette it opened. The pill is hidden while it is moved.
     var addressPillPull: CGSize {
         get { self[AddressPillPullKey.self] }
         set { self[AddressPillPullKey.self] = newValue }
