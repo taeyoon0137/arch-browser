@@ -6,7 +6,7 @@ import Foundation
 
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
-    public let capabilities: Set<EngineCapability> = [.devTools, .pdfController, .sessionRestore, .cookies]
+    public let capabilities: Set<EngineCapability> = [.devTools, .cookies]
     let frameworkPath: String
     let helperPath: String?
     private let accessibility = MainActor.assumeIsolated { ChromiumAccessibility() }
@@ -126,7 +126,6 @@ public final class ChromiumApplication: EngineApplication {
         rendererCrashCount += 1
         delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
     }
-    public func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { fatalError("not implemented") }
     public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
     public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
     public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
@@ -134,23 +133,17 @@ public final class ChromiumApplication: EngineApplication {
         self.delegate?.application(self, didCreateBrowser: browser)
         return browser
     }
-    public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) {
-        completion(ChromiumBrowser(sessionID: sessionID, context: Self.chromiumContext(context), delegate: delegate, window: nil))
-    }
     private static func chromiumContext(_ context: any EngineBrowserContext) -> ChromiumBrowserContext {
         guard let context = context as? ChromiumBrowserContext else {
             preconditionFailure("Chromium browsers require a Chromium browser context")
         }
         return context
     }
-    public func setBlockLists(_ lists: [URL]) { fatalError("not implemented") }
-    public func setExcludedDomains(_ domains: [String]) { fatalError("not implemented") }
 }
 
 /// One profile, whose request context keeps its cookies, site storage, caches, and permission answers for the app's lifetime.
 public final class ChromiumBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
-    public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
@@ -164,7 +157,6 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
     public var id: EngineBrowserContextID { attributes.id }
     public var type: EngineBrowserContextType { attributes.type }
     public var userVisibleName: String { attributes.userVisibleName }
-    public var history: any EngineHistory { fatalError("not implemented") }
     public var downloads: any EngineDownloads { chromiumDownloads }
     public var extensions: (any EngineExtensions)? { nil }
 
@@ -227,9 +219,7 @@ public final class ChromiumBrowser: EngineBrowser {
         completion(true)
     }
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
-        requestContext.visitAllCookies { cookies in
-            completion(cookies.map { EngineCookie(name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, expires: $0.expires, isSecure: $0.secure, isHTTPOnly: $0.httpOnly) })
-        }
+        requestContext.visitAllCookies { cookies in completion(cookies.map(Self.engineCookie)) }
     }
     public func setCookie(_ cookie: EngineCookie, for url: URL) {
         requestContext.setCookie(Self.bridgeCookie(cookie), forURL: url.absoluteString)
@@ -242,13 +232,22 @@ public final class ChromiumBrowser: EngineBrowser {
         requestContext.deleteCookies(forURL: url.absoluteString, name: name)
     }
     public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
-        requestContext.deleteCookies(passingTest: { cookie in
-            shouldRemove(EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, isSecure: cookie.secure, isHTTPOnly: cookie.httpOnly))
-        }, completion: completion)
+        requestContext.deleteCookies(passingTest: { shouldRemove(Self.engineCookie($0)) }, completion: completion)
     }
     /// Chromium keeps this data by origin. The bridge clears it in a hidden browser, so no tab keeps the DevTools client it needs.
     public func removeSiteData(for origins: [URL], completion: @escaping () -> Void) {
         requestContext.clearStorage(forOrigins: origins.map(\.absoluteString), completion: completion)
+    }
+    private static func engineCookie(_ cookie: ARCHCEFCookie) -> EngineCookie {
+        let sameSite: EngineCookieSameSite = switch cookie.sameSite {
+        case .unspecified: .unspecified
+        case .noRestriction: .noRestriction
+        case .lax: .lax
+        case .strict: .strict
+        @unknown default: .unspecified
+        }
+        return EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, isSecure: cookie.secure,
+                            isHTTPOnly: cookie.httpOnly, sameSite: sameSite)
     }
     private static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
         let value = ARCHCEFCookie()
@@ -260,6 +259,13 @@ public final class ChromiumBrowser: EngineBrowser {
         value.expires = cookie.expires
         value.secure = cookie.isSecure
         value.httpOnly = cookie.isHTTPOnly
+        value.sameSite = switch cookie.sameSite {
+        // Chromium refuses a `SameSite=None` cookie that is not secure, so such a cookie keeps no policy, which Chromium treats as `lax`.
+        case .noRestriction: cookie.isSecure ? .noRestriction : .unspecified
+        case .unspecified: .unspecified
+        case .lax: .lax
+        case .strict: .strict
+        }
         return value
     }
 }
@@ -272,7 +278,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public weak var pageScriptDelegate: (any EnginePageScriptDelegate)?
-    public var visibility: EngineWebContentsVisibility = .visible
     /// Chromium scales the page by 1.2 per zoom level; level 0 is the default size.
     public var zoomFactor: Double {
         get { browser.map { pow(1.2, $0.zoomLevel) } ?? 1 }
@@ -346,7 +351,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
     public var restorableState: Data? { nil }
     public private(set) var isAudible = false
-    public var selectedText: String? { nil }
     public private(set) var isFullscreen = false
     public var mediaSession: any EngineMediaSession { chromiumMediaSession }
     /// Follows each frame's media as the helper's renderer script reports it.
@@ -359,9 +363,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         }
         self?.browser?.performMediaAction(bridgeAction, inFrame: frame)
     }
-    /// The adapter forwards none of CEF's load events, so an observer would never hear from this engine; none is kept (docs/engine-protocol.md, Tier 1).
-    public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {}
-    public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {}
     public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
         guard !text.isEmpty else {
             stopFind()
@@ -456,7 +457,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser.tryClose(completion: completion)
     }
     public private(set) lazy var devTools: (any EngineDevTools)? = ChromiumDevTools(webContents: self)
-    public var thumbnails: (any EngineThumbnails)? { nil }
 
     fileprivate var hasDevTools: Bool { browser?.hasDevTools == true }
     fileprivate func showDevTools() { browser?.showDevTools() }
@@ -778,7 +778,7 @@ public final class ChromiumNavigationController: EngineNavigationController {
     }
 }
 
-/// Chromium's developer tools in a window that CEF makes. CEF offers no way to pick a panel, so every view opens the tools as they are.
+/// Chromium's developer tools in a window that CEF makes. CEF offers no way to pick a panel.
 final class ChromiumDevTools: EngineDevTools {
     private unowned let webContents: ChromiumWebContents
     private(set) var window: NSWindow?
@@ -797,9 +797,6 @@ final class ChromiumDevTools: EngineDevTools {
     var isOpen: Bool { webContents.hasDevTools }
     func open() { webContents.showDevTools() }
     func close() { webContents.closeDevTools() }
-    func openConsoleView() { open() }
-    func openInspectView() { open() }
-    func openNetworkView() { open() }
 }
 
 /// A page in a Chromium tab's back-forward list. Its index records its position when read; its URL shows whether the entry is still there.

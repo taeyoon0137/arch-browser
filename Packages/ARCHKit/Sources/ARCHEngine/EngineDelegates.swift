@@ -28,17 +28,6 @@ public enum EngineNavigationPolicy: Sendable {
     case cancel
 }
 
-public struct EngineNavigation: Sendable {
-    public var url: URL
-    public var responseStatusCode: Int?
-    public var responseHeaders: [String: String]
-    public init(url: URL, responseStatusCode: Int? = nil, responseHeaders: [String: String] = [:]) {
-        self.url = url
-        self.responseStatusCode = responseStatusCode
-        self.responseHeaders = responseHeaders
-    }
-}
-
 public enum EnginePermissionType: String, Codable, Sendable {
     case camera
     case microphone
@@ -92,15 +81,6 @@ public protocol EngineWebContentsNavigationDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy
 }
 
-public protocol EngineWebContentsNavigationObserver: AnyObject {
-    func webContents(_ webContents: any EngineWebContents, didStartProvisionalNavigation navigation: EngineNavigation)
-    func webContents(_ webContents: any EngineWebContents, didReceiveServerRedirect navigation: EngineNavigation)
-    func webContents(_ webContents: any EngineWebContents, didCommit navigation: EngineNavigation)
-    func webContents(_ webContents: any EngineWebContents, didFinish navigation: EngineNavigation)
-    func webContents(_ webContents: any EngineWebContents, didFail navigation: EngineNavigation, error: Error)
-    func webContents(_ webContents: any EngineWebContents, didFinishInPageNavigation navigation: EngineNavigation)
-}
-
 /// A lightweight user interface (UI) delegate. It excludes callbacks for autofill, translation bubbles, and vendor integrations.
 public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents)
@@ -110,11 +90,10 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents)
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents)
+    /// `isAudible` changed.
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
-    func webContents(_ webContents: any EngineWebContents, didChangeStatusText text: String?)
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
     func webContentsDidClose(_ webContents: any EngineWebContents)
-    func webContentsDidRequestActivation(_ webContents: any EngineWebContents)
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents)
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void)
@@ -128,19 +107,13 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool
     /// Builds the page's context menu. On entry `menu` holds only the spelling and editing items the engine runs itself, marked with `EngineContextMenuItem` identifiers, and they carry their enabled state. The delegate may retitle, reorder, or remove them, except that a spelling suggestion keeps its title, and sets `isEnabled` on every item it adds. The engine shows the menu after this returns, unless it is empty.
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu)
-    func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool
-    func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void)
     /// Offers a link that belongs to another app. The engines call this instead of loading a scheme they do not handle. `isUserInitiated` is true when the user clicked the link.
     func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool)
     func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void)
-    func webContents(_ webContents: any EngineWebContents, didChangeAudibleState isAudible: Bool)
-    func webContents(_ webContents: any EngineWebContents, didChangeMuteState isMuted: Bool)
-    func webContents(_ webContents: any EngineWebContents, blockedPopupCountDidChange count: Int)
     func webContentsProcessDidTerminate(_ webContents: any EngineWebContents)
-    func webContents(_ webContents: any EngineWebContents, didConsumeKeyEvent event: NSEvent) -> Bool
 }
 
-// Default implementations let feature code override only the callbacks it handles. Dialogs and permissions default to the safe answer.
+// Default implementations let feature code override only the callbacks it handles. Dialogs and permissions default to the safe answer, and a link for another app stays unopened.
 public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeURL(_ webContents: any EngineWebContents) {}
@@ -149,10 +122,8 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
-    func webContents(_ webContents: any EngineWebContents, didChangeStatusText text: String?) {}
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}
-    func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) { completion() }
@@ -163,26 +134,14 @@ public extension EngineWebContentsUIDelegate {
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) { completion(false) }
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool { true }
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {}
-    func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool { false }
-    func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {}
     func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) { completion(nil) }
-    func webContents(_ webContents: any EngineWebContents, didChangeAudibleState isAudible: Bool) {}
-    func webContents(_ webContents: any EngineWebContents, didChangeMuteState isMuted: Bool) {}
-    func webContents(_ webContents: any EngineWebContents, blockedPopupCountDidChange count: Int) {}
     func webContentsProcessDidTerminate(_ webContents: any EngineWebContents) {}
-    func webContents(_ webContents: any EngineWebContents, didConsumeKeyEvent event: NSEvent) -> Bool { false }
 }
 
 /// Schemes both engines load. A link with any other scheme, such as `mailto:`, belongs to another app.
 public enum EngineURLSchemes {
     public static let web: Set<String> = ["http", "https", "file", "about", "data", "blob", "javascript"]
-}
-
-public extension EngineWebContentsUIDelegate {
-    func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
-        guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
-        self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
-    }
 }
 
 public extension URL {

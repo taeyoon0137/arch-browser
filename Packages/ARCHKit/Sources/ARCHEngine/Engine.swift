@@ -4,33 +4,26 @@ import Foundation
 
 /// Selectable engine kinds. The raw value is used as-is in UserDefaults and the debug menu.
 public enum EngineKind: String, CaseIterable, Codable, Sendable {
-    case legacy
     case webKit
     case chromium
 
     /// The engine's name as the interface shows it.
     public var displayName: String {
         switch self {
-        case .legacy: return "Legacy"
         case .webKit: return "WebKit"
         case .chromium: return "Chromium"
         }
     }
 }
 
-/// Optional capabilities that differ per engine. The UI hides features that are missing from this set.
+/// Optional capabilities that differ per engine. An engine lists those its adapter implements. Feature code reads the list where it must know before an engine starts, as for web extensions, and tests an optional member such as `devTools` directly.
 public enum EngineCapability: String, CaseIterable, Codable, Sendable {
     case extensions
     case devTools
     case pdfController
-    case importSources
-    case notifications
-    case accessibilityTree
-    case tabGroups
-    case translation
     case pictureInPicture
+    /// The engine restores a page's back-forward list from `EngineWebContents.restorableState`.
     case sessionRestore
-    case contentBlocking
     case cookies
 }
 
@@ -93,17 +86,4 @@ public final class EngineRegistry {
         }
         set { defaults.set(newValue.rawValue, forKey: Self.defaultEngineKey) }
     }
-}
-
-/// Engine selection. A per-tab override wins over the profile default.
-public struct EngineSelection: Hashable, Codable, Sendable {
-    public var profileDefault: EngineKind
-    public var tabOverride: EngineKind?
-
-    public init(profileDefault: EngineKind, tabOverride: EngineKind? = nil) {
-        self.profileDefault = profileDefault
-        self.tabOverride = tabOverride
-    }
-
-    public var effective: EngineKind { tabOverride ?? profileDefault }
 }

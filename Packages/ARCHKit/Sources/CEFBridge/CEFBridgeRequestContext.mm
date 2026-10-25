@@ -40,6 +40,38 @@ cef_basetime_t ToBaseTime(NSDate *date) {
     return time;
 }
 
+ARCHCEFCookieSameSite ToBridgeSameSite(cef_cookie_same_site_t sameSite) {
+    switch (sameSite) {
+        case CEF_COOKIE_SAME_SITE_NO_RESTRICTION: return ARCHCEFCookieSameSiteNoRestriction;
+        case CEF_COOKIE_SAME_SITE_LAX_MODE: return ARCHCEFCookieSameSiteLax;
+        case CEF_COOKIE_SAME_SITE_STRICT_MODE: return ARCHCEFCookieSameSiteStrict;
+        default: return ARCHCEFCookieSameSiteUnspecified;
+    }
+}
+
+cef_cookie_same_site_t ToCefSameSite(ARCHCEFCookieSameSite sameSite) {
+    switch (sameSite) {
+        case ARCHCEFCookieSameSiteNoRestriction: return CEF_COOKIE_SAME_SITE_NO_RESTRICTION;
+        case ARCHCEFCookieSameSiteLax: return CEF_COOKIE_SAME_SITE_LAX_MODE;
+        case ARCHCEFCookieSameSiteStrict: return CEF_COOKIE_SAME_SITE_STRICT_MODE;
+        case ARCHCEFCookieSameSiteUnspecified: return CEF_COOKIE_SAME_SITE_UNSPECIFIED;
+    }
+    return CEF_COOKIE_SAME_SITE_UNSPECIFIED;
+}
+
+ARCHCEFCookie *MakeBridgeCookie(const CefCookie &cookie) {
+    ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
+    item.name = ToNSString(CefString(&cookie.name));
+    item.value = ToNSString(CefString(&cookie.value));
+    item.domain = ToNSString(CefString(&cookie.domain));
+    item.path = ToNSString(CefString(&cookie.path));
+    item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
+    item.secure = cookie.secure != 0;
+    item.httpOnly = cookie.httponly != 0;
+    item.sameSite = ToBridgeSameSite(cookie.same_site);
+    return item;
+}
+
 // Collects cookies as CEF visits them and reports the list when CEF releases the visitor, which also happens when the store has no cookies or cannot be read.
 class CookieCollector : public CefCookieVisitor {
   public:
@@ -52,15 +84,7 @@ class CookieCollector : public CefCookieVisitor {
     }
 
     bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
-        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
-        item.name = ToNSString(CefString(&cookie.name));
-        item.value = ToNSString(CefString(&cookie.value));
-        item.domain = ToNSString(CefString(&cookie.domain));
-        item.path = ToNSString(CefString(&cookie.path));
-        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
-        item.secure = cookie.secure != 0;
-        item.httpOnly = cookie.httponly != 0;
-        [cookies_ addObject:item];
+        [cookies_ addObject:MakeBridgeCookie(cookie)];
         return true;
     }
 
@@ -98,6 +122,7 @@ CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
     CefString(&value.path) = cookie.path.UTF8String;
     value.secure = cookie.secure;
     value.httponly = cookie.httpOnly;
+    value.same_site = ToCefSameSite(cookie.sameSite);
     if (cookie.expires) {
         value.has_expires = true;
         value.expires = ToBaseTime(cookie.expires);
@@ -134,15 +159,7 @@ class CookieDeleter : public CefCookieVisitor {
     ~CookieDeleter() override { dispatch_async(dispatch_get_main_queue(), completion_); }
 
     bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
-        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
-        item.name = ToNSString(CefString(&cookie.name));
-        item.value = ToNSString(CefString(&cookie.value));
-        item.domain = ToNSString(CefString(&cookie.domain));
-        item.path = ToNSString(CefString(&cookie.path));
-        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
-        item.secure = cookie.secure != 0;
-        item.httpOnly = cookie.httponly != 0;
-        deleteCookie = test_(item);
+        deleteCookie = test_(MakeBridgeCookie(cookie));
         return true;
     }
 

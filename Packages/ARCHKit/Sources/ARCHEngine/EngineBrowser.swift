@@ -1,6 +1,16 @@
 import AppKit
 import Foundation
 
+/// The cookie's `SameSite` attribute: whether requests from other sites carry it.
+public enum EngineCookieSameSite: String, Hashable, Sendable {
+    /// The cookie names no policy. Chromium then treats it as `lax`.
+    case unspecified
+    /// `SameSite=None`: requests from other sites carry it too.
+    case noRestriction
+    case lax
+    case strict
+}
+
 public struct EngineCookie: Hashable, Sendable {
     public var name: String
     public var value: String
@@ -9,7 +19,9 @@ public struct EngineCookie: Hashable, Sendable {
     public var expires: Date?
     public var isSecure: Bool
     public var isHTTPOnly: Bool
-    public init(name: String, value: String, domain: String, path: String = "/", expires: Date? = nil, isSecure: Bool = false, isHTTPOnly: Bool = false) {
+    public var sameSite: EngineCookieSameSite
+    public init(name: String, value: String, domain: String, path: String = "/", expires: Date? = nil, isSecure: Bool = false, isHTTPOnly: Bool = false,
+                sameSite: EngineCookieSameSite = .unspecified) {
         self.name = name
         self.value = value
         self.domain = domain
@@ -17,6 +29,7 @@ public struct EngineCookie: Hashable, Sendable {
         self.expires = expires
         self.isSecure = isSecure
         self.isHTTPOnly = isHTTPOnly
+        self.sameSite = sameSite
     }
 
     /// An address the cookie belongs to, for stores that set cookies by URL.

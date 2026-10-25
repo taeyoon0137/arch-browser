@@ -35,6 +35,16 @@ typedef NS_ENUM(NSInteger, ARCHCEFPermissionSetting) {
     ARCHCEFPermissionSettingBlock,
 };
 
+/// A cookie's `SameSite` attribute, as Chromium keeps it.
+typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
+    /// No policy, which Chromium treats as `Lax`.
+    ARCHCEFCookieSameSiteUnspecified,
+    /// `SameSite=None`, which Chromium accepts only on a secure cookie.
+    ARCHCEFCookieSameSiteNoRestriction,
+    ARCHCEFCookieSameSiteLax,
+    ARCHCEFCookieSameSiteStrict,
+};
+
 /// A cookie as the bridge passes it between Swift and CEF's cookie manager.
 @interface ARCHCEFCookie : NSObject
 @property (nonatomic, copy) NSString *name;
@@ -45,6 +55,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFPermissionSetting) {
 @property (nonatomic, copy, nullable) NSDate *expires;
 @property (nonatomic) BOOL secure;
 @property (nonatomic) BOOL httpOnly;
+@property (nonatomic) ARCHCEFCookieSameSite sameSite;
 @end
 
 /// A Chromium profile: cookies, site storage, caches, and the permission answers it keeps. Browsers of different contexts never share a render process. Until `ARCHCEFRuntime` initializes and once it begins to shut down, calls change nothing and completions still run.

@@ -10,7 +10,7 @@ enum WebKitInspectorAPI {
     static let developerExtrasAPIID = "webkit.developerExtras"
     static let featureID = "webkit.webInspector"
     /// The inspector's actions, each without arguments.
-    static let actions = ["show", "close", "attach", "showConsole", "showResources", "toggleElementSelection"]
+    static let actions = ["show", "close", "attach"]
 
     @MainActor static func register() {
         let flags = PrivateAPIFlags.shared
@@ -57,18 +57,6 @@ final class WebKitDevTools: EngineDevTools {
     }
 
     func close() { perform("close") }
-    func openConsoleView() {
-        open()
-        perform("showConsole")
-    }
-    func openInspectView() {
-        open()
-        perform("toggleElementSelection")
-    }
-    func openNetworkView() {
-        open()
-        perform("showResources")
-    }
 
     private func perform(_ action: String) {
         _ = inspector?.perform(NSSelectorFromString(action))

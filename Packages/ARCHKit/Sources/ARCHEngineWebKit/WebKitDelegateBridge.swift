@@ -1,4 +1,4 @@
-// Bridges WKNavigationDelegate, WKUIDelegate, and KVO into ARCHEngine delegate and observer calls.
+// Bridges WKNavigationDelegate, WKUIDelegate, and KVO into ARCHEngine delegate calls.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -37,10 +37,6 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             webView.observe(\.estimatedProgress) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
             webView.observe(\.themeColor) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeThemeColor($0) } },
         ]
-    }
-
-    private func navigation(_ navigation: WKNavigation?) -> EngineNavigation {
-        EngineNavigation(url: owner.webView.url ?? URL(string: "about:blank")!)
     }
 
     // MARK: WKNavigationDelegate
@@ -96,30 +92,9 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         owner.context.webKitDownloads.add(download, from: owner)
     }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        owner.observers.forEach { $0.webContents(owner, didStartProvisionalNavigation: self.navigation(navigation)) }
-    }
-
-    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-        owner.observers.forEach { $0.webContents(owner, didReceiveServerRedirect: self.navigation(navigation)) }
-    }
-
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        owner.observers.forEach { $0.webContents(owner, didCommit: self.navigation(navigation)) }
-    }
-
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        owner.observers.forEach { $0.webContents(owner, didFinish: self.navigation(navigation)) }
         owner.uiDelegate?.webContentsDidFinishLoadingDocument(owner)
         owner.refreshFavicon()
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        owner.observers.forEach { $0.webContents(owner, didFail: self.navigation(navigation), error: error) }
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        owner.observers.forEach { $0.webContents(owner, didFail: self.navigation(navigation), error: error) }
     }
 
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

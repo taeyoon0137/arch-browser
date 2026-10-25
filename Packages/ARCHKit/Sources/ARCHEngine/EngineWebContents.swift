@@ -1,42 +1,20 @@
 import AppKit
 import Foundation
 
+/// How a new web contents starts. Its engine is that of the browser that creates it.
 public struct EngineWebContentsConfiguration: Sendable {
     public var initialURL: URL?
-    public var initiallyHidden: Bool
-    public var initiallyMuted: Bool
-    public var disallowAutoplay: Bool
-    public var disallowContextMenus: Bool
     public var disallowDownloads: Bool
-    public var transparentBackground: Bool
-    public var forcedViewSize: CGSize?
-    /// Per-tab engine selection. nil uses the profile default.
-    public var engineOverride: EngineKind?
     /// Page state that an earlier web contents of the same engine reported as `restorableState`. The engine restores it in place of loading `initialURL` when it can.
     public var restorableState: Data?
     /// The scripts that run in each new document, from the first one on. A web contents a page opens starts with its opener's scripts.
     public var pageScripts: [EnginePageScript]
-    public init(initialURL: URL? = nil, initiallyHidden: Bool = false, initiallyMuted: Bool = false, disallowAutoplay: Bool = false,
-                disallowContextMenus: Bool = false, disallowDownloads: Bool = false, transparentBackground: Bool = false,
-                forcedViewSize: CGSize? = nil, engineOverride: EngineKind? = nil, restorableState: Data? = nil, pageScripts: [EnginePageScript] = []) {
+    public init(initialURL: URL? = nil, disallowDownloads: Bool = false, restorableState: Data? = nil, pageScripts: [EnginePageScript] = []) {
         self.initialURL = initialURL
+        self.disallowDownloads = disallowDownloads
         self.restorableState = restorableState
         self.pageScripts = pageScripts
-        self.initiallyHidden = initiallyHidden
-        self.initiallyMuted = initiallyMuted
-        self.disallowAutoplay = disallowAutoplay
-        self.disallowContextMenus = disallowContextMenus
-        self.disallowDownloads = disallowDownloads
-        self.transparentBackground = transparentBackground
-        self.forcedViewSize = forcedViewSize
-        self.engineOverride = engineOverride
     }
-}
-
-public enum EngineWebContentsVisibility: String, Codable, Sendable {
-    case visible
-    case hidden
-    case occluded
 }
 
 public struct EngineFindResult: Hashable, Sendable {
@@ -89,17 +67,13 @@ public protocol EngineWebContents: AnyObject {
     var restorableState: Data? { get }
     /// Whether a media element in the page plays sound that is not muted. Sound from Web Audio, or from media elements outside the document or inside shadow roots, does not count.
     var isAudible: Bool { get }
-    var selectedText: String? { get }
     var zoomFactor: Double { get set }
-    var visibility: EngineWebContentsVisibility { get set }
     var isFullscreen: Bool { get }
 
     var navigationController: any EngineNavigationController { get }
     var mediaSession: any EngineMediaSession { get }
     var uiDelegate: (any EngineWebContentsUIDelegate)? { get set }
     var navigationDelegate: (any EngineWebContentsNavigationDelegate)? { get set }
-    func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver)
-    func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver)
 
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void)
     func stopFind()
@@ -130,11 +104,6 @@ public protocol EngineWebContents: AnyObject {
     func tryToClose(completion: @escaping (Bool) -> Void)
     /// Tier 2 capability. nil when the engine does not support it.
     var devTools: (any EngineDevTools)? { get }
-    var thumbnails: (any EngineThumbnails)? { get }
-}
-
-public protocol EngineThumbnails: AnyObject {
-    func requestThumbnail(size: CGSize, completion: @escaping (NSImage?) -> Void)
 }
 
 public protocol EngineDevTools: AnyObject {
@@ -147,7 +116,4 @@ public protocol EngineDevTools: AnyObject {
     var didChangeWindow: (() -> Void)? { get set }
     func open()
     func close()
-    func openConsoleView()
-    func openInspectView()
-    func openNetworkView()
 }

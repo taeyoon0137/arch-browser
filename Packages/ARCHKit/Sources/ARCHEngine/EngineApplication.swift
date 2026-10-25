@@ -48,7 +48,7 @@ public protocol EngineApplicationDelegate: AnyObject {
     func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int)
 }
 
-/// Engine process lifecycle, profiles (browser contexts), window-level browsers, and block lists.
+/// Engine process lifecycle, profiles (browser contexts), and browsers.
 public protocol EngineApplication: AnyObject {
     var engineKind: EngineKind { get }
     var version: String { get }
@@ -59,14 +59,8 @@ public protocol EngineApplication: AnyObject {
 
     var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { get }
     func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void)
-    func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void)
     func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)?
     func deleteBrowserContext(_ id: EngineBrowserContextID) throws
 
     func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser
-    func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void)
-
-    /// Ad and tracker block lists (EasyList format). WebKit converts them to WKContentRuleList.
-    func setBlockLists(_ lists: [URL])
-    func setExcludedDomains(_ domains: [String])
 }

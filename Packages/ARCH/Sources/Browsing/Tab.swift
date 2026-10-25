@@ -309,8 +309,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
         if isUserInitiated { forgetExternalAppDecline() }
-        guard self.webContents(webContents, canNavigateExternallyTo: url) else { return }
-        self.webContents(webContents, showExternalProtocolDialogFor: url) { _ in }
+        offerExternalApp(for: url)
     }
 
     /// The user asked for the next page, as by typing its address, so a site's earlier decline no longer applies.
@@ -323,14 +322,10 @@ extension Tab: EngineWebContentsUIDelegate {
         return url.host ?? "\(url.scheme ?? ""):"
     }
 
-    public func webContents(_ webContents: any EngineWebContents, canNavigateExternallyTo url: URL) -> Bool {
-        NSWorkspace.shared.urlForApplication(toOpen: url) != nil
-    }
-
-    /// Asks before a page hands a link to another app, then opens the link there. One question shows at a time, and a site the user said no to asks no more.
-    public func webContents(_ webContents: any EngineWebContents, showExternalProtocolDialogFor url: URL, completion: @escaping (Bool) -> Void) {
+    /// Asks before a page hands a link to another app, then opens the link there. Nothing happens without an app for the link. One question shows at a time, and a site the user said no to asks no more.
+    private func offerExternalApp(for url: URL) {
         guard !isOfferingExternalApp, declinedExternalAppSite == nil || declinedExternalAppSite != Self.site(of: self.url),
-              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return completion(false) }
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
         isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
         let alert = NSAlert()
@@ -341,15 +336,13 @@ extension Tab: EngineWebContentsUIDelegate {
         alert.addButton(withTitle: "Cancel")
         let pageSite = Self.site(of: self.url)
         showAlert(alert) { [weak self] response in
-            let opens = response == .alertFirstButtonReturn
             self?.isOfferingExternalApp = false
-            if opens {
+            if response == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(url)
             } else if response == .alertSecondButtonReturn, let self, Self.site(of: self.url) == pageSite {
                 // Only the Cancel button counts as an answer; a sheet the app ended, as for an engine switch, does not.
                 self.declinedExternalAppSite = pageSite
             }
-            completion(opens)
         }
     }
 

@@ -55,8 +55,6 @@ final class NowPlaying: EngineMediaSessionDelegate {
     }
 
     func mediaSessionDidChange(_ session: any EngineMediaSession) { scheduleUpdate() }
-    func mediaSession(_ session: any EngineMediaSession, didChangePictureInPictureActive isActive: Bool) {}
-    func mediaSession(_ session: any EngineMediaSession, didChangeMuted isMuted: Bool) {}
 
     /// Combines the changes of one run loop turn into one update. Published values also arrive before they are stored.
     private func scheduleUpdate() {

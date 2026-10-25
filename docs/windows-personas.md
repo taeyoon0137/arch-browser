@@ -450,7 +450,7 @@ public protocol Engine: AnyObject {
 ```
 
 - The ID names the context within its application, and `storageIdentifier` picks the storage, so no adapter parses an ID string as a UUID. Existing callers compile unchanged because the new parameter has a default.
-- `EngineBrowser`'s comment changes from "A container for one window" to "The web contents of one browser context in one engine." The session keeps one per Persona and engine with `window: nil`, because tabs move between windows. `EngineBrowser.window`, `deleteBrowserContext`, and `loadBrowserContext` stay as they are, unused.
+- `EngineBrowser`'s comment changes from "A container for one window" to "The web contents of one browser context in one engine." The session keeps one per Persona and engine with `window: nil`, because tabs move between windows. `EngineBrowser.window` and `deleteBrowserContext` stay as they are, unused.
 - `createBrowserContext` keeps completing synchronously, because `startEngine` and `openTab` rely on it.
 
 ### WebKit adapter

@@ -86,7 +86,6 @@ public final class ScriptMediaSession: EngineMediaSession {
     public var metadata: EngineMediaMetadata? { current?.media.metadata }
     public var canGoToNextTrack: Bool { current?.media.canGoToNextTrack ?? false }
     public var canGoToPreviousTrack: Bool { current?.media.canGoToPreviousTrack ?? false }
-    public var isPictureInPictureActive: Bool { false }
 
     public func play() {
         if let current { send(current.id, .play) }
@@ -106,10 +105,4 @@ public final class ScriptMediaSession: EngineMediaSession {
     public func previousTrack() {
         if let current, current.media.canGoToPreviousTrack { send(current.id, .previousTrack) }
     }
-
-    // Seeking, muting, and picture-in-picture are not implemented.
-    public func seek(to position: TimeInterval) { fatalError("not implemented") }
-    public func setMuted(_ muted: Bool) { fatalError("not implemented") }
-    public func requestPictureInPicture() { fatalError("not implemented") }
-    public func exitPictureInPicture() { fatalError("not implemented") }
 }

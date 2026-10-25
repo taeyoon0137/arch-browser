@@ -120,7 +120,7 @@ arch-browser
 │   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   ├── ARCHKit/Sources/
-│   │   ├── ARCHEngine/             # Engine protocols, registry, and selection
+│   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers
 │   │   ├── ARCHEngineChromium/     # Chromium adapter using CEF
 │   │   ├── ARCHEngineWebKit/       # WebKit adapter
 │   │   ├── ARCHPrivateAPI/         # Private API registry and flags

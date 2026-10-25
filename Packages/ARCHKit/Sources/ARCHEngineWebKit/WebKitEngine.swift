@@ -8,7 +8,7 @@ public final class WebKitEngine: Engine {
     public let kind: EngineKind = .webKit
     /// Web extensions need macOS 15.4.
     public var capabilities: Set<EngineCapability> {
-        let capabilities: Set<EngineCapability> = [.pdfController, .translation, .pictureInPicture, .sessionRestore, .contentBlocking, .cookies]
+        let capabilities: Set<EngineCapability> = [.pdfController, .pictureInPicture, .sessionRestore, .cookies]
         guard #available(macOS 15.4, *) else { return capabilities }
         return capabilities.union([.extensions])
     }
@@ -54,15 +54,10 @@ public final class WebKitApplication: EngineApplication {
         contexts[attributes.id] = context
         completion(.success(context))
     }
-    public func loadBrowserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { fatalError("skeleton") }
     public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
     public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
     public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
         makeBrowser(sessionID: UUID().uuidString, context: context, delegate: delegate, window: window)
-    }
-    /// Nothing is persisted yet, so restoring yields an empty browser with the same session identifier.
-    public func restoreBrowser(context: any EngineBrowserContext, sessionID: String, delegate: any EngineBrowserDelegate, completion: @escaping (any EngineBrowser) -> Void) {
-        completion(makeBrowser(sessionID: sessionID, context: context, delegate: delegate, window: nil))
     }
     private func makeBrowser(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> WebKitBrowser {
         guard let context = context as? WebKitBrowserContext else {
@@ -77,15 +72,11 @@ public final class WebKitApplication: EngineApplication {
         rendererCrashCount += 1
         delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
     }
-    /// Conversion from EasyList-format lists to `WKContentRuleList` is not implemented.
-    public func setBlockLists(_ lists: [URL]) { fatalError("skeleton") }
-    public func setExcludedDomains(_ domains: [String]) { fatalError("skeleton") }
 }
 
-/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: a store that keeps nothing for incognito, otherwise the default store or, with a storage identifier, the store of that identifier. History needs a separate store, which is not implemented.
+/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: a store that keeps nothing for incognito, otherwise the default store or, with a storage identifier, the store of that identifier.
 public final class WebKitBrowserContext: EngineBrowserContext {
     public let attributes: EngineBrowserContextAttributes
-    public weak var delegate: (any EngineBrowserContextDelegate)?
     public var preferences = EnginePreferences()
     public let dataStore: WKWebsiteDataStore
     weak var application: WebKitApplication?
@@ -103,7 +94,6 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     public var id: EngineBrowserContextID { attributes.id }
     public var type: EngineBrowserContextType { attributes.type }
     public var userVisibleName: String { attributes.userVisibleName }
-    public var history: any EngineHistory { fatalError("skeleton") }
     public var downloads: any EngineDownloads { webKitDownloads }
     /// From macOS 15.4, the profile's web extensions, whose controller every web view of the profile uses.
     public var extensions: (any EngineExtensions)? {
@@ -167,9 +157,7 @@ public final class WebKitBrowser: EngineBrowser {
     }
 
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
-        webKitContext.dataStore.httpCookieStore.getAllCookies { cookies in
-            completion(cookies.map { EngineCookie(name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, expires: $0.expiresDate, isSecure: $0.isSecure, isHTTPOnly: $0.isHTTPOnly) })
-        }
+        webKitContext.dataStore.httpCookieStore.getAllCookies { cookies in completion(cookies.map(Self.engineCookie)) }
     }
     public func setCookie(_ cookie: EngineCookie, for url: URL) {
         guard let httpCookie = Self.httpCookie(cookie, for: url) else { return }
@@ -185,11 +173,26 @@ public final class WebKitBrowser: EngineBrowser {
         }
         group.notify(queue: .main, execute: completion)
     }
+    /// WebKit keeps no policy both for a cookie that names `SameSite=None` and for one that names none, and sends either with requests from other sites, so such a cookie reads as `noRestriction`.
+    private static func engineCookie(_ cookie: HTTPCookie) -> EngineCookie {
+        let sameSite: EngineCookieSameSite = switch cookie.sameSitePolicy {
+        case .sameSiteLax?: .lax
+        case .sameSiteStrict?: .strict
+        default: .noRestriction
+        }
+        return EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expiresDate, isSecure: cookie.isSecure,
+                            isHTTPOnly: cookie.isHTTPOnly, sameSite: sameSite)
+    }
     private static func httpCookie(_ cookie: EngineCookie, for url: URL) -> HTTPCookie? {
         var properties: [HTTPCookiePropertyKey: Any] = [.name: cookie.name, .value: cookie.value, .domain: cookie.domain, .path: cookie.path, .originURL: url]
         if let expires = cookie.expires { properties[.expires] = expires }
         if cookie.isSecure { properties[.secure] = "TRUE" }
         if cookie.isHTTPOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        switch cookie.sameSite {
+        case .lax: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax.rawValue
+        case .strict: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict.rawValue
+        case .noRestriction, .unspecified: break
+        }
         return HTTPCookie(properties: properties)
     }
     public func removeCookie(named name: String, for url: URL) {
@@ -208,8 +211,7 @@ public final class WebKitBrowser: EngineBrowser {
         let store = webKitContext.dataStore.httpCookieStore
         store.getAllCookies { cookies in
             let group = DispatchGroup()
-            for cookie in cookies where shouldRemove(EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expiresDate,
-                                                                  isSecure: cookie.isSecure, isHTTPOnly: cookie.isHTTPOnly)) {
+            for cookie in cookies where shouldRemove(Self.engineCookie(cookie)) {
                 group.enter()
                 store.delete(cookie) { group.leave() }
             }
@@ -267,13 +269,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
     public weak var pageScriptDelegate: (any EnginePageScriptDelegate)?
-    public var visibility: EngineWebContentsVisibility = .visible
     public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView, contents: self)
     /// The web view's content controller, which holds its page scripts.
     let userContent: WebKitUserContentController
     let allowsDownloads: Bool
     var bridge: WebKitDelegateBridge?
-    var observers: [any EngineWebContentsNavigationObserver] = []
     /// Gives the dialog the page waits on its safe answer. Set while an `alert`, `confirm`, or `prompt` dialog is open.
     private var dismissPendingDialog: (() -> Void)?
     /// The documents, in any frame, whose media elements play sound.
@@ -360,19 +360,12 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// WebKit's interaction state holds the back-forward list and each page's position.
     public var restorableState: Data? { webView.interactionState as? Data }
     public var isAudible: Bool { !audibleDocuments.isEmpty }
-    public var selectedText: String? { nil }
     public var zoomFactor: Double {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }
     }
     public var isFullscreen: Bool { webView.fullscreenState == .inFullscreen }
     public var mediaSession: any EngineMediaSession { webKitMediaSession }
-    public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {
-        observers.append(observer)
-    }
-    public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {
-        observers.removeAll { $0 === observer }
-    }
 
     /// WebKit's find reports only whether a match exists. Once it selects the match, a script counts the matches in the page's visible text and places the selected one among them.
     public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
@@ -538,7 +531,6 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     private func allowInspection() {
         webView.isInspectable = true
     }
-    public var thumbnails: (any EngineThumbnails)? { nil }
 
     /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate.
     func refreshFavicon() {
