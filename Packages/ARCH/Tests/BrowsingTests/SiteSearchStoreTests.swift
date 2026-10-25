@@ -1,4 +1,4 @@
-// Site search shortcuts that an import adds, and a `site-search.json` that does not decode, each test in a temporary folder of its own.
+// Site search shortcuts that an import adds, a `site-search.json` that does not decode, and the palette's destination for a keyword whose template makes no web address, each test in a temporary folder of its own.
 import Foundation
 import Testing
 @testable import Browsing
@@ -39,6 +39,17 @@ import Testing
         store.remove(Self.docs)
         #expect(folder.contents("site-search.unreadable.json") == "{")
         #expect(SiteSearchStore(directory: folder.url).shortcuts.map(\.keyword) == Self.defaultKeywords)
+    }
+
+    @Test func aKeywordWhoseTemplateMakesNoWebAddressSearchesTheWeb() throws {
+        let folder = try TemporaryFolder()
+        // Settings saves no such template, but the file can be edited by hand.
+        try folder.write(#"{ "shortcuts": [{ "keyword": "docs", "name": "Docs", "url": "https://docs.example/search?q=%s" }, { "keyword": "bad", "name": "Bad", "url": "files %s" }] }"#, to: "site-search.json")
+        let store = SiteSearchStore(directory: folder.url)
+        #expect(BrowserSession.destination(forInput: "docs cats", siteSearch: store) == URL(string: "https://docs.example/search?q=cats"))
+        let search = try #require(BrowserSession.destination(forInput: "bad cats", siteSearch: store))
+        #expect(search.host == BrowserSession.searchURL.host)
+        #expect(URLComponents(url: search, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value == "bad cats")
     }
 }
 

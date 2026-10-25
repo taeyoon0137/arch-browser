@@ -92,8 +92,36 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     }
 }
 
+/// What the library button and the downloads list's Clear button show of every download. The session refreshes it with each change to its downloads, and each value publishes only when it changes.
+final class DownloadSummary: ObservableObject {
+    /// Whether a download is in progress.
+    @Published private(set) var isDownloading = false
+    /// The share of the in-progress downloads' bytes received, or `nil` when none of them knows its size.
+    @Published private(set) var progress: Double?
+    /// Whether a download has finished, so that Clear has a row to remove.
+    @Published private(set) var hasFinished = false
+
+    func refresh(from entries: [DownloadEntry]) {
+        let active = entries.filter { $0.state == .inProgress }
+        let sized = active.filter { $0.totalBytes > 0 }
+        let total = sized.reduce(Int64(0)) { $0 + $1.totalBytes }
+        let received = sized.reduce(Int64(0)) { $0 + $1.completedBytes }
+        let progress = sized.isEmpty ? nil : min(1, Double(received) / Double(total))
+        let hasFinished = entries.contains(where: \.isFinished)
+        if isDownloading == active.isEmpty { isDownloading = !active.isEmpty }
+        if self.progress != progress { self.progress = progress }
+        if self.hasFinished != hasFinished { self.hasFinished = hasFinished }
+    }
+}
+
 struct DownloadsSectionView: View {
     @ObservedObject var session: BrowserSession
+    @ObservedObject private var summary: DownloadSummary
+
+    init(session: BrowserSession) {
+        self.session = session
+        _summary = ObservedObject(wrappedValue: session.downloadSummary)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -106,7 +134,7 @@ struct DownloadsSectionView: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    .disabled(!session.downloads.contains(where: \.isFinished))
+                    .disabled(!summary.hasFinished)
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
@@ -132,7 +160,8 @@ struct DownloadsSectionView: View {
 }
 
 struct DownloadRowView: View {
-    @ObservedObject var session: BrowserSession
+    /// Only the row's actions use the session, so the row does not follow its changes.
+    let session: BrowserSession
     @ObservedObject var entry: DownloadEntry
 
     private var icon: NSImage {

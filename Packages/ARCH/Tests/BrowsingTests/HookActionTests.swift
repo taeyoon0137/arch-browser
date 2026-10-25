@@ -74,6 +74,7 @@ private final class FinishedDownload: EngineDownloadItem {
     let id = "1"
     let sourceURL = URL(string: "https://example.org/files/a1b2.pdf")!
     let pageURL: URL? = URL(string: "https://example.org/files")
+    let webContents: (any EngineWebContents)? = nil
     let targetPath: URL?
     let state = EngineDownloadState.completed
     let completedBytes: Int64 = 3

@@ -647,7 +647,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     /// CEF reports a main frame's address once its navigation commits, so `url` is still the page's while a navigation turns into a download.
     public func cefBrowserDidStart(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
         guard let downloads = context?.chromiumDownloads else { return decision(nil, true) }
-        downloads.begin(download, pageURL: url, suggestedName: suggestedName, decision: decision)
+        downloads.begin(download, from: self, pageURL: url, suggestedName: suggestedName, decision: decision)
     }
     public func cefBrowserDidUpdate(_ download: ARCHCEFDownload) {
         context?.chromiumDownloads.update(download)

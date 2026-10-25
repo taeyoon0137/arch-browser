@@ -1,4 +1,4 @@
-// Loading `session.json`: files of each version gain what they lack through `normalized()`, and files this build cannot read or fully understand stay on disk.
+// Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, and a scheduled save writes the snapshot taken last, or nothing without one.
 import Foundation
 import Testing
 @testable import Browsing
@@ -246,6 +246,52 @@ import Testing
         let folder = try SessionFolder()
         #expect(folder.store.load() == nil)
         #expect(try folder.fileNames().isEmpty)
+    }
+
+    @Test func theClosedListKeepsTheNewestRecordsWithoutTheirPageState() {
+        let records = (0..<(SessionSnapshot.maximumClosedTabs + 5)).map { index in
+            SessionSnapshot.TabRecord(id: UUID(), spaceID: spaceA, url: URL(string: "https://example.org/\(index)"), title: "Page \(index)", isPinned: false,
+                                      lastActivatedAt: Date(), state: Data([1, 2]), suggestedTitle: SuggestedTitle(title: "Name", url: URL(string: "https://example.org/\(index)")!))
+        }
+        let snapshot = SessionSnapshot(spaces: [], currentSpaceID: spaceA, favorites: [], tabs: [], closedTabs: records).normalized()
+        let closed = snapshot.closedTabs ?? []
+        #expect(closed.map(\.id) == records.suffix(SessionSnapshot.maximumClosedTabs).map(\.id))
+        #expect(closed.allSatisfy { $0.state == nil && $0.lastActivatedAt == nil && $0.suggestedTitle == nil })
+        #expect(closed.last?.url == records.last?.url && closed.last?.title == records.last?.title)
+    }
+
+    @MainActor
+    @Test func aScheduledSaveWritesTheLastSnapshotAndNothingWithoutOne() async throws {
+        let folder = try SessionFolder()
+        try folder.write(version11File)
+        let store = folder.store
+        var snapshot = try #require(store.load())
+        store.scheduleSave { nil }
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(try folder.contents(of: "session.json") == Data(version11File.utf8))
+
+        snapshot.tabs.removeLast()
+        let first = snapshot
+        snapshot.tabs.removeLast()
+        let last = snapshot
+        store.scheduleSave { first }
+        store.scheduleSave { last }
+        try await Task.sleep(for: .milliseconds(700))
+        // The write follows on a queue of its own.
+        var written = try #require(folder.store.load())
+        var attempts = 0
+        while written.tabs.count != last.tabs.count, attempts < 20 {
+            try await Task.sleep(for: .milliseconds(50))
+            written = try #require(folder.store.load())
+            attempts += 1
+        }
+        #expect(written.tabs.map(\.id) == last.tabs.map(\.id))
+
+        // Saving now replaces a save that is still waiting.
+        store.scheduleSave { first }
+        store.saveNow(snapshot)
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(try #require(folder.store.load()).tabs.map(\.id) == last.tabs.map(\.id))
     }
 }
 

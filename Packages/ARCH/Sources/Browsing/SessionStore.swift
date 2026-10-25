@@ -27,7 +27,19 @@ struct SessionSnapshot: Codable {
         var personaID: UUID?
         /// The name a hook gave the tab's document, or the user's refusal of it, with the document's address. `nil` without either, in closed-tab records, and in files before version 12.
         var suggestedTitle: SuggestedTitle?
+
+        /// The record as the closed list keeps it: without the activation date, page state, and hook's name, which a reopened tab does not use.
+        var closed: TabRecord {
+            var record = self
+            record.lastActivatedAt = nil
+            record.state = nil
+            record.suggestedTitle = nil
+            return record
+        }
     }
+
+    /// The most records the closed list keeps. The oldest go first.
+    static let maximumClosedTabs = 100
 
     /// A favorite's tab, which opens where it was when the favorite is next opened.
     struct FavoriteTabRecord: Codable {
@@ -65,7 +77,7 @@ struct SessionSnapshot: Codable {
     var folders: [TabFolder]?
     /// The index in `tabs` of the front main window's selected tab, written for builds before version 11. `normalized()` reads it, when `selectedFavoriteID` names no favorite tab, to select the tab of the window it makes for a file without `windows`.
     var selectedTabIndex: Int?
-    /// Recently closed tabs, oldest first. Optional so older files without this field still decode.
+    /// Recently closed tabs, oldest first, at most `maximumClosedTabs` of them, each as `TabRecord.closed` keeps it. Optional so older files without this field still decode.
     var closedTabs: [TabRecord]?
     /// Each space's split view as indexes into `tabs`, left to right; the tabs' space is the split view's. `nil` in files before version 7.
     var splitViews: [[Int]]?
@@ -92,6 +104,8 @@ struct SessionSnapshot: Codable {
         snapshot.tabs = withUniqueIDs(tabs, at: \.id)
         snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
+        // Earlier builds kept an archived tab's page state and activation date in its closed record, and more records than the list keeps.
+        snapshot.closedTabs = snapshot.closedTabs.map { $0.suffix(Self.maximumClosedTabs).map(\.closed) }
         snapshot.assignPersonas()
         snapshot.repairWindows()
         // Only a Persona that is gone loses its stored data. The default Persona is always listed, so the engines' default storage is never removed.
@@ -168,6 +182,8 @@ struct SessionSnapshot: Codable {
 final class SessionStore {
     let fileURL: URL
     private var pendingSave: DispatchWorkItem?
+    /// Encodes and writes the snapshots in the order they were taken, away from the main thread.
+    private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.session-store", qos: .utility)
 
     init(directory: URL) {
         fileURL = directory.appendingPathComponent("session.json")
@@ -192,20 +208,24 @@ final class SessionStore {
         var version: Int?
     }
 
-    /// Combines rapid changes, such as tab updates, into one file write. Runs the `snapshot` closure when writing, not when scheduling.
-    func scheduleSave(_ snapshot: @escaping () -> SessionSnapshot) {
+    /// Combines rapid changes, such as tab updates, into one file write. Runs the `snapshot` closure on the main thread half a second after the last call, not when scheduling, and writes nothing when it returns nil, as once the session is gone. The file is written on `writeQueue`.
+    func scheduleSave(_ snapshot: @escaping () -> SessionSnapshot?) {
         pendingSave?.cancel()
-        let work = DispatchWorkItem { [fileURL] in
-            guard let data = try? JSONEncoder().encode(snapshot()) else { return }
-            try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: fileURL, options: .atomic)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let snapshot = snapshot() else { return }
+            self.writeQueue.async { self.write(snapshot) }
         }
         pendingSave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Writes `snapshot` in place of a scheduled save, after any write already queued, and returns once it is on disk, as quitting needs.
     func saveNow(_ snapshot: SessionSnapshot) {
         pendingSave?.cancel()
+        writeQueue.sync { write(snapshot) }
+    }
+
+    private func write(_ snapshot: SessionSnapshot) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: fileURL, options: .atomic)

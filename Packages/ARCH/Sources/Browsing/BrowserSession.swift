@@ -45,14 +45,18 @@ public final class BrowserSession: ObservableObject {
     /// The active window's selected tab. Now Playing and AppleScript's `active tab` follow it.
     @Published public private(set) var focusedTabID: UUID?
     /// Downloads reported by the engine and not removed by the user, oldest first.
-    @Published public private(set) var downloads: [DownloadEntry] = []
+    @Published public private(set) var downloads: [DownloadEntry] = [] {
+        didSet { downloadSummary.refresh(from: downloads) }
+    }
+    /// What the library button and the downloads list's Clear button show of `downloads`. Their progress publishes there rather than from the session, so that it does not redraw every view that follows the session.
+    let downloadSummary = DownloadSummary()
     /// The entries of downloads that finished while no window showed the library. The library button shows their count.
     @Published public private(set) var unseenDownloadIDs: Set<UUID> = []
     /// Counts the most recently closed tabs the user closed since they last pressed another key or clicked in the page. ⌘Z reopens them one at a time, newest first.
     public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
-    /// The last 100 closed or archived tabs, oldest first. The newest reopens first.
+    /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
 
@@ -67,7 +71,7 @@ public final class BrowserSession: ObservableObject {
     private var crashCounts: [EngineKind: Int] = [:]
     /// The engines' total of page process crashes, kept for the tab close log (III.8).
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
-    /// Tabs that only ever pointed at a file. They close once the engine creates the download.
+    /// Tabs that only ever pointed at a file. Each closes once the engine creates the download its page started.
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
@@ -776,8 +780,8 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
         }
-        // Every change to a tab, such as a new address or name, is saved.
-        tabObservers[tab.id] = tab.objectWillChange.sink { [weak self] _ in self?.scheduleSave() }
+        // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.
+        tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() }
         return tab
     }
 
@@ -844,10 +848,10 @@ public final class BrowserSession: ObservableObject {
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
+        downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
         if remember, let spaceID = tab.spaceID {
-            closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
-            if closedTabs.count > 100 { closedTabs.removeFirst() }
+            addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
@@ -861,6 +865,25 @@ public final class BrowserSession: ObservableObject {
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectedTabID = candidates.first { !window.isShownInAnotherWindow($0) }?.id
         }
+    }
+
+    /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish.
+    func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
+        guard let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
+        if webContents.closingStopsDownloads {
+            // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers.
+            webContents.uiDelegate = nil
+            webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
+            downloadPages.append((runtime, webContents))
+        } else {
+            runtime.browser.closeWebContents(webContents)
+        }
+    }
+
+    /// Adds a closed or archived tab's record to the closed list as the list keeps it (`SessionSnapshot.TabRecord.closed`), dropping the oldest beyond `SessionSnapshot.maximumClosedTabs`.
+    private func addToClosedList(_ record: SessionSnapshot.TabRecord) {
+        closedTabs.append(record.closed)
+        if closedTabs.count > SessionSnapshot.maximumClosedTabs { closedTabs.removeFirst(closedTabs.count - SessionSnapshot.maximumClosedTabs) }
     }
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
@@ -946,9 +969,9 @@ public final class BrowserSession: ObservableObject {
         return nil
     }
 
-    /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, or `nil` for empty text.
-    static func destination(forInput input: String) -> URL? {
-        if let search = SiteSearchStore.shared.match(input) { return search.shortcut.resultsURL(for: search.query) }
+    /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, such as a keyword whose template makes no web address, or `nil` for empty text.
+    static func destination(forInput input: String, siteSearch: SiteSearchStore = .shared) -> URL? {
+        if let search = siteSearch.match(input), let url = search.shortcut.resultsURL(for: search.query) { return url }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         if let url = url(forInput: text) { return url }
@@ -1008,68 +1031,6 @@ public final class BrowserSession: ObservableObject {
         for tab in allTabs where tab.personaID == personaID && tab.url.map({ plugins.pageScriptsCover($0, of: id) }) == true {
             tab.webContents.navigationController.reload()
         }
-    }
-
-    // MARK: Downloads
-
-    /// Opening the library marks every finished download as seen, which clears the library button's count.
-    func markDownloadsSeen() {
-        unseenDownloadIDs.removeAll()
-    }
-
-    public func removeDownload(_ entry: DownloadEntry) {
-        entry.item.remove()
-    }
-
-    public func clearFinishedDownloads() {
-        downloads.filter(\.isFinished).forEach { $0.item.remove() }
-    }
-
-    /// The downloads folder saved in Settings, falling back to the user's Downloads folder, then the temporary folder.
-    private var downloadsDirectory: URL {
-        Self.savedDownloadsFolder
-            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-    }
-
-    /// Adds a counter to `filename` until the name is unused in `directory`.
-    static func uniqueDestination(for filename: String, in directory: URL) -> URL {
-        let base = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        var candidate = directory.appendingPathComponent(filename)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            counter += 1
-            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
-        }
-        return candidate
-    }
-
-    // MARK: Download settings
-
-    /// Settings saves the downloads folder's path and whether to ask where to save each download under these keys.
-    public static let downloadsFolderKey = "ARCHDownloadsFolder"
-    public static let asksWhereToSaveDownloadsKey = "ARCHAskWhereToSaveDownloads"
-
-    /// The downloads folder saved in Settings, or nil when none is saved or the saved folder no longer exists.
-    private static var savedDownloadsFolder: URL? {
-        var isDirectory: ObjCBool = false
-        return UserDefaults.standard.string(forKey: downloadsFolderKey).flatMap { path in
-            FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
-        }
-    }
-
-    /// Copies the saved download settings into a profile's preferences, which choose each download's destination, now and after every change to the defaults. A saved folder that no longer exists leaves the user's Downloads folder in use.
-    private func followDownloadSettings(of context: any EngineBrowserContext) {
-        let apply = {
-            context.preferences.downloadFilePath = Self.savedDownloadsFolder
-            context.preferences.promptForDownloadPath = UserDefaults.standard.bool(forKey: Self.asksWhereToSaveDownloadsKey)
-        }
-        apply()
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { _ in apply() }
-            .store(in: &cancellables)
     }
 
     // MARK: Site permissions
@@ -1461,10 +1422,7 @@ public final class BrowserSession: ObservableObject {
         var restored: [Int: Tab] = [:]
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
             if !record.isPinned, let cutoff, let last = record.lastActivatedAt, last < cutoff {
-                // Closed-tab records keep no hook's name, as for a tab closed by hand.
-                var closed = record
-                closed.suggestedTitle = nil
-                closedTabs.append(closed)
+                addToClosedList(record)
                 closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }
@@ -1509,7 +1467,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Saves the session once changes stop for half a second. The window controllers call it for frame changes, which no published value reports.
     func scheduleSave() {
-        store.scheduleSave { [weak self] in self?.snapshot() ?? SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: [], currentSpaceID: UUID(), favorites: [], tabs: [], selectedTabIndex: nil) }
+        store.scheduleSave { [weak self] in self?.snapshot() }
     }
 
     public func saveNow() {
@@ -1562,6 +1520,78 @@ extension BrowserSession: EngineApplicationDelegate {
 /// The protocol's defaults apply: popups reach the session through their opener's `Tab.openNewTab`, and no engine reports new web contents to the browser's delegate.
 extension BrowserSession: EngineBrowserDelegate {}
 
+// MARK: Downloads
+
+extension BrowserSession {
+    /// Opening the library marks every finished download as seen, which clears the library button's count.
+    func markDownloadsSeen() {
+        unseenDownloadIDs.removeAll()
+    }
+
+    public func removeDownload(_ entry: DownloadEntry) {
+        entry.item.remove()
+    }
+
+    public func clearFinishedDownloads() {
+        downloads.filter(\.isFinished).forEach { $0.item.remove() }
+    }
+
+    /// The downloads folder saved in Settings, falling back to the user's Downloads folder, then the temporary folder.
+    private var downloadsDirectory: URL {
+        Self.savedDownloadsFolder
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+    }
+
+    /// Adds a counter to `filename` until the name is unused in `directory`.
+    static func uniqueDestination(for filename: String, in directory: URL) -> URL {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            counter += 1
+            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+        }
+        return candidate
+    }
+
+    // MARK: Download settings
+
+    /// Settings saves the downloads folder's path and whether to ask where to save each download under these keys.
+    public static let downloadsFolderKey = "ARCHDownloadsFolder"
+    public static let asksWhereToSaveDownloadsKey = "ARCHAskWhereToSaveDownloads"
+
+    /// The downloads folder saved in Settings, or nil when none is saved or the saved folder no longer exists.
+    private static var savedDownloadsFolder: URL? {
+        var isDirectory: ObjCBool = false
+        return UserDefaults.standard.string(forKey: downloadsFolderKey).flatMap { path in
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
+        }
+    }
+
+    /// Copies the saved download settings into a profile's preferences, which choose each download's destination, now and after every change to the defaults. A saved folder that no longer exists leaves the user's Downloads folder in use.
+    private func followDownloadSettings(of context: any EngineBrowserContext) {
+        let apply = {
+            context.preferences.downloadFilePath = Self.savedDownloadsFolder
+            context.preferences.promptForDownloadPath = UserDefaults.standard.bool(forKey: Self.asksWhereToSaveDownloadsKey)
+        }
+        apply()
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { _ in apply() }
+            .store(in: &cancellables)
+    }
+
+    /// Each kept page closes once its own downloads no longer need it.
+    private func closeDownloadPagesIfIdle() {
+        let idle = downloadPages.filter { !$0.webContents.closingStopsDownloads }
+        guard !idle.isEmpty else { return }
+        downloadPages.removeAll { page in idle.contains { $0.webContents === page.webContents } }
+        for page in idle { page.runtime.browser.closeWebContents(page.webContents) }
+    }
+}
+
 extension BrowserSession: EngineDownloadsDelegate {
     public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
         guard let personaID = runtime(owning: downloads)?.personaID else { return }
@@ -1573,46 +1603,24 @@ extension BrowserSession: EngineDownloadsDelegate {
         downloads.first { $0.item === item }
     }
 
-    /// The library button shows a new download's progress, so the library itself stays as it is.
+    /// The library button shows a new download's progress, so the library itself stays as it is. The tab that only pointed at the file closes; another such tab waits for its own download, which closing it first would cancel.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         guard let personaID = runtime(owning: downloads)?.personaID else { return }
         self.downloads.append(DownloadEntry(item: item, personaID: personaID))
-        let finishedTabIDs = downloadOnlyTabIDs
-        downloadOnlyTabIDs.removeAll()
-        // The engine is still choosing the file's destination, so the tabs close once that callback returns.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            for tab in self.allTabs where finishedTabIDs.contains(tab.id) { self.closeTab(tab, remember: false, reason: .download) }
+        guard let tab = allTabs.first(where: { downloadOnlyTabIDs.contains($0.id) && $0.webContents === item.webContents }) else { return }
+        downloadOnlyTabIDs.remove(tab.id)
+        // The engine is still choosing the file's destination, so the tab closes once that callback returns.
+        DispatchQueue.main.async { [weak self, weak tab] in
+            if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
         }
     }
 
-    /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish.
-    func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
-        guard let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
-        if webContents.closingStopsDownloads {
-            // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers.
-            webContents.uiDelegate = nil
-            webContents.navigationController.load(URLRequest(url: URL(string: "about:blank")!))
-            downloadPages.append((runtime, webContents))
-        } else {
-            runtime.browser.closeWebContents(webContents)
-        }
-    }
-
-    /// Each kept page closes once its own downloads no longer need it.
-    private func closeDownloadPagesIfIdle() {
-        let idle = downloadPages.filter { !$0.webContents.closingStopsDownloads }
-        guard !idle.isEmpty else { return }
-        downloadPages.removeAll { page in idle.contains { $0.webContents === page.webContents } }
-        for page in idle { page.runtime.browser.closeWebContents(page.webContents) }
-    }
-
-    /// The session also announces state changes because the sidebar icon and Clear button read download entry state through it.
+    /// The entry's row and `downloadSummary` show the change; the session itself publishes nothing for it.
     public func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem) {
-        objectWillChange.send()
         guard let entry = entry(for: item) else { return }
         let wasFinished = entry.isFinished
         entry.refresh()
+        downloadSummary.refresh(from: self.downloads)
         if !wasFinished, entry.state == .completed, !windows.contains(where: \.isLibraryVisible) { unseenDownloadIDs.insert(entry.id) }
         if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()

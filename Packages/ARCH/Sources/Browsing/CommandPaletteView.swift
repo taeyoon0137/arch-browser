@@ -45,8 +45,8 @@ struct CommandPaletteView: View {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return mode == .newTab ? "Open a new tab" : "Enter an address or search" }
         if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
-        // The session reads the untrimmed text the same way, so a keyword and a space are enough.
-        if let search = SiteSearchStore.shared.match(text) {
+        // The session reads the untrimmed text the same way, so a keyword and a space are enough, and searches the web for a keyword whose template makes no web address.
+        if let search = SiteSearchStore.shared.match(text), search.shortcut.resultsURL(for: search.query) != nil {
             return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \"\(search.query)\""
         }
         if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(url.host ?? trimmed)" }

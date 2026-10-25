@@ -9,9 +9,9 @@ public final class ChromiumDownloads: EngineDownloads {
     public private(set) var items: [any EngineDownloadItem] = []
     private var itemsByIdentifier: [UInt32: ChromiumDownloadItem] = [:]
 
-    /// Announces a new download from the page at `pageURL` and asks the delegate for its destination. The engine shows its Save As dialog if no delegate is set.
-    func begin(_ download: ARCHCEFDownload, pageURL: URL?, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
-        let item = ChromiumDownloadItem(download: download, pageURL: pageURL, owner: self)
+    /// Announces a new download that `webContents` started from the page at `pageURL` and asks the delegate for its destination. The engine shows its Save As dialog if no delegate is set.
+    func begin(_ download: ARCHCEFDownload, from webContents: ChromiumWebContents, pageURL: URL?, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
+        let item = ChromiumDownloadItem(download: download, webContents: webContents, pageURL: pageURL, owner: self)
         itemsByIdentifier[download.identifier] = item
         items.append(item)
         delegate?.downloads(self, didCreate: item)
@@ -41,6 +41,7 @@ final class ChromiumDownloadItem: EngineDownloadItem {
     let id: String
     let sourceURL: URL
     let pageURL: URL?
+    private(set) weak var webContents: (any EngineWebContents)?
     let startTime = Date()
     let download: ARCHCEFDownload
     private unowned let owner: ChromiumDownloads
@@ -50,8 +51,9 @@ final class ChromiumDownloadItem: EngineDownloadItem {
     private(set) var completedBytes: Int64 = 0
     private(set) var totalBytes: Int64 = 0
 
-    init(download: ARCHCEFDownload, pageURL: URL?, owner: ChromiumDownloads) {
+    init(download: ARCHCEFDownload, webContents: ChromiumWebContents, pageURL: URL?, owner: ChromiumDownloads) {
         self.download = download
+        self.webContents = webContents
         self.pageURL = pageURL
         self.owner = owner
         id = String(download.identifier)

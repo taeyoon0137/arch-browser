@@ -13,6 +13,8 @@ public protocol EngineDownloadItem: AnyObject {
     var sourceURL: URL { get }
     /// The address of the page its web contents showed when the download started; nil when they showed none.
     var pageURL: URL? { get }
+    /// The web contents that started the download, until they are gone.
+    var webContents: (any EngineWebContents)? { get }
     var targetPath: URL? { get }
     var state: EngineDownloadState { get }
     var completedBytes: Int64 { get }

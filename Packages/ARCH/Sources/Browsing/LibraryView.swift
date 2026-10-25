@@ -74,9 +74,16 @@ struct LibraryToolRow: View {
 /// Opens and closes the library. While files download it shows a download symbol over their combined progress.
 struct LibraryButton: View {
     @ObservedObject var session: BrowserSession
+    /// The downloads' progress, which redraws this button without the views that follow the session.
+    @ObservedObject private var downloads: DownloadSummary
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @Environment(\.sidebarIsFloating) private var isFloating
     @State private var isHovering = false
+
+    init(session: BrowserSession) {
+        self.session = session
+        _downloads = ObservedObject(wrappedValue: session.downloadSummary)
+    }
 
     /// In the floating sidebar, the library opens in the card. Elsewhere, it also reveals a hidden sidebar.
     private func toggle() {
@@ -87,21 +94,8 @@ struct LibraryButton: View {
         }
     }
 
-    private var activeDownloads: [DownloadEntry] {
-        session.downloads.filter { $0.state == .inProgress }
-    }
-
-    /// The share of the active downloads' bytes received, or `nil` when none of them knows its size.
-    private var progress: Double? {
-        let sized = activeDownloads.filter { $0.totalBytes > 0 }
-        guard !sized.isEmpty else { return nil }
-        let total = sized.reduce(Int64(0)) { $0 + $1.totalBytes }
-        let received = sized.reduce(Int64(0)) { $0 + $1.completedBytes }
-        return min(1, Double(received) / Double(total))
-    }
-
     private var accessibilityValue: String {
-        if !activeDownloads.isEmpty { return "Downloading" }
+        if downloads.isDownloading { return "Downloading" }
         let count = session.unseenDownloadIDs.count
         return count == 0 ? "" : count == 1 ? "1 new download" : "\(count) new downloads"
     }
@@ -109,14 +103,14 @@ struct LibraryButton: View {
     var body: some View {
         Button(action: toggle) {
             Group {
-                if activeDownloads.isEmpty {
+                if !downloads.isDownloading {
                     Image(systemName: "archivebox")
                         .font(.system(size: 15, weight: .medium))
                 } else {
                     VStack(spacing: 3) {
                         Image(systemName: "arrow.down")
                             .font(.system(size: 12, weight: .semibold))
-                        DownloadProgressBar(progress: progress)
+                        DownloadProgressBar(progress: downloads.progress)
                             .frame(width: 16, height: 3)
                     }
                 }
@@ -124,7 +118,7 @@ struct LibraryButton: View {
             .frame(width: 30, height: 28)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(windowModel.isLibraryVisible ? 0.1 : isHovering ? 0.08 : 0)))
             .overlay(alignment: .topTrailing) {
-                if activeDownloads.isEmpty, !session.unseenDownloadIDs.isEmpty {
+                if !downloads.isDownloading, !session.unseenDownloadIDs.isEmpty {
                     Text("\(session.unseenDownloadIDs.count)")
                         .font(.system(size: 9, weight: .bold))
                         .monospacedDigit()

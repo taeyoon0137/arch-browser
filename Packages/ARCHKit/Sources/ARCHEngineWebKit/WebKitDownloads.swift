@@ -19,9 +19,9 @@ public final class WebKitDownloads: EngineDownloads {
         self.context = context
     }
 
-    /// Wraps and announces a new WebKit download.
-    func add(_ download: WKDownload, from webView: WKWebView) {
-        let item = WebKitDownloadItem(download: download, webView: webView, owner: self)
+    /// Wraps and announces a new WebKit download that `webContents` started.
+    func add(_ download: WKDownload, from webContents: WebKitWebContents) {
+        let item = WebKitDownloadItem(download: download, webContents: webContents, owner: self)
         items.append(item)
         delegate?.downloads(self, didCreate: item)
     }
@@ -53,6 +53,7 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     let id = UUID().uuidString
     let sourceURL: URL
     let pageURL: URL?
+    private(set) weak var webContents: (any EngineWebContents)?
     private(set) var targetPath: URL?
     private(set) var state: EngineDownloadState = .inProgress
     private(set) var completedBytes: Int64 = 0
@@ -64,9 +65,11 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     private var resumeData: Data?
     private var observations: [NSKeyValueObservation] = []
 
-    init(download: WKDownload, webView: WKWebView, owner: WebKitDownloads) {
+    init(download: WKDownload, webContents: WebKitWebContents, owner: WebKitDownloads) {
+        let webView = webContents.webView
         self.download = download
         self.webView = webView
+        self.webContents = webContents
         self.owner = owner
         self.sourceURL = download.originalRequest?.url ?? webView.url ?? URL(string: "about:blank")!
         // While a navigation turns into a download, the web view's address can already be the download's, so the page is the current back-forward item.

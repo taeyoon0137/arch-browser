@@ -102,6 +102,17 @@ public final class Tab: ObservableObject, Identifiable {
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
 
+    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
+    var persistedChanges: AnyPublisher<Void, Never> {
+        func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
+            // A published value also sends its current value to each new subscriber, which is no change.
+            publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        }
+        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($folderID), changes($url), changes($title),
+                                    changes($customTitle), changes($suggestedTitle))
+            .eraseToAnyPublisher()
+    }
+
     /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
     var isListedInSidebar: Bool { !isInSmallWindow }
 

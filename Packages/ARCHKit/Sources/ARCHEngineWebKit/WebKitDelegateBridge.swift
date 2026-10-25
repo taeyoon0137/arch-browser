@@ -90,11 +90,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        owner.context.webKitDownloads.add(download, from: webView)
+        owner.context.webKitDownloads.add(download, from: owner)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        owner.context.webKitDownloads.add(download, from: webView)
+        owner.context.webKitDownloads.add(download, from: owner)
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
