@@ -1,4 +1,4 @@
-// The Settings sections: General for the default browser, new pages, and downloads; Sidebar for tab archiving; Appearance for the app's appearance.
+// The Settings sections: General for the default browser, links from other apps, new pages, and downloads; Sidebar for tab archiving; Appearance for the app's appearance.
 import AppKit
 import ARCHEngine
 import Browsing
@@ -7,9 +7,10 @@ import SwiftUI
 /// Every section has the same width, so only the window's height changes between them.
 let sectionWidth: CGFloat = 540
 
-/// The default browser, the engine and search engine for new pages, and where downloads go.
+/// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, and where downloads go.
 struct GeneralSection: View {
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
+    @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = true
     @State private var defaultEngine = EngineRegistry.shared.defaultKind
     @AppStorage(SearchEngine.defaultsKey) private var searchEngine = SearchEngine.google
     @AppStorage(BrowserSession.downloadsFolderKey) private var downloadsFolderPath: String?
@@ -28,6 +29,7 @@ struct GeneralSection: View {
                         .disabled(!DefaultBrowser.canBecomeDefault)
                     }
                 }
+                Toggle("Open links from other apps in a small window when Arch is in the background", isOn: $opensLinksInSmallWindow)
                 Picker("Default engine", selection: $defaultEngine) {
                     ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
                         Text(kind.displayName)

@@ -56,9 +56,17 @@ Checked at runtime for step 11, with the screen locked and temporary code in `Ap
 - Move to Main Window put the tab last among its space's open tabs and selected it in the main window, which then held its page's view, and the small window closed. `performClose` on a small window closed its tab into the closed list, Reopen Last Closed Tab brought it back as a listed tab of the main window, and Close Tab closed both tab and window. Archiving left a small window's tab open. Quitting with a small window open saved its tab as an open tab of its space and only the main window in `windows`.
 - `window.open` without a user gesture opened no popup on Chromium, so popups from a small window remain a check for the screen.
 
+Checked at runtime for step 12, with the bundled app, the screen unlocked, and Arch driven through accessibility while another app was in front
+- Settings ▸ General shows the toggle on while nothing is saved. Turned off, it saved `ARCHOpensLinksInSmallWindow` as false, and the next link that `open -g -a` sent while another app was active opened a selected tab in the main window. Turned on again, it applied to the next link, from `open location`, which opened a small window. With Arch active, `open -g -a` opened a tab in the main window.
+- Settings ▸ Shortcuts lists Move to Main Window with ⌥⌘N in the Window section, with Minimize, Zoom, and Bring All to Front, and none of the items that AppKit adds.
+- An `alert` showed on a small window on both engines. On WebKit, Window ▸ Move to Main Window with the alert open moved the tab and the alert to the main window, where OK answered the page. On Chromium, text typed into a field survived the button's Move to Main Window, the tab became the last open tab of its space, and the small window closed. In a small window, Edit ▸ Find… found text in its page and File ▸ Open Location opened the palette with its address; File ▸ New Tab brought the main window forward with the New Tab palette.
+- A link with `target=_blank` and a `window.open` from a click in a small window each opened another small window, cascaded by 29 points. The popup kept `window.opener`, and its `postMessage` reached the page on both engines. The main window's sidebar listed none of the small windows' tabs. A small window's close button closed its tab, and quitting saved the small windows' tabs as open tabs of their destination space, with one window record.
+- A popup that calls `window.close()` closed at once on WebKit and, as a tab of the main window, on Chromium. In a Chromium small window, its page went blank but the window stayed open until another window became key, so something tied to the key window keeps CEF's view until then (plan task I.14).
+
 Not verified; the implementation order checks each
 - That a CEF Alloy browser keeps input, IME, focus, accessibility, and backing scale when its parent view moves to another `NSWindow`.
 - The order in which app activation and the URL event arrive when another app opens a link while the screen is unlocked, links from Mail and Notes among them, and whether activation brings only the small window forward. These need the screen.
+- On WebKit, that text typed into a form field survives Move to Main Window: typing did not reach a WebKit page in the background. With a print or Export as PDF panel on a small window, that ⌥⌘N and ⌘W end the panel with Cancel; that a download-only small window's save panel opens as a panel of its own and saves; and the palette's width in a 480-point small window. These need the screen.
 - That Chromium's developer tools for a tab use that tab's request context. The check needs the screen, so step 13 makes it.
 
 ## Decisions
@@ -360,7 +368,7 @@ public func canDeletePersona(_ id: Persona.ID) -> Bool
 public func deletePersona(_ id: Persona.ID)
 
 // Step 11
-/// Whether a link from another app opens in a small window: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
+/// Whether a link from another app opens in a small window while the preference allows it: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
 public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool
 /// The app sets it to name Move to Main Window's shortcut, which Settings ▸ Shortcuts can change, in the small window's button.
 public var moveToMainWindowShortcut: () -> String?
@@ -368,6 +376,10 @@ public var moveToMainWindowShortcut: () -> String?
 /// A small window on a new tab for a page that a small window's page or preview opened.
 @discardableResult func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel
 public func moveToMainWindow(_ smallWindow: BrowserWindowModel)
+
+// Step 12
+/// Settings ▸ General saves under this key whether links from other apps may open in small windows. While nothing is saved, they may.
+public static let opensLinksInSmallWindowKey: String
 ```
 
 - Every existing app-wide mutator keeps its name. `openTab(url:in:pinned:select:engine:state:)` keeps its signature, so parallel tasks compile: a nil space means the sidebar target's current space, and `select: true` selects the tab in the sidebar target. The tab takes the space's Persona. Views and menus use `BrowserWindowModel.openTab` instead.
@@ -386,7 +398,7 @@ public func moveToMainWindow(_ smallWindow: BrowserWindowModel)
 
 - `AppDelegate` keeps the menu bar, link routing, the key monitors, the global shortcut, and the app's lifecycle. Window building moves to `BrowserWindowController`. Every action resolves `session.activeWindow` (page commands) or `session.sidebarTarget()` (sidebar commands). Selector names stay unchanged, because `ShortcutSettings` keys saved shortcuts by them.
 - It adds `applicationShouldHandleReopen(_:hasVisibleWindows:)`: with no main window open, a Dock click opens one.
-- It records the time of each `NSApplication.didBecomeActiveNotification` for the small-window decision (step 11).
+- It records the time of each `NSApplication.didBecomeActiveNotification` for the small-window decision (step 11) and reads the preference under `opensLinksInSmallWindowKey` as each link arrives (step 12).
 - Sidebar commands go through `frontSidebarTarget()`, which brings the sidebar target forward while a small window is the active window (window rule 7).
 
 ### ARCHEngine
@@ -564,7 +576,6 @@ Engine and tab events
 
 When
 - `application(_:open:)` opens a link in a small window when three things hold: the preference is on, the first windows have been restored, and Arch was not active when the link arrived. Not active means `!NSApp.isActive`, or the app became active less than 0.5 seconds before. Step 11's log was taken with the screen locked, when Arch never became active, so it could not set the threshold, which stays at the proposed value (Facts). Otherwise the link opens a tab in the sidebar target, as today, and the sidebar target comes forward from behind a small window. Links that arrive during launch reach `application(_:open:)` before the session exists and open in the main window, so regression check 4's launch case holds. `open location` arrives the same way and follows the same rule. The global shortcut always uses the main window.
-- Until step 12 adds the preference, the first condition always holds.
 
 The tab
 - Its destination space is the last main window's current space when the small window opens, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.
@@ -588,7 +599,7 @@ Closing
 - AppKit would take a sheet away unanswered when code closes its window, so `BrowserWindowModel.close()` first ends a sheet that `TabSheetQueue` does not show, the print panel or Export as PDF's save panel, with Cancel. A download's save panel therefore never opens as a sheet on a small window, which a download-only tab closes on the next turn of the run loop; it opens as a panel of its own.
 
 Preference
-- Settings ▸ General: "Open links from other apps in a small window when Arch is in the background", stored under `ARCHOpensLinksInSmallWindow` (`BrowserSession.opensLinksInSmallWindowKey`), on by default. Off restores today's behavior exactly.
+- Settings ▸ General: "Open links from other apps in a small window when Arch is in the background", stored under `ARCHOpensLinksInSmallWindow` (`BrowserSession.opensLinksInSmallWindowKey`), on while nothing is saved. `application(_:open:)` reads it as each link arrives, so a change applies to the next link. Off restores the behavior from before step 11: every link opens a tab in the sidebar target, which comes forward from behind a small window that is still open.
 
 ## Personas in the interface (III.12)
 

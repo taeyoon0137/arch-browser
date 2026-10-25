@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; while Arch is active, links open in new tabs of the sidebar target. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
+    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, while Settings ▸ General allows small windows, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; otherwise links open in new tabs of the sidebar target. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
     func application(_ application: NSApplication, open urls: [URL]) {
         let urls = urls.compactMap { url in
             url.scheme == nil ? BrowserSession.url(forInput: url.absoluteString.removingPercentEncoding ?? url.absoluteString) : url
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             pendingURLs += urls
             return
         }
-        if BrowserSession.opensLinkInSmallWindow(isAppActive: NSApp.isActive, becameActiveAt: becameActiveAt, now: Date()) {
+        if allowsSmallWindowsForLinks, BrowserSession.opensLinkInSmallWindow(isAppActive: NSApp.isActive, becameActiveAt: becameActiveAt, now: Date()) {
             urls.forEach { session.openSmallWindow(url: $0) }
             // Without `.activateAllWindows`, only the key and main windows come forward.
             NSRunningApplication.current.activate(options: [])
@@ -91,6 +91,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         frontSidebarTarget()
         urls.forEach { session.openTab(url: $0) }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Settings ▸ General's preference, read for each link so that a change applies to the next one. It is on until the user turns it off, as the toggle shows.
+    private var allowsSmallWindowsForLinks: Bool {
+        UserDefaults.standard.object(forKey: BrowserSession.opensLinksInSmallWindowKey) as? Bool ?? true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
