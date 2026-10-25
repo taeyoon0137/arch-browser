@@ -36,6 +36,8 @@ public final class BrowserSession: ObservableObject {
     public let siteSearch: SiteSearchStore
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
+    /// The engines whose application did not start the last time the session tried, which run no web extensions meanwhile.
+    private var enginesThatDidNotStart: Set<EngineKind> = []
     /// Each Persona's runtimes, from the Persona's first tab until quit, and its plugins.
     private var personaEngines: [Persona.ID: PersonaEngines] = [:]
     /// The runtimes of Personas deleted since launch, kept without tabs until quit, because the download items in their rows refer to their download lists and profiles unowned.
@@ -115,6 +117,7 @@ public final class BrowserSession: ObservableObject {
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
             primary = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+            if primary == nil { enginesThatDidNotStart.insert(kind) }
         }
         guard let primary else { throw SessionError.noEngineStarted }
         primaryEngine = primary.engineKind
@@ -372,7 +375,11 @@ public final class BrowserSession: ObservableObject {
     /// The engine's application, started on first use. Returns nil when the engine cannot start.
     private func application(for kind: EngineKind) -> (any EngineApplication)? {
         if let application = applications[kind] { return application }
-        guard let application = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory) else { return nil }
+        guard let application = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory) else {
+            enginesThatDidNotStart.insert(kind)
+            return nil
+        }
+        enginesThatDidNotStart.remove(kind)
         start(application)
         return application
     }
@@ -1025,22 +1032,23 @@ public final class BrowserSession: ObservableObject {
         return engines(of: personaID).webExtensions
     }
 
-    /// The registered engines that run web extensions on this Mac, each with its extension runtime's version, without starting any of them.
+    /// The registered engines that run web extensions on this Mac, each with its extension runtime's version, without starting any of them. An engine whose application did not start is not one of them.
     var extensionEngineVersions: [EngineKind: String] {
         var versions: [EngineKind: String] = [:]
-        for kind in registry.registeredKinds {
+        for kind in registry.registeredKinds where !enginesThatDidNotStart.contains(kind) {
             guard let engine = registry.engine(for: kind), engine.capabilities.contains(.extensions), let version = engine.extensionRuntimeVersion else { continue }
             versions[kind] = version
         }
         return versions
     }
 
-    /// The Persona's profiles in the engines that run web extensions, by engine, which start if they have not started.
+    /// The Persona's profiles in the engines that run web extensions, by engine, which start if they have not started. An engine whose application or profile does not start is left out: unlike a tab's runtime, it takes no other engine's profile, which would run each extension twice there.
     func extensionEngines(in personaID: Persona.ID) -> [EngineKind: any EngineExtensions] {
         guard personas.contains(where: { $0.id == personaID }) else { return [:] }
+        let personaEngines = engines(of: personaID)
         var engines: [EngineKind: any EngineExtensions] = [:]
         for kind in extensionEngineVersions.keys {
-            engines[kind] = runtime(for: kind, in: personaID).context.extensions
+            engines[kind] = (personaEngines.runtimes[kind] ?? startRuntime(kind, in: personaEngines))?.context.extensions
         }
         return engines
     }

@@ -1,4 +1,4 @@
-// Which engines run each web extension's package: the checks at staging, of the installed plugin a package updates, and before loads without a current answer, `engineChecks` in `plugins.json` with each engine's version and the names this build does not know, loading only where a package runs, failures to start kept to their engine, the kind unavailable only without an engine, and where the review sheet and Settings say a plugin runs. A recording engine stands in for Chromium.
+// Which engines run each web extension's package: the checks at staging, of the installed plugin a package updates, before loads without a current answer, of switched-off plugins once the engines run, and of a plugin switched on again after every engine refused it, `engineChecks` in `plugins.json` with each engine's version and the names this build does not know, loading only where a package runs, failures to start kept to their engine, only the engines whose profiles start counting, the kind unavailable only without an engine, and where the review sheet and Settings say a plugin runs. A recording engine stands in for Chromium.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -136,6 +136,25 @@ struct EngineCoverageTests {
         second.discard(update)
     }
 
+    @Test func checksSwitchedOffPluginsOnceTheEnginesRun() async throws {
+        let (first, firstRuntime) = launch()
+        let switchedOff = try await first.installEverything(from: sampleExtensionFolder, isEnabled: false)
+        try await first.installEverything(from: folder.package("other", ["manifest.json": #"{"manifest_version": 3, "name": "O", "version": "1"}"#]))
+        await firstRuntime.waitForEngines()
+        first.close()
+
+        // A macOS update changed WebKit's version. The engines start for the enabled plugin and check the switched-off one too, without loading it.
+        let (webKit, chromium) = replaceEngines(webKit: "W2", chromium: "C1")
+        let (second, runtime) = launch()
+        #expect(second.plugins.first { $0.id == switchedOff.id }?.engineChecks == [.chromium: true])
+        await runtime.waitForEngines()
+        let plugin = try #require(second.plugins.first { $0.id == switchedOff.id })
+        #expect(!plugin.isEnabled && plugin.engineChecks == [.webKit: true, .chromium: true] && plugin.enginesNote == "Runs on WebKit and Chromium tabs.")
+        #expect(try fileChecks() == ["webKit": "true W2", "chromium": "true C1"])
+        #expect(webKit.checkCount == 2 && chromium.checkCount == 0)
+        #expect(webKit.loaded[sampleID] == nil && chromium.loaded[sampleID] == nil)
+    }
+
     @Test func switchesOffAPluginThatNoEngineRunsAnyMore() async throws {
         let (first, firstRuntime) = launch()
         try await first.installEverything(from: sampleExtensionFolder)
@@ -151,6 +170,13 @@ struct EngineCoverageTests {
         #expect(plugin.engineChecks == [.webKit: false, .chromium: false] && plugin.enginesNote == "No engine on this Mac runs it.")
         #expect(webKit.loaded.isEmpty && chromium.loaded.isEmpty)
         #expect(try fileChecks() == ["webKit": "false W2", "chromium": "false C2"])
+
+        // Switching it on again has the engines check the package again, so that it goes off again with the reason.
+        second.setEnabled(true, for: plugin.id)
+        await runtime.waitForEngines()
+        let again = try #require(second.plugins.first)
+        #expect(!again.isEnabled && again.failure == "WebKit cannot run this extension: The engine refused it.")
+        #expect(webKit.checkCount == 2 && chromium.checkCount == 2 && webKit.loaded.isEmpty && chromium.loaded.isEmpty)
     }
 
     @Test func keepsAFailureToStartToItsEngine() async throws {
@@ -185,7 +211,57 @@ struct EngineCoverageTests {
         plugin = try #require(manager.plugins.first)
         #expect(!plugin.isEnabled)
         #expect(plugin.failure == "Arch could not start it on WebKit tabs: The engine refused it.\nArch could not start it on Chromium tabs: The engine refused it.")
+        // Both engines run the package, so only the failures say why it is off.
+        #expect(plugin.enginesNote == nil)
         #expect(webKit.loaded.isEmpty && chromium.loaded.isEmpty)
+    }
+
+    @Test func countsOnlyTheEnginesWhoseProfilesStart() async throws {
+        let (first, firstRuntime) = launch()
+        let installed = try await first.installEverything(from: sampleExtensionFolder)
+        await firstRuntime.waitForEngines()
+        first.close()
+
+        // Chromium is listed but its profile does not start: its current answer no longer counts, and WebKit alone runs the plugin.
+        var (webKit, chromium) = replaceEngines(webKit: "W1", chromium: "C1")
+        host.enginesThatDoNotStart = [.chromium]
+        let (second, secondRuntime) = launch()
+        #expect(second.plugins.first?.engineChecks == [.webKit: true, .chromium: true])
+        await secondRuntime.waitForEngines()
+        #expect(secondRuntime.engines == [.webKit: "W1"])
+        var plugin = try #require(second.plugins.first)
+        #expect(plugin.engineChecks == [.webKit: true] && plugin.enginesNote == "Runs on WebKit tabs.")
+        #expect(webKit.loaded[sampleID] != nil && chromium.checkCount == 0 && chromium.loaded.isEmpty)
+        // A failure to start on WebKit then leaves it on no engine, which switches it off.
+        webKit.refused = [sampleID]
+        second.setEnabled(false, for: installed.id)
+        await secondRuntime.waitForEngines()
+        second.setEnabled(true, for: installed.id)
+        await secondRuntime.waitForEngines()
+        plugin = try #require(second.plugins.first)
+        #expect(!plugin.isEnabled && plugin.failure == "Arch could not start it on WebKit tabs: The engine refused it.")
+        second.close()
+
+        // WebKit refuses the package after an update: its refusal alone switches the plugin off, and the file keeps Chromium's answer.
+        (webKit, chromium) = replaceEngines(webKit: "W2", chromium: "C1")
+        webKit.refusedNames = ["Sample Extension"]
+        let (third, thirdRuntime) = launch()
+        third.setEnabled(true, for: installed.id)
+        await thirdRuntime.waitForEngines()
+        plugin = try #require(third.plugins.first)
+        #expect(!plugin.isEnabled && plugin.failure == "WebKit cannot run this extension: The engine refused it.")
+        #expect(plugin.engineChecks == [.webKit: false] && plugin.enginesNote == "No engine on this Mac runs it.")
+        #expect(try fileChecks() == ["webKit": "false W2", "chromium": "true C1"])
+        #expect(chromium.checkCount == 0 && chromium.loaded.isEmpty)
+    }
+
+    @Test func installsAPackageAsUnavailableWhenNoProfileStarts() async throws {
+        host.enginesThatDoNotStart = [.webKit, .chromium]
+        let (manager, runtime) = launch()
+        let package = try await manager.stage(sampleExtensionFolder)
+        #expect(package.engineChecks.isEmpty && runtime.engines.isEmpty)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        #expect(manager.plugins.first?.unavailability == "No engine on this Mac runs web extensions.")
     }
 
     @Test func isUnavailableOnlyWithoutAnEngine() async throws {

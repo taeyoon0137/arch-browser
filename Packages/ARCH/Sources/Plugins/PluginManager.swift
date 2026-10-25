@@ -19,7 +19,7 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var failure: String?
     /// Why the plugin's runtime cannot run it on this Mac, which Settings shows; its contributions stay out meanwhile.
     public var unavailability: String?
-    /// The current answers: whether each engine that checked the package at the engine's present version runs it. Empty for kinds that Arch runs alike on every engine, and for engines that have not checked the package.
+    /// The current answers: whether each engine that runs the kind for the Persona and checked the package at the engine's present version runs it. Empty for kinds that Arch runs alike on every engine, and for engines that have not checked the package.
     public var engineChecks: [EngineKind: Bool] = [:]
     /// Why the package failed to start in this run on engines whose check it passed, each as a sentence that names the engine, which Settings shows until the plugin is switched on again or updates.
     public var engineFailures: [EngineKind: String] = [:]
@@ -29,10 +29,11 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         Set(engineChecks.filter(\.value).keys).subtracting(engineFailures.keys)
     }
 
-    /// Where the plugin runs, as Settings says it, such as "Runs on WebKit tabs.", once an engine has checked its package.
+    /// Where the plugin runs, as Settings says it, such as "Runs on WebKit tabs.", once an engine has checked its package, or "No engine on this Mac runs it." when every engine that checked it refuses it. Nil while it starts on none of the engines that run it, whose failures say why.
     public var enginesNote: String? {
         guard !engineChecks.isEmpty else { return nil }
-        return PluginPackage.runsNote(on: engines) ?? "No engine on this Mac runs it."
+        if let note = PluginPackage.runsNote(on: engines) { return note }
+        return engineChecks.values.contains(true) ? nil : "No engine on this Mac runs it."
     }
 
     /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
@@ -132,6 +133,7 @@ public final class PluginManager: ObservableObject {
             runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: id, failure: reason) }
             runtime.onCheck = { [weak self] id, checks in self?.record(checks, for: id) }
             runtime.onEngineFailure = { [weak self] id, engine, reason in self?.recordEngineFailure(reason, of: id, on: engine) }
+            runtime.onEnginesChange = { [weak self, kind = runtime.kind] in self?.readEngineChecks(of: kind) }
         }
         runEnabledPlugins()
     }
@@ -172,10 +174,10 @@ public final class PluginManager: ObservableObject {
         }.first
     }
 
-    /// Tells each runtime the enabled plugins of its kind, none while it cannot run them on this Mac.
+    /// Tells each runtime the installed plugins of its kind, on or off, so that it runs the enabled ones; none while it cannot run them on this Mac.
     private func runEnabledPlugins() {
         for (kind, runtime) in runtimes {
-            runtime.run(plugins.filter { $0.kind == kind && $0.isEnabled && $0.unavailability == nil })
+            runtime.run(plugins.filter { $0.kind == kind && $0.unavailability == nil })
         }
     }
 
@@ -194,7 +196,7 @@ public final class PluginManager: ObservableObject {
         var plugin = plugins[index]
         plugin.isEnabled = isEnabled
         plugin.failure = failure
-        // Switching a plugin on tries again the engines where it failed to start.
+        // Switching a plugin on tries again the engines where it failed to start; the runtime checks again the package of one that every engine refused.
         if isEnabled { plugin.engineFailures = [:] }
         plugins[index] = plugin
         failures[id] = nil
@@ -347,6 +349,18 @@ public final class PluginManager: ObservableObject {
         if plugin.isEnabled, runtime.engines.keys.allSatisfy({ plugin.engineChecks[$0] == false }), let reason = Self.refusal(in: checks) {
             setEnabled(false, for: id, failure: reason)
         }
+    }
+
+    /// Reads the current answers of the kind's plugins from their install entries again, and why the kind cannot run, after its runtime's engines changed.
+    private func readEngineChecks(of kind: PluginKind) {
+        guard let runtime = runtimes[kind] else { return }
+        var plugins = plugins
+        for index in plugins.indices where plugins[index].kind == kind {
+            guard case let .readable(install)? = installs.first(where: { $0.id == plugins[index].id.rawValue }) else { continue }
+            plugins[index].engineChecks = Self.currentChecks(install.engineChecks, engines: runtime.engines)
+            plugins[index].unavailability = runtime.unavailability
+        }
+        if plugins != self.plugins { self.plugins = plugins }
     }
 
     /// Keeps why the plugin failed to start on the engine for the run, so that the engine counts as one it does not run on, and switches the plugin off with every engine's reason once it has failed on each engine it ran on.

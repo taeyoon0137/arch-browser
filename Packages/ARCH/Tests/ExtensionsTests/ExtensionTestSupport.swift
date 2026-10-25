@@ -63,6 +63,8 @@ final class RecordingHost: WebExtensionHost {
     var engines: [EngineKind: any EngineExtensions] = [:]
     /// The version of each engine's extension runtime, `1` for an engine the test does not name.
     var versions: [EngineKind: String] = [:]
+    /// Engines that the host lists but whose profiles do not start, as an engine that fails when the runtime first needs it.
+    var enginesThatDoNotStart: Set<EngineKind> = []
     var tabs: [UUID: any EngineWebContents] = [:]
     private(set) var popups: [NSPopover] = []
     private(set) var sheets: [NSAlert] = []
@@ -72,7 +74,9 @@ final class RecordingHost: WebExtensionHost {
         Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
     }
 
-    func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions] { engines }
+    func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions] {
+        engines.filter { !enginesThatDoNotStart.contains($0.key) }
+    }
     func webContents(ofTab id: UUID) -> (any EngineWebContents)? { tabs[id] }
     func activate(_ tab: any EngineWebContents) {}
     func close(_ tab: any EngineWebContents) {}
