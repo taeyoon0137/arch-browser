@@ -1,9 +1,143 @@
-// Parses exported bookmarks into favorites. Favorites have no folders, so each format's folders are flattened in the order the file lists them.
+// Parses bookmarks. HTML bookmark files become favorites directly. Chromium-format JSON and WebKit-format property lists become bookmark trees: the file import flattens a tree into favorites in file order, and the browser import splits it so that a bar's bookmarks become favorites and other folders become pinned folders named by their paths.
 import Browsing
 import Foundation
 
+/// A bookmark, favorite, or pinned tab read from another browser, with a web address.
+struct ImportedItem: Equatable {
+    /// The browser's identifier for the item, which the import record keys on. `nil` when the file gives none.
+    var sourceID: String?
+    var url: URL
+    /// The item's name, or its host when the name is empty.
+    var title: String
+    /// The name the user gave a tab, which the tab keeps as its own name. `nil` for bookmarks.
+    var customTitle: String?
+
+    /// Only web pages come in (`ImportedFile.webURL`), so this returns nil for any other address.
+    init?(sourceID: String? = nil, address: String, title: String?, customTitle: String? = nil) {
+        guard let url = ImportedFile.webURL(address) else { return nil }
+        let name = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let customName = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.sourceID = sourceID
+        self.url = url
+        self.title = name.isEmpty ? url.host ?? url.absoluteString : name
+        self.customTitle = customName.isEmpty ? nil : customName
+    }
+
+    /// The item as the file import adds it to the favorites.
+    var favorite: Favorite {
+        Favorite(url: url, title: title)
+    }
+}
+
+/// A folder as Arch keeps it: folders do not nest, so the name is the source folder's path.
+struct ImportedFolder: Equatable {
+    var sourceID: String?
+    var name: String
+    var items: [ImportedItem]
+}
+
+/// Bookmarks or a sidebar's pinned items as the source nests them.
+struct BookmarkTree: Equatable {
+    enum Node: Equatable {
+        case item(ImportedItem)
+        case folder(Folder)
+    }
+
+    struct Folder: Equatable {
+        /// Where the paths of the folders below a folder start.
+        enum Kind {
+            /// A bookmarks bar: its own items become favorites, and the paths of its folders start below it.
+            case bar
+            /// Any other top-level folder: its own items go into a folder named after it, and the paths of its folders start with its name.
+            case root
+            case folder
+        }
+
+        var sourceID: String?
+        var name: String
+        var kind: Kind = .folder
+        var children: [Node] = []
+
+        /// Every item in the folder and the folders below it, in order.
+        var allItems: [ImportedItem] {
+            children.flatMap { node -> [ImportedItem] in
+                switch node {
+                case .item(let item): return [item]
+                case .folder(let folder): return folder.allItems
+                }
+            }
+        }
+
+        /// The folder without the items `isExcluded` matches, here or in the folders below it.
+        func removingItems(where isExcluded: (ImportedItem) -> Bool) -> Folder {
+            var folder = self
+            folder.children = children.compactMap { node in
+                switch node {
+                case .item(let item): return isExcluded(item) ? nil : node
+                case .folder(let child): return .folder(child.removingItems(where: isExcluded))
+                }
+            }
+            return folder
+        }
+    }
+
+    var roots: [Folder]
+
+    /// Every item in file order, as the file import makes favorites of them.
+    var allItems: [ImportedItem] {
+        roots.flatMap(\.allItems)
+    }
+
+    /// The bars' own items in bar order, and every other folder that directly holds items, in tree order with each folder before the ones below it. A folder's name is its path joined with " / ", such as "Work / Docs" below a bar and "Other Bookmarks / Recipes" below another root, so that folders of different roots stay apart. Empty folders are left out.
+    func split() -> (barItems: [ImportedItem], folders: [ImportedFolder]) {
+        var barItems: [ImportedItem] = []
+        var folders: [ImportedFolder] = []
+        func visit(_ folder: Folder, below parentPath: [String]) {
+            let name = folder.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let path: [String]
+            switch folder.kind {
+            case .bar: path = []
+            case .root: path = [name]
+            case .folder: path = parentPath + [name.isEmpty ? "Untitled Folder" : name]
+            }
+            let items = folder.children.compactMap { node -> ImportedItem? in
+                if case .item(let item) = node { return item }
+                return nil
+            }
+            if folder.kind == .bar {
+                barItems += items
+            } else if !items.isEmpty {
+                folders.append(ImportedFolder(sourceID: folder.sourceID, name: path.joined(separator: " / "), items: items))
+            }
+            for case .folder(let child) in folder.children {
+                visit(child, below: path)
+            }
+        }
+        roots.forEach { visit($0, below: []) }
+        return (barItems, folders)
+    }
+
+    /// Combines the trees of one profile's bookmark files in order. Each root follows the earlier trees' root of the same name, and an item whose address an earlier tree has is left out, so it comes once.
+    static func merging(_ trees: [BookmarkTree]) -> BookmarkTree {
+        var roots: [Folder] = []
+        var earlierAddresses: Set<URL> = []
+        for tree in trees {
+            for root in tree.roots {
+                let kept = root.removingItems { earlierAddresses.contains($0.url) }
+                if let index = roots.lastIndex(where: { $0.name == kept.name }) {
+                    roots.insert(kept, at: index + 1)
+                } else {
+                    roots.append(kept)
+                }
+            }
+            earlierAddresses.formUnion(tree.allItems.map(\.url))
+        }
+        return BookmarkTree(roots: roots)
+    }
+}
+
 enum BookmarkFile {
-    /// HTML bookmark files, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name.
+    /// HTML bookmark files, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name. Favorites have no folders, so the file's folders are flattened.
     static func netscapeFavorites(from data: Data) -> [Favorite] {
         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252) ?? ""
         return anchorPattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
@@ -13,48 +147,65 @@ enum BookmarkFile {
                   let valueRange = (1...3).lazy.compactMap({ Range(reference.range(at: $0), in: attributes) }).first else { return nil }
             let name = String(text[nameRange])
             let plainName = tagPattern.stringByReplacingMatches(in: name, range: NSRange(name.startIndex..., in: name), withTemplate: "")
-            return ImportedFile.favorite(address: decodingEntities(String(attributes[valueRange])), title: decodingEntities(plainName))
+            return ImportedItem(address: decodingEntities(String(attributes[valueRange])), title: decodingEntities(plainName))?.favorite
         }
     }
 
-    /// Chromium-format Bookmarks JSON: a `roots` object whose folders hold `url` and `folder` nodes. The bookmarks bar comes first, then the other and mobile folders, then any other root. Returns nil for JSON without `roots`.
-    static func chromiumFavorites(from data: Data) -> [Favorite]? {
+    /// Chromium-format Bookmarks JSON: a `roots` object whose folders hold `url` and `folder` nodes, each with its `guid`. The bookmarks bar comes first, then the other and mobile bookmarks, then any other root by key. Returns nil for JSON without `roots`.
+    static func chromiumTree(from data: Data) -> BookmarkTree? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let roots = object["roots"] as? [String: Any] else { return nil }
-        let knownRoots = ["bookmark_bar", "other", "synced"]
-        let rootNames = knownRoots.filter { roots[$0] != nil } + roots.keys.filter { !knownRoots.contains($0) }.sorted()
-        var favorites: [Favorite] = []
-        func collect(_ node: Any?) {
-            guard let node = node as? [String: Any] else { return }
-            if node["type"] as? String == "url", let address = node["url"] as? String,
-               let favorite = ImportedFile.favorite(address: address, title: node["name"] as? String) {
-                favorites.append(favorite)
+        let knownRoots: [(key: String, name: String, kind: BookmarkTree.Folder.Kind)] = [
+            ("bookmark_bar", "Bookmarks Bar", .bar), ("other", "Other Bookmarks", .root), ("synced", "Mobile Bookmarks", .root),
+        ]
+        let otherKeys = roots.keys.filter { key in !knownRoots.contains { $0.key == key } }.sorted()
+        func folder(_ node: [String: Any], name: String, kind: BookmarkTree.Folder.Kind) -> BookmarkTree.Folder {
+            let children = (node["children"] as? [Any] ?? []).compactMap { child -> BookmarkTree.Node? in
+                guard let child = child as? [String: Any] else { return nil }
+                switch child["type"] as? String {
+                case "url":
+                    return (child["url"] as? String).flatMap { ImportedItem(sourceID: child["guid"] as? String, address: $0, title: child["name"] as? String) }.map(BookmarkTree.Node.item)
+                case "folder":
+                    return .folder(folder(child, name: child["name"] as? String ?? "", kind: .folder))
+                default:
+                    return nil
+                }
             }
-            (node["children"] as? [Any])?.forEach(collect)
+            return BookmarkTree.Folder(sourceID: node["guid"] as? String, name: name, kind: kind, children: children)
         }
-        rootNames.forEach { collect(roots[$0]) }
-        return favorites
+        let rootFolders = knownRoots.compactMap { root in
+            (roots[root.key] as? [String: Any]).map { folder($0, name: root.name, kind: root.kind) }
+        } + otherKeys.compactMap { key in
+            (roots[key] as? [String: Any]).map { folder($0, name: $0["name"] as? String ?? key, kind: .root) }
+        }
+        return BookmarkTree(roots: rootFolders)
     }
 
-    /// WebKit-format Bookmarks.plist: `WebBookmarkTypeList` dictionaries whose `Children` hold more lists and `WebBookmarkTypeLeaf` entries, each with `URLString` and its name under `URIDictionary`. The reading list holds pages saved to read once, not bookmarks, so it stays out. Returns nil for a property list without `Children`.
-    static func webKitFavorites(from data: Data) -> [Favorite]? {
+    /// WebKit-format Bookmarks.plist: `WebBookmarkTypeList` dictionaries whose `Children` hold more lists and `WebBookmarkTypeLeaf` entries, each with `URLString`, its name under `URIDictionary`, and its `WebBookmarkUUID`. The file's top level is a root named Bookmarks; the Favorites bar (`BookmarksBar`) is the bar, and the bookmarks menu (`BookmarksMenu`) another root. The reading list holds pages saved to read once, not bookmarks, so it stays out. Returns nil for a property list without `Children`.
+    static func webKitTree(from data: Data) -> BookmarkTree? {
         guard let root = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let children = root["Children"] as? [[String: Any]] else { return nil }
-        var favorites: [Favorite] = []
-        func collect(_ node: [String: Any]) {
-            switch node["WebBookmarkType"] as? String ?? "" {
+        func node(_ entry: [String: Any]) -> BookmarkTree.Node? {
+            let sourceID = entry["WebBookmarkUUID"] as? String
+            switch entry["WebBookmarkType"] as? String ?? "" {
             case "WebBookmarkTypeLeaf":
-                if let address = node["URLString"] as? String,
-                   let favorite = ImportedFile.favorite(address: address, title: (node["URIDictionary"] as? [String: Any])?["title"] as? String) {
-                    favorites.append(favorite)
+                let title = (entry["URIDictionary"] as? [String: Any])?["title"] as? String
+                return (entry["URLString"] as? String).flatMap { ImportedItem(sourceID: sourceID, address: $0, title: title) }.map(BookmarkTree.Node.item)
+            case "WebBookmarkTypeList":
+                let title = entry["Title"] as? String ?? ""
+                let list: (name: String, kind: BookmarkTree.Folder.Kind)
+                switch title {
+                case "com.apple.ReadingList": return nil
+                case "BookmarksBar": list = ("Favorites", .bar)
+                case "BookmarksMenu": list = ("Bookmarks Menu", .root)
+                default: list = (title, .folder)
                 }
-            case "WebBookmarkTypeList" where node["Title"] as? String != "com.apple.ReadingList":
-                (node["Children"] as? [[String: Any]])?.forEach(collect)
+                let children = (entry["Children"] as? [[String: Any]] ?? []).compactMap(node)
+                return .folder(BookmarkTree.Folder(sourceID: sourceID, name: list.name, kind: list.kind, children: children))
             default:
-                break
+                return nil
             }
         }
-        children.forEach(collect)
-        return favorites
+        return BookmarkTree(roots: [BookmarkTree.Folder(sourceID: root["WebBookmarkUUID"] as? String, name: "Bookmarks", kind: .root, children: children.compactMap(node))])
     }
 
     // MARK: HTML

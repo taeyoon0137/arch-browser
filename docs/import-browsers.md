@@ -80,10 +80,10 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
 | Safari | History | The history store |
 
 - Each Chromium-family profile and each Arc profile has one row in the sheet with its own destination Persona. Safari has one row.
-- Only web addresses are imported, following `ImportedFile.webURL`. Titles fall back to the host, as in `ImportedFile.favorite`.
+- Only web addresses are imported, following `ImportedFile.webURL`. Titles fall back to the host, as in `ImportedItem`.
 - A Chromium-family profile's bookmarks come from `Bookmarks`, then `AccountBookmarks`, each root of the second following the same root of the first; an address that appears in both comes once.
 - Favorites have no folders, so only bookmarks directly in the bars become favorites, in bar order; the bars' folders go to the space.
-- Arch's folders do not nest. Each source folder directly containing bookmarks becomes one pinned folder named by its path, joined with " / ". A path in a bar starts below the bar, such as "Work / Docs". A path in any other root starts with the root's name, such as "Other Bookmarks / Recipes", so folders of different roots stay apart; Safari's top level counts as a root named Bookmarks. Bookmarks directly under a root other than a bar go into a folder named after it: Other Bookmarks, Mobile Bookmarks, Bookmarks Menu, or Bookmarks. Empty folders are skipped.
+- Arch's folders do not nest. Each source folder directly containing bookmarks becomes one pinned folder named by its path, joined with " / ". A path in a bar starts below the bar, such as "Work / Docs". A path in any other root starts with the root's name, such as "Other Bookmarks / Recipes", so folders of different roots stay apart; Safari's top level counts as a root named Bookmarks. Bookmarks directly under a root other than a bar go into a folder named after it: Other Bookmarks, Mobile Bookmarks, Bookmarks Menu, or Bookmarks. A folder without a name counts as Untitled Folder in paths. Empty folders are skipped.
 - Arc spaces:
   - The name is the space's `title`. A space without one gets the next free "Space <n>" name, as new spaces do; the record under Duplicates brings later imports back to that space.
   - The tint is the `SpaceTint` whose system color's hue is nearest to `primaryColorPalette.midTone`, or gray when that color's saturation is below 20%. A space without a theme takes the next tint of the rotation, as new spaces do.
@@ -174,7 +174,7 @@ Only `BrowserSource.swift` names browser products in code, as `AGENTS.md` allows
   - `SiteSearch.swift`: `add(_:)` adds shortcuts accepted by `canSave`, writes the file once, and returns the number added. When the store kept its defaults because its file did not decode, the first write moves that file to `site-search.unreadable.json`, as `session.json` does, so neither the import nor Settings overwrites it.
   - `SpaceTheme.swift`: `SpaceTint.nearest(red:green:blue:)`.
 - `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`: the menu item and its validation.
-- `Package.swift`: an `ImportTests` test target that depends on `Import` and links `sqlite3`.
+- `Package.swift`: an `ImportTests` test target that depends on `Import`, and on `Browsing` and `History` for the types its tests name, and links `sqlite3`.
 - `docs/plan.md` and `docs/features.md` as the Working Rules require.
 
 ## Tests

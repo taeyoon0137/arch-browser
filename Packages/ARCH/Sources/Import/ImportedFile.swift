@@ -20,9 +20,9 @@ struct ImportedFile {
         let start = String(decoding: data.prefix(1_024), as: UTF8.self)
         let favorites: [Favorite]?
         if header.starts(with: Data("bplist".utf8)) || start.contains("<plist") {
-            favorites = BookmarkFile.webKitFavorites(from: data)
+            favorites = BookmarkFile.webKitTree(from: data)?.allItems.map(\.favorite)
         } else if start.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))).hasPrefix("{") {
-            favorites = BookmarkFile.chromiumFavorites(from: data)
+            favorites = BookmarkFile.chromiumTree(from: data)?.allItems.map(\.favorite)
         } else if start.range(of: "NETSCAPE-Bookmark-file", options: .caseInsensitive) != nil || ["html", "htm"].contains(url.pathExtension.lowercased()) {
             favorites = BookmarkFile.netscapeFavorites(from: data)
         } else {
@@ -38,21 +38,22 @@ struct ImportedFile {
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host?.isEmpty == false else { return nil }
         return url
     }
-
-    /// A favorite for a bookmark with a web address, titled with the bookmark's name, or its host when the name is empty.
-    static func favorite(address: String, title: String?) -> Favorite? {
-        guard let url = webURL(address) else { return nil }
-        let name = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return Favorite(url: url, title: name.isEmpty ? url.host ?? url.absoluteString : name)
-    }
 }
 
-/// Why a chosen file gave nothing to import.
-enum ImportError: LocalizedError {
+/// Why a file gave nothing to import.
+enum ImportError: LocalizedError, Equatable {
     /// The file is in none of the formats Import reads.
     case unrecognizedFormat(URL)
-    /// SQLite could not open the copy of the database, or the copy has no Chromium-format `urls` table.
+    /// SQLite could not open the copy of the database, or the copy lacks the history table or its columns.
     case unreadableHistory(URL)
+    /// The file does not parse, or the database copy lacks the expected table or columns.
+    case unreadableFile(URL)
+    /// macOS privacy protection keeps Arch from reading the file (`EPERM`). A privacy setting in System Settings opens it.
+    case blockedByPrivacy(URL)
+    /// The file's owner or permissions keep Arch from reading it (`EACCES`), which no privacy setting changes.
+    case notPermitted(URL)
+    /// The profile keeps its bookmarks only in files encrypted with the browser's own key.
+    case encryptedBookmarks
 
     var errorDescription: String? {
         switch self {
@@ -60,6 +61,14 @@ enum ImportError: LocalizedError {
             return "\u{201C}\(url.lastPathComponent)\u{201D} is not a bookmarks file or a History database that Arch can read."
         case .unreadableHistory(let url):
             return "\u{201C}\(url.lastPathComponent)\u{201D} could not be read as a History database."
+        case .unreadableFile(let url):
+            return "\u{201C}\(url.lastPathComponent)\u{201D} could not be read."
+        case .blockedByPrivacy(let url):
+            return "macOS privacy protection keeps Arch from reading \u{201C}\(url.lastPathComponent)\u{201D}."
+        case .notPermitted(let url):
+            return "Arch does not have permission to read \u{201C}\(url.lastPathComponent)\u{201D}."
+        case .encryptedBookmarks:
+            return "The bookmarks are encrypted with the browser's own key."
         }
     }
 }
