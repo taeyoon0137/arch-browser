@@ -1,4 +1,4 @@
-// The shortcuts of a menu whose items change while the app runs, as the Plugins menu's do: where Settings lists its commands, which default shortcuts give way to other commands', and that the user's choices reach new items.
+// The shortcuts of a menu whose items change while the app runs, as the Plugins menu's do: where Settings lists its commands, which default shortcuts and choices give way to other commands', and that the user's choices reach new items.
 import AppKit
 import Testing
 @testable import Preferences
@@ -10,6 +10,7 @@ import Testing
     private let menuBar = NSMenu()
     private let pluginsMenu = NSMenu(title: "Plugins")
     private let copy = Self.item("Copy", action: "copy:", key: "c", modifiers: .command)
+    private let minimize = Self.item("Minimize", action: "minimize:", key: "m", modifiers: .command)
 
     init() {
         // Without a global shortcut, the tests register no hot key.
@@ -17,7 +18,7 @@ import Testing
         settings = ShortcutSettings(defaults: defaults.store)
         menuBar.addItem(Self.menuBarItem("Edit", [copy]))
         menuBar.addItem(Self.menuBarItem("Plugins", menu: pluginsMenu))
-        menuBar.addItem(Self.menuBarItem("Window", [Self.item("Minimize", action: "minimize:", key: "m", modifiers: .command)]))
+        menuBar.addItem(Self.menuBarItem("Window", [minimize]))
         settings.manage(menuBar)
     }
 
@@ -45,9 +46,9 @@ import Testing
 
     @Test func givesDefaultsWayToAppCommandsAndEarlierItems() throws {
         let items = fillPluginsMenu()
-        #expect(try command("First ▸ Copy Plain").defaultOwner == "Copy")
-        #expect(try command("First ▸ Read").defaultOwner == nil)
-        #expect(try command("Second ▸ Read Aloud").defaultOwner == "First ▸ Read")
+        #expect(try command("First ▸ Copy Plain").shortcutOwner == "Copy")
+        #expect(try command("First ▸ Read").shortcutOwner == nil)
+        #expect(try command("Second ▸ Read Aloud").shortcutOwner == "First ▸ Read")
         #expect(items.copyPlain.keyEquivalent.isEmpty && items.readAloud.keyEquivalent.isEmpty)
         #expect(items.read.keyEquivalent == "r" && items.read.keyEquivalentModifierMask == [.control, .option])
         #expect(copy.keyEquivalent == "c")
@@ -64,8 +65,34 @@ import Testing
     @Test func freesADefaultWhenItsOwnerChanges() throws {
         let items = fillPluginsMenu()
         settings.setShortcut(KeyShortcut(key: "k", modifiers: .command), for: try command("Copy"))
-        #expect(try command("First ▸ Copy Plain").defaultOwner == nil)
+        #expect(try command("First ▸ Copy Plain").shortcutOwner == nil)
         #expect(items.copyPlain.keyEquivalent == "c" && items.copyPlain.keyEquivalentModifierMask == .command)
+    }
+
+    @Test func givesChoicesWayToAppCommandsChosenWhileTheItemWasAway() throws {
+        let shortcut = KeyShortcut(key: "m", modifiers: [.command, .option])
+        _ = fillPluginsMenu()
+        settings.setShortcut(shortcut, for: try command("First ▸ Read"))
+        // Another Persona's Plugins menu lacks the item, so Settings asks nothing before Minimize takes the shortcut.
+        pluginsMenu.removeAllItems()
+        settings.manageChangingMenu(pluginsMenu)
+        settings.setShortcut(shortcut, for: try command("Minimize"))
+        let items = fillPluginsMenu()
+        #expect(try command("First ▸ Read").shortcutOwner == "Minimize" && settings.shortcut(for: try command("First ▸ Read")) == nil)
+        #expect(items.read.keyEquivalent.isEmpty)
+        #expect(minimize.keyEquivalent == "m" && minimize.keyEquivalentModifierMask == [.command, .option])
+        // Read no longer has ⌃⌥R, so Read Aloud takes its default.
+        #expect(items.readAloud.keyEquivalent == "r" && items.readAloud.keyEquivalentModifierMask == [.control, .option])
+    }
+
+    @Test func givesTheFirstOfTwoItemsAChoiceTheyShare() throws {
+        let shortcut = KeyShortcut(key: "x", modifiers: [.control, .option])
+        let items = fillPluginsMenu()
+        // As choices made in two Personas, each of whose Plugins menus has one of the items.
+        settings.setShortcut(shortcut, for: try command("Second ▸ Read Aloud"))
+        settings.setShortcut(shortcut, for: try command("First ▸ Read"))
+        #expect(try command("Second ▸ Read Aloud").shortcutOwner == "First ▸ Read")
+        #expect(items.read.keyEquivalent == "x" && items.readAloud.keyEquivalent.isEmpty)
     }
 
     private static func item(_ title: String, action: String, key: String, modifiers: NSEvent.ModifierFlags) -> NSMenuItem {

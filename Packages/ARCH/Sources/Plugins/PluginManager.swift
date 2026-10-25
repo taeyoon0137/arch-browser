@@ -148,15 +148,26 @@ public final class PluginManager: ObservableObject {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 
-    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one with the identifier of a built-in plugin. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
+    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one whose identifier `checkInstallable(_:)` refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
         let root = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let package = try await Task.detached { try PluginPackage.stage(url, at: root) }.value
-        guard builtIns[package.manifest.id] == nil else {
+        do {
+            try checkInstallable(package.manifest.id)
+        } catch {
             discard(package)
-            throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(package.manifest.id.rawValue).")
+            throw error
         }
         return package
+    }
+
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin may have: a built-in plugin's, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    private func checkInstallable(_ id: PluginID) throws {
+        guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
+        let list = directory.appendingPathComponent(PluginListFile.name)
+        guard ![list, PluginFile.unreadableURL(of: list)].contains(where: { $0.lastPathComponent == id.rawValue }) else {
+            throw PluginError.invalidPackage("Arch keeps a file named \(id.rawValue) beside the installed plugins, so no plugin can have it as its identifier.")
+        }
     }
 
     /// Deletes a staged package that the user chose not to install.
@@ -168,7 +179,7 @@ public final class PluginManager: ObservableObject {
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says. A package with an installed plugin's identifier updates it: the new package replaces the old one, the plugin keeps its place, storage, and secrets, and its running instance stops, so that its next use starts the new code.
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws {
         let id = package.manifest.id
-        guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
+        try checkInstallable(id)
         let destination = Self.packageFolder(of: id, in: directory)
         let fileManager = FileManager.default
         badges[id] = nil

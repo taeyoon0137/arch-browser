@@ -54,7 +54,7 @@ public struct PluginCommand: Identifiable, Hashable, Sendable {
     public var symbol: String?
     /// Words the palette matches besides the title.
     public var keywords: [String]
-    /// The shortcut of the command's item in the Plugins menu, which the index adds when the manifest lists none there. The user can change it in Settings ▸ Shortcuts.
+    /// The shortcut of the command's first item in the Plugins menu, which the index adds when the manifest lists none there. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
 
     public init(id: String, title: String, symbol: String? = nil, keywords: [String] = [], shortcut: PluginShortcut? = nil) {
@@ -217,7 +217,7 @@ public struct PluginMenuEntry: Hashable, Sendable {
     public let command: PluginCommandRef
     /// The item's title, or its command's.
     public let title: String
-    /// The command's shortcut, which the Plugins menu gives the item.
+    /// The command's shortcut, which the Plugins menu gives the item; nil for a later item of the same command there.
     public let shortcut: PluginShortcut?
 }
 
@@ -241,18 +241,20 @@ public struct PluginContributionIndex: Sendable {
         let entry: PluginMenuEntry
     }
 
-    /// Menu items and sidebar items whose commands the manifest does not list are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it.
+    /// Menu items and sidebar items whose commands the manifest does not list are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
     @MainActor
     init(_ plugins: [InstalledPlugin]) {
         let enabled = plugins.filter(\.isEnabled)
         commands = enabled.flatMap { plugin in plugin.manifest.contributions.commands.map { plugin.attributed($0) } }
         menuItems = enabled.flatMap { plugin in
             let contributions = plugin.manifest.contributions
+            var inPluginsMenu: Set<String> = []
             let listed = contributions.menuItems.compactMap { item -> LocatedEntry? in
                 guard let command = contributions.commands.first(where: { $0.id == item.command }) else { return nil }
-                return LocatedEntry(location: item.location, entry: PluginMenuEntry(command: PluginCommandRef(plugin: plugin.id, command: command.id), title: item.title ?? command.title, shortcut: command.shortcut))
+                let repeatsPluginsMenuItem = item.location == .pluginsMenu && !inPluginsMenu.insert(command.id).inserted
+                return LocatedEntry(location: item.location, entry: PluginMenuEntry(command: PluginCommandRef(plugin: plugin.id, command: command.id), title: item.title ?? command.title,
+                                                                                    shortcut: repeatsPluginsMenuItem ? nil : command.shortcut))
             }
-            let inPluginsMenu = Set(listed.filter { $0.location == .pluginsMenu }.map(\.entry.command.command))
             let forShortcuts = contributions.commands.filter { $0.shortcut != nil && !inPluginsMenu.contains($0.id) }.map { command in
                 LocatedEntry(location: .pluginsMenu, entry: PluginMenuEntry(command: PluginCommandRef(plugin: plugin.id, command: command.id), title: command.title, shortcut: command.shortcut))
             }

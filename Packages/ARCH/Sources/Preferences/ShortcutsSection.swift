@@ -50,7 +50,7 @@ struct ShortcutsSection: View {
         }
     }
 
-    /// A command whose default another command has says so below its title.
+    /// A command whose shortcut another command has says so below its title.
     private func row(_ command: ShortcutCommand) -> some View {
         LabeledContent {
             HStack(spacing: 4) {
@@ -69,7 +69,7 @@ struct ShortcutsSection: View {
             }
         } label: {
             Text(command.title)
-            if let owner = command.defaultOwner, let shortcut = command.defaultShortcut, !shortcuts.isChanged(command) {
+            if let owner = command.shortcutOwner, let shortcut = shortcuts.preferredShortcut(for: command) {
                 Text("\(shortcut.displayName) is used by \(owner).")
             }
         }

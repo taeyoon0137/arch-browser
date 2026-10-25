@@ -176,7 +176,8 @@ import Testing
                 ])),
             installed("org.example.second", name: "Second", contributions: PluginContributions(
                 commands: [PluginCommand(id: "read", title: "Read Aloud", shortcut: shortcut)],
-                menuItems: [PluginMenuItem(command: "read", location: .pluginsMenu), PluginMenuItem(command: "read", location: .spaceMenu)])),
+                menuItems: [PluginMenuItem(command: "read", location: .pluginsMenu), PluginMenuItem(command: "read", location: .spaceMenu),
+                            PluginMenuItem(command: "read", location: .pluginsMenu, title: "Read Again")])),
             installed("org.example.off", name: "Off", contributions: PluginContributions(
                 commands: [PluginCommand(id: "read", title: "Read")],
                 menuItems: [PluginMenuItem(command: "read", location: .pluginsMenu)],
@@ -195,9 +196,9 @@ import Testing
         #expect(entry.command == PluginCommandRef(plugin: PluginID(rawValue: "org.example.first")!, command: "read"))
     }
 
-    @Test func putsEveryShortcutInThePluginsMenu() {
-        #expect(titles(at: .pluginsMenu) == ["First: Save, Read", "Second: Read Aloud"])
-        #expect(index.menuSections(at: .pluginsMenu).flatMap(\.items).map(\.shortcut) == [nil, shortcut, shortcut])
+    @Test func putsEveryShortcutInThePluginsMenuOnce() {
+        #expect(titles(at: .pluginsMenu) == ["First: Save, Read", "Second: Read Aloud, Read Again"])
+        #expect(index.menuSections(at: .pluginsMenu).flatMap(\.items).map(\.shortcut) == [nil, shortcut, shortcut, nil])
     }
 
     @Test func showsPageContextItemsForTheContextsOfTheClick() {

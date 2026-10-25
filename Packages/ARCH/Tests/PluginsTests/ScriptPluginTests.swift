@@ -68,6 +68,10 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
              .invalidPackage("plugin.json: contributes.settings[0].default does not suit a number setting.")),
             ("built-in identifier", ["plugin.json": #"{"id": "local.arch.browser.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
              .invalidPackage("A plugin built into Arch has the identifier local.arch.browser.page-address.")),
+            ("plugin list identifier", ["plugin.json": #"{"id": "Plugins.JSON", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("Arch keeps a file named plugins.json beside the installed plugins, so no plugin can have it as its identifier.")),
+            ("unreadable plugin list identifier", ["plugin.json": #"{"id": "plugins.unreadable.json", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("Arch keeps a file named plugins.unreadable.json beside the installed plugins, so no plugin can have it as its identifier.")),
         ]
         let manager = manager()
         for (name, files, expected) in cases {
