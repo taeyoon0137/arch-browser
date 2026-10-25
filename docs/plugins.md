@@ -260,7 +260,7 @@ The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesi
 
 ## AI hooks and plugins that AI writes
 
-- AI hooks (VII.6) are built-in plugins. They subscribe to `pageLoaded` and `downloadFinished` and call the AI interface through the `ai` permission. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`.
+- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. A plugin with `ai` that declares hooks registers with the same center under its own feature (VII.7).
 - The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
 - VII.7 writes a script plugin only, never a built-in plugin or a web extension, and never with `nativeMessaging`. It puts the package in a staging folder and calls `PluginManager.stage(_:)`.
 - An AI-written plugin uses the same review sheet, showing every file's full source and the permissions. It installs disabled with the origin `generated`, and Settings labels it Written by AI. The user enables it.
@@ -853,7 +853,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. IV.12 builds the web extension runtime on WebKit as a `PluginRuntime`; VI.1 adds Chromium; IV.13 follows both.
-6. VII.6 and VII.7 build on the `ai` permission and the staging and review path.
+6. VII.7 adds the `ai` permission and plugin hooks on VII.6's hook center, and builds on the staging and review path.
 
 ## Open decisions
 

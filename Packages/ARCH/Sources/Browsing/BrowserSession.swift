@@ -122,6 +122,7 @@ public final class BrowserSession: ObservableObject {
         MainActor.assumeIsolated {
             pageAssistant.attach(to: self)
             pluginPages.attach(to: self)
+            hooks.attach(to: self)
         }
     }
 
@@ -1198,6 +1199,8 @@ public final class BrowserSession: ObservableObject {
 
     /// The conversations of the page reader and the question popover, which windows show. It follows the session's tabs once the session exists.
     public let pageAssistant = PageAssistant()
+    /// Posts the tabs' and downloads' events to the AI interface's hooks and applies their actions, once the session exists.
+    private let hooks = BrowserHooks()
 
     // MARK: Drag and drop
 
@@ -1392,6 +1395,7 @@ public final class BrowserSession: ObservableObject {
             let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state, in: personaID), id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
+            tab.suggestedTitle = record.suggestedTitle
             tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -1441,7 +1445,7 @@ public final class BrowserSession: ObservableObject {
         let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
-                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
+                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID, suggestedTitle: $0.suggestedTitle) },
                                folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
                                splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }

@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, and version 11 the main windows. Files without a version are version 1.
-    static let currentVersion = 11
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, and version 12 each open tab's suggested title. Files without a version are version 1.
+    static let currentVersion = 12
 
     struct TabRecord: Codable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -25,6 +25,8 @@ struct SessionSnapshot: Codable {
         var state: Data?
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
+        /// The name a hook gave the tab's page, with the page's address. `nil` without one, in closed-tab records, and in files before version 12.
+        var suggestedTitle: SuggestedTitle?
     }
 
     /// A favorite's tab, which opens where it was when the favorite is next opened.

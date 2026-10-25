@@ -1,4 +1,4 @@
-// Posts a local notification when a download finishes while the app is not active. Clicking the notification reveals the file in the Finder.
+// Posts a local notification when a download finishes while the app is not active. Clicking the notification reveals the file in the Finder, or opens its folder once a hook has renamed it.
 import AppKit
 import UserNotifications
 
@@ -46,7 +46,15 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            DispatchQueue.main.async { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+            // The notification keeps the name the file finished with, so a file a hook renamed since shows in its folder.
+            let file = URL(fileURLWithPath: path)
+            DispatchQueue.main.async {
+                if FileManager.default.fileExists(atPath: path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([file])
+                } else {
+                    NSWorkspace.shared.open(file.deletingLastPathComponent())
+                }
+            }
         }
         completionHandler()
     }

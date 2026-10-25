@@ -31,6 +31,8 @@ public final class AIService: ObservableObject, AIClient {
 
     public let settings: AISettingsStore
     public let usage: AIUsageStore
+    /// Where features subscribe to browser events, which run their requests through this service.
+    public private(set) lazy var hooks = AIHookCenter(service: self)
     @Published public private(set) var features: [AIFeature] = []
     /// The last 50 requests, newest last, kept in memory only.
     @Published public private(set) var activity: [AIActivityEntry] = []
@@ -128,7 +130,7 @@ public final class AIService: ObservableObject, AIClient {
     private func serve(_ request: AIRequest, entry: inout AIActivityEntry, continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws -> AIFinishReason {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
         let models = try settings.routeModels(for: feature, carryingPageData: AIPartText.carriesData(request.messages))
-        try checkBudgets(for: feature)
+        if let budget = reachedBudget(for: feature) { throw AIError.budgetReached(budget) }
         if feature.trigger == .automatic { usage.countAutomaticRequest(for: feature.id) }
         var attempt = AIAttempt(continuation: continuation)
         var lastError = AIError.notConfigured(.noUsableModel)
@@ -207,15 +209,16 @@ public final class AIService: ObservableObject, AIClient {
         }
     }
 
-    /// When the month's estimated cost reaches the spending limit, automatic and user requests both stop until the user raises it.
-    private func checkBudgets(for feature: AIFeature) throws {
+    /// The budget that keeps the feature from starting a request now: an automatic feature's daily request limit, or the monthly spending limit, which stops automatic and user requests alike until the user raises it.
+    func reachedBudget(for feature: AIFeature) -> AIBudget? {
         let limits = settings.limits
         if feature.trigger == .automatic, usage.automaticRequestCount(for: feature.id) >= limits.automaticRequestsPerDay {
-            throw AIError.budgetReached(.automaticRequestsPerDay)
+            return .automaticRequestsPerDay
         }
         if let limit = limits.monthlySpendingLimit, usage.estimatedCost(in: limit.currency) >= limit.amount {
-            throw AIError.budgetReached(.monthlySpending)
+            return .monthlySpending
         }
+        return nil
     }
 
     private func limiter(for provider: AIProviderID) -> AIRateLimiter {

@@ -150,7 +150,7 @@ public final class PageAssistant: ObservableObject {
     private func tab(_ tab: Tab, willMoveTo url: URL?) {
         let previous = tabAddresses[tab.id]
         tabAddresses[tab.id] = url
-        guard let previous, let url, Self.withoutFragment(previous) != Self.withoutFragment(url) else { return }
+        guard let previous, let url, previous.withoutFragment != url.withoutFragment else { return }
         guard Self.site(of: previous) == Self.site(of: url) else { return forgetConversations(ofTab: tab.id) }
         readerConversations[tab.id]?.pageDidChange()
         session?.closePageQuestions(ofTab: tab.id)
@@ -168,12 +168,6 @@ public final class PageAssistant: ObservableObject {
     /// The host, or the scheme for an address without one, such as a local file.
     private static func site(of url: URL) -> String {
         url.host?.lowercased() ?? url.scheme ?? ""
-    }
-
-    private static func withoutFragment(_ url: URL) -> URL {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.fragment != nil else { return url }
-        components.fragment = nil
-        return components.url ?? url
     }
 
     // MARK: Instructions

@@ -204,6 +204,15 @@ import Testing
         #expect(reloadedWindows.map(\.isSidebarVisible) == windows.map(\.isSidebarVisible))
     }
 
+    @Test func suggestedTitlesLoadAndSaveWithTheirAddresses() throws {
+        let folder = try SessionFolder()
+        try folder.write(version12File)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.tabs.map(\.suggestedTitle) == [SuggestedTitle(title: "Example Article", url: URL(string: "https://example.org/a")!), nil, nil])
+        folder.store.saveNow(loaded)
+        #expect(try #require(folder.store.load()).tabs.map(\.suggestedTitle) == loaded.tabs.map(\.suggestedTitle))
+    }
+
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
         let folder = try SessionFolder()
         let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": [1, 2],"#)
@@ -435,3 +444,8 @@ private let version11File = version8File.replacingOccurrences(of: #""version": 8
     { "id": "\(window5)", "currentSpaceID": "\(spaceA)", "selectedTabID": "\(closedTab)", "isSidebarVisible": true }
   ],
 """)
+
+/// A version 12 file: the version 8 file with a suggested title for its first tab.
+private let version12File = version8File
+    .replacingOccurrences(of: #""version": 8,"#, with: #""version": 12,"#)
+    .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "suggestedTitle": { "title": "Example Article", "url": "https://example.org/a" }, "isPinned": true,"#)

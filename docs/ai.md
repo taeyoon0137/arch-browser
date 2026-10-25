@@ -1,6 +1,6 @@
 # AI interface design
 
-This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.5 built the interface, the providers, the page reader, and questions in the page; VII.6 and VII.7 in `docs/plan.md` build the rest. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
+This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.6 built the interface, the providers, the page reader, questions in the page, and hooks; VII.7 in `docs/plan.md` builds the rest. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
 
 ## Purpose and principles
 
@@ -20,7 +20,7 @@ This note designs the AI interface (feature row 43) and the parts of rows 52 to 
 | `Browsing` | `Packages/ARCH/Sources/Browsing` | The page reader, questions in the page, hook events and their actions, and the page source for the interface | `AI` |
 | `Plugins` | `Packages/ARCH/Sources/Plugins` | The plugin system (V.11), the AI plugin composer and review sheet (VII.7) | `AI` |
 
-- `AI` does not depend on `Browsing`, `Plugins`, or an engine module. `Browsing` supplies page content through the `AIPageSource` protocol and applies hook actions through a handler it sets.
+- `AI` does not depend on `Browsing`, `Plugins`, or an engine module. `Browsing` supplies page content through the `AIPageSource` protocol, and as the hook center's host (`AIHookHost`) it posts hook events and applies their actions.
 - The app shell gives Settings ▸ AI a closure that opens the built-in terminal, as `BrowserSession.showSettings` does for the Settings window. This keeps `Preferences` independent of `Terminal`.
 
 ## Client API
@@ -256,8 +256,8 @@ public final class AIService: ObservableObject, AIClient {
     public static let shared: AIService
 
     public let settings: AISettingsStore
-    public let hooks: AIHookCenter
     public let usage: AIUsageStore
+    public private(set) lazy var hooks = AIHookCenter(service: self)
     @Published public private(set) var features: [AIFeature]
     /// The last 50 requests, kept in memory only.
     @Published public private(set) var activity: [AIActivityEntry]
@@ -586,49 +586,52 @@ Hooks let features act on browser events (row 54). The hook center lives in `AI`
 ### Events
 
 ```swift
-public enum AIHookEventKind: String, Codable, Sendable {
+public enum AIHookEventKind: Hashable, Sendable {
     case pageLoaded, tabOpened, downloadFinished
 }
 
 public enum AIHookEvent: Sendable {
-    /// The main frame finished loading and the page has a title.
+    /// A tab's main frame finished loading a document.
     case pageLoaded(AIPageLoad)
-    /// A tab opened, not a restored one.
+    /// A tab opened, other than one restored from the saved session.
     case tabOpened(AITabOpen)
-    /// A download finished and its file is in place.
+    /// A download finished, and its file is in place.
     case downloadFinished(AIDownloadFinish)
 
     public var kind: AIHookEventKind { get }
-    /// The tab ID or the download ID. A newer event of the same kind and subject replaces an older one.
-    public var subject: String { get }
-    /// The site the event belongs to, for site exclusions.
+    /// The tab or download the event is about. A newer event of the same kind and subject replaces an older one.
+    public var subject: UUID { get }
+    /// The address the event comes from, to which site exclusions apply: the page, or the download's page or source.
     public var url: URL? { get }
 }
 
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
-    public var title: String
-    /// The first load of a tab restored from `session.json`.
+    /// The first load of a tab restored from the saved session.
     public var isRestore: Bool
 }
 
 public struct AITabOpen: Sendable {
     public var tabID: UUID
+    /// The address the tab opens with; nil while its engine has reported none.
     public var url: URL?
-    public var openerTabID: UUID?
 }
 
 public struct AIDownloadFinish: Sendable {
-    public var downloadID: String
+    /// The download's entry in the library, unique among every Persona's downloads.
+    public var downloadID: UUID
     public var fileURL: URL
+    /// What a hook may send about the download, which never includes the file's contents.
     public var info: AIDownloadInfo
-    public var tabID: UUID?
+    /// Whether the user chose the file's name, in a save panel.
+    public var isNamedByUser: Bool
 }
 ```
 
-- `Browsing` posts `pageLoaded` from `Tab.didFinishLoad` for main-frame loads, excluding same-document navigations. It posts `tabOpened` from `BrowserSession.adopt` for tabs that are not restored, and `downloadFinished` when a download item reports completion.
-- `Browsing` calls `cancel(subject:)` when a tab closes or a download is removed.
+- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's `isLoading` turns false and the tab has an address. Whether Chromium reports a same-document navigation that way needs verification; the tab name hook asks nothing for a page it has named already. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- The engines do not report the page that started a download, so `AIDownloadInfo` carries the file's name, media type (from its extension), size, and source address, without a page address or title.
+- `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
 
 ### Subscription
 
@@ -636,21 +639,22 @@ public struct AIDownloadFinish: Sendable {
 public struct AIHookRegistration: Sendable {
     public var feature: AIFeatureID
     public var events: Set<AIHookEventKind>
-    /// Lower runs earlier. Built-in hooks use 100, plugins 200.
+    /// Lower runs earlier, and hooks of equal priority run in the order of their feature IDs. Built-in hooks use 100.
     public var priority: Int
-    /// Time to wait after the event before running. A newer event for the same subject during the wait replaces this one.
+    /// How long after the event the hook runs. A newer event for the same subject during the wait replaces this one.
     public var delay: Duration
-    /// The hook is cancelled when it runs longer. Default 30 seconds.
+    /// The center stops the hook when it runs longer. Default 30 seconds.
     public var timeout: Duration
+    /// The kinds of action the center passes on to the host; it drops the others.
     public var allowedActions: Set<AIHookActionKind>
     public var handler: @Sendable (AIHookEvent, AIHookContext) async throws -> AIHookResult
 }
 
 public struct AIHookContext: Sendable {
-    /// Requests sent through it carry the hook's feature ID.
+    /// Sends each request under the hook's feature, whatever feature the request names.
     public let client: any AIClient
     public let pages: any AIPageSource
-    /// Actions earlier hooks applied for this event.
+    /// The actions that earlier hooks applied for this event.
     public let appliedActions: [AIHookAction]
 }
 
@@ -660,26 +664,46 @@ public enum AIHookResult: Sendable {
     case actions([AIHookAction], stop: Bool)
 }
 
+/// The browser side of the hooks, which `Browsing` provides.
 @MainActor
-public final class AIHookCenter {
-    public func subscribe(_ registration: AIHookRegistration) -> AIHookSubscription
-    public func post(_ event: AIHookEvent)
-    public func cancel(subject: String)
-    /// Set by `Browsing`. Applies an action and reports whether it applied.
-    public var actionHandler: ((AIHookAction, AIHookEvent) -> Bool)?
+public protocol AIHookHost: AnyObject {
+    var pages: any AIPageSource { get }
+    /// Applies the action when it still fits the event, and reports whether it did.
+    func apply(_ action: AIHookAction, for event: AIHookEvent) -> Bool
 }
 
-public final class AIHookSubscription: Sendable {
+@MainActor
+public final class AIHookCenter: ObservableObject {
+    /// Each feature's error from its last hook that did not succeed, until one succeeds or the user changes the feature's route.
+    @Published public private(set) var lastErrors: [AIFeatureID: any Error]
+    /// Features whose hooks paused after consecutive authentication or provider errors.
+    @Published public private(set) var pausedFeatures: Set<AIFeatureID>
+    /// Set by `Browsing`, which owns it. Without a host, posted events reach no hook.
+    public weak var host: (any AIHookHost)?
+
+    @discardableResult
+    public func subscribe(_ registration: AIHookRegistration) -> AIHookSubscription
+    public func post(_ event: AIHookEvent)
+    public func cancel(subject: UUID)
+    public func resume(_ feature: AIFeatureID)
+}
+
+@MainActor
+public final class AIHookSubscription {
     public func cancel()
+}
+
+public enum AIHookError: Error, Sendable {
+    case timedOut
 }
 ```
 
 ### Ordering
 
 - Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once.
-- Each hook's actions apply as soon as it returns, before the next hook runs.
+- Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only those the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
-- The center skips hooks whose feature is off or has no route, without sending a request.
+- The center skips, without sending a request, hooks whose feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. It checks again after each hook's delay, together with the event's site.
 
 ### Cancellation
 
@@ -688,34 +712,35 @@ The center cancels a running hook and its request when:
 - a newer event of the same kind and subject arrives (the new event's chain starts after the old one stops);
 - the subject goes away (`cancel(subject:)`);
 - the user switches the feature off or changes its route;
-- the subscription is canceled, as when a plugin is disabled or removed;
-- the timeout passes;
+- the subscription is canceled;
+- the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 
-The center discards canceled hooks' actions. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. Three consecutive `authentication` or `providerUnavailable` errors pause the hook until the user resumes it or changes its route.
+The center discards canceled hooks' actions, even ones a hook returns after it was cancelled. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. Three consecutive `authentication` or `providerUnavailable` errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route; changing the route also clears the last error.
 
 ### Actions
 
 ```swift
-public enum AIHookActionKind: String, Codable, Sendable {
+public enum AIHookActionKind: Hashable, Sendable {
     case renameTab, renameDownload
 }
 
 public enum AIHookAction: Sendable {
     case renameTab(UUID, title: String)
-    case renameDownload(id: String, filename: String)
+    case renameDownload(UUID, filename: String)
 }
 ```
 
-`Browsing` checks each action before applying it:
+`BrowserHooks` checks each action before applying it:
 
-- `renameTab` applies only while the tab still shows the event's address, ignoring the fragment, and the user has not named the tab. It sets a new `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle ?? pageTitle`. Moving to another document clears the suggested title; renaming the tab to an empty name clears both. `session.json` stores the suggested title with its address in the next snapshot version. Restored tabs keep their names without new requests; the hook skips a restored tab that has one.
-- `renameDownload` applies only while the file is still at its path. It keeps the extension, removes `/`, `:`, control characters, and leading dots, limits the name to 80 characters, and picks an unused name. The download row keeps the original name and offers Restore Original Name in its context menu.
+- `renameTab` applies only to a `pageLoaded` event's tab, while it is a space's tab that the user has not named and that still shows the event's address, ignoring the fragment; a favorite's tab goes by its favorite's name. It takes the first line of the title, trimmed and cut to 60 characters, and sets `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle ?? pageTitle`. Moving to another document clears the suggested title. Renaming the tab to an empty name or to the page's title clears both, and confirming the name the row shows changes nothing. `session.json` (snapshot version 12) stores each open tab's suggested title with its address; closed-tab records keep none.
+- `renameDownload` applies only to a `downloadFinished` event's download, while the user has not chosen its name and its file is still at the event's path. It removes `/` and `:`, turns control characters into spaces, trims spaces and dots from both ends, keeps the file's extension (dropping it from the suggestion when the suggestion repeats it), limits the name to 80 characters with the extension, and picks an unused name in the file's folder. The download row then shows the new name and offers Restore Original Name in its context menu, which gives the file its original name, or the nearest unused one. A finished download's notification keeps the original path, so clicking it after a rename opens the file's folder.
 
-The first hooks (VII.6):
+The first hooks (`BuiltInHooks` in `Browsing`):
 
-- `hook.tabName`, on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It sends the page's title, address, and first 2,000 characters of text. It asks for a name of at most four words in the page's language.
-- `hook.downloadName`, on `downloadFinished`. It sends the download part only, not the file's contents, and asks for a descriptive file name.
+- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips a restored tab's first load, so that launching sends no request, and a page that has a suggested title already. It reads the tab's page with a 2,000-character limit, skips a page that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
+- `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
+- Both ask for at most 256 output tokens and take the reply's first line without the quotes, emphasis, or final period a model may add.
 
 ## Features that AI adds at run time
 
@@ -871,7 +896,7 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error or pause.
+- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, and for a feature whose hooks paused, Resume. An automatic feature's last error comes from the hook center, since its hooks can stop before a request.
 - Sites: the exclusion list.
 - Usage: the totals, the monthly spending limit, and the daily limit for automatic features.
 - Activity: the in-memory request list.
@@ -882,17 +907,15 @@ public struct AIPrice: Codable, Sendable {
 - HTTP provider tests use a `URLProtocol` subclass that replays hand-written server-sent event transcripts for both formats: text deltas, tool calls whose arguments arrive in pieces, usage, error events, 401, 429 with and without `retry-after`, 5xx, and a cut stream. No test uses a real key or the network.
 - Command-line provider tests use a fixture script in the test target. It prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone. Adding the same script as a command-line tool in Settings ▸ AI lets the app run every feature without a provider account.
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, cool-down), the daily and monthly limits, and usage normalization.
-- Hook tests cover ordering by priority, `stop`, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, discarded actions after cancellation, and pausing after three failures.
+- Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
 - Plugin tests (VII.7) cover manifest checks, the syntax check, digest mismatches, and that each `arch` call fails without its permission.
 - In-app checks for the remaining tasks (the lead runs them from the bundle; `docs/plan.md`'s regression checklist covers the built ones):
-  - VII.6: with the tab name hook on, a new page's tab gets a short name; the user's own name is never replaced; a finished download is renamed and Restore Original Name works.
   - VII.7: a request produces a plugin whose review lists its permissions; it runs only after Enable; Remove deletes it.
 
 ## Task breakdown
 
 | Task | Builds | Main files |
 |---|---|---|
-| VII.6 | `AIHookCenter`, event posting and actions in `Browsing`, `Tab.suggestedTitle` in `session.json`, and the two hooks | `AI`, `Browsing`, `SessionStore.swift` |
 | VII.7 | The composer, checks, review sheet, and lifetime of AI-written plugins | `Plugins`, `AI` |
 
-VII.6 builds on the built tasks; VII.7 also needs V.11.
+VII.7 also needs V.11.

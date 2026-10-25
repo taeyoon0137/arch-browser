@@ -24,6 +24,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var title: String
     /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
     @Published public internal(set) var customTitle: String?
+    /// A name a hook gave the page, shown while the user has not named the tab. Another document clears it, and the session restores it.
+    @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
@@ -101,7 +103,8 @@ public final class Tab: ObservableObject, Identifiable {
     /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
     var isListedInSidebar: Bool { !isInSmallWindow }
 
-    public var displayTitle: String { customTitle ?? pageTitle }
+    /// The user's name for the tab, a hook's name for its page, or the page's title.
+    public var displayTitle: String { customTitle ?? suggestedTitle?.title ?? pageTitle }
 
     /// The page's title, or its host if it has no title.
     public var pageTitle: String {
@@ -115,6 +118,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
+        if let url, let suggested = suggestedTitle, url.withoutFragment != suggested.url.withoutFragment { suggestedTitle = nil }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
@@ -401,6 +405,21 @@ extension Tab: EngineWebContentsNavigationDelegate {
         let url = action.url
         DispatchQueue.main.async { previewLink(url) }
         return .cancel
+    }
+}
+
+/// A name a hook gave a tab's page, with the page's address, so that the name goes when the tab shows another document.
+struct SuggestedTitle: Codable, Equatable {
+    var title: String
+    var url: URL
+}
+
+extension URL {
+    /// The address without its fragment, which only names a place in the document.
+    var withoutFragment: URL {
+        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false), components.fragment != nil else { return self }
+        components.fragment = nil
+        return components.url ?? self
     }
 }
 

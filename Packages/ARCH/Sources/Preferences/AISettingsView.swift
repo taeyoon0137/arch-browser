@@ -41,7 +41,7 @@ struct AISettingsView: View {
                 }
                 switch page {
                 case .providers: AIProvidersPage(service: service, settings: settings)
-                case .features: AIFeaturesPage(service: service, settings: settings)
+                case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks)
                 case .sites: AISitesPage(settings: settings)
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
@@ -66,10 +66,11 @@ func aiFootnote(_ text: String) -> some View {
 
 // MARK: - Features
 
-/// The default route, then one section per registered feature with its switch, its models, what it sends, and its last error. The Test Prompt feature's section also holds the prompt.
+/// The default route, then one section per registered feature with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them. The Test Prompt feature's section also holds the prompt.
 private struct AIFeaturesPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
+    @ObservedObject var hooks: AIHookCenter
 
     var body: some View {
         Section {
@@ -91,8 +92,15 @@ private struct AIFeaturesPage: View {
                 AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? "Default Model" : "None")
                 if feature.id == AIFeature.testPrompt.id {
                     AITestPromptRows(service: service, settings: settings)
-                } else if let error = lastError(of: feature.id) {
+                } else if let error = lastError(of: feature) {
                     Text(error).font(.callout).foregroundStyle(.red)
+                }
+                if hooks.pausedFeatures.contains(feature.id) {
+                    HStack {
+                        Text("Paused after \(AIHookCenter.failuresBeforePause) failed requests in a row.").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Resume") { hooks.resume(feature.id) }
+                    }
                 }
             } header: {
                 Text(feature.name)
@@ -102,8 +110,10 @@ private struct AIFeaturesPage: View {
         }
     }
 
-    private func lastError(of feature: AIFeatureID) -> String? {
-        guard case .failed(let error) = service.activity.last(where: { $0.feature == feature })?.result else { return nil }
+    /// An automatic feature's hooks can also stop before a request, as for a budget or a timeout, so its last error comes from the hook center.
+    private func lastError(of feature: AIFeature) -> String? {
+        if feature.trigger == .automatic { return hooks.lastErrors[feature.id]?.localizedDescription }
+        guard case .failed(let error) = service.activity.last(where: { $0.feature == feature.id })?.result else { return nil }
         return error.localizedDescription
     }
 

@@ -154,11 +154,16 @@ public final class BrowserWindowModel: ObservableObject {
         renamingSpaceID = nil
     }
 
-    /// An empty name or the page's own title restores the page's title. The session saves the name, as it saves every change to a tab.
+    /// An empty name or the page's own title restores the page's title, dropping a hook's name too, and the name the tab shows already changes nothing. The session saves the name, as it saves every change to a tab.
     public func renameTab(_ id: UUID, to name: String) {
         if let tab = session.tabs.first(where: { $0.id == id }) {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            tab.customTitle = trimmed.isEmpty || trimmed == tab.pageTitle ? nil : trimmed
+            if trimmed.isEmpty || trimmed == tab.pageTitle {
+                tab.customTitle = nil
+                tab.suggestedTitle = nil
+            } else if trimmed != tab.displayTitle {
+                tab.customTitle = trimmed
+            }
         }
         endRenaming(id)
     }

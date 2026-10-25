@@ -1,4 +1,4 @@
-// The downloads list fills the top of the sidebar's library. Each row reflects one engine download item and offers open, reveal, pause, resume, cancel, and remove actions.
+// The downloads list fills the top of the sidebar's library. Each row reflects one engine download item and offers open, reveal, pause, resume, cancel, and remove actions, and gives a file that a hook renamed its original name back.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -15,6 +15,8 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     @Published public private(set) var completedBytes: Int64
     @Published public private(set) var totalBytes: Int64
     @Published public private(set) var targetPath: URL?
+    /// Where a rename moved the finished file; nil while the file keeps the name the engine gave it.
+    @Published public private(set) var renamedPath: URL?
 
     init(item: any EngineDownloadItem, personaID: Persona.ID) {
         self.item = item
@@ -32,12 +34,55 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         targetPath = item.targetPath
     }
 
+    /// The file's location: where a rename moved it, or where the engine saved it.
+    public var fileURL: URL? {
+        renamedPath ?? targetPath
+    }
+
     public var filename: String {
-        targetPath?.lastPathComponent ?? item.sourceURL.lastPathComponent
+        fileURL?.lastPathComponent ?? item.sourceURL.lastPathComponent
     }
 
     public var isFinished: Bool {
         state == .completed || state == .cancelled || state == .failed
+    }
+
+    // MARK: Renaming
+
+    /// The longest file name a rename gives, extension included.
+    static let maximumFilenameLength = 80
+
+    /// Renames the finished file in its folder to `name` with the file's own extension, made safe by `safeFilename(_:keepingExtensionOf:)` and unused in the folder. Fails when the file is no longer where the entry put it, the name leaves nothing, or the file has that name already.
+    @discardableResult
+    func rename(to name: String) -> Bool {
+        guard state == .completed, let current = fileURL, let filename = Self.safeFilename(name, keepingExtensionOf: current.lastPathComponent),
+              filename != current.lastPathComponent else { return false }
+        return move(current, to: BrowserSession.uniqueDestination(for: filename, in: current.deletingLastPathComponent()))
+    }
+
+    /// Gives the renamed file back the name the engine saved it under, or the nearest unused one.
+    func restoreOriginalName() {
+        guard let current = renamedPath, let original = targetPath else { return }
+        let destination = FileManager.default.fileExists(atPath: original.path) ? BrowserSession.uniqueDestination(for: original.lastPathComponent, in: current.deletingLastPathComponent()) : original
+        move(current, to: destination)
+    }
+
+    @discardableResult
+    private func move(_ current: URL, to destination: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: current.path), (try? FileManager.default.moveItem(at: current, to: destination)) != nil else { return false }
+        renamedPath = destination == targetPath ? nil : destination
+        return true
+    }
+
+    /// A file name from a suggested name: without `/` and `:`, with spaces for control characters such as line breaks, without dots or spaces at either end, with the original file's extension, which the suggestion may repeat, and at most `maximumFilenameLength` characters. Nil when nothing is left.
+    static func safeFilename(_ suggestion: String, keepingExtensionOf original: String) -> String? {
+        let pathExtension = (original as NSString).pathExtension
+        let suffix = pathExtension.isEmpty ? "" : ".\(pathExtension)"
+        var base = String(String.UnicodeScalarView(suggestion.unicodeScalars.filter { $0 != "/" && $0 != ":" }.map { CharacterSet.controlCharacters.contains($0) ? " " : $0 }))
+        if !suffix.isEmpty, base.lowercased().hasSuffix(suffix.lowercased()) { base.removeLast(suffix.count) }
+        let edges = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "."))
+        base = String(base.trimmingCharacters(in: edges).prefix(max(maximumFilenameLength - suffix.count, 1))).trimmingCharacters(in: edges)
+        return base.isEmpty ? nil : base + suffix
     }
 }
 
@@ -85,7 +130,7 @@ struct DownloadRowView: View {
     @ObservedObject var entry: DownloadEntry
 
     private var icon: NSImage {
-        if let path = entry.targetPath?.path, entry.state == .completed { return NSWorkspace.shared.icon(forFile: path) }
+        if let path = entry.fileURL?.path, entry.state == .completed { return NSWorkspace.shared.icon(forFile: path) }
         return NSWorkspace.shared.icon(for: .data)
     }
 
@@ -127,19 +172,22 @@ struct DownloadRowView: View {
             } else if entry.state == .paused || entry.state == .failed {
                 SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
                 SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
-            } else if entry.state == .completed, let path = entry.targetPath {
+            } else if entry.state == .completed, let path = entry.fileURL {
                 SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
             }
         }
         .padding(6)
         .contentShape(Rectangle())
         .onTapGesture {
-            if entry.state == .completed, let path = entry.targetPath { NSWorkspace.shared.open(path) }
+            if entry.state == .completed, let path = entry.fileURL { NSWorkspace.shared.open(path) }
         }
         .contextMenu {
-            if let path = entry.targetPath, entry.state == .completed {
+            if let path = entry.fileURL, entry.state == .completed {
                 Button("Open") { NSWorkspace.shared.open(path) }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+                if entry.renamedPath != nil {
+                    Button("Restore Original Name", action: entry.restoreOriginalName)
+                }
                 Divider()
             }
             Button("Remove from List") { session.removeDownload(entry) }
