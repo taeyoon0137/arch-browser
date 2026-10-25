@@ -412,7 +412,7 @@ public struct AIJSONLinePaths: Codable, Sendable {
 
 ### Keychain
 
-- One generic password item per HTTP provider: service `local.arch.browser.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable.
+- One generic password item per HTTP provider: service `xyz.taeyoon.arch.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable.
 - Arch reads the key once per launch, when the first request to that provider starts. It keeps the key in memory until quit or until the user replaces or removes it. Arch never writes it to `ai.json`, logs, the activity list, or error messages.
 - Until the bundle has a stable signing identity (I.7), each rebuild changes the code signature. macOS therefore asks for the login keychain password once after each rebuild. Arch does not use the data protection keychain because it needs entitlements the bundle lacks.
 - Replacing or removing a key asks for Touch ID or the login password through LocalAuthentication (`deviceOwnerAuthentication`).

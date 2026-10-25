@@ -55,7 +55,7 @@ public final class ChromiumEngine: Engine {
     private static let profileNamePrefix = "Persona-"
     private static let removedProfileExtension = "removed"
     /// Deletes removed profiles one at a time, so that two deletions never race over one directory.
-    private static let profileDeletionQueue = DispatchQueue(label: "local.arch.browser.chromium.profile-deletion", qos: .utility)
+    private static let profileDeletionQueue = DispatchQueue(label: "xyz.taeyoon.arch.chromium.profile-deletion", qos: .utility)
 
     fileprivate static func profileName(forStorage identifier: UUID) -> String {
         profileNamePrefix + identifier.uuidString

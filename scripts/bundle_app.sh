@@ -68,7 +68,7 @@ cp "$BIN/Arch" "$APP/Contents/MacOS/Arch"
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 xcrun vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
 mv "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
-write_plist "$APP/Contents/Info.plist" "Arch" "local.arch.browser" 0 "$APP_KEYS"
+write_plist "$APP/Contents/Info.plist" "Arch" "xyz.taeyoon.arch" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$SDEF" "$APP/Contents/Resources/Arch.sdef"
 cp -R "$CEF" "$APP/Contents/Frameworks/"
@@ -93,7 +93,7 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   mkdir -p "$helper/Contents/MacOS"
   cp "$BIN/ArchHelper" "$helper/Contents/MacOS/$name"
   idsuffix="$(printf '%s' "$suffix" | tr -d ' ()' | tr 'A-Z' 'a-z')"
-  write_plist "$helper/Contents/Info.plist" "$name" "local.arch.browser.helper${idsuffix:+.$idsuffix}" 1
+  write_plist "$helper/Contents/Info.plist" "$name" "xyz.taeyoon.arch.helper${idsuffix:+.$idsuffix}" 1
   printf 'APPL????' > "$helper/Contents/PkgInfo"
 done
 

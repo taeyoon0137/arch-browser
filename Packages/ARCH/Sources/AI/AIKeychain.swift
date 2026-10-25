@@ -10,9 +10,9 @@ protocol AIKeyStore: AnyObject, Sendable {
     func removeKey(for provider: AIProviderID) throws
 }
 
-/// Service `local.arch.browser.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable. The data protection keychain needs entitlements the bundle does not have, so items go to the login keychain; until the bundle has a stable signing identity, macOS asks for the keychain password once after each rebuild.
+/// Service `xyz.taeyoon.arch.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable. The data protection keychain needs entitlements the bundle does not have, so items go to the login keychain; until the bundle has a stable signing identity, macOS asks for the keychain password once after each rebuild.
 final class AIKeychain: AIKeyStore, @unchecked Sendable {
-    static let service = "local.arch.browser.ai"
+    static let service = "xyz.taeyoon.arch.ai"
 
     private let lock = NSLock()
     /// Keys read this launch. A cached nil means the Keychain has no item.

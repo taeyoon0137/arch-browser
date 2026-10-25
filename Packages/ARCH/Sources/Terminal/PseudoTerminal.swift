@@ -13,7 +13,7 @@ final class PseudoTerminal {
     private let master: Descriptor
     private let readSource: DispatchSourceRead
     /// Keeps typed and pasted input in order.
-    private let writeQueue = DispatchQueue(label: "local.arch.browser.terminal.write")
+    private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.terminal.write")
     private var hasExited = false
 
     /// Starts the login shell in the user's home folder on a terminal of `size`. Throws a `POSIXError` when the terminal or the shell cannot start.
@@ -47,7 +47,7 @@ final class PseudoTerminal {
         }
         shellID = processID
         self.master = Descriptor(master)
-        readSource = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "local.arch.browser.terminal.read"))
+        readSource = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "xyz.taeyoon.arch.terminal.read"))
         startReading()
         waitForExit()
     }
