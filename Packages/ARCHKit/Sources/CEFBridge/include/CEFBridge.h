@@ -210,11 +210,12 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeThemeColor:(NSString *)color;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
-/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own. /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
+/// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
+- (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
+/// Reports the window that CEF made for the developer tools once they open. The app may move the window and attach it to its own.
 - (void)cefBrowserDevToolsDidOpenWindow:(NSWindow *)window;
 /// Reports that the developer tools closed.
 - (void)cefBrowserDevToolsDidClose;
-- (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port
@@ -237,6 +238,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
                          helperPath:(nullable NSString *)helperPath
                           cachePath:(NSString *)cachePath;
 + (BOOL)isInitialized;
+/// Closes every browser, runs CEF's work for up to two seconds while they close, and shuts CEF down. It runs by itself at `NSApplicationWillTerminateNotification`, once the quit is certain.
 + (void)shutdown;
 /// Builds the accessibility tree of every browser, now and as browsers open, or stops building it. Assistive apps then read Chromium pages as they read WebKit ones; the tree costs memory and time on every page.
 + (void)setAccessibilityEnabled:(BOOL)enabled;
@@ -245,6 +247,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @end
 
 /// One browser embedded as a child of `parentView`. CEF adds its own view inside `parentView`. Each popup a page opens is a browser of its own, which the bridge makes and the opener's delegate adopts through `cefBrowserDidOpenPopup:targetURL:disposition:`.
+///
+/// CEF creates and closes a browser on later tasks. The bridge keeps the object, and with it `parentView` and the view CEF adds, from creation until CEF has created the browser, and from `close` or `tryCloseWithCompletion:` until CEF has closed it, so the app may release the object at any time. Releasing an open browser that the app did not close closes it. CEF never closes the window that shows the browser.
 @interface ARCHCEFBrowser : NSObject
 /// Creates the browser in `requestContext`, whose profile the page loads in. The renderer runs `pageScripts` from the first document on.
 - (instancetype)initWithParentView:(NSView *)parentView
@@ -281,7 +285,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)executeJavaScript:(NSString *)script;
 /// Evaluates `script` in the main frame's page world and passes the string it evaluates to. `executeJavaScript:` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
 - (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable result))completion;
-/// Replaces the page scripts, from each frame's next document on. The renderer processes of the browser's frames get them at once, and each frame created after the change gets them as well. In a renderer process that had none of the browser's frames, such as after a cross-site navigation, the first document may still run the scripts the browser was created with, because CEF does not order the message before it (needs verification).
+/// Replaces the page scripts, from each frame's next document on. The renderer processes of the browser's frames get them at once, and each frame created after the change gets them as well. In a renderer process that had none of the browser's frames, such as after a cross-site navigation, the first document may still run the scripts the browser was created with, because CEF does not order the message before it.
 - (void)setPageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts;
 /// Calls a JavaScript function expression with the channel of `world` in the main frame's current document, opening one there if the world has none. Calls `completion` once on the main thread with whether the function ran without throwing and the string it returned, or with NO when the frame has no script context, the page's process quits, the browser goes, or no reply comes within ten seconds.
 - (void)callPageScriptFunction:(NSString *)function
@@ -298,7 +302,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)print;
 /// Renders the current page as PDF data on the system's default paper size. Passes `nil` if printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
-/// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page.
+/// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page. Calls `completion` once on the main thread, with nil when the capture fails, the page's process quits, or the browser closes first.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
 /// Opens Chromium's developer tools for this browser in their own window, or brings that window forward.
@@ -308,8 +312,9 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly) BOOL hasDevTools;
 /// Leaves the fullscreen the page entered. `willResize` tells CEF that leaving also resizes the view.
 - (void)exitFullscreenWillResize:(BOOL)willResize NS_SWIFT_NAME(exitFullscreen(willResize:));
+/// Closes the browser without running the page's `beforeunload` handlers. A close before CEF has created the browser takes effect once it has.
 - (void)close;
-/// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which.
+/// Runs the page's `beforeunload` handlers, then closes the browser unless the user chooses to stay. `completion` reports which. Before CEF has created the browser, it reports closing at once and the browser closes once it is created.
 - (void)tryCloseWithCompletion:(void (^)(BOOL closing))completion;
 /// Loads the page at `index` in the back-forward list. Nothing happens for the current page, an index outside the list, or an entry whose URL is no longer `url`.
 - (void)goToNavigationEntryAtIndex:(NSInteger)index url:(NSString *)url NS_SWIFT_NAME(goToNavigationEntry(at:url:));

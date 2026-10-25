@@ -1,1197 +1,35 @@
-// Initializes the Chromium Embedded Framework (CEF) and runs its message pump. Uses one `CefClient` per embedded browser.
-#import "CEFBridge.h"
+// One embedded browser: the `ARCHCEFBrowser` the app holds and the `CefClient` that passes CEF's callbacks to it, with the browser's downloads, back-forward list, context menus, page scripts, and popups.
+#import "CEFBridgeInternal.h"
 
-#include <crt_externs.h>
 #include <dispatch/dispatch.h>
+
 #include <algorithm>
 #include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
-#include <atomic>
-
-#include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
-#include "include/cef_command_line.h"
 #include "include/cef_context_menu_handler.h"
-#include "include/cef_cookie.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_permission_handler.h"
-#include "include/cef_render_process_handler.h"
 #include "include/cef_request_context.h"
-#include "include/cef_request_context_handler.h"
 #include "include/cef_request_handler.h"
-#include "include/cef_v8.h"
 #include "include/cef_values.h"
-#include "include/wrapper/cef_helpers.h"
-#include "include/wrapper/cef_library_loader.h"
 
-#pragma mark - NSApplication subclass
-
-@interface ARCHCEFApplication () <CefAppProtocol> {
-    BOOL _handlingSendEvent;
-}
-@end
-
-@implementation ARCHCEFApplication
-
-- (BOOL)isHandlingSendEvent {
-    return _handlingSendEvent;
-}
-
-- (void)setHandlingSendEvent:(BOOL)handlingSendEvent {
-    _handlingSendEvent = handlingSendEvent;
-}
-
-- (void)sendEvent:(NSEvent *)event {
-    CefScopedSendingEvent sendingEventScoper;
-    [super sendEvent:event];
-}
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-implementations"
-- (void)accessibilitySetValue:(id)value forAttribute:(NSString *)attribute {
-    if (self.accessibilityAttributeHandler) {
-        self.accessibilityAttributeHandler(attribute, value);
-    }
-    [super accessibilitySetValue:value forAttribute:attribute];
-}
-#pragma clang diagnostic pop
-
-- (void)terminate:(id)sender {
-    // AppKit does not quit while a window shows a sheet with more than one button, and quits only once that sheet ends. Answer the sheets with Cancel first so that none holds the app open. Ending a sheet can show another one, so the loop repeats a bounded number of times.
-    for (NSWindow *window in self.windows) {
-        for (int attempt = 0; attempt < 32 && window.attachedSheet; attempt++) {
-            [window endSheet:window.attachedSheet returnCode:NSModalResponseCancel];
-        }
-    }
-    [super terminate:sender];
-}
-
-@end
-
-#pragma mark - Message pump
-
-// Runs CEF work on the main run loop the way the CEF client sample does: immediately for a delay of zero or less,
-// otherwise on a one-shot timer no later than 33 ms, and again at once when a request arrives during a run.
-@interface ARCHCEFPump : NSObject
-+ (instancetype)shared;
-- (void)scheduleWork:(int64_t)delayMilliseconds;
-@end
-
-@implementation ARCHCEFPump {
-    NSTimer *_timer;
-    BOOL _isActive;
-    BOOL _reentrancyDetected;
-}
-
-static const int64_t kMaxTimerDelayMilliseconds = 1000 / 30;
-static const int64_t kTimerDelayPlaceholder = INT64_MAX;
-
-+ (instancetype)shared {
-    static ARCHCEFPump *pump;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ pump = [[ARCHCEFPump alloc] init]; });
-    return pump;
-}
-
-// Called on the main thread only.
-- (void)scheduleWork:(int64_t)delayMilliseconds {
-    if (delayMilliseconds == kTimerDelayPlaceholder && _timer != nil) {
-        return;
-    }
-    [self killTimer];
-    if (delayMilliseconds <= 0) {
-        [self doWork];
-        return;
-    }
-    int64_t delay = MIN(delayMilliseconds, kMaxTimerDelayMilliseconds);
-    _timer = [NSTimer scheduledTimerWithTimeInterval:delay / 1000.0 target:self selector:@selector(timerFired:) userInfo:nil repeats:NO];
-    [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSEventTrackingRunLoopMode];
-}
-
-- (void)timerFired:(NSTimer *)timer {
-    [self killTimer];
-    [self doWork];
-}
-
-- (void)killTimer {
-    [_timer invalidate];
-    _timer = nil;
-}
-
-- (void)doWork {
-    if (_isActive) {
-        _reentrancyDetected = YES;
-        return;
-    }
-    _reentrancyDetected = NO;
-    _isActive = YES;
-    CefDoMessageLoopWork();
-    _isActive = NO;
-    if (_reentrancyDetected) {
-        [self scheduleWork:0];
-    } else if (_timer == nil) {
-        [self scheduleWork:kTimerDelayPlaceholder];
-    }
-}
-
-@end
-
-#pragma mark - CefApp
+using namespace cef_bridge;
 
 namespace {
 
-NSString *ToNSString(const CefString &value) {
-    std::string utf8 = value.ToString();
-    return [NSString stringWithUTF8String:utf8.c_str()] ?: @"";
-}
-
-class BridgeApp : public CefApp, public CefBrowserProcessHandler {
-public:
-    CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
-
-    // CEF calls this from any thread, including the main thread from inside one of its own API calls such as `LoadURL`.
-    // Running `CefDoMessageLoopWork()` there re-enters the message loop and hangs, so the work always waits for the next
-    // pass of the main run loop, as the CEF client sample does.
-    void OnScheduleMessagePumpWork(int64_t delay_ms) override {
-        dispatch_async(dispatch_get_main_queue(), ^{ [[ARCHCEFPump shared] scheduleWork:delay_ms]; });
-    }
-
-    void OnBeforeCommandLineProcessing(const CefString &process_type, CefRefPtr<CefCommandLine> command_line) override {
-        if (process_type.empty()) {
-            // Without it Chromium shows its own sign-in window and never asks GetAuthCredentials.
-            command_line->AppendSwitch("disable-chrome-login-prompt");
-            // The app feeds Now Playing and answers the media keys for both engines. Chromium's own media controls would use the same process-wide centers, so they stay off.
-            std::string disabled = command_line->GetSwitchValue("disable-features").ToString();
-            command_line->AppendSwitchWithValue("disable-features", disabled.empty() ? "HardwareMediaKeyHandling" : disabled + ",HardwareMediaKeyHandling");
-        }
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(BridgeApp);
-};
-
-bool gInitialized = false;
-bool gAccessibilityEnabled = false;
-// The root cache path the runtime initialized with, standardized. Every request context's profile is a direct child of it.
-NSString *gRootCachePath;
-// Every browser, so that accessibility changes reach the open ones.
-NSHashTable *gBrowsers = [NSHashTable weakObjectsHashTable];
-// Every request context object, so that shutdown releases their references to CEF.
-NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
-
-// CEF returns no value from `ExecuteJavaScript`, so the browser asks the page's renderer process for the theme color.
-const char kThemeColorRequest[] = "ARCHThemeColorRequest";
-const char kThemeColorReply[] = "ARCHThemeColorReply";
-
-// The first theme color whose media query matches, as a canvas normalizes it, or an empty string. A transparent color stands for an invalid one.
-const char kThemeColorScript[] = R"JS((() => {
-  const meta = [...document.querySelectorAll('meta[name="theme-color" i]')].find((m) => m.content && (!m.media || matchMedia(m.media).matches));
-  if (!meta) return "";
-  const context = document.createElement("canvas").getContext("2d");
-  context.fillStyle = "rgba(0, 0, 0, 0)";
-  context.fillStyle = meta.content;
-  return context.fillStyle;
-})())JS";
-
-// The browser sends other scripts whose result it needs the same way. A request carries its number, the script, and a page script world or null; with a world, the script is a function to call with that world's channel. The reply carries the number, whether the script ran, and the string it returned, or null.
-const char kScriptRequest[] = "ARCHScriptRequest";
-const char kScriptReply[] = "ARCHScriptReply";
-// How long the browser waits for a reply. A frame that navigates or goes away before it answers drops the request.
+// How long the browser waits for the reply to a `kScriptRequest`. A frame that navigates or goes away before it answers drops the request.
 const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
 
-const char kAudibleReport[] = "ARCHAudibleReport";
-const char kMediaReport[] = "ARCHMediaReport";
-
-// Reports whether the document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in the page's world before the page's scripts, so it records the page's action handlers as the page sets them and runs them for the media keys. Keep it in step with WebKitAudibleScript in the WebKit adapter.
-const char kAudibleScript[] = R"JS((() => {
-  const report = __archReportAudible, reportMedia = __archReportMedia, stringify = JSON.stringify, apply = Reflect.apply;
-  const session = navigator.mediaSession, handlers = new Map();
-  let audible = false, hidden = false, current = null, reported = "null";
-  const sounds = (m) => !m.paused && !m.ended && !m.muted && m.volume > 0;
-  const largest = (artwork) => {
-    let best = "", area = -1;
-    for (const image of artwork || []) {
-      const sizes = String(image.sizes || "").toLowerCase().split(/\s+/);
-      const size = sizes.includes("any") ? Infinity : Math.max(0, ...sizes.map((s) => { const [w, h] = s.split("x").map(Number); return w * h || 0; }));
-      if (size > area) { area = size; best = image.src; }
-    }
-    return best;
-  };
-  const describe = () => {
-    if (hidden || !current || !current.isConnected) return null;
-    const metadata = session && session.metadata, duration = current.duration;
-    return {
-      playing: !current.paused && !current.ended, duration: Number.isFinite(duration) ? duration : 0, live: duration === Infinity,
-      position: current.currentTime, rate: current.playbackRate,
-      metadata: metadata && { title: metadata.title, artist: metadata.artist, album: metadata.album, artwork: largest(metadata.artwork) },
-      next: handlers.has("nexttrack"), previous: handlers.has("previoustrack"),
-    };
-  };
-  const updateMedia = () => { const text = stringify(describe()); if (text !== reported) { reported = text; reportMedia(text); } };
-  const update = (event) => {
-    if (event && event.target instanceof HTMLMediaElement && sounds(event.target)) current = event.target;
-    const now = !hidden && [...document.querySelectorAll("video, audio")].some(sounds);
-    if (now !== audible) { audible = now; report(now); }
-    updateMedia();
-  };
-  for (const type of ["play", "playing", "pause", "ended", "volumechange", "emptied", "seeked", "ratechange", "durationchange", "loadedmetadata"]) document.addEventListener(type, update, true);
-  addEventListener("pagehide", () => { hidden = true; update(); });
-  addEventListener("pageshow", () => { hidden = false; update(); });
-  if (session) {
-    const prototype = Object.getPrototypeOf(session), original = prototype.setActionHandler, metadata = Object.getOwnPropertyDescriptor(prototype, "metadata");
-    prototype.setActionHandler = function setActionHandler(action, handler) {
-      apply(original, this, [action, handler]);
-      if (this !== session) return;
-      if (typeof handler === "function") handlers.set(action, handler); else handlers.delete(action);
-      updateMedia();
-    };
-    if (metadata && metadata.set) Object.defineProperty(prototype, "metadata", { ...metadata, set(value) { apply(metadata.set, this, [value]); if (this === session) updateMedia(); } });
-  }
-  // The browser runs media actions through this function, which pages can call but not replace: the page's own handler, or else the media itself.
-  Object.defineProperty(window, "__archMediaControl", { value: (action) => {
-    const handler = handlers.get(action);
-    if (handler) return void apply(handler, session, [{ action }]);
-    if (action === "play" && current) current.play().catch(() => {});
-    if (action === "pause") { if (current) current.pause(); for (const m of document.querySelectorAll("video, audio")) if (sounds(m)) m.pause(); }
-  } });
-})())JS";
-
-// Sends a frame's audible state from its renderer to the browser, which tracks each frame.
-class AudibleReporter : public CefV8Handler {
-public:
-    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
-                 CefString &exception) override {
-        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
-        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
-        if (arguments.size() == 1 && arguments[0]->IsBool() && frame) {
-            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kAudibleReport);
-            message->GetArgumentList()->SetBool(0, arguments[0]->GetBoolValue());
-            frame->SendProcessMessage(PID_BROWSER, message);
-        }
-        return true;
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(AudibleReporter);
-};
-
-// Sends a frame's media, as the JSON text the media script writes, from its renderer to the browser.
-class MediaReporter : public CefV8Handler {
-public:
-    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
-                 CefString &exception) override {
-        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
-        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
-        if (arguments.size() == 1 && arguments[0]->IsString() && frame) {
-            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kMediaReport);
-            message->GetArgumentList()->SetString(0, arguments[0]->GetStringValue());
-            frame->SendProcessMessage(PID_BROWSER, message);
-        }
-        return true;
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(MediaReporter);
-};
-
-// The browser passes a browser's page scripts to its renderers in the browser's extra info under this key, and in this message whenever they change.
-const char kPageScriptsKey[] = "pageScripts";
-const char kPageScriptsUpdate[] = "ARCHPageScriptsUpdate";
-// The keys of one page script in those lists.
-const char kPageScriptWorldKey[] = "world";
-const char kPageScriptSourceKey[] = "source";
-const char kPageScriptAtDocumentEndKey[] = "atDocumentEnd";
-const char kPageScriptMainFrameOnlyKey[] = "mainFrameOnly";
-// A value a page script sends carries its world, the request's number, and the JSON text. The reply carries the world, the number, and the reply's JSON text or null.
-const char kPageScriptSend[] = "ARCHPageScriptSend";
-const char kPageScriptReply[] = "ARCHPageScriptReply";
-// A value for the listeners of a world's channel in the main frame carries the world and the JSON text.
-const char kPageScriptDelivery[] = "ARCHPageScriptDelivery";
-
-// Evaluates to the function that opens a world's channel in a document. That function takes the native function that sends JSON text to the browser and returns the request's number, and returns the renderer's endpoint: the `channel` the world's scripts receive, `deliver` for posted values, `reply` for replies, and `run` for the world's scripts. Endpoints live in the page's main world, so they keep what they use from the page's reach: the helper evaluates this script in each new document before the page's scripts run, so every endpoint, even one opened after the page has run, calls the built-ins as they were then, and endpoints keep their state in objects without prototypes. Keep the channel in step with `WebKitPageScripts.channelSource` in the WebKit adapter.
-const char kPageScriptEndpointOpener[] = R"JS((() => {
-  const stringify = JSON.stringify, parse = JSON.parse, apply = Reflect.apply, create = Object.create, freeze = Object.freeze, report = reportError;
-  const PromiseType = Promise, TypeErrorType = TypeError;
-  const listen = EventTarget.prototype.addEventListener, readyState = Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get;
-  const call = (target, args) => { try { apply(target, undefined, args); } catch (error) { report(error); } };
-  return (post) => {
-    const listeners = create(null), replies = create(null);
-    let listenerCount = 0;
-    const channel = freeze({
-      send: (value) => new PromiseType((resolve) => {
-        const json = stringify(value);
-        if (typeof json !== "string") throw new TypeErrorType("A page script can send only values JSON can hold.");
-        replies[post(json)] = resolve;
-      }),
-      onMessage: (listener) => {
-        if (typeof listener !== "function") throw new TypeErrorType("A page script's message listener must be a function.");
-        listeners[listenerCount++] = listener;
-      },
-    });
-    return freeze({
-      channel,
-      deliver: (json) => { const value = parse(json); for (let i = 0; i < listenerCount; i++) call(listeners[i], [value]); },
-      reply: (request, json) => {
-        const resolve = replies[request];
-        if (!resolve) return;
-        delete replies[request];
-        resolve(typeof json === "string" ? parse(json) : undefined);
-      },
-      run: (script, atDocumentEnd) => {
-        const start = () => call(script, [channel]);
-        if (atDocumentEnd && apply(readyState, document, []) === "loading") apply(listen, document, ["DOMContentLoaded", start, { once: true }]);
-        else start();
-      },
-    });
-  };
-})())JS";
-
-// One page script as a renderer keeps it.
-struct PageScript {
-    std::string world;
-    std::string source;
-    bool atDocumentEnd;
-    bool mainFrameOnly;
-};
-
-std::vector<PageScript> ReadPageScripts(CefRefPtr<CefListValue> list) {
-    std::vector<PageScript> scripts;
-    for (size_t index = 0; list && index < list->GetSize(); index++) {
-        CefRefPtr<CefDictionaryValue> entry = list->GetDictionary(index);
-        scripts.push_back({entry->GetString(kPageScriptWorldKey).ToString(), entry->GetString(kPageScriptSourceKey).ToString(),
-                           entry->GetBool(kPageScriptAtDocumentEndKey), entry->GetBool(kPageScriptMainFrameOnlyKey)});
-    }
-    return scripts;
-}
-
-// The number of the last value a page script sent from this renderer process. Numbers are never reused, so a reply that comes after its document went away cannot settle a promise of the frame's next document.
-int gLastPageScriptRequest = 0;
-
-// Sends the JSON text a page script passes to its world's channel from the renderer to the browser, and returns the request's number, which the reply carries back.
-class PageScriptSender : public CefV8Handler {
-public:
-    explicit PageScriptSender(const std::string &world) : world_(world) {}
-
-    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
-                 CefString &exception) override {
-        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
-        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
-        if (arguments.size() != 1 || !arguments[0]->IsString() || !frame) {
-            exception = "The page script channel sends only JSON text.";
-            return true;
-        }
-        int request = ++gLastPageScriptRequest;
-        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPageScriptSend);
-        message->GetArgumentList()->SetString(0, world_);
-        message->GetArgumentList()->SetInt(1, request);
-        message->GetArgumentList()->SetString(2, arguments[0]->GetStringValue());
-        frame->SendProcessMessage(PID_BROWSER, message);
-        retval = CefV8Value::CreateInt(request);
-        return true;
-    }
-
-private:
-    std::string world_;
-    IMPLEMENT_REFCOUNTING(PageScriptSender);
-};
-
-// Evaluates `code` in the context the caller entered. Returns its value, or nullptr when it throws.
-CefRefPtr<CefV8Value> Evaluate(CefRefPtr<CefV8Context> context, const CefString &code) {
-    CefRefPtr<CefV8Value> value;
-    CefRefPtr<CefV8Exception> exception;
-    return context->Eval(code, CefString(), 0, value, exception) ? value : nullptr;
-}
-
-// Evaluates a function expression in the context the caller entered. Returns the function, or nullptr when the text is not one.
-CefRefPtr<CefV8Value> EvaluateFunction(CefRefPtr<CefV8Context> context, const std::string &function) {
-    // On lines of their own, the brackets make any function expression evaluate to its function, and a final line comment in it cannot hide them.
-    CefRefPtr<CefV8Value> value = Evaluate(context, "(\n" + function + "\n)");
-    return value && value->IsFunction() ? value : nullptr;
-}
-
-// Evaluates `script` in the frame's page world. Returns the string it evaluates to, or nothing when the frame has no script context or the script throws or returns another type.
-std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefString &script) {
-    CefRefPtr<CefV8Context> context = frame->GetV8Context();
-    if (!context || !context->Enter()) {
-        return std::nullopt;
-    }
-    std::optional<CefString> result;
-    if (CefRefPtr<CefV8Value> value = Evaluate(context, script); value && value->IsString()) {
-        result = value->GetStringValue();
-    }
-    context->Exit();
-    return result;
-}
-
-// Calls the function a world's endpoint holds under `name`, in the context the caller entered.
-void CallEndpoint(CefRefPtr<CefV8Value> endpoint, const char *name, const CefV8ValueList &arguments) {
-    CefRefPtr<CefV8Value> function = endpoint->GetValue(name);
-    if (function && function->IsFunction()) {
-        function->ExecuteFunction(nullptr, arguments);
-    }
-}
-
-// Runs in the helper's renderer processes. It answers the browser's requests for values only a page's script can read, and runs each browser's page scripts with their worlds' channels.
-class HelperApp : public CefApp, public CefRenderProcessHandler {
-public:
-    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
-
-    void OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extra_info) override {
-        if (extra_info && extra_info->HasKey(kPageScriptsKey)) {
-            SetPageScripts(browser, ReadPageScripts(extra_info->GetList(kPageScriptsKey)));
-        }
-    }
-
-    void OnBrowserDestroyed(CefRefPtr<CefBrowser> browser) override {
-        std::erase_if(pageScripts_, [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
-    }
-
-    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the document gets its opener of page script endpoints, and the page scripts run, before the page's own scripts.
-    void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
-        if (!context->Enter()) {
-            return;
-        }
-        context->GetGlobal()->SetValue("__archReportAudible", CefV8Value::CreateFunction("__archReportAudible", new AudibleReporter()),
-                                       static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
-                                                                               V8_PROPERTY_ATTRIBUTE_DONTDELETE));
-        context->GetGlobal()->SetValue("__archReportMedia", CefV8Value::CreateFunction("__archReportMedia", new MediaReporter()),
-                                       static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
-                                                                               V8_PROPERTY_ATTRIBUTE_DONTDELETE));
-        Evaluate(context, kAudibleScript);
-        if (CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpointOpener); open && open->IsFunction()) {
-            openers_.push_back({context, open});
-        }
-        RunPageScripts(browser, frame, context);
-        context->Exit();
-    }
-
-    void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
-        std::erase_if(openers_, [&](const EndpointOpener &opener) { return opener.context->IsSame(context); });
-        std::erase_if(endpoints_, [&](const WorldEndpoint &endpoint) { return endpoint.context->IsSame(context); });
-    }
-
-    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
-                                  CefRefPtr<CefProcessMessage> message) override {
-        CefRefPtr<CefListValue> arguments = message->GetArgumentList();
-        if (message->GetName() == kThemeColorRequest) {
-            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
-            reply->GetArgumentList()->SetString(0, EvaluateString(frame, kThemeColorScript).value_or(CefString()));
-            frame->SendProcessMessage(PID_BROWSER, reply);
-            return true;
-        }
-        if (message->GetName() == kScriptRequest) {
-            // A request with a world calls a function with that world's channel; one without evaluates a script, for which a value other than a string counts as a failure.
-            std::optional<CefString> result;
-            bool succeeded;
-            if (arguments->GetType(2) == VTYPE_STRING) {
-                succeeded = CallWithChannel(frame, arguments->GetString(2).ToString(), arguments->GetString(1).ToString(), result);
-            } else {
-                result = EvaluateString(frame, arguments->GetString(1));
-                succeeded = result.has_value();
-            }
-            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kScriptReply);
-            reply->GetArgumentList()->SetInt(0, arguments->GetInt(0));
-            reply->GetArgumentList()->SetBool(1, succeeded);
-            if (result) {
-                reply->GetArgumentList()->SetString(2, *result);
-            } else {
-                reply->GetArgumentList()->SetNull(2);
-            }
-            frame->SendProcessMessage(PID_BROWSER, reply);
-            return true;
-        }
-        if (message->GetName() == kPageScriptsUpdate) {
-            SetPageScripts(browser, ReadPageScripts(arguments->GetList(0)));
-            return true;
-        }
-        if (message->GetName() == kPageScriptReply) {
-            Deliver(frame, arguments->GetString(0).ToString(), "reply", [&] {
-                CefRefPtr<CefV8Value> json = arguments->GetType(2) == VTYPE_STRING ? CefV8Value::CreateString(arguments->GetString(2)) : CefV8Value::CreateNull();
-                return CefV8ValueList{CefV8Value::CreateInt(arguments->GetInt(1)), json};
-            });
-            return true;
-        }
-        if (message->GetName() == kPageScriptDelivery) {
-            Deliver(frame, arguments->GetString(0).ToString(), "deliver", [&] { return CefV8ValueList{CefV8Value::CreateString(arguments->GetString(1))}; });
-            return true;
-        }
-        return false;
-    }
-
-private:
-    // The page scripts of one browser in this process. During a cross-origin navigation, CEF can create a browser object before it destroys the old one with the same identifier, so the scripts belong to the object.
-    struct BrowserScripts {
-        CefRefPtr<CefBrowser> browser;
-        std::vector<PageScript> scripts;
-    };
-
-    // The function that opens world endpoints in one document, made before the page's scripts ran.
-    struct EndpointOpener {
-        CefRefPtr<CefV8Context> context;
-        CefRefPtr<CefV8Value> open;
-    };
-
-    // A world's endpoint in one document.
-    struct WorldEndpoint {
-        std::string world;
-        CefRefPtr<CefV8Context> context;
-        CefRefPtr<CefV8Value> endpoint;
-    };
-
-    void SetPageScripts(CefRefPtr<CefBrowser> browser, std::vector<PageScript> scripts) {
-        for (BrowserScripts &entry : pageScripts_) {
-            if (entry.browser->IsSame(browser)) {
-                entry.scripts = std::move(scripts);
-                return;
-            }
-        }
-        pageScripts_.push_back({browser, std::move(scripts)});
-    }
-
-    // Runs the browser's page scripts that apply to the frame in its new document, in the context the caller entered. A script can run code that creates another frame's context and runs these again, so the loop goes over its own copy.
-    void RunPageScripts(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
-        auto found = std::find_if(pageScripts_.begin(), pageScripts_.end(), [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
-        if (found == pageScripts_.end()) {
-            return;
-        }
-        const std::vector<PageScript> scripts = found->scripts;
-        for (const PageScript &script : scripts) {
-            if (script.mainFrameOnly && !frame->IsMain()) {
-                continue;
-            }
-            CefRefPtr<CefV8Value> endpoint = OpenEndpoint(context, script.world);
-            CefRefPtr<CefV8Value> function = EvaluateFunction(context, script.source);
-            if (endpoint && function) {
-                CallEndpoint(endpoint, "run", {function, CefV8Value::CreateBool(script.atDocumentEnd)});
-            }
-        }
-    }
-
-    // The world's endpoint in the document of `context`, or nullptr when the document has none.
-    CefRefPtr<CefV8Value> FindEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
-        for (const WorldEndpoint &endpoint : endpoints_) {
-            if (endpoint.world == world && endpoint.context->IsSame(context)) {
-                return endpoint.endpoint;
-            }
-        }
-        return nullptr;
-    }
-
-    // The world's endpoint in the document of `context`, which the caller entered, opened there with the document's opener if the document has none. nullptr when the document has no opener or the opener fails.
-    CefRefPtr<CefV8Value> OpenEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
-        if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
-            return endpoint;
-        }
-        auto opener = std::find_if(openers_.begin(), openers_.end(), [&](const EndpointOpener &entry) { return entry.context->IsSame(context); });
-        if (opener == openers_.end()) {
-            return nullptr;
-        }
-        CefRefPtr<CefV8Value> endpoint = opener->open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))});
-        if (!endpoint || !endpoint->IsObject()) {
-            return nullptr;
-        }
-        endpoints_.push_back({world, context, endpoint});
-        return endpoint;
-    }
-
-    // Calls `function`, a function expression, with the world's channel in the frame's current document. Returns whether it ran without throwing, with the string it returned in `result`.
-    bool CallWithChannel(CefRefPtr<CefFrame> frame, const std::string &world, const std::string &function, std::optional<CefString> &result) {
-        CefRefPtr<CefV8Context> context = frame->GetV8Context();
-        if (!context || !context->Enter()) {
-            return false;
-        }
-        CefRefPtr<CefV8Value> endpoint = OpenEndpoint(context, world);
-        CefRefPtr<CefV8Value> callee = EvaluateFunction(context, function);
-        CefRefPtr<CefV8Value> value = endpoint && callee ? callee->ExecuteFunction(nullptr, {endpoint->GetValue("channel")}) : nullptr;
-        if (value && value->IsString()) {
-            result = value->GetStringValue();
-        }
-        context->Exit();
-        return value != nullptr;
-    }
-
-    // Calls a function of the world's endpoint in the frame's current document with the arguments `makeArguments` creates there. Nothing happens when the document has no endpoint for the world.
-    template <typename MakeArguments>
-    void Deliver(CefRefPtr<CefFrame> frame, const std::string &world, const char *name, MakeArguments makeArguments) {
-        CefRefPtr<CefV8Context> context = frame->GetV8Context();
-        if (!context || !context->Enter()) {
-            return;
-        }
-        if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
-            CallEndpoint(endpoint, name, makeArguments());
-        }
-        context->Exit();
-    }
-
-    std::vector<BrowserScripts> pageScripts_;
-    // The endpoint openers and endpoints of the documents in this process, removed as their contexts go.
-    std::vector<EndpointOpener> openers_;
-    std::vector<WorldEndpoint> endpoints_;
-    IMPLEMENT_REFCOUNTING(HelperApp);
-};
-
 }  // namespace
-
-#pragma mark - Cookies
-
-@implementation ARCHCEFCookie
-@end
-
-namespace {
-
-NSDate *ToNSDate(const cef_basetime_t &time) {
-    cef_time_t exploded;
-    double seconds = 0;
-    if (!cef_time_from_basetime(time, &exploded) || !cef_time_to_doublet(&exploded, &seconds)) {
-        return nil;
-    }
-    return [NSDate dateWithTimeIntervalSince1970:seconds];
-}
-
-cef_basetime_t ToBaseTime(NSDate *date) {
-    cef_time_t exploded;
-    cef_basetime_t time = {};
-    if (cef_time_from_doublet(date.timeIntervalSince1970, &exploded)) {
-        cef_time_to_basetime(&exploded, &time);
-    }
-    return time;
-}
-
-// Collects cookies as CEF visits them and reports the list when CEF releases the visitor, which also happens when the store has no cookies or cannot be read.
-class CookieCollector : public CefCookieVisitor {
-  public:
-    explicit CookieCollector(void (^completion)(NSArray<ARCHCEFCookie *> *)) : completion_([completion copy]), cookies_([NSMutableArray array]) {}
-
-    ~CookieCollector() override {
-        NSArray<ARCHCEFCookie *> *cookies = [cookies_ copy];
-        void (^completion)(NSArray<ARCHCEFCookie *> *) = completion_;
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(cookies); });
-    }
-
-    bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
-        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
-        item.name = ToNSString(CefString(&cookie.name));
-        item.value = ToNSString(CefString(&cookie.value));
-        item.domain = ToNSString(CefString(&cookie.domain));
-        item.path = ToNSString(CefString(&cookie.path));
-        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
-        item.secure = cookie.secure != 0;
-        item.httpOnly = cookie.httponly != 0;
-        [cookies_ addObject:item];
-        return true;
-    }
-
-  private:
-    void (^completion_)(NSArray<ARCHCEFCookie *> *);
-    NSMutableArray<ARCHCEFCookie *> *cookies_;
-    IMPLEMENT_REFCOUNTING(CookieCollector);
-};
-
-// Counts down the cookie writes of one batch and reports once the last finishes.
-class CookieBatchCallback : public CefSetCookieCallback {
-  public:
-    CookieBatchCallback(int count, void (^completion)(void)) : remaining_(count), completion_([completion copy]) {}
-
-    void OnComplete(bool success) override { Finish(); }
-
-    void Finish() {
-        if (--remaining_ == 0) {
-            void (^completion)(void) = completion_;
-            dispatch_async(dispatch_get_main_queue(), completion);
-        }
-    }
-
-  private:
-    std::atomic<int> remaining_;
-    void (^completion_)(void);
-    IMPLEMENT_REFCOUNTING(CookieBatchCallback);
-};
-
-CefCookie MakeCefCookie(ARCHCEFCookie *cookie) {
-    CefCookie value;
-    CefString(&value.name) = cookie.name.UTF8String;
-    CefString(&value.value) = cookie.value.UTF8String;
-    CefString(&value.domain) = cookie.domain.UTF8String;
-    CefString(&value.path) = cookie.path.UTF8String;
-    value.secure = cookie.secure;
-    value.httponly = cookie.httpOnly;
-    if (cookie.expires) {
-        value.has_expires = true;
-        value.expires = ToBaseTime(cookie.expires);
-    }
-    return value;
-}
-
-}  // namespace
-
-#pragma mark - Site data
-
-namespace {
-
-// Reports once CEF releases it: after the flush it was given finishes, or at once when the flush cannot start.
-class CookieFlushCallback : public CefCompletionCallback {
-  public:
-    explicit CookieFlushCallback(void (^completion)(void)) : completion_([completion copy]) {}
-
-    ~CookieFlushCallback() override { dispatch_async(dispatch_get_main_queue(), completion_); }
-
-    void OnComplete() override {}
-
-  private:
-    void (^completion_)(void);
-    IMPLEMENT_REFCOUNTING(CookieFlushCallback);
-};
-
-// Deletes the cookies a test accepts as CEF visits them, and reports once CEF releases the visitor, which also happens when the store has no cookies or cannot be read.
-class CookieDeleter : public CefCookieVisitor {
-  public:
-    CookieDeleter(BOOL (^test)(ARCHCEFCookie *), void (^completion)(void)) : test_([test copy]), completion_([completion copy]) {}
-
-    // CEF releases the visitor inside its own call, so the report waits for the next turn of the main run loop.
-    ~CookieDeleter() override { dispatch_async(dispatch_get_main_queue(), completion_); }
-
-    bool Visit(const CefCookie &cookie, int count, int total, bool &deleteCookie) override {
-        ARCHCEFCookie *item = [[ARCHCEFCookie alloc] init];
-        item.name = ToNSString(CefString(&cookie.name));
-        item.value = ToNSString(CefString(&cookie.value));
-        item.domain = ToNSString(CefString(&cookie.domain));
-        item.path = ToNSString(CefString(&cookie.path));
-        item.expires = cookie.has_expires ? ToNSDate(cookie.expires) : nil;
-        item.secure = cookie.secure != 0;
-        item.httpOnly = cookie.httponly != 0;
-        deleteCookie = test_(item);
-        return true;
-    }
-
-  private:
-    BOOL (^test_)(ARCHCEFCookie *);
-    void (^completion_)(void);
-    IMPLEMENT_REFCOUNTING(CookieDeleter);
-};
-
-// The storage types of `Storage.clearDataForOrigin` that belong to an origin, leaving out cookies, which the cookie store deletes, and the shader cache, which Chromium clears for every site at once. Chromium ignores names it does not know.
-const char kClearedStorageTypes[] =
-    "file_systems,indexeddb,local_storage,websql,service_workers,cache_storage,interest_groups,shared_storage,storage_buckets";
-
-// Runs `Storage.clearDataForOrigin` for each origin in a hidden browser of its own, then closes that browser. A DevTools client stays attached to a browser until the browser closes, and an attached client keeps Chromium from timing out a hung page, so no tab makes the calls.
-class StorageClearingClient : public CefClient, public CefLifeSpanHandler, public CefDevToolsMessageObserver {
-  public:
-    StorageClearingClient(NSArray<NSString *> *origins, NSView *parentView, void (^completion)(void))
-        : origins_([origins copy]), parentView_(parentView), completion_([completion copy]) {}
-
-    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
-        browser_ = browser;
-        CefRefPtr<CefBrowserHost> host = browser->GetHost();
-        registration_ = host->AddDevToolsMessageObserver(this);
-        // A call that fails can answer before `ExecuteDevToolsMethod` returns, so the answers count only once every call is sent.
-        isSending_ = YES;
-        for (NSString *origin in origins_) {
-            CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
-            params->SetString("origin", origin.UTF8String);
-            params->SetString("storageTypes", kClearedStorageTypes);
-            int messageID = host->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", params);
-            if (messageID != 0) {
-                [sent_ addObject:@(messageID)];
-            }
-        }
-        isSending_ = NO;
-        FinishIfAnswered();
-    }
-
-    void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result, size_t result_size) override {
-        [answered_ addObject:@(message_id)];
-        FinishIfAnswered();
-    }
-
-    // Answers still pending when the agent detaches never arrive.
-    void OnDevToolsAgentDetached(CefRefPtr<CefBrowser> browser) override { Finish(); }
-
-    // The parent view is in no window. Returning false would ask CEF to close that window; the browser's view leaves its parent instead, and CEF finishes closing the browser once the view is released.
-    bool DoClose(CefRefPtr<CefBrowser> browser) override {
-        [CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle()) removeFromSuperview];
-        return true;
-    }
-
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        Finish();
-        browser_ = nullptr;
-        parentView_ = nil;
-    }
-
-  private:
-    void FinishIfAnswered() {
-        if (!isSending_ && [sent_ isSubsetOfSet:answered_]) {
-            Finish();
-        }
-    }
-
-    // Reports once and closes the browser. It runs on the next turn of the main run loop, outside CEF's callback.
-    void Finish() {
-        if (isFinished_) {
-            return;
-        }
-        isFinished_ = YES;
-        CefRefPtr<StorageClearingClient> client = this;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            client->registration_ = nullptr;
-            if (client->browser_) {
-                client->browser_->GetHost()->CloseBrowser(true);
-            }
-            client->completion_();
-        });
-    }
-
-    NSArray<NSString *> *origins_;
-    NSView *parentView_;
-    void (^completion_)(void);
-    CefRefPtr<CefBrowser> browser_;
-    CefRefPtr<CefRegistration> registration_;
-    NSMutableSet<NSNumber *> *sent_ = [NSMutableSet set];
-    NSMutableSet<NSNumber *> *answered_ = [NSMutableSet set];
-    BOOL isSending_ = NO;
-    BOOL isFinished_ = NO;
-    IMPLEMENT_REFCOUNTING(StorageClearingClient);
-};
-
-}  // namespace
-
-#pragma mark - Request context
-
-@interface ARCHCEFRequestContext ()
-/// Creates the object before CEF has a context for it.
-- (instancetype)initWithoutContext;
-/// Gives the object CEF's context and that context's cookie manager.
-- (void)attachContext:(CefRefPtr<CefRequestContext>)context;
-/// Releases the CEF objects and runs the waiting calls. Calls after that change nothing.
-- (void)detachContext;
-/// Runs the calls that waited for Chromium to initialize the context, in order. Later calls run at once.
-- (void)runWaitingCalls;
-/// The context for browsers of this profile, or null without one.
-- (CefRefPtr<CefRequestContext>)cefContext;
-@end
-
-namespace {
-
-// Tells its context object on the main queue once Chromium has initialized both the context and its cookie store. CEF keeps the handler until every object of the context is gone.
-class ContextReadiness : public CefRequestContextHandler, public CefCompletionCallback {
-  public:
-    explicit ContextReadiness(ARCHCEFRequestContext *owner) : owner_(owner) {}
-
-    void OnRequestContextInitialized(CefRefPtr<CefRequestContext> request_context) override { Arrive(); }
-
-    // The cookie manager calls it once its storage has initialized.
-    void OnComplete() override { Arrive(); }
-
-  private:
-    void Arrive() {
-        if (--remaining_ == 0) {
-            __weak ARCHCEFRequestContext *owner = owner_;
-            dispatch_async(dispatch_get_main_queue(), ^{ [owner runWaitingCalls]; });
-        }
-    }
-
-    __weak ARCHCEFRequestContext *owner_;
-    std::atomic<int> remaining_{2};
-    IMPLEMENT_REFCOUNTING(ContextReadiness);
-};
-
-}  // namespace
-
-@implementation ARCHCEFRequestContext {
-    CefRefPtr<CefRequestContext> _context;
-    CefRefPtr<CefCookieManager> _cookieManager;
-    /// The calls made before Chromium reported the context and its cookie store initialized, oldest first. Nil once calls run at once.
-    NSMutableArray<dispatch_block_t> *_waitingCalls;
-}
-
-+ (ARCHCEFRequestContext *)globalContext {
-    static ARCHCEFRequestContext *globalContext;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ globalContext = [[ARCHCEFRequestContext alloc] initWithoutContext]; });
-    return globalContext;
-}
-
-- (instancetype)initWithoutContext {
-    self = [super init];
-    if (self) {
-        [gRequestContexts addObject:self];
-    }
-    return self;
-}
-
-- (instancetype)initWithCachePath:(NSString *)cachePath {
-    if (!gInitialized || ![cachePath.stringByStandardizingPath.stringByDeletingLastPathComponent isEqualToString:gRootCachePath]) {
-        return nil;
-    }
-    self = [self initWithoutContext];
-    if (!self) {
-        return nil;
-    }
-    _waitingCalls = [NSMutableArray array];
-    // The other settings stay empty, as the runtime leaves its own.
-    CefRequestContextSettings settings;
-    CefString(&settings.cache_path) = cachePath.UTF8String;
-    CefRefPtr<ContextReadiness> readiness = new ContextReadiness(self);
-    _context = CefRequestContext::CreateContext(settings, readiness);
-    if (!_context) {
-        return nil;
-    }
-    _cookieManager = _context->GetCookieManager(readiness);
-    return self;
-}
-
-- (void)attachContext:(CefRefPtr<CefRequestContext>)context {
-    _context = context;
-    _cookieManager = context ? context->GetCookieManager(nullptr) : nullptr;
-}
-
-- (void)detachContext {
-    _cookieManager = nullptr;
-    _context = nullptr;
-    [self runWaitingCalls];
-}
-
-- (void)runWaitingCalls {
-    NSArray<dispatch_block_t> *calls = _waitingCalls;
-    _waitingCalls = nil;
-    for (dispatch_block_t call in calls) {
-        call();
-    }
-}
-
-/// Runs `call` at once, or after the calls that wait for Chromium to initialize the context.
-- (void)whenReady:(dispatch_block_t)call {
-    if (_waitingCalls) {
-        [_waitingCalls addObject:[call copy]];
-    } else {
-        call();
-    }
-}
-
-- (CefRefPtr<CefRequestContext>)cefContext {
-    return _context;
-}
-
-- (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {
-    [self whenReady:^{
-        CefRefPtr<CookieCollector> collector = new CookieCollector(completion);
-        if (self->_cookieManager) {
-            self->_cookieManager->VisitAllCookies(collector);
-        }
-    }];
-}
-
-- (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
-    [self whenReady:^{
-        if (self->_cookieManager) {
-            self->_cookieManager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
-        }
-    }];
-}
-
-- (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
-    [self whenReady:^{
-        NSUInteger count = MIN(cookies.count, urls.count);
-        if (!self->_cookieManager || count == 0) {
-            dispatch_async(dispatch_get_main_queue(), completion);
-            return;
-        }
-        CefRefPtr<CookieBatchCallback> callback = new CookieBatchCallback((int)count, completion);
-        for (NSUInteger index = 0; index < count; index++) {
-            // A cookie CEF refuses never calls back, so it counts as finished at once.
-            if (!self->_cookieManager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
-                callback->Finish();
-            }
-        }
-    }];
-}
-
-- (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
-    [self whenReady:^{
-        if (self->_cookieManager) {
-            self->_cookieManager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
-        }
-    }];
-}
-
-/// Writes the cookie store to disk, then calls `completion` once on the main thread.
-- (void)flushCookiesWithCompletion:(void (^)(void))completion {
-    CefRefPtr<CookieFlushCallback> callback = new CookieFlushCallback(completion);
-    if (_cookieManager) {
-        _cookieManager->FlushStore(callback);
-    }
-}
-
-- (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *))test completion:(void (^)(void))completion {
-    [self whenReady:^{
-        // The flush of the store the deleter visited runs after the deletions, so its end reports them applied.
-        CefRefPtr<CookieDeleter> deleter = new CookieDeleter(test, ^{ [self flushCookiesWithCompletion:completion]; });
-        if (self->_cookieManager) {
-            self->_cookieManager->VisitAllCookies(deleter);
-        }
-    }];
-}
-
-- (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion {
-    [self whenReady:^{
-        if (!self->_context || origins.count == 0) {
-            dispatch_async(dispatch_get_main_queue(), completion);
-            return;
-        }
-        // The browser needs a parent view, which stays out of every window and holds the browser's view until it closes.
-        NSView *parentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
-        CefRefPtr<StorageClearingClient> client = new StorageClearingClient(origins, parentView, completion);
-        CefWindowInfo windowInfo;
-        windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView), CefRect(0, 0, 1, 1));
-        windowInfo.hidden = true;
-        CefBrowserSettings settings;
-        if (!CefBrowserHost::CreateBrowser(windowInfo, client, CefString("about:blank"), settings, nullptr, self->_context)) {
-            dispatch_async(dispatch_get_main_queue(), completion);
-        }
-    }];
-}
-
-- (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin {
-    [self whenReady:^{
-        if (!self->_context) {
-            return;
-        }
-        // The content settings in which the profile keeps each answer that the prompt (see `PermissionsFromPrompt`) gives.
-        struct Mapping {
-            ARCHCEFPermission permission;
-            cef_content_setting_types_t type;
-        };
-        static const Mapping kMappings[] = {
-            {ARCHCEFPermissionCamera, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
-            {ARCHCEFPermissionMicrophone, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
-            {ARCHCEFPermissionGeolocation, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
-            {ARCHCEFPermissionNotifications, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS},
-            {ARCHCEFPermissionClipboard, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
-            {ARCHCEFPermissionMidi, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
-        };
-        cef_content_setting_values_t value = CEF_CONTENT_SETTING_VALUE_DEFAULT;
-        if (setting == ARCHCEFPermissionSettingAllow) {
-            value = CEF_CONTENT_SETTING_VALUE_ALLOW;
-        } else if (setting == ARCHCEFPermissionSettingBlock) {
-            value = CEF_CONTENT_SETTING_VALUE_BLOCK;
-        }
-        CefString url(origin.UTF8String);
-        for (const Mapping &mapping : kMappings) {
-            if (permissions & mapping.permission) {
-                self->_context->SetContentSetting(url, url, mapping.type, value);
-            }
-        }
-    }];
-}
-
-@end
-
-#pragma mark - Runtime
-
-@interface ARCHCEFBrowser ()
-- (void)applyAccessibilityState;
-/// Whether CEF still has the browser, from its creation until `OnBeforeClose`.
-@property (nonatomic, readonly) BOOL isOpen;
-@end
-
-@implementation ARCHCEFRuntime
-
-+ (void)setAccessibilityEnabled:(BOOL)enabled {
-    gAccessibilityEnabled = enabled;
-    for (ARCHCEFBrowser *browser in gBrowsers) {
-        [browser applyAccessibilityState];
-    }
-}
-
-+ (BOOL)initializeWithFrameworkPath:(NSString *)frameworkPath helperPath:(NSString *)helperPath cachePath:(NSString *)cachePath {
-    if (gInitialized) {
-        return YES;
-    }
-    NSString *library = [frameworkPath stringByAppendingPathComponent:@"Chromium Embedded Framework"];
-    if (!cef_load_library(library.fileSystemRepresentation)) {
-        return NO;
-    }
-    CefMainArgs mainArgs(*_NSGetArgc(), *_NSGetArgv());
-    CefSettings settings;
-    settings.no_sandbox = true;
-    settings.external_message_pump = true;
-    CefString(&settings.framework_dir_path) = frameworkPath.UTF8String;
-    CefString(&settings.root_cache_path) = cachePath.UTF8String;
-    CefString(&settings.cache_path) = cachePath.UTF8String;
-    if (helperPath.length > 0) {
-        CefString(&settings.browser_subprocess_path) = helperPath.UTF8String;
-    }
-    CefRefPtr<BridgeApp> app(new BridgeApp);
-    if (!CefInitialize(mainArgs, settings, app.get(), nullptr)) {
-        return NO;
-    }
-    gInitialized = true;
-    gRootCachePath = cachePath.stringByStandardizingPath;
-    [ARCHCEFRequestContext.globalContext attachContext:CefRequestContext::GetGlobalContext()];
-    // CEF shuts down only once AppKit has decided to quit, so a quit that does not happen leaves the engine running.
-    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification
-                                                      object:nil
-                                                       queue:nil
-                                                  usingBlock:^(NSNotification *notification) {
-                                                      [ARCHCEFRuntime shutdown];
-                                                  }];
-    return YES;
-}
-
-+ (BOOL)isInitialized {
-    return gInitialized;
-}
-
-+ (void)shutdown {
-    if (!gInitialized) {
-        return;
-    }
-    gInitialized = false;
-    // CEF asserts in debug builds on references the app still holds when it shuts down. Storage calls from here on change nothing, as they did before the runtime initialized, and calls still waiting for a context complete the same way.
-    for (ARCHCEFRequestContext *context in gRequestContexts.allObjects) {
-        [context detachContext];
-    }
-    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashes once Chrome-style developer tools have opened. The closes run CEF's work for at most two seconds.
-    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
-        [browser close];
-    }
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
-    while ([self hasOpenBrowsers] && deadline.timeIntervalSinceNow > 0) {
-        CefDoMessageLoopWork();
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    }
-    CefShutdown();
-}
-
-+ (BOOL)hasOpenBrowsers {
-    for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
-        if (browser.isOpen) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-+ (int)runHelperWithArgc:(int)argc argv:(char **)argv {
-    CefScopedLibraryLoader libraryLoader;
-    if (!libraryLoader.LoadInHelper()) {
-        return 1;
-    }
-    CefMainArgs mainArgs(argc, argv);
-    CefRefPtr<CefApp> app = new HelperApp();
-    return CefExecuteProcess(mainArgs, app, nullptr);
-}
-
-@end
 
 #pragma mark - Download
 
@@ -1559,6 +397,20 @@ std::optional<PendingPopup> TakePendingPopup(ARCHCEFBrowser *popup) {
     return pending;
 }
 
+// The browser objects whose browser CEF is creating through `CreateBrowser`, or closing because the app asked. CEF does both on later tasks and adds its view to the parent view through a handle that does not retain that view, so each object, with the client CEF calls and the parent view, stays here from `CreateBrowser` until `OnAfterCreated`, and from `close` or `tryCloseWithCompletion:` until `OnBeforeClose` or until the user chooses to stay, even after the app has released it. Popups wait in `gPendingPopups` until CEF creates them.
+NSMutableSet<ARCHCEFBrowser *> *gBrowsersInTransition = [NSMutableSet set];
+
+// Takes a closing browser's view out of its parent. CEF ends the browser only once the view is released. A focused page view can stay held by the window's text input context, so the page gives up the focus first, and it is muted so that it is not heard while anything still holds the view.
+void DetachBrowserView(CefRefPtr<CefBrowser> browser) {
+    NSView *view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
+    NSWindow *window = view.window;
+    if ([window.firstResponder isKindOfClass:NSView.class] && [(NSView *)window.firstResponder isDescendantOf:view]) {
+        [window makeFirstResponder:nil];
+    }
+    browser->GetHost()->SetAudioMuted(true);
+    [view removeFromSuperview];
+}
+
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.
 class BridgeClient : public CefClient,
                      public CefDisplayHandler,
@@ -1584,6 +436,8 @@ public:
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
     CefRefPtr<CefFrameHandler> GetFrameHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
     void OnFrameCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) override { [owner_ handleFrameCreated:frame]; }
 
@@ -1597,7 +451,6 @@ public:
         [owner_ handleContextMenu:params frame:frame callback:callback];
         return true;
     }
-    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
 
     // The app shows the page's dialogs as its own sheets and answers through the callback, which stays alive in the block until then.
     bool OnJSDialog(CefRefPtr<CefBrowser> browser, const CefString &origin_url, JSDialogType dialog_type, const CefString &message_text,
@@ -1631,7 +484,6 @@ public:
 
     // CEF also resets after every answered dialog and on every navigation, so the bridge passes the reset on only while a page dialog waits.
     void OnResetDialogState(CefRefPtr<CefBrowser> browser) override { [owner_ handleResetDialogs]; }
-    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
     bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString &url, const CefString &request_method) override {
         return owner_ != nil && owner_.allowsDownloads && [owner_ handleShouldDownload:ToNSString(url) hasDocument:browser->HasDocument()];
@@ -1773,12 +625,13 @@ public:
         gPendingPopups.erase({browser->GetIdentifier(), popup_id});
     }
 
-    // Returning false would make CEF close the window that holds the browser's view, which is the app's window. The view leaves its parent instead, and CEF finishes closing the browser once the view is released. While the view stays, as for a page's own close that the owner refuses, CEF keeps the browser open.
+    // Returning false would make CEF close the window that holds the browser's view, which is the app's window, so the answer is always true. The view leaves its parent instead, and CEF finishes closing the browser once the view is released. While the view stays, as for a page's own close that the owner refuses, CEF keeps the browser open. Without an owner, as after the app released an open browser, the client takes the view out itself.
     bool DoClose(CefRefPtr<CefBrowser> browser) override {
-        if (!owner_) {
-            return false;
+        if (owner_) {
+            [owner_ handleDoClose];
+        } else {
+            DetachBrowserView(browser);
         }
-        [owner_ handleDoClose];
         return true;
     }
 
@@ -1885,19 +738,36 @@ private:
     IMPLEMENT_REFCOUNTING(BridgePdfCallback);
 };
 
-// Resolves screenshot requests using the message ID from `ExecuteDevToolsMethod`.
+// Runs the browser's screenshot requests through the DevTools protocol and passes each one's PNG, or nil, to its completion exactly once.
 class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
 public:
-    void Expect(int messageID, void (^completion)(NSData *_Nullable)) { pending_[messageID] = completion; }
+    // Sends `Page.captureScreenshot` with `params`. A call that fails can answer before `ExecuteDevToolsMethod` returns, so results that come while the call is sent wait in `early_` for its message ID.
+    void Capture(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(NSData *_Nullable)) {
+        isSending_ = true;
+        int messageID = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
+        isSending_ = false;
+        std::map<int, NSData *> early;
+        early.swap(early_);
+        if (messageID == 0) {
+            completion(nil);
+        } else if (auto result = early.find(messageID); result != early.end()) {
+            completion(result->second);
+        } else {
+            pending_[messageID] = completion;
+        }
+    }
+
+    // Ends every request still waiting with nil, as when the browser closes or its page's process quits.
+    void FinishAll() {
+        std::map<int, void (^)(NSData *_Nullable)> pending;
+        pending.swap(pending_);
+        for (auto &entry : pending) {
+            entry.second(nil);
+        }
+    }
 
     void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result,
                                 size_t result_size) override {
-        auto pending = pending_.find(message_id);
-        if (pending == pending_.end()) {
-            return;
-        }
-        void (^completion)(NSData *_Nullable) = pending->second;
-        pending_.erase(pending);
         NSData *png = nil;
         if (success && result_size > 0) {
             NSData *json = [NSData dataWithBytesNoCopy:const_cast<void *>(result) length:result_size freeWhenDone:NO];
@@ -1906,11 +776,25 @@ public:
                 png = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
             }
         }
+        auto pending = pending_.find(message_id);
+        if (pending == pending_.end()) {
+            if (isSending_) {
+                early_[message_id] = png;
+            }
+            return;
+        }
+        void (^completion)(NSData *_Nullable) = pending->second;
+        pending_.erase(pending);
         completion(png);
     }
 
+    // Results still pending when the agent detaches never arrive.
+    void OnDevToolsAgentDetached(CefRefPtr<CefBrowser> browser) override { FinishAll(); }
+
 private:
     std::map<int, void (^)(NSData *_Nullable)> pending_;
+    std::map<int, NSData *> early_;
+    bool isSending_ = false;
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
 };
 
@@ -2001,7 +885,10 @@ private:
     CefWindowInfo windowInfo;
     [self placeInWindowInfo:windowInfo];
     CefBrowserSettings settings;
-    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, [self creationExtraInfo], [requestContext cefContext]);
+    [gBrowsersInTransition addObject:self];
+    if (!CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, [self creationExtraInfo], [requestContext cefContext])) {
+        [gBrowsersInTransition removeObject:self];
+    }
     return self;
 }
 
@@ -2044,13 +931,31 @@ private:
 - (void)dealloc {
     [self finishContextMenu];
     [self finishScriptRequests];
+    [self finishCaptures];
     if (_client) {
         _client->Detach();
     }
+    // The app released an open browser without closing it. The client no longer reaches this object, so the client's `DoClose` takes the view out of its parent itself.
+    if (_browser && gInitialized) {
+        _browser->GetHost()->CloseBrowser(true);
+    }
+}
+
+/// Takes the object out of `gBrowsersInTransition` once CEF has created or closed its browser, or the user chose to stay. The object lasts at least until the next turn of the run loop, so neither the rest of CEF's callback nor the caller loses it.
+- (void)endTransition {
+    if (![gBrowsersInTransition containsObject:self]) {
+        return;
+    }
+    ARCHCEFBrowser *browser = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // The block only keeps the object.
+        (void)browser;
+    });
+    [gBrowsersInTransition removeObject:self];
 }
 
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser {
-    // A popup's entry keeps this object alive until the method returns; from then on the delegate that adopts it does.
+    // A popup's entry, or for a browser from `CreateBrowser` its place in `gBrowsersInTransition`, keeps this object alive until the method returns; from then on its delegate keeps it, or the block below until it closes the browser.
     std::optional<PendingPopup> popup = TakePendingPopup(self);
     _browser = browser;
     NSView *view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
@@ -2060,14 +965,15 @@ private:
     [self applyAccessibilityState];
     if (popup) {
         [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
-        // `OnBeforePopup` asked the opener's delegate in the same task, so a popup without a delegate here is one the delegate dropped. CEF owns the popup's page only once the opener shows the popup, later in this task, and closing the popup before then crashes CEF, so the block keeps this object until the next turn of the run loop and closes the popup then.
-        if (!_delegate) {
-            ARCHCEFBrowser *unadopted = self;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [unadopted close];
-            });
-        }
     }
+    // A browser without a delegate here is one nobody keeps: a popup the opener's delegate dropped, since `OnBeforePopup` asked that delegate in the same task, or a browser whose owner went before CEF created it. It closes, as does one the app closed before then. CEF owns a popup's page only once the opener shows the popup, later in this task, and closing the popup before then crashes CEF, so the block keeps this object until the next turn of the run loop and closes the browser then.
+    if (!_delegate || _closeRequested) {
+        ARCHCEFBrowser *closing = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [closing close];
+        });
+    }
+    [self endTransition];
     [_delegate cefBrowserDidCreateView];
 }
 
@@ -2205,15 +1111,9 @@ private:
         });
         return;
     }
-    // CEF ends the browser only once its view is released. A focused page view can stay held by the window's text input context, so the page gives up the focus first, and it is muted so that it is not heard while anything still holds the view.
-    NSWindow *window = _browserView.window;
-    if ([window.firstResponder isKindOfClass:NSView.class] && [(NSView *)window.firstResponder isDescendantOf:_browserView]) {
-        [window makeFirstResponder:nil];
-    }
     if (_browser) {
-        _browser->GetHost()->SetAudioMuted(true);
+        DetachBrowserView(_browser);
     }
-    [_browserView removeFromSuperview];
     _browserView = nil;
     [self finishPendingClose:YES];
 }
@@ -2225,6 +1125,7 @@ private:
         // A close the user stays from no longer counts as the app's.
         if (!closing) {
             _closeRequested = NO;
+            [self endTransition];
         }
         completion(closing);
     }
@@ -2294,6 +1195,9 @@ private:
 - (void)handleBeforeClose {
     [self finishContextMenu];
     [self finishScriptRequests];
+    [self finishCaptures];
+    _devToolsRegistration = nullptr;
+    _devToolsObserver = nullptr;
     _contextMenuFrame = nullptr;
     _browser = nullptr;
     _browserView = nil;
@@ -2308,6 +1212,7 @@ private:
         }
         [_delegate cefBrowserDidClose];
     }
+    [self endTransition];
 }
 
 // Downloads are keyed by their CEF identifiers and retained for the browser's lifetime so interrupted downloads can still be resumed.
@@ -2370,6 +1275,7 @@ private:
         [_delegate cefBrowserDidChangeAudible:NO];
     }
     [self finishScriptRequests];
+    [self finishCaptures];
     [_delegate cefBrowserRenderProcessDidTerminate];
 }
 
@@ -2581,7 +1487,7 @@ private:
     }
 }
 
-/// A frame created after the scripts changed may be the first of the browser in its renderer process, which then has only the scripts of the browser's extra info. CEF queues the message until the frame attaches and does not order it before the frame's first document, so that document may still run the extra info's scripts (needs verification).
+/// A frame created after the scripts changed may be the first of the browser in its renderer process, which then has only the scripts of the browser's extra info. CEF queues the message until the frame attaches and does not order it before the frame's first document, so that document may still run the extra info's scripts.
 - (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame {
     if (_pageScriptsChanged) {
         [self sendPageScriptsToFrame:frame];
@@ -2707,12 +1613,14 @@ private:
     CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
     params->SetString("format", "png");
     params->SetBool("captureBeyondViewport", beyondViewport);
-    int messageID = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
-    if (messageID == 0) {
-        completion(nil);
-        return;
+    _devToolsObserver->Capture(host, params, completion);
+}
+
+/// Ends every capture still waiting for its result, as when the page's process quits or the browser goes.
+- (void)finishCaptures {
+    if (_devToolsObserver) {
+        _devToolsObserver->FinishAll();
     }
-    _devToolsObserver->Expect(messageID, completion);
 }
 
 - (NSArray<ARCHCEFNavigationEntry *> *)navigationEntries {
@@ -2770,20 +1678,23 @@ private:
     return _browser != nullptr;
 }
 
+// Before CEF has created the browser, the request waits for `OnAfterCreated`.
 - (void)close {
+    _closeRequested = YES;
     if (_browser) {
-        _closeRequested = YES;
+        [gBrowsersInTransition addObject:self];
         _browser->GetHost()->CloseBrowser(true);
     }
 }
 
 - (void)tryCloseWithCompletion:(void (^)(BOOL))completion {
+    _closeRequested = YES;
     if (!_browser) {
         completion(YES);
         return;
     }
     _pendingClose = [completion copy];
-    _closeRequested = YES;
+    [gBrowsersInTransition addObject:self];
     _browser->GetHost()->CloseBrowser(false);
 }
 

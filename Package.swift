@@ -2,9 +2,12 @@
 import PackageDescription
 
 // Maintained by hand. Add one target per feature module as it is written.
-// CEFBridge compiles the CEF C++ wrapper from Frameworks/cef through symlinks; run the download step in docs/plan.md first.
+// CEFBridge compiles its own files and the CEF C++ wrapper, which scripts/setup_cef.sh copies from Frameworks/cef; run it first (docs/plan.md, Build Procedure).
 let cefWrapperSources = [
-    "CEFBridge.mm",
+    "CEFBridgeBrowser.mm",
+    "CEFBridgeHelper.mm",
+    "CEFBridgeRequestContext.mm",
+    "CEFBridgeRuntime.mm",
     "wrapper_src/base",
     "wrapper_src/cpptoc",
     "wrapper_src/ctocpp",

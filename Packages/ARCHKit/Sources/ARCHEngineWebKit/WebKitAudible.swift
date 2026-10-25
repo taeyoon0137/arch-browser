@@ -2,7 +2,7 @@
 import ARCHEngine
 import WebKit
 
-/// Reports whether a document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in its own content world, so pages cannot read or replace it. Keep it in step with the Chromium engine's script in CEFBridge.mm.
+/// Reports whether a document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in its own content world, so pages cannot read or replace it. Keep it in step with the Chromium engine's script in CEFBridgeHelper.mm.
 final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
     static let world = WKContentWorld.world(name: "ARCHMedia")
     static let handlerName = "archAudible"

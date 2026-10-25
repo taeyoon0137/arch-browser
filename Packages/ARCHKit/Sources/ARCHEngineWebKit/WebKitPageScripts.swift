@@ -50,7 +50,7 @@ enum WebKitPageScripts {
         .world(name: "ARCHPageScript." + world)
     }
 
-    /// Defines the world's channel in the document, once, as `__archPageScriptChannel`, and the function the app delivers posted values to. Keep it in step with the Chromium engine's channel script in CEFBridge.mm.
+    /// Defines the world's channel in the document, once, as `__archPageScriptChannel`, and the function the app delivers posted values to. Keep it in step with the Chromium engine's channel script in CEFBridgeHelper.mm.
     static let channelSource = marker + """
     (() => {
       if (globalThis.__archPageScriptChannel) return;
