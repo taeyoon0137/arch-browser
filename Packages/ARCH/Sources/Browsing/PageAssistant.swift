@@ -85,6 +85,11 @@ public final class PageAssistant: ObservableObject {
         readerConversations.values.forEach { $0.cancel() }
     }
 
+    /// Stops the replies being written about the tabs `ids`, as when a window that shows them hides its reader while another window shows its own.
+    func stopReaderReplies(ofTabs ids: [UUID]) {
+        ids.forEach { readerConversations[$0]?.cancel() }
+    }
+
     func readerConversation(for tab: Tab) -> PageConversation {
         if let conversation = readerConversations[tab.id] { return conversation }
         let conversation = PageConversation(feature: .pageReader, tabID: tab.id, instructions: Self.readerInstructions, pages: pages, client: AIService.shared)

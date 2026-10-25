@@ -1,7 +1,7 @@
-// The page area and split view. The page area shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
+// The page area and split view. The page area shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. A pane whose tab another window shows holds a placeholder instead. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
 import SwiftUI
 
-/// The page area: the panes the window shows, or the empty page frame with no tab open. While the selected page fills the window in fullscreen, only its pane shows.
+/// The page area: the window's panes, or the empty page frame with no tab open. While the selected page fills the window in fullscreen, only its pane shows. A pane whose page another window shows holds a placeholder, because a page's view has one superview (window rule 1).
 struct PageAreaView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -19,12 +19,18 @@ struct PageAreaView: View {
             } else {
                 HStack(spacing: BrowserWindowView.pageMargin) {
                     ForEach(panes) { tab in
-                        PagePaneView(session: session, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
-                            // A pane appears and leaves at once, as a page does when another tab is selected.
-                            .transition(.identity)
-                            .background(GeometryReader { proxy in
-                                Color.clear.preference(key: PaneFramesKey.self, value: [PaneFrame(tabID: tab.id, frame: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))])
-                            })
+                        Group {
+                            if windowModel.shows(tab) {
+                                PagePaneView(session: session, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
+                            } else {
+                                ShownElsewherePaneView(tab: tab)
+                            }
+                        }
+                        // A pane appears and leaves at once, as a page does when another tab is selected.
+                        .transition(.identity)
+                        .background(GeometryReader { proxy in
+                            Color.clear.preference(key: PaneFramesKey.self, value: [PaneFrame(tabID: tab.id, frame: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))])
+                        })
                     }
                 }
             }
@@ -90,6 +96,33 @@ private struct PagePaneView: View {
     /// Selecting the tab again would close an internal page over it.
     private func selectTab() {
         if windowModel.selectedTabID != tab.id { windowModel.selectedTabID = tab.id }
+    }
+}
+
+/// Stands in for a pane whose tab another window shows. Show Here selects the tab, which moves its page to this window (window rule 2); a click elsewhere in the pane leaves it where it is.
+private struct ShownElsewherePaneView: View {
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "macwindow.on.rectangle")
+                .font(.system(size: 30))
+                .foregroundStyle(.secondary)
+            Text(tab.displayTitle)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+            Text("This tab is shown in another window.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Button("Show Here") { windowModel.selectedTabID = tab.id }
+                .controlSize(.large)
+                .padding(.top, 6)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PageBackgroundView(isEmpty: true))
+        .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
     }
 }
 

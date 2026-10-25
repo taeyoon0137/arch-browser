@@ -109,11 +109,13 @@ public final class BrowserWindowModel: ObservableObject {
         // A selected favorite's tab belongs to no space and shows in the current one. It stays selected while the space stays, and stays open behind a new space's own tab.
         let selectedSpaceID = selectedTab.map { $0.spaceID ?? currentSpaceID }
         currentSpaceID = id
-        if selectedSpaceID != id {
-            // The first tab row the sidebar shows that no other window shows, open tabs before pinned ones. Only a space whose free tabs all sit in collapsed folders selects a hidden tab.
-            let spaceTabs = (session.tabs(in: id, pinned: false) + session.tabs(in: id, pinned: true)).filter { !isShownInAnotherWindow($0) }
-            selectedTabID = (spaceTabs.first { !session.isInCollapsedFolder($0) } ?? spaceTabs.first)?.id
-        }
+        if selectedSpaceID != id { selectedTabID = firstFreeTab(inSpace: id)?.id }
+    }
+
+    /// The first tab row of the space that the sidebar shows and no other window shows, open tabs before pinned ones (window rule 3). Only a space whose free tabs all sit in collapsed folders gives a hidden tab.
+    func firstFreeTab(inSpace id: UUID) -> Tab? {
+        let spaceTabs = (session.tabs(in: id, pinned: false) + session.tabs(in: id, pinned: true)).filter { !isShownInAnotherWindow($0) }
+        return spaceTabs.first { !session.isInCollapsedFolder($0) } ?? spaceTabs.first
     }
 
     public func switchToAdjacentSpace(forward: Bool) {
@@ -305,11 +307,12 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// The preview panel or an internal page is what the user sees, so it closes instead of the tab under it.
+    /// The preview panel or an internal page is what the user sees, so it closes instead of the tab under it. A window with no tab selected closes itself while another browser window stays open.
     public func closeSelectedTab() {
         if preview != nil { return closePreview() }
         if internalPage != nil { return closeInternalPage() }
-        selectedTab.map(session.requestCloseTab)
+        if let tab = selectedTab { return session.requestCloseTab(tab) }
+        if session.windows.count > 1 { nsWindow?.performClose(nil) }
     }
 
     /// Closes other tabs in the selected tab's space, keeping pinned tabs.
@@ -405,10 +408,10 @@ public final class BrowserWindowModel: ObservableObject {
         session.allTabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
-    /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
+    /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window, and leaves a page that another window has taken in the meantime alone. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
     func focusPage(leaving previous: NSView? = nil) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let view = self.selectedTab?.webContents.view, let window = view.window else { return }
+            guard let self, let view = self.selectedTab?.webContents.view, let window = view.window, window === self.nsWindow else { return }
             if let previous, let responder = window.firstResponder, responder !== window,
                (responder as? NSView)?.isDescendant(of: previous) != true { return }
             // Keys must not reach a page an internal page covers.
@@ -466,7 +469,7 @@ public final class BrowserWindowModel: ObservableObject {
         if isPageReaderVisible {
             selectedTab.map(session.pageAssistant.readerDidShow)
         } else {
-            session.pageReaderDidHide()
+            session.pageReaderDidHide(in: self)
         }
     }
 
@@ -514,11 +517,30 @@ public final class BrowserWindowModel: ObservableObject {
     /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
     var visibleSheet: TabSheet?
 
-    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window.
+    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window. None once the window has let go of its tabs as it closes.
     var tabsOnScreen: [Tab] {
-        guard let selected = selectedTab else { return [] }
+        guard let selected = selectedTab, shows(selected) else { return [] }
         if fullscreenTabID == selected.id { return [selected] }
         return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
+    }
+
+    // MARK: Closing
+
+    /// The window's space and selected tab, which the session keeps once the window closes.
+    var record: WindowRecord { WindowRecord(currentSpaceID: currentSpaceID, selectedTabID: selectedTabID) }
+
+    /// Lets go of what the window shows as it closes, so that other windows can show its tabs, which stay open (window rule 5): the page reader's replies about them, the palette, find, region capture, page fullscreen, the preview panel, the question popover, the sheet, which shows again in the next window that shows its tab, and the docked developer tools.
+    @MainActor func prepareToClose() {
+        if isPageReaderVisible { session.pageReaderDidHide(in: self) }
+        commandPaletteMode = nil
+        hideFindBar()
+        cancelRegionCapture()
+        exitPageFullscreen()
+        closePreview()
+        closePageQuestion()
+        shownTabIDs = []
+        session.sheets.deferSheet(of: self)
+        devToolsDock.track(nil)
     }
 
     // MARK: Find in page
@@ -972,4 +994,10 @@ public final class BrowserWindowModel: ObservableObject {
         if let split = session.splitTabIDs[spaceID] { return split }
         return recentTabs.first { $0.id != tab.id && $0.spaceID == tab.spaceID }.map { [$0.id] } ?? []
     }
+}
+
+/// A main window's space and selected tab. The session keeps the record of the last main window that closed, opens the next main window from it, and saves the front main window's.
+struct WindowRecord {
+    var currentSpaceID: UUID
+    var selectedTabID: UUID?
 }

@@ -16,7 +16,7 @@
 			<element type="tab" access="r" description="Every tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs.">
 				<cocoa key="scriptTabs"/>
 			</element>
-			<property name="active tab" code="ArAT" type="tab" access="r" description="The selected tab.">
+			<property name="active tab" code="ArAT" type="tab" access="r" description="The selected tab of the browser window that was last in front.">
 				<cocoa key="scriptActiveTab"/>
 			</property>
 		</class-extension>

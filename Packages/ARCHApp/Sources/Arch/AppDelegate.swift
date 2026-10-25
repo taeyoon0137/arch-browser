@@ -1,4 +1,4 @@
-// Registers the engines, opens the main window, and connects the menu bar to the browser session.
+// Registers the engines, creates the browser session, which opens the browser windows, and connects the menu bar to it.
 import AppKit
 import ARCHEngine
 import ARCHEngineChromium
@@ -9,7 +9,6 @@ import History
 import Import
 import Plugins
 import Preferences
-import SwiftUI
 import Terminal
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
@@ -18,7 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     private static let recentPageTag = 9_100
-    private var window: NSWindow!
+    /// The Window menu, which becomes `NSApp.windowsMenu` once the shortcut settings have listed the menu bar.
+    private var windowMenu: NSMenu?
     /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
@@ -38,6 +38,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.loadPlugins(builtIns: [PageAddressPlugin.self])
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        // The sidebar takes the place of window tabs, so AppKit offers no tab bar or tab menu items.
+        NSWindow.allowsAutomaticWindowTabbing = false
+        NSApp.appearance = AppearanceSetting.current.appearance
+        NSApp.mainMenu = makeMainMenu()
+        installUndoCloseShortcut()
+        installFullscreenEscape()
+        installTabSwitcher()
+        installShortcuts()
+        // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu stays out of Settings ▸ Shortcuts.
+        NSApp.windowsMenu = windowMenu
+        // Engines register their private APIs when they start; the checks run without delaying launch.
+        PrivateAPIFlags.shared.checkInBackground()
+        session.restoreWindows()
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
             pendingURLs.removeAll()
@@ -46,43 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else if session.allTabs.isEmpty {
             session.openTab()
         }
-        NSApp.appearance = AppearanceSetting.current.appearance
-        NSApp.mainMenu = makeMainMenu()
-        installUndoCloseShortcut()
-        installFullscreenEscape()
-        installTabSwitcher()
-        installShortcuts()
-        // Engines register their private APIs when they start; the checks run without delaying launch.
-        PrivateAPIFlags.shared.checkInBackground()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                          backing: .buffered, defer: false)
-        window.title = "Arch"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the sidebar's top row.
-        window.toolbar = NSToolbar(identifier: "Main")
-        window.toolbarStyle = .unified
-        window.titlebarSeparatorStyle = .none
-        // Full screen hides the traffic lights, so the toolbar would only cover the sidebar's top row there.
-        NotificationCenter.default.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-            self?.window.toolbar?.isVisible = false
-        }
-        // AppKit restores the toolbar's full screen state while it exits, so the toolbar returns once the window is back.
-        NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-            self?.window.toolbar?.isVisible = true
-        }
-        window.isMovableByWindowBackground = true
-        // The session has one window, the sidebar target, which this window shows.
-        let windowModel = session.sidebarTarget()
-        windowModel.nsWindow = window
-        let hostingController = NSHostingController(rootView: BrowserWindowView(session: session, window: windowModel))
-        hostingController.sizingOptions = []
-        window.contentViewController = hostingController
-        window.contentMinSize = NSSize(width: 800, height: 500)
-        window.setContentSize(NSSize(width: 1200, height: 800))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         promptForDefaultBrowserIfNeeded()
     }
@@ -102,6 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// A Dock click opens a main window where the last one was while Settings, History, or another of the app's windows keeps the app running without one. Otherwise AppKit brings the windows forward as usual.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let session, session.lastMainWindow == nil else { return true }
+        // With no main window open, the sidebar target is a new one.
+        _ = session.sidebarTarget()
+        return false
+    }
 
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
@@ -136,7 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(newTab), keyEquivalent: "t")
+        fileMenu.addItem(withTitle: "New Window", action: #selector(newWindow), keyEquivalent: "n")
         fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
+        let closeWindowItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
         let closeOthersItem = fileMenu.addItem(withTitle: "Close Other Tabs", action: #selector(closeOtherTabs), keyEquivalent: "w")
         closeOthersItem.keyEquivalentModifierMask = [.command, .option]
         let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
@@ -244,6 +231,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         historyMenu.delegate = self
         self.historyMenu = historyMenu
         mainMenu.addItem(submenu(historyMenu, title: "History"))
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        self.windowMenu = windowMenu
+        mainMenu.addItem(submenu(windowMenu, title: "Window"))
         return mainMenu
     }
 
@@ -255,9 +250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // Page commands act on the active window, and sidebar commands, such as those of the Tab and Spaces menus, on the sidebar target.
     @objc private func newTab() { session.sidebarTarget().showCommandPalette(.newTab) }
+    /// A new window shows no tab, so it opens with the new tab palette (open decision 8).
+    @objc private func newWindow() { session.openWindow().showCommandPalette(.newTab) }
     /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it.
     @objc private func closeTab() {
-        if let key = NSApp.keyWindow, key !== window, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
+        if let key = NSApp.keyWindow, session.window(for: key) == nil, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
         session.activeWindow?.closeSelectedTab()
     }
     @objc private func closeOtherTabs() { session.activeWindow?.closeOtherTabs() }
@@ -295,13 +292,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func clearHistory() { HistoryStore.shared.clear() }
     @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
-    /// Pages chosen in the History window open as new tabs in the browser window, which comes to the front.
+    /// Pages chosen in the History window open as new tabs in the sidebar target, which comes to the front.
     @objc private func showHistory() {
         let history = HistoryWindowController.shared
         history.openURL = { [weak self] url in
-            guard let self else { return }
-            self.session.openTab(url: url)
-            self.window.makeKeyAndOrderFront(nil)
+            guard let session = self?.session else { return }
+            session.openTab(url: url)
+            session.sidebarTarget().nsWindow?.makeKeyAndOrderFront(nil)
         }
         history.show()
     }
@@ -412,9 +409,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
             return activeWindow?.canTogglePageReader == true
         }
-        // Import waits while another import runs or the window shows a sheet. It touches no tab, so an internal page does not disable it.
+        // Import waits while another import runs or the last main window shows a sheet, and opens a main window when none is open. It touches no tab, so an internal page does not disable it.
         if item.action == #selector(importBookmarksAndHistory) {
-            return window.map { importController.canImport(in: $0) } ?? false
+            guard let window = session?.lastMainWindow?.nsWindow else { return true }
+            return importController.canImport(in: window)
         }
         return true
     }
@@ -520,13 +518,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let menuBar = NSApp.mainMenu { shortcuts.manage(menuBar) }
     }
 
-    /// The global shortcut brings the browser window forward, out of the Dock if it is minimized, and opens the new tab palette in it.
+    /// The global shortcut brings the sidebar target forward, out of the Dock if it is minimized, and opens the new tab palette in it.
     private func openNewTabFromAnyApp() {
-        guard let session, let window else { return }
+        guard let session else { return }
         NSApp.activate(ignoringOtherApps: true)
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        window.makeKeyAndOrderFront(nil)
-        session.sidebarTarget().showCommandPalette(.newTab)
+        let target = session.sidebarTarget()
+        if let window = target.nsWindow {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        target.showCommandPalette(.newTab)
     }
 
     // MARK: Tab close log
@@ -539,16 +540,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     private lazy var importController = ImportController(session: session)
 
-    @objc private func importBookmarksAndHistory() { importController.chooseFiles(in: window) }
+    @objc private func importBookmarksAndHistory() {
+        guard let window = session.sidebarTarget().nsWindow else { return }
+        importController.chooseFiles(in: window)
+    }
 
     // MARK: Default browser
 
     @objc private func setAsDefaultBrowser() { DefaultBrowser.makeDefault() }
 
-    /// Prompts once per user after the window opens. Skips the prompt outside an app bundle or when the app is already the default browser.
+    /// Prompts once per user on the front main window after it opens. Skips the prompt outside an app bundle or when the app is already the default browser.
     private func promptForDefaultBrowserIfNeeded() {
         let defaults = UserDefaults.standard
-        guard DefaultBrowser.canBecomeDefault, !defaults.bool(forKey: Self.askedDefaultBrowserKey), !DefaultBrowser.isDefault else { return }
+        guard let window = session.lastMainWindow?.nsWindow, DefaultBrowser.canBecomeDefault,
+              !defaults.bool(forKey: Self.askedDefaultBrowserKey), !DefaultBrowser.isDefault else { return }
         defaults.set(true, forKey: Self.askedDefaultBrowserKey)
         let alert = NSAlert()
         alert.messageText = "Set Arch as your default browser?"

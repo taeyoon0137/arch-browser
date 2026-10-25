@@ -181,7 +181,7 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
 
     /// Window rule 1: the selected tab and the panes of its split view that no other window shows, left to right.
     @Published private(set) var shownTabIDs: [UUID]
-    /// The selected tab, then the other shown panes, or the selected tab alone while its page fills the window. Their sheets can show here.
+    /// The selected tab, then the other shown panes, or the selected tab alone while its page fills the window. Their sheets can show here. Empty once the window has let go of its tabs as it closes.
     var tabsOnScreen: [Tab] { get }
     /// The sheet the window shows, which `TabSheetQueue` sets and clears.
     var visibleSheet: TabSheet?
@@ -190,6 +190,18 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
     /// A small window's tab's Persona, or the current space's.
     public var personaID: Persona.ID { get }
     public var recentTabs: [Tab] { get }
+    /// The space and selected tab, which the session keeps once the window closes.
+    var record: WindowRecord { get }
+    /// Window rule 3 within a space: its first tab row that the sidebar shows and no other window shows, open tabs before pinned ones.
+    func firstFreeTab(inSpace id: UUID) -> Tab?
+    /// Lets go of what the window shows as it closes (Windows and menus ▸ Engine and tab events).
+    @MainActor func prepareToClose()
+}
+
+/// A main window's space and selected tab. Step 9 keeps it in memory; step 10 moves it into the snapshot as `SessionSnapshot.WindowRecord` with the window's ID, frame, and sidebar visibility.
+struct WindowRecord {
+    var currentSpaceID: UUID
+    var selectedTabID: UUID?
 }
 ```
 
@@ -201,10 +213,12 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
   4. `session.windowDidSelect(self)`, which updates the focused tab while this is the active window. The session's change observer saves the selection.
   5. `devToolsDock.track(selectedTab?.webContents.devTools)`.
   6. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, and move keyboard focus from another pane of the split view to the selected page.
-- `shows(_:)` reads `shownTabIDs`, and `isShownInAnotherWindow(_:)` asks the other windows. `updateShownTabs()` runs after the selection or a split view changes: the window keeps its selected tab and the panes it shows already, and takes each other pane of `paneTabs` that no other window shows. Step 9's placeholder fills each pane of `paneTabs` outside `shownTabIDs`.
+- `shows(_:)` reads `shownTabIDs`, and `isShownInAnotherWindow(_:)` asks the other windows. `updateShownTabs()` runs after the selection or a split view changes and after another window closes: the window keeps its selected tab and the panes it shows already, and takes each other pane of `paneTabs` that no other window shows. `PageAreaView` fills each pane of `paneTabs` outside `shownTabIDs` with a placeholder (Interactions ▸ Split view).
 - `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection, ends the pane's page fullscreen, and defers its sheet.
 - `fallbackTab(excluding:)` returns the first tab of `recentTabs` that is listed in the sidebar, is not `excluding`, and is not shown by another window, or nil. It can be another pane of the same split view; the window then shows a placeholder in the pane of the tab it gave up.
 - `isLibraryVisible.didSet` asks the session to mark finished downloads seen.
+- `focusPage` moves keyboard focus only while the selected page is in the window's own `nsWindow`, so a page that another window took in the meantime keeps that window's focus.
+- `closeSelectedTab()` closes the preview panel, the internal page, or the selected tab, and with none of them, the window itself while another browser window is open.
 
 `PersonaEngines` (new, internal, `PersonaEngines.swift`)
 
@@ -267,17 +281,19 @@ public final class DevToolsDockSettings: ObservableObject {
 `BrowserWindowController` (new, internal, `BrowserWindowController.swift`)
 
 ```swift
-/// The AppKit window of one BrowserWindowModel. Builds the main window as AppDelegate does today, or the small window; records the frame; reports becoming main and closing to the session.
+/// The AppKit window of one BrowserWindowModel: the main window, or from step 11 the small window. It reports becoming main and closing to the session and, from step 10, records the frame.
 final class BrowserWindowController: NSWindowController, NSWindowDelegate {
-    init(model: BrowserWindowModel, session: BrowserSession, frame: CGRect?)
+    let model: BrowserWindowModel
+    /// Builds the window hidden, at `source`'s size and cascaded from it, or centered at 1200×800 without a source or while the source is in full screen. Step 10 adds the saved frame.
+    init(model: BrowserWindowModel, cascadingFrom source: NSWindow?)
 }
 ```
 
-- Only `BrowserSession.openWindow` creates one, so restore, ⌘N, a small window, and a main window created on demand take one path. It lives in `Browsing`, which already builds a window (`TabCloseLogWindowController`) and holds both window views.
-- It hosts `BrowserWindowView(session:window:)` or `SmallWindowView(session:window:)`, sets `model.nsWindow`, and hides its own toolbar in full screen.
-- It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; with two or more Personas, followed by " — <Persona name>".
+- Only the session's `makeWindow(spaceID:)` creates one, so restore, ⌘N, and a main window created on demand take one path, and from step 11 a small window too. The session keeps the controllers in `windowControllers` and releases each on the turn of the run loop after its window closes, because AppKit is still closing the window then. It lives in `Browsing`, which already builds a window (`TabCloseLogWindowController`) and holds both window views.
+- It hosts `BrowserWindowView(session:window:)`, from step 11 also `SmallWindowView(session:window:)`, reaching the session through `model.session`, sets `model.nsWindow`, and hides its own toolbar in full screen.
+- It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; from step 13, with two or more Personas, followed by " — <Persona name>". It reads the title on the run loop turn after the model or the spaces change, because `objectWillChange` comes before the change.
 - It sets `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false`.
-- Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowDidMove` and `windowDidEndLiveResize` record `model.restorableFrame` and schedule a save, except in full screen; `windowWillEnterFullScreen` keeps the frame from before. For a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does. `windowWillClose` calls `session.windowWillClose(model)`.
+- Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowWillClose` calls `session.windowWillClose(model)`. From step 10, `windowDidMove` and `windowDidEndLiveResize` record `model.restorableFrame` and schedule a save, except in full screen; `windowWillEnterFullScreen` keeps the frame from before. From step 11, for a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does.
 
 `BrowserSession` (changed; app-wide)
 
@@ -291,12 +307,15 @@ public var focusedTab: Tab? { get }
 /// Window rule 7.
 public var activeWindow: BrowserWindowModel? { get }
 public var lastMainWindow: BrowserWindowModel? { get }
-/// Window rule 7. Creates a main window when none is open.
+/// Window rule 7. While no main window is open, opens one from `lastWindowRecord`: its space, and its selected tab, or the space's first free tab when that tab closed.
 public func sidebarTarget() -> BrowserWindowModel
+/// New Window: a main window on the active window's space, or the last main window's while none is open, with no tab selected (open decision 8). Step 11 adds `kind`.
 @discardableResult
-public func openWindow(kind: BrowserWindowKind = .main, spaceID: UUID? = nil, frame: CGRect? = nil) -> BrowserWindowModel
-/// Creates the windows of the loaded snapshot, back to front.
+public func openWindow() -> BrowserWindowModel
+/// Creates the windows of the loaded snapshot, back to front: in step 9 the one window that `lastWindowRecord` describes, in step 10 each saved window record.
 public func restoreWindows()
+/// The last main window's space and selection while no main window is open: the snapshot's until the first window opens, then those of the last main window that closed. The next main window opens on them, and `snapshot()` saves them.
+private var lastWindowRecord: WindowRecord
 /// The window whose `shownTabIDs` has the tab.
 func window(showing tab: Tab) -> BrowserWindowModel?
 public func window(for nsWindow: NSWindow?) -> BrowserWindowModel?
@@ -304,8 +323,12 @@ public func window(for nsWindow: NSWindow?) -> BrowserWindowModel?
 func release(_ tab: Tab?, except window: BrowserWindowModel)
 /// Updates the focused tab when `window` is the active window.
 func windowDidSelect(_ window: BrowserWindowModel)
+/// Moves `window` to the front of `windows` and updates the focused tab.
 func windowDidBecomeMain(_ window: BrowserWindowModel)
-func windowWillClose(_ window: BrowserWindowModel)
+/// The teardown under Windows and menus ▸ Engine and tab events.
+@MainActor func windowWillClose(_ window: BrowserWindowModel)
+/// Stops the reader's replies about the tabs `window` shows while another window shows the reader, or every reply once no other window does.
+@MainActor func pageReaderDidHide(in window: BrowserWindowModel)
 
 public func persona(ofSpace id: UUID) -> Persona
 public func spaces(in persona: Persona.ID) -> [Space]
@@ -483,7 +506,7 @@ Tests
 AppKit
 - `NSWindow.allowsAutomaticWindowTabbing = false` before the first window opens.
 - The main window keeps today's style, empty unified toolbar, and minimum content size of 800×500. A small window's minimum is 480×360.
-- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the active window.
+- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the active window at its size, or centers at 1200×800 while the active window is in full screen.
 - Restore creates the windows back to front, so the front one becomes key last. Sheets that restored tabs asked for show as each window appears.
 
 Menus
@@ -509,7 +532,7 @@ Engine and tab events
 - `deleteSpace` moves the tabs to a neighbor space in the same Persona and switches every window on the deleted space there.
 - Archiving treats every shown tab as active.
 - Now Playing follows `focusedTabID`. AppleScript's `active tab` is `focusedTab`, and `tabs` lists sidebar order (spaces in Persona order), then small-window tabs.
-- Closing a window runs, in order: dismiss the palette, hide find, cancel region capture, exit page fullscreen, defer the visible sheet, and `devToolsDock.track(nil)`. Then the session removes the model, keeps the last main window's record, and schedules a save. When code closes a window, as Persona deletion does, its sheet ends with the deferred response first, because AppKit closes the window anyway.
+- Closing a window runs `prepareToClose()`, in order: stop the page reader's replies about its tabs, dismiss the palette, hide find, cancel region capture, exit page fullscreen, close the preview panel and the question popover, empty `shownTabIDs` and defer the visible sheet, and `devToolsDock.track(nil)`. Then the session keeps the window's record, removes the model, lets the other windows take the panes it showed and show their sheets, and updates the focused tab; the change of `windows` schedules a save. When code closes a window, as Persona deletion does, its sheet ends with the deferred response first, because AppKit closes the window anyway.
 
 ## Small window (III.7)
 
@@ -582,7 +605,7 @@ Live favorites (III.13)
 - A favorite and its live tab belong to one Persona. The live tab follows window rule 1: selecting a favorite whose tab another window shows moves the tab here. It stays alive, hidden, while its window shows another Persona's space. Whether the live tab keeps a `spaceID` is III.13's choice; if it leaves space lists, III.13 extends `isListedInSidebar`.
 
 Split view (III.5)
-- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows, a pane of its `paneTabs` outside its `shownTabIDs`; Show Here applies rule 2. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
+- `shownTabIDs` covers the panes, and window rule 1 covers every pane. A layout saved per space is app-wide, so a second window on the same space shows a placeholder with Show Here in each pane whose tab another window shows, a pane of its `paneTabs` outside its `shownTabIDs`; Show Here selects the tab, which applies rule 2, and a click elsewhere in the placeholder leaves the tab where it is. The pane under the pointer sets the window's `selectedTabID`. If III.5 lands before step 11, `PageAreaView` takes the pane layout.
 
 Previews (III.11)
 - A preview's secondary web contents comes from the runtime of the window's Persona, so it carries that Persona's cookies. The window model owns the panel, which closes with the window.
@@ -662,7 +685,7 @@ Coordination
    - New checks: a JavaScript `alert` in a background tab waits until the tab is selected, then shows on the window. Closing a background Chromium tab with a `beforeunload` handler through Close Other Tabs brings it forward with its sheet. A popup from the selected tab is selected; one from a background tab opens unread.
 
 9. III.6.5 Window controller and multiple windows (bundle)
-   - Files: new `BrowserWindowController.swift`; `BrowserSession.swift` (`openWindow`, `restoreWindows`, `windowDidBecomeMain`, which also updates the focused tab, `windowWillClose`, the teardown order, the last main window's record in memory, `windows` as the published list of open windows in place of the one window that step 8's rules go through, and `pageReaderDidHide` over every window), `SplitView.swift` (the placeholder of Interactions ▸ Split view for a pane whose tab another window shows), `AppDelegate.swift` (window building removed; New Window, Close Window, and the Window menu after `installShortcuts()`; tabbing off; reopen handling; the targets of the global shortcut, History, Import, and the prompt), `Scripting.swift`.
+   - Files: new `BrowserWindowController.swift`; `BrowserSession.swift` (`openWindow`, `restoreWindows`, `windowDidBecomeMain`, which also updates the focused tab, `windowWillClose`, the teardown order, the last main window's record in memory, `windows` as the published list of open windows in place of the one window that step 8's rules go through, and `pageReaderDidHide` over every window), `BrowserWindowModel.swift` (`prepareToClose`, `record`, `firstFreeTab(inSpace:)`, ⌘W without a tab), `PageAssistant.swift` (stopping one window's replies), `SplitView.swift` (the placeholder of Interactions ▸ Split view for a pane whose tab another window shows), `AppDelegate.swift` (window building removed; New Window, Close Window, and the Window menu after `installShortcuts()`; tabbing off; reopen handling; the targets of the global shortcut, History, Import, and the prompt), `Arch.sdef` (the `active tab` description). `Scripting.swift` already reads `focusedTab` and needs no change.
    - Launch order in `AppDelegate`: register the engines, create the session, set `NSWindow.allowsAutomaticWindowTabbing = false`, build the menus, install the monitors and shortcuts, set `NSApp.windowsMenu`, call `session.restoreWindows()`, open pending links, `ARCH_START_URL`, or a new tab in the sidebar target, activate, and prompt for the default browser on the front main window.
    - Re-check: 4, 5, 9, 12, 16, 18, 20, 26, 28.
    - New checks:
@@ -678,7 +701,7 @@ Coordination
      - With Settings open, closing every browser window keeps the app running, and a Dock click opens a main window.
 
 10. III.6.6 Windows persist (bundle); finishes III.6
-    - Files: `SessionStore.swift` (`WindowRecord`, `windows`, rule 7, version +1), `BrowserSession.swift` (save and restore), `BrowserWindowController.swift` (frames, clamping), `SessionSnapshotTests.swift`.
+    - Files: `SessionStore.swift` (`WindowRecord`, which moves from `BrowserWindowModel.swift`, `windows`, rule 7, version +1), `BrowserSession.swift` (save and restore), `BrowserWindowController.swift` (frames, clamping), `SessionSnapshotTests.swift`.
     - Re-check: 9 (the width persists and is app-wide), 10, 22, 31.
     - New checks: two windows with different frames, spaces, selected tabs, and sidebar visibility return after a relaunch, with the same window in front. A window in full screen returns windowed at its earlier frame. A window left on an external display returns on the main screen after that display is disconnected. Closing the last window quits, and the relaunch restores it. The kept v4 file opens one window centered at 1200×800 with its selection.
 
