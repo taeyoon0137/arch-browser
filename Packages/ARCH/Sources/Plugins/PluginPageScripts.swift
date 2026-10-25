@@ -11,14 +11,15 @@ extension PluginID {
 }
 
 extension PluginPageScript {
-    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address, then runs the script's body with the world's channel as `arch`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
+    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, then runs the script's body with the world's channel as `arch`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
     @MainActor
     func engineScript(world: String, sites: [MatchPattern]) -> EnginePageScript? {
-        guard FunctionBodyCheck.accepts(source) else { return nil }
+        guard FunctionBodyCheck.shared.accepts(source) else { return nil }
         let guarded = """
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
-          if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))) return;
+          if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || covers(location, \(MatchPattern.javaScriptLiteral(excludes)))
+            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))) return;
           ((arch) => {
         \(source)
           })(channel);
@@ -28,12 +29,14 @@ extension PluginPageScript {
     }
 }
 
-/// Tells whether a page script's source is a function body on its own. The `Function` constructor parses its last argument as a function body alone and runs none of it, so JavaScriptCore checks the source without running plugin code in the app. A check of the source inside brackets would not do: a source can close the brackets and open new ones.
-@MainActor
-private enum FunctionBodyCheck {
-    private static let check = JSContext()?.evaluateScript(#"(source) => { try { new Function("arch", source); return true; } catch { return false; } }"#)
+/// Tells whether a page script's source is a function body on its own. The `Function` constructor parses its last argument as a function body alone and runs none of it, so JavaScriptCore checks the source without running plugin code in the app. A check of the source inside brackets would not do: a source can close the brackets and open new ones. Each check has a JavaScriptCore context of its own, which one thread uses at a time.
+final class FunctionBodyCheck {
+    /// The check of the contribution index.
+    @MainActor static let shared = FunctionBodyCheck()
 
-    static func accepts(_ source: String) -> Bool {
+    private let check = JSContext()?.evaluateScript(#"(source) => { try { new Function("arch", source); return true; } catch { return false; } }"#)
+
+    func accepts(_ source: String) -> Bool {
         check?.call(withArguments: [source])?.toBool() ?? false
     }
 }

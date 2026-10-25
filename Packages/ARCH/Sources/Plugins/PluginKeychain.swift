@@ -9,8 +9,8 @@ protocol PluginSecretStore: AnyObject {
     func setSecret(_ secret: String?, service: String, account: String) throws
     /// Whether the item exists. It does not read the secret, which can make macOS ask for the keychain password.
     func containsSecret(service: String, account: String) throws -> Bool
-    /// Deletes the items of every plugin whose accounts start with `accountPrefix`. It reads only the items' attributes.
-    func removeSecrets(accountPrefix: String) throws
+    /// Deletes the items whose accounts start with `accountPrefix`: the service's, or for nil those of every plugin. It reads only the items' attributes.
+    func removeSecrets(service: String?, accountPrefix: String) throws
 }
 
 /// Accessible when unlocked, not synchronizable, in the login keychain, as the AI module keeps provider keys.
@@ -59,33 +59,32 @@ final class PluginKeychain: PluginSecretStore {
         }
     }
 
-    func removeSecrets(accountPrefix: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrSynchronizable as String: false,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-        ]
+    func removeSecrets(service: String?, accountPrefix: String) throws {
+        var query = Self.query(service: service, account: nil)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status != errSecItemNotFound else { return }
         guard status == errSecSuccess else { throw PluginKeychainError(status: status) }
         for item in result as? [[String: Any]] ?? [] {
-            guard let service = item[kSecAttrService as String] as? String, service.hasPrefix(Self.servicePrefix),
+            guard let itemService = item[kSecAttrService as String] as? String, itemService.hasPrefix(Self.servicePrefix),
                   let account = item[kSecAttrAccount as String] as? String, account.hasPrefix(accountPrefix) else { continue }
-            try setSecret(nil, service: service, account: account)
+            try setSecret(nil, service: itemService, account: account)
         }
     }
 
     static let servicePrefix = "local.arch.browser.plugin."
 
-    private static func query(service: String, account: String) -> [String: Any] {
-        [
+    /// The service's item for `account`, or all of its items for nil, and the items of every service for a nil service.
+    private static func query(service: String?, account: String?) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: false,
         ]
+        query[kSecAttrService as String] = service
+        query[kSecAttrAccount as String] = account
+        return query
     }
 }
 
@@ -119,6 +118,11 @@ final class ScopedPluginSecrets: PluginSecrets {
 
     func containsSecret(forKey key: String) throws -> Bool {
         try store.containsSecret(service: service, account: account(key))
+    }
+
+    /// Deletes every secret of the plugin in the Persona, when the user removes the plugin.
+    func removeAll() throws {
+        try store.removeSecrets(service: service, accountPrefix: Self.accountPrefix(of: personaID))
     }
 
     /// The start of the accounts of every secret in the Persona.

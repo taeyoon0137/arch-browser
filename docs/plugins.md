@@ -24,7 +24,7 @@
 | `script` | Arch package: `plugin.json`, HTML, JavaScript, CSS | A hidden `WKWebView` per running plugin; page scripts in the tab's engine | A folder or `.zip` the user chooses, or VII.7 | Installed in one Persona |
 | `webExtension` | Manifest V3 web extension package | `WKWebExtensionController` on WebKit tabs; CEF's extension runtime on Chromium tabs after VI.1 | A folder, `.zip`, or `.crx` file the user chooses | Installed in one Persona |
 
-A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` that has `manifest_version` 3 is a web extension. Arch refuses other folders, and manifests with an `apiVersion` higher than the app supports.
+A folder with `plugin.json` is a script plugin. A folder with a `manifest.json` that has `manifest_version` 3 is a web extension. Arch refuses other folders, manifests with an `apiVersion` higher than the app supports, and manifest keys it does not read (see Keys the script runtime reads).
 
 ## Package and manifest
 
@@ -77,6 +77,23 @@ A script plugin's `plugin.json`:
 
 Symbols use SF Symbols names, so plugins need no image files. A package may still carry an `icon` image for its Settings row.
 
+### Keys the script runtime reads
+
+The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, and `background`, and these contributions:
+
+| Key | Fields |
+|---|---|
+| `commands` | `id`, `title`, `symbol`, `keywords`, `shortcut` |
+| `menus` | `command`, `location` (`pluginsMenu`, `pageContextMenu` with its `contexts`, `tabContextMenu`, or `spaceMenu`), `title` |
+| `sidebarItems` | `id`, `title`, `symbol`, `command` |
+| `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
+| `pageScripts` | `matches`, `excludes`, `js`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
+
+- Arch refuses every other key until the step that builds it reads it, such as `siteAccess`, `network`, `events`, a sidebar item's `panel`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so that a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has.
+- Commands need a background script. Menu items and sidebar items name listed commands. Command and sidebar item identifiers and setting keys are unique.
+- A path names a regular file of the package: names separated by `/`, none of them empty, `.`, or `..`, and no link that leads out of the package. Each file in a page script's `js` becomes a page script of its own with the entry's patterns and timing; it must be UTF-8 text that parses as a function body on its own, which the review checks as the index does.
+- A refusal throws `PluginError.invalidPackage` with a sentence that names the field, such as `plugin.json: contributes.menus[0].command names “b”, which contributes.commands does not list.`
+
 ### Match patterns
 
 `sites` and a page script's `matches` and `excludes` hold match patterns. A pattern is `<scheme>://<host><path>` or `<all_urls>`, which equals `*://*/*`.
@@ -113,9 +130,9 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 | Command | The command palette, after the primary row and before history suggestions, when the typed text matches the title or a keyword; Settings ▸ Shortcuts, through its Plugins menu item | Menu items and sidebar items run commands too. A command with `takesArgument` shows its title as a token in the palette field and receives the text the user types after it |
 | Shortcut | The command's item in the Plugins menu, which a command with a shortcut gets after the plugin's own items when its manifest lists none | Settings ▸ Shortcuts lists the item under Plugins with the plugin's name, and the user can change the shortcut there. App shortcuts take priority over plugin shortcuts, and between plugins the first installed keeps a shortcut: a command goes without its default shortcut while an app command, a command the user gave it, or an earlier plugin's command has it, and its row in Settings ▸ Shortcuts names that command |
 | Menu item | A Plugins menu in the menu bar, before the Window menu, for the active window's Persona; the page context menu, after the app's items, when the click is on one of the listed contexts (page, link, image, selection, editable); a tab row's context menu and the space menu, after their items | In each menu, a plugin's items form a section under the plugin's name. A click is on `page` when it is on no link, image, media, selection, or field. Page context menu items run app-side, so they work alike on both engines, as row 49 requires. The command runs on the active window's selected tab from the Plugins menu, on the page's tab with the link, image, and selected text from the page context menu, on the row's tab from a tab row, and on the window's selected tab with the space from the space menu. The window's selected tab reaches a command only while it belongs to the plugin's Persona and no internal page or preview panel covers its page |
-| Sidebar item | A row below the favorites with a symbol, a title, and the badge the plugin sets | It runs a command on the window's selected tab or opens a panel |
-| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel uses one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
-| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin may add an HTML settings page below the form |
+| Sidebar item | A row below the favorites with a symbol, a title, and the badge the plugin sets | It runs a command on the window's selected tab or opens a panel. A script plugin's item runs a command until script plugin panels exist |
+| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel will use one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
+| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin will be able to add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
 | Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
 
@@ -146,10 +163,10 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own routing entry | No AI access |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
-- Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com". The user can narrow the sites and switch `siteAccess` to `whenInvoked` before installing. When a manifest asks for all sites, the sheet starts with `whenInvoked`. The result is the plugin's `PluginGrant`.
+- Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
 - Granting access to all sites or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table.
 - Settings ▸ Plugins lists each grant and revokes any part of it. Calls that need a revoked permission get `permissionDenied`. Contributions that need it are hidden.
-- An update that asks for more than the current grant shows the sheet again with the new items marked. An update that asks for less narrows the grant without asking.
+- An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
 - Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other. Settings shows the grant, and the user can switch the plugin off.
 - A plugin never sees cookies, passwords, or API keys. Its fetches carry no Persona cookies, so a plugin cannot act as the user on a site. Site data stays in the engines.
 
@@ -157,15 +174,15 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 - Built-in plugins run in the app process. They are trusted, reviewed with the app, and limited to `PluginContext` by convention.
 - Script plugins run their background script in a hidden `WKWebView` owned by the `Plugins` module. The code runs in a separate WebKit web content process, regardless of the tabs' engine:
-  - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package.
-  - Every document has a content security policy of `default-src 'self'` and a `connect-src` limited to the scheme itself, with no `unsafe-eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
+  - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package. The root of that origin is a document the handler writes, which runs the background script as a classic script; every other path is a package path, and other hosts and paths that name no file of the package get 404.
+  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
   - A `WKContentRuleList` blocks every load outside the plugin's scheme as a second layer.
   - Each plugin uses its own `WKWebsiteDataStore.nonPersistent()`, so it shares no cookies or site storage with any Persona or plugin. Its lasting state goes through `arch.storage`.
-  - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. The host identifies the calling plugin by the sending web view, never by the message.
+  - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. A user script defines `arch` in the page's world at the start of each document, and the app hands the background script commands and page script values through `callAsyncJavaScript`. The host identifies the calling plugin by the sending web view, never by the message.
   - Panels and HTML settings pages use the same configuration and bridge.
 - Web extensions run in the engines' own extension sandboxes: WebKit's for `WKWebExtensionController`, Chromium's for CEF's extension runtime.
-- Hangs and crashes: a background is hung if it leaves an event or command unanswered for 10 seconds. The host releases its web view (whether WebKit then ends the process at once needs verification) and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. After three failures within five minutes, the host disables the plugin. Its Settings row says why.
-- Resources: a background starts at its first event, command, or page message and stops after 30 seconds without work. A panel's web view lives only while the panel is open.
+- Hangs and crashes: a background is hung if it leaves its start (the load of its document), an event, a command, or a page message unanswered for 10 seconds. The host releases its web view (whether WebKit then ends the process at once needs verification), fails the calls that wait for it, and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. WebKit fails at once a call whose promise nothing can settle any more, so only a promise that stays pending or a script that keeps running counts as hung. After three failures within five minutes, the host disables the plugin. Its Settings row says why until the user switches it on again, during that run.
+- Resources: a background starts at its first event, command, or page message and stops after 30 seconds without work. Its badges stay. A panel's web view lives only while the panel is open.
 
 ## Lifecycle
 
@@ -177,40 +194,41 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `failed` | Disabled by the host after repeated failures, with the reason |
 | `unavailable` | Cannot run on this system or engine, with the reason, such as a web extension below macOS 15.4 |
 
-1. Stage: the user chooses a folder or archive with `NSOpenPanel`, or VII.7 hands over a folder. Arch copies it to a staging folder, reads and validates the manifest, and lists the files.
-2. Review: the install sheet shows the name, version, origin, permissions, and sites. For an AI-written plugin it also shows every file's source.
-3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable.
+1. Stage: the user chooses a folder or archive with `NSOpenPanel` in Settings ▸ Plugins, or VII.7 hands over a folder. Arch copies it to `Staging/<UUID>/` in the Persona's folder, off the main thread, reads and validates the manifest, and lists the files. `ditto` extracts an archive and keeps every entry inside the destination; the package is the archive's top level or its only folder. A package with a symbolic link is refused, since a link could lead to files outside it, and so is one with a built-in plugin's identifier. Nothing in the package runs before the user installs it. The manager clears `Staging/` when it starts.
+2. Review: the install sheet shows the name, version, origin, permissions, sites, and files. For an AI-written plugin it also shows every file's source.
+3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable. Cancel deletes the staged package.
 4. Enable: Arch registers the contributions, adds the page scripts to the Persona's tabs from their next load, and sends `activate` when the background first starts.
-5. Update: installing the same `id` again replaces the package after review and keeps storage. A running background stops and restarts on the new code.
+5. Update: installing the same `id` again replaces the package after review and keeps the plugin's place, storage, and secrets. A running background stops, and the next use starts the new code.
 6. Disable: Arch removes the contributions, closes page message channels, ends the plugin's context, sends `deactivate`, and stops the background.
-7. Remove: after a confirmation sheet, Arch disables the plugin and deletes its package, storage, and Keychain items. Built-in plugins cannot be removed, only disabled.
-8. Launch: each Persona's manager reads `plugins.json`, registers the built-in types, and shows enabled contributions. Installed plugin code runs only when needed.
+7. Remove: after a confirmation, Arch stops the plugin and deletes its package, storage, and the Persona's Keychain items for it. Built-in plugins cannot be removed, only disabled.
+8. Launch: each Persona's manager reads `plugins.json`, registers the built-in types, reads each installed plugin's manifest from its package, and shows enabled contributions. A package that no longer reads stays recorded but out of the list. Installed plugin code runs only when needed.
 
 ## Storage
 
 ```
 ~/Library/Application Support/Arch/Plugins/<persona id>/
-  plugins.json                  Which plugins the user switched on or off; installed plugins add their manifest, origin, grant, and install date
-  <plugin id>/package/          The installed package (script and web extension plugins)
+  plugins.json                  Which plugins the user switched on or off, and the installed plugins with their origin, grant, and install date
+  Staging/<UUID>/               A package under review
+  <plugin id>/package/          The installed package (script and web extension plugins), which holds the manifest
   <plugin id>/storage.json      Key-value storage, written atomically after changes settle
   <plugin id>/storage.unreadable.json  The last storage.json that did not decode
 ```
 
 - `<persona id>` is the Persona's UUID as `UUID.uuidString` writes it, so the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. The app gives `PluginManager` its Application Support folder, and the manager derives the Persona's folder from it.
 - `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; the limit never refuses removals and writes that do not grow it. A value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep, throws an encoding error, so every value the storage accepts reaches the file. Settings values live in the same file under keys that start with `arch.setting:`, which the plugin's own keys cannot use: `PluginStorage` throws `PluginError.reservedKey` for them, reads none, and leaves them out of `allKeys()`. A stored setting value that does not suit its field, such as an option a newer version no longer offers, reads as the default.
-- `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}]}`, in the order the user made the choices; a new choice for a plugin replaces its old one. A plugin without a choice follows `BuiltInPlugin.isOnByDefault`. Each choice writes the file at once. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
+- `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}], "installed": [{"id": "<plugin id>", "source": "file:///…/Sample.zip", "grant": {"permissions": ["clipboard"], "sites": ["https://example.org/*"]}, "installedAt": 814595493.0}]}`. The choices are in the order the user made them; a new choice for a plugin replaces its old one. A built-in plugin without a choice follows `BuiltInPlugin.isOnByDefault`, and an installed one is off. The installs are in the order the user installed the plugins; an update keeps its place. `installedAt` is the default `Date` encoding, seconds since 2001. The manifest stays in the package, so the grant cannot drift from it: the manager limits the recorded grant to what the package's manifest asks for. Each choice, install, and removal writes the file at once. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
 - Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing file counts as empty. A file that does not decode moves to `storage.unreadable.json`, replacing an older one, and the plugin starts empty, so its first change does not overwrite the old data. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
-- Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`, accessible when unlocked and not synchronizable, in the login keychain as the AI module's keys are. Settings ▸ Plugins shows only whether a secret is saved, which it reads without the secret, so macOS does not ask for the keychain password. A deleted Persona's items go at the next launch (see Personas).
+- Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`, accessible when unlocked and not synchronizable, in the login keychain as the AI module's keys are. Settings ▸ Plugins shows only whether a secret is saved, which it reads without the secret, so macOS does not ask for the keychain password. Removing a plugin deletes the service's items whose accounts start with `<persona id>/`, which it finds by their attributes alone. A deleted Persona's items go at the next launch (see Personas).
 - Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
 - Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
 
 ## Personas
 
 - Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it.
-- The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows the contributions of its Persona, its current space's, which for a small window is its tab's, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas.
+- The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows the contributions of its Persona, its current space's, which for a small window is its tab's, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas, and installs plugins into that Persona. A review sheet still open when the user deletes its Persona closes without installing.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
-- Deleting a Persona closes its manager (`close()`): its plugins leave the list, so their contributions go and nothing starts them again, their running instances stop and their contexts stop acting, and storage changes that have not reached the files are dropped. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
+- Deleting a Persona closes its manager (`close()`): its plugins leave the list, so their contributions go and nothing starts them again, their running instances stop, a script plugin's background web view with them, and their contexts stop acting, and storage changes that have not reached the files are dropped. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder, with its installed packages and the packages left in `Staging/`. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
 
 ## Web extensions as plugins
 
@@ -393,7 +411,7 @@ public struct PluginSidebarItem: Identifiable, Hashable, Codable, Sendable {
     public enum Action: Hashable, Codable, Sendable {
         /// Runs on the window's selected tab.
         case command(String)
-        /// The panel that `Plugin.panel(for:)` returns, in a popover beside the row. Step 4 adds the package path of a script plugin's panel.
+        /// The panel that `Plugin.panel(for:)` returns, in a popover beside the row. Script plugin panels, a later step, add the package path of an HTML file.
         case panel
     }
     public var id: String
@@ -634,20 +652,18 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var origin: PluginOrigin
     public var grant: PluginGrant
     public var isEnabled: Bool
-    public var state: PluginState
-    public var installedAt: Date
+    /// nil for a built-in plugin.
+    public var installedAt: Date?
+    /// Why the manager switched the plugin off after repeated failures in this run, which Settings shows. IV.12 adds why a web extension is unavailable.
+    public var failure: String?
 }
 
-public enum PluginState: Hashable, Sendable {
-    case disabled, idle, running
-    case failed(String)
-    case unavailable(String)
-}
-
-/// A validated package in the staging folder, ready for the review sheet.
-public struct PluginPackage: Sendable {
+/// A validated package, staged for the review sheet or installed.
+public struct PluginPackage: Identifiable, Sendable {
     public let manifest: PluginManifest
     public let rootURL: URL
+    /// The folder or archive the user chose.
+    public let sourceURL: URL
     /// Package-relative paths, shown in the review.
     public let files: [String]
 }
@@ -687,7 +703,7 @@ public struct PluginContributionIndex: Sendable {
     public var pageScripts: [EnginePageScript] { get }
 }
 
-/// Runs installed plugins of one kind in one Persona. `Plugins` provides the script runtime; `Extensions` provides the web extension runtime.
+/// Runs installed plugins of one kind in one Persona. `Plugins` provides the script runtime; `Extensions` provides the web extension runtime. While the script runtime is the only one, the manager makes script plugins itself; IV.12 adds this protocol with the second runtime.
 @MainActor
 public protocol PluginRuntime: AnyObject {
     var kind: PluginKind { get }
@@ -723,11 +739,14 @@ public final class PluginManager: ObservableObject {
     public func load() throws
     /// Copies a folder or archive into staging and validates it.
     public func stage(_ url: URL) async throws -> PluginPackage
-    public func install(_ package: PluginPackage, origin: PluginOrigin, grant: PluginGrant, enable: Bool) async throws
+    /// Deletes a staged package the user did not install.
+    public func discard(_ package: PluginPackage)
+    /// The origin is the package's `sourceURL`; VII.7 adds `generated`.
+    public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws
     /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID)
     public func setGrant(_ grant: PluginGrant, for id: PluginID) async throws
-    public func remove(_ id: PluginID) async throws
+    public func remove(_ id: PluginID) throws
 
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async
     /// Starts the plugin if needed and asks it for the item's panel. Nil, with a beep, when it offers none.
@@ -758,7 +777,7 @@ public final class PluginManager: ObservableObject {
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with the `PluginError` case name.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. So far the bridge has `commands.onRun`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table joins as `PluginContext` gains its members.
 
 | JavaScript | Swift |
 |---|---|
@@ -772,6 +791,9 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.net.fetch(url, init)` | `fetch(_:)` |
 | `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
+
+- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, and a page message listener `{tab, frameUrl, isMainFrame, body}`; a tab is `{id, spaceId, title, url, engine, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. Absent values are left out. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
+- `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
 
 Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves with the plugin's reply, and `arch.onMessage((message) => …)` receives `postMessage(_:toTab:)`.
 

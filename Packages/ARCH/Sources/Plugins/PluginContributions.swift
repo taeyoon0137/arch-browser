@@ -23,17 +23,25 @@ public struct PluginContributions: Hashable, Sendable {
 /// A script that runs in each document whose address one of its patterns and one of the plugin's granted sites cover, on both engines. It reaches its plugin through `arch`: `arch.send(value)` returns a promise of the reply from `Plugin.receive(_:)`, and `arch.onMessage(listener)` receives the values posted to the page's main frame.
 public struct PluginPageScript: Hashable, Sendable {
     public var matches: [MatchPattern]
-    /// JavaScript, run as the body of a function. A source that does not parse as a function body on its own never runs.
+    /// Addresses the script skips although `matches` covers them.
+    public var excludes: [MatchPattern]
+    /// JavaScript, run as the body of a function. A source that does not parse as a function body on its own never runs. A script plugin's comes from a file of its package.
     public var source: String
     public var runAt: EnginePageScriptInjectionTime
     /// Whether the script also runs in the frames inside a page.
     public var allFrames: Bool
 
-    public init(matches: [MatchPattern], source: String, runAt: EnginePageScriptInjectionTime = .documentEnd, allFrames: Bool = false) {
+    public init(matches: [MatchPattern], excludes: [MatchPattern] = [], source: String, runAt: EnginePageScriptInjectionTime = .documentEnd, allFrames: Bool = false) {
         self.matches = matches
+        self.excludes = excludes
         self.source = source
         self.runAt = runAt
         self.allFrames = allFrames
+    }
+
+    /// Whether the patterns cover `url`: one of `matches` does and none of `excludes`. Keep it in step with the guard of `engineScript(world:sites:)`.
+    func covers(_ url: URL) -> Bool {
+        matches.contains { $0.matches(url) } && !excludes.contains { $0.matches(url) }
     }
 }
 

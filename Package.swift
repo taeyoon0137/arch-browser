@@ -73,7 +73,8 @@ let package = Package(
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         .testTarget(name: "AITests", dependencies: ["AI"], path: "Packages/ARCH/Tests/AITests"),
         .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
-        .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests"),
+        // `Fixtures` holds a sample script plugin that the tests install and run.
+        .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences"], path: "Packages/ARCH/Tests/PreferencesTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],

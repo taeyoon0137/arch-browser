@@ -5,9 +5,9 @@ import ARCHEngine
 /// A running plugin in one Persona.
 @MainActor
 public protocol Plugin: AnyObject {
-    /// Called once, before the plugin's first command runs. The context acts for this instance until it stops, when the user switches the plugin off or deletes its Persona, or the activation throws.
+    /// Called once, before the plugin's first command runs. The context acts for this instance until it stops: when the user switches the plugin off, updates it, removes it, or deletes its Persona, when the activation throws, and for a script plugin also when its background script stops for being idle, hung, or ended.
     func activate(in context: any PluginContext) async throws
-    /// Called when the user switches the plugin off or deletes its Persona, once the activation has ended, after which the manager drops the instance. Its context has stopped acting by then. Switching the plugin on again starts a new instance.
+    /// Called when the instance stops, once its activation has ended, after which the manager drops the instance. Its context has stopped acting by then. The plugin's next use starts a new instance.
     func deactivate() async
     /// Runs one of the commands the manifest lists.
     func run(_ command: String, _ invocation: PluginInvocation) async throws
@@ -46,7 +46,7 @@ public protocol PluginContext: AnyObject {
     var secrets: any PluginSecrets { get }
     /// The value of one of the plugin's settings: the user's, or the manifest's default. Nil for a key the manifest does not list and for a secret setting, whose value `secrets` holds.
     func setting(_ key: String) -> PluginValue?
-    /// Shows `text` as the badge of one of the plugin's sidebar items, or no badge for nil or empty text. The badge goes when the plugin stops.
+    /// Shows `text` as the badge of one of the plugin's sidebar items, or no badge for nil or empty text. The badge stays until the plugin changes it or the user switches the plugin off, updates it, or removes it, also after a script plugin's instance stops on its own.
     func setBadge(_ text: String?, onSidebarItem id: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
@@ -190,4 +190,27 @@ public enum PluginError: Error, Hashable, Sendable {
     case reservedKey(String)
     /// A write would take the plugin's storage past its limit.
     case quotaExceeded
+    /// The folder or archive is not a package Arch can install, for the reason the text gives as a sentence.
+    case invalidPackage(String)
+    /// The package targets a plugin API newer than `PluginManifest.apiVersion`.
+    case unsupportedAPIVersion(Int)
+    /// A script plugin's background script left its start, a command, or a page script value unanswered past the hang limit.
+    case timedOut
+}
+
+extension PluginError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .permissionDenied(permission): return "The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst())."
+        case .stopped: return "The plugin has stopped."
+        case .noPage: return "The command needs a page."
+        case let .invalidMatchPattern(text): return "“\(text)” is not a site pattern."
+        case let .invalidShortcut(text): return "“\(text)” is not a shortcut."
+        case let .reservedKey(key): return "The storage key “\(key)” belongs to the plugin's settings."
+        case .quotaExceeded: return "The plugin's storage is full."
+        case let .invalidPackage(reason): return reason
+        case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
+        case .timedOut: return "The plugin did not answer in time."
+        }
+    }
 }

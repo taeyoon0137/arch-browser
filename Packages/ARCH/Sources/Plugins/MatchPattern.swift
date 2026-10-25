@@ -58,6 +58,16 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
         return includesSubdomains ? "\(host) and its subdomains" : host
     }
 
+    /// What a grant of the pattern lets a plugin do, as the sentence that Settings and the install sheet show.
+    public var accessSummary: String {
+        "Run scripts on pages from \(siteName)"
+    }
+
+    /// Whether the pattern covers every host, which granting asks the user to confirm with Touch ID or the login password.
+    public var coversEverySite: Bool {
+        host == nil
+    }
+
     /// Whether `pattern`, in which each `*` matches any run of bytes, matches all of `text`. After a mismatch it lets the last `*` take one more byte and tries again. Keep it in step with `glob` in `javaScriptMatcher`.
     private static func glob(_ pattern: [UInt8], matches text: [UInt8]) -> Bool {
         let star = UInt8(ascii: "*")
@@ -81,6 +91,18 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
             }
         }
         return pattern[p...].allSatisfy { $0 == star }
+    }
+}
+
+/// A pattern encodes as its written form, as `plugins.json` keeps the grants of installed plugins.
+extension MatchPattern: Codable {
+    public init(from decoder: any Decoder) throws {
+        try self.init(decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
     }
 }
 

@@ -653,6 +653,7 @@ Plugins (V.11)
 - One `PluginManager` per Persona, at `Plugins/<Persona.id>/`; the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. `Persona.defaultID` exists from step 2, so V.11 uses Persona folders from its start, and the interim `Plugins/<plugin ID>/` folder in `docs/ai.md` is not needed.
 - `PluginBrowserHost.tabs(in:)` filters `session.tabs` by `personaID`. `openTab(_:_:in:)` uses `preferredSpace(in:)`. `selectTab` goes to the window that shows the tab, else to the sidebar target. `present` uses the active window.
 - Page scripts come from the tab's Persona's manager: `makeWebContents(url:engine:state:in:)` passes them to each web contents it creates, a tab takes them again when it joins the session, and every tab of the Persona takes new ones when they change (`PluginPages`).
+- Script plugins install into the Persona that Settings ▸ Plugins shows, and their packages, storage, and background web views belong to that Persona's manager: deleting the Persona stops their backgrounds, and the next launch removes their packages with its folder.
 - Download entries record their Persona, so a plugin sees only its Persona's downloads. History stays app-wide in this design, while `docs/plugins.md` says a plugin sees only its Persona's history (open decision 2).
 - The half of III.12's done condition about separate plugins is part of V.11's done condition (open decision 15), which regression check 43 in `docs/plan.md` covers with the built-in Page Address plugin.
 

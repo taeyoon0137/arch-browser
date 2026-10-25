@@ -69,7 +69,7 @@ final class PluginStorageFile: PluginStorage {
         PluginFile.write(data, to: fileURL)
     }
 
-    /// Drops the changes that have not reached the file, for a plugin whose data goes, so that none writes the file again.
+    /// Drops the changes that have not reached the file, when the user removes the plugin or deletes its Persona, so that none writes the file again.
     func discardChanges() {
         pendingSave?.cancel()
         pendingSave = nil

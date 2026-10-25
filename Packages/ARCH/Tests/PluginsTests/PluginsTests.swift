@@ -709,6 +709,20 @@ import Testing
         }
     }
 
+    @Test func skipsTheAddressesItExcludes() throws {
+        let sites = [try MatchPattern("https://example.org/*")]
+        let script = PluginPageScript(matches: sites, excludes: [try MatchPattern("https://example.org/private/*")], source: "ran = arch;")
+        let engineScript = try #require(script.engineScript(world: world, sites: sites))
+        for (address, runs) in [("https://example.org/a", true), ("https://example.org/private/a", false)] {
+            let context = try #require(JSContext())
+            context.setObject(location(address), forKeyedSubscript: "location" as NSString)
+            context.evaluateScript("var ran = null; const channel = {};")
+            context.evaluateScript("(\(engineScript.source))(channel);")
+            #expect(context.evaluateScript("ran === channel").toBool() == runs, "\(address)")
+            #expect(script.covers(URL(string: address)!) == runs, "\(address)")
+        }
+    }
+
     @Test func leavesOutSourcesThatAreNotFunctionBodiesOnTheirOwn() throws {
         let sites = [try MatchPattern("https://example.org/*")]
         // Each closes brackets of the function it would run in; the first two would then run on every page.
@@ -759,7 +773,7 @@ private func installed(_ id: String, name: String, contributions: PluginContribu
 }
 
 /// Secrets in memory by service and account, so that tests never touch the Keychain.
-private final class MemorySecretStore: PluginSecretStore {
+final class MemorySecretStore: PluginSecretStore {
     private(set) var items: [String: String] = [:]
 
     func secret(service: String, account: String) throws -> String? {
@@ -774,10 +788,11 @@ private final class MemorySecretStore: PluginSecretStore {
         items[service + " " + account] != nil
     }
 
-    func removeSecrets(accountPrefix: String) throws {
+    func removeSecrets(service: String?, accountPrefix: String) throws {
         items = items.filter { key, _ in
             let parts = key.split(separator: " ", maxSplits: 1)
-            return !(parts[0].hasPrefix(PluginKeychain.servicePrefix) && parts[1].hasPrefix(accountPrefix))
+            let isOfService = service.map { parts[0] == $0 } ?? parts[0].hasPrefix(PluginKeychain.servicePrefix)
+            return !(isOfService && parts[1].hasPrefix(accountPrefix))
         }
     }
 }
@@ -788,7 +803,7 @@ private func nested(_ depth: Int) -> PluginValue {
 }
 
 /// A folder of its own for one test's files, removed when the test ends.
-private final class TemporaryFolder {
+final class TemporaryFolder {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("ArchPluginsTests-\(UUID().uuidString)", isDirectory: true)
 
     deinit {

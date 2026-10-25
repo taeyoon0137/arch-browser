@@ -1,7 +1,8 @@
-// Settings ▸ Plugins: the plugins of each Persona, each with its switch, what its grant lets it do, and its settings as a form. Only built-in plugins exist so far, which keep the grant their manifests ask for, so the section states the grant without controls to narrow it.
+// Settings ▸ Plugins: the plugins of each Persona, each with its switch, what its grant lets it do, and its settings as a form, and Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
 import Browsing
 import Plugins
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// With two or more Personas, a picker chooses whose plugins the section shows. The list scrolls in a section of fixed height.
 struct PluginsSection: View {
@@ -19,7 +20,9 @@ struct PluginsSection: View {
                     }
                 }
             }
+            // Each Persona's list is a view of its own, so that a review sheet open while the user deletes its Persona closes instead of installing into the Persona shown next.
             PluginList(session: session, plugins: session.plugins(in: shownPersonaID), personaID: shownPersonaID)
+                .id(shownPersonaID)
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth, height: 440)
@@ -32,27 +35,70 @@ struct PluginsSection: View {
     }
 }
 
-/// One section per plugin, in the order the manager registered them.
+/// Install Plugin…, then one section per plugin, in the order the manager registered them.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
+    /// The package under review.
+    @State private var staged: PluginPackage?
+    /// Why the last chosen folder or archive could not be staged.
+    @State private var failure: String?
 
     var body: some View {
+        Section {
+            LabeledContent("Install a plugin from a folder or a .zip archive") {
+                Button("Install Plugin…", action: choosePackage)
+            }
+        } footer: {
+            if let failure {
+                Text(failure)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .sheet(item: $staged) { PluginInstallSheet(plugins: plugins, package: $0) }
         ForEach(plugins.plugins) { plugin in
             PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin)
         }
     }
+
+    /// Asks for a package with an open panel on the Settings window, then stages it for the review sheet.
+    private func choosePackage() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowedContentTypes = [.folder, .zip]
+        panel.prompt = "Review"
+        let finish = { (response: NSApplication.ModalResponse) in
+            guard response == .OK, let url = panel.url else { return }
+            Task {
+                do {
+                    staged = try await plugins.stage(url)
+                    failure = nil
+                } catch {
+                    failure = error.localizedDescription
+                }
+            }
+        }
+        if let window = PreferencesWindowController.shared.window {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            panel.begin(completionHandler: finish)
+        }
+    }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, and Reload Matching Tabs for a plugin with page scripts, which start with each page's next load.
+/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. The footer says where the plugin came from and why the manager switched it off, if it did.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
     let plugin: InstalledPlugin
-    /// Why the last change to a setting failed.
+    /// Why the last change to a setting, or the removal, failed.
     @State private var failure: String?
+    @State private var isConfirmingRemoval = false
 
     var body: some View {
         Section {
@@ -72,11 +118,23 @@ private struct PluginSection: View {
             if plugin.isEnabled, !plugin.manifest.contributions.pageScripts.isEmpty {
                 Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
             }
+            if plugin.origin != .bundled {
+                Button("Remove…", role: .destructive) { isConfirmingRemoval = true }
+                    .confirmationDialog("Remove “\(plugin.manifest.name)”?", isPresented: $isConfirmingRemoval) {
+                        Button("Remove", role: .destructive, action: remove)
+                    } message: {
+                        Text("Its files, storage, and saved secrets in this Persona are deleted.")
+                    }
+            }
         } footer: {
             // A grouped form's footer is trailing-aligned and primary by default.
             VStack(alignment: .leading, spacing: 4) {
-                Text("Version \(plugin.manifest.version), built into Arch.")
+                Text("Version \(plugin.manifest.version), \(origin).")
                     .foregroundStyle(.secondary)
+                if let reason = plugin.failure {
+                    Text(reason)
+                        .foregroundStyle(.red)
+                }
                 if let failure {
                     Text(failure)
                         .foregroundStyle(.red)
@@ -84,6 +142,25 @@ private struct PluginSection: View {
             }
             .font(.callout)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Where the plugin came from, as the footer says it.
+    private var origin: String {
+        switch plugin.origin {
+        case .bundled:
+            return "built into Arch"
+        case let .file(url):
+            let date = plugin.installedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+            return "installed from \(url.lastPathComponent)\(date)"
+        }
+    }
+
+    private func remove() {
+        do {
+            try plugins.remove(plugin.id)
+        } catch {
+            failure = error.localizedDescription
         }
     }
 }

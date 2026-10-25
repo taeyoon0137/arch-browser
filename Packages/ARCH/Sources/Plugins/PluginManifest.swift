@@ -26,6 +26,9 @@ extension StringProtocol {
 
 /// Who a plugin is, what it asks for, and what it adds to the interface. The app shows the contributions before any of the plugin's code runs.
 public struct PluginManifest: Hashable, Sendable {
+    /// The newest plugin API this app runs, which a script plugin's `apiVersion` may not exceed.
+    public static let apiVersion = 1
+
     public var id: PluginID
     public var name: String
     public var version: String
@@ -47,8 +50,16 @@ public struct PluginManifest: Hashable, Sendable {
     }
 }
 
-/// A capability a plugin asks for. Each permission guards members of `PluginContext` or fields the plugin receives, and joins with them.
-public enum PluginPermission: String, Hashable, Sendable, CaseIterable {
+/// Where a plugin came from.
+public enum PluginOrigin: Hashable, Sendable {
+    /// Compiled into the app.
+    case bundled
+    /// Installed from the folder or archive at the address.
+    case file(URL)
+}
+
+/// A capability a plugin asks for. Each permission guards members of `PluginContext` or fields the plugin receives, and joins with them. A script plugin's manifest names it by its raw value.
+public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
     /// Titles and addresses of tabs. Without it, a plugin sees a tab's identifier, space, engine, and pinned state only.
     case tabs
     /// Writing text to the clipboard.
@@ -64,14 +75,23 @@ public enum PluginPermission: String, Hashable, Sendable, CaseIterable {
 }
 
 /// What the user granted a plugin: a subset of what its manifest asks for. `PluginContext` checks every call against it.
-public struct PluginGrant: Hashable, Sendable {
+public struct PluginGrant: Hashable, Codable, Sendable {
     public var permissions: Set<PluginPermission>
     public var sites: [MatchPattern]
 
+    public init(permissions: Set<PluginPermission>, sites: [MatchPattern]) {
+        self.permissions = permissions
+        self.sites = sites
+    }
+
     /// Everything the manifest asks for. Built-in plugins get this grant.
     public init(requestedBy manifest: PluginManifest) {
-        permissions = manifest.permissions
-        sites = manifest.sites
+        self.init(permissions: manifest.permissions, sites: manifest.sites)
+    }
+
+    /// The grant without what the manifest does not ask for, so that a grant never exceeds the request.
+    func limited(to manifest: PluginManifest) -> PluginGrant {
+        PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains))
     }
 
     /// Whether the granted sites cover the page at `url`.
@@ -81,6 +101,6 @@ public struct PluginGrant: Hashable, Sendable {
 
     /// What the grant lets the plugin do, one sentence for each permission, in a fixed order, and for each site.
     public var summaries: [String] {
-        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map { "Run scripts on pages from \($0.siteName)" }
+        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map(\.accessSummary)
     }
 }
