@@ -40,6 +40,8 @@ public final class BrowserWindowModel: ObservableObject {
             if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
             // A favorite's tab belongs to no space, so selecting it keeps the current one.
             if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
+            // Another tab takes the focus, so a palette left open over the old page closes, as when a link from another app or Move to Main Window selects a tab.
+            if commandPaletteMode != nil, oldValue != selectedTabID { commandPaletteMode = nil }
             // Switching tabs ends the search because it belongs to one page.
             if isFindBarVisible, oldValue != selectedTabID {
                 session.allTabs.first { $0.id == oldValue }?.webContents.stopFind()
