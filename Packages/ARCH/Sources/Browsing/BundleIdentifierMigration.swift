@@ -2,12 +2,16 @@
 import Foundation
 import Security
 
-/// Moves the preferences, WebKit's website data, the cookies and HTTP storage, and the AI provider keys from the previous bundle identifier to the current one, and deletes the previous identifier's caches. An item moves only while the previous one exists and the current one does not, and the previous one goes only once the current one exists, so a run that stopped partway finishes at the next launch and a finished run finds nothing to do. macOS ties permissions and the default browser setting to the identifier, so they cannot move.
+/// Moves the preferences, WebKit's website data, the cookies and HTTP storage, the AI provider keys, and WebKit's WebCrypto master key from the previous bundle identifier to the current one, and deletes the previous identifier's caches. An item moves only while the previous one exists and the current one does not, and the previous one goes only once the current one exists, so a run that stopped partway finishes at the next launch and a finished run finds nothing to do. macOS ties permissions and the default browser setting to the identifier, so they cannot move, and the app asks again to become the default browser.
 public struct BundleIdentifierMigration {
     /// Items in folders of `~/Library` named by the identifier and a suffix: WebKit's website data, which holds the default store and each Persona's, and the cookies and HTTP storage beside it.
     static let movedItems: [(folder: String, suffix: String)] = [("WebKit", ""), ("HTTPStorages", ""), ("HTTPStorages", ".binarycookies")]
     /// Keychain services named by the identifier and a suffix: the AI module's provider keys (`AIKeychain.service`).
     static let keychainServiceSuffixes = [".ai"]
+    /// The Keychain account, named by this prefix and the identifier, of the key with which WebKit wraps the CryptoKey objects that sites keep in IndexedDB. WebKit makes a new key when it finds none, and the new key cannot unwrap the moved ones.
+    static let webCryptoMasterKeyAccountPrefix = "com.apple.WebKit.WebCrypto.master+"
+    /// Preferences the current identifier starts without: whether the app asked to become the default browser (`AppDelegate`), since that setting stays with the previous identifier.
+    static let unmovedPreferences: Set<String> = ["ARCHAskedDefaultBrowser"]
 
     var previousIdentifier: String
     var identifier: String
@@ -28,11 +32,11 @@ public struct BundleIdentifierMigration {
         migration.moveKeychainItems()
     }
 
-    /// Copies each preference of the previous domain that the current domain lacks, then removes the previous domain.
+    /// Copies each preference of the previous domain that the current domain lacks, except `unmovedPreferences`, then removes the previous domain.
     func movePreferences() {
         guard let previous = defaults.persistentDomain(forName: previousIdentifier), !previous.isEmpty else { return }
         let current = defaults.persistentDomain(forName: identifier) ?? [:]
-        for (key, value) in previous where current[key] == nil {
+        for (key, value) in previous where current[key] == nil && !Self.unmovedPreferences.contains(key) {
             defaults.set(value, forKey: key)
         }
         defaults.removePersistentDomain(forName: previousIdentifier)
@@ -57,30 +61,36 @@ public struct BundleIdentifierMigration {
         try? FileManager.default.removeItem(at: caches)
     }
 
-    /// Adds each item of the previous services under the current one, with the attributes `AIKeychain` gives a new item, then deletes the previous item. The previous item's access list names the app of the previous identifier, so reading its key can show the login keychain prompt once. An item whose key cannot be read stays for the next launch.
+    /// Adds each item of the previous services under the current one, with the attributes `AIKeychain` gives a new item, and WebKit's WebCrypto master key under the current identifier's account, with the attributes WebKit gave it, then deletes the previous item. The previous item's access list names the app of the previous identifier, so reading its key can show the login keychain prompt once. An item whose key cannot be read stays for the next launch.
     func moveKeychainItems() {
         for suffix in Self.keychainServiceSuffixes {
             let previousService = previousIdentifier + suffix, service = identifier + suffix
             for account in Self.accounts(of: previousService) {
-                if Self.item(service: service, account: account, withKey: false) == nil {
-                    guard let previous = Self.item(service: previousService, account: account, withKey: true), let key = previous[kSecValueData as String] else { continue }
-                    var item = Self.query(service: service, account: account)
-                    item[kSecValueData as String] = key
-                    item[kSecAttrLabel as String] = previous[kSecAttrLabel as String]
-                    item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-                    guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { continue }
-                }
-                SecItemDelete(Self.query(service: previousService, account: account) as CFDictionary)
+                Self.moveItem(from: Self.query(service: previousService, account: account), to: Self.query(service: service, account: account), copying: [kSecAttrLabel], setting: [kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked])
             }
         }
+        let prefix = Self.webCryptoMasterKeyAccountPrefix
+        Self.moveItem(from: Self.query(account: prefix + previousIdentifier), to: Self.query(account: prefix + identifier), copying: [kSecAttrService, kSecAttrLabel, kSecAttrComment])
     }
 
-    private static func query(service: String, account: String? = nil) -> [String: Any] {
+    /// When `current` finds no item, adds one with the key and `attributes` of the item `previous` finds and with `values`; then deletes the previous item.
+    private static func moveItem(from previous: [String: Any], to current: [String: Any], copying attributes: [CFString], setting values: [String: Any] = [:]) {
+        if Self.item(current, withKey: false) == nil {
+            guard let previousItem = Self.item(previous, withKey: true), let key = previousItem[kSecValueData as String] else { return }
+            var item = current.merging(values) { $1 }
+            item[kSecValueData as String] = key
+            for attribute in attributes { item[attribute as String] = previousItem[attribute as String] }
+            guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { return }
+        }
+        SecItemDelete(previous as CFDictionary)
+    }
+
+    private static func query(service: String? = nil, account: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
             kSecAttrSynchronizable as String: false,
         ]
+        if let service { query[kSecAttrService as String] = service }
         if let account { query[kSecAttrAccount as String] = account }
         return query
     }
@@ -95,9 +105,9 @@ public struct BundleIdentifierMigration {
         return (result as? [[String: Any]] ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
     }
 
-    /// The item's attributes, and its key under `kSecValueData` when asked for.
-    private static func item(service: String, account: String, withKey: Bool) -> [String: Any]? {
-        var query = Self.query(service: service, account: account)
+    /// The attributes of the item `query` finds, and its key under `kSecValueData` when asked for.
+    private static func item(_ query: [String: Any], withKey: Bool) -> [String: Any]? {
+        var query = query
         query[kSecReturnAttributes as String] = true
         query[kSecReturnData as String] = withKey
         query[kSecMatchLimit as String] = kSecMatchLimitOne

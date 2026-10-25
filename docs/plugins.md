@@ -219,7 +219,7 @@ The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesi
 
 - The user installs the 1Password and iCloud Passwords web extension plugins in each Persona that needs them. Arch bundles no third-party code.
 - Both need `nativeMessaging` to reach their desktop helpers, so installing them asks for Touch ID.
-- 1Password's desktop app accepts a browser it does not list only when the browser is signed and installed in `/Applications`. The iCloud Passwords helper starts only for browsers on Apple's `apple/password-manager-resources` list. Both remain blocked on a stable signing identity (I.7), and on Chromium also on VI.1, as IV.13 records.
+- 1Password's desktop app accepts a browser it does not list only when the browser is signed and installed in `/Applications`. The iCloud Passwords helper starts only for browsers on Apple's `apple/password-manager-resources` list. On Chromium both remain blocked on VI.1, as IV.13 records.
 - Universal Autofill (⌘\\) reads the page's accessibility tree and is not a plugin matter; it needs II.13 on Chromium.
 - Each plugin's Settings row shows whether its helper answered. A missing allow-list entry shows as a status instead of failing silently.
 

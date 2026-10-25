@@ -10,7 +10,7 @@ protocol AIKeyStore: AnyObject, Sendable {
     func removeKey(for provider: AIProviderID) throws
 }
 
-/// Service `xyz.taeyoon.arch.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable. The data protection keychain needs entitlements the bundle does not have, so items go to the login keychain; until the bundle has a stable signing identity, macOS asks for the keychain password once after each rebuild.
+/// Service `xyz.taeyoon.arch.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable. The data protection keychain needs entitlements the bundle does not have, so items go to the login keychain. Builds signed with the same Apple Development identity keep access to the items; an ad hoc signed build changes its code signature with each rebuild, so macOS asks for the keychain password once after each rebuild.
 final class AIKeychain: AIKeyStore, @unchecked Sendable {
     static let service = "xyz.taeyoon.arch.ai"
 
