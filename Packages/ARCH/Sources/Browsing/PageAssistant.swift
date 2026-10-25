@@ -51,7 +51,10 @@ public final class PageAssistant: ObservableObject {
         pages.session = session
         AIService.shared.register(.pageReader)
         AIService.shared.register(.pageQuestion)
-        session.$tabs.sink { [weak self] tabs in self?.follow(tabs) }.store(in: &cancellables)
+        // A favorite's tab is read and asked about like a space's tab.
+        session.$tabs.combineLatest(session.$favoriteTabs) { tabs, favoriteTabs in tabs + favoriteTabs.values }
+            .sink { [weak self] tabs in self?.follow(tabs) }
+            .store(in: &cancellables)
     }
 
     // MARK: Availability
@@ -219,7 +222,7 @@ final class TabPageSource: AIPageSource {
     }
 
     private func readableContent(ofTab id: UUID, limit: Int) async throws -> EngineReadableContent {
-        guard let webContents = session?.tabs.first(where: { $0.id == id })?.webContents else { throw EngineReadableContentError.unreadable }
+        guard let webContents = session?.allTabs.first(where: { $0.id == id })?.webContents else { throw EngineReadableContentError.unreadable }
         return try await withCheckedThrowingContinuation { continuation in
             webContents.readableContent(limit: limit) { continuation.resume(with: $0) }
         }
