@@ -1,7 +1,6 @@
 // Chromium is the primary engine. This adapter implements the `ARCHEngine` protocols using the Chromium Embedded Framework (CEF) through the Objective-C bridge.
 import AppKit
 import ARCHEngine
-import AVFoundation
 import CEFBridge
 import Foundation
 
@@ -288,8 +287,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private weak var context: ChromiumBrowserContext?
     /// The profile the page loads in. Popups load in the same one.
     private let requestContext: ARCHCEFRequestContext
-    private var observers: [any EngineWebContentsNavigationObserver] = []
-    private var pendingURL: URL?
+    /// The icon URL that last gave each host's pages their icon in this tab, by lowercase host.
+    private var iconURLsByHost: [String: URL] = [:]
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool, forward: Bool)?
     private var lastActiveMatchOrdinal = 0
@@ -360,8 +359,9 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         }
         self?.browser?.performMediaAction(bridgeAction, inFrame: frame)
     }
-    public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.append(observer) }
-    public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) { observers.removeAll { $0 === observer } }
+    /// The adapter forwards none of CEF's load events, so an observer would never hear from this engine; none is kept (docs/engine-protocol.md, Tier 1).
+    public func addNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {}
+    public func removeNavigationObserver(_ observer: any EngineWebContentsNavigationObserver) {}
     public func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {
         guard !text.isEmpty else {
             stopFind()
@@ -485,13 +485,17 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.title = title
         uiDelegate?.webContentsDidChangeTitle(self)
     }
+    /// CEF reports the main frame's address when a document commits and on same-document navigations, such as `history.pushState`, but reports icon URLs only once a document finishes loading or changes its icon links, and never for a page back from the back-forward cache. So the icon stays while the tab stays on one host, as WebKit's stays until the next document finishes loading, and the next report replaces it; a page on another host starts with the icon that host's pages last showed in this tab, or with none.
     public func cefBrowserDidChangeURL(_ url: String) {
+        let previousURL = self.url
         self.url = URL(string: url)
         uiDelegate?.webContentsDidChangeURL(self)
+        guard !FaviconLoader.keepsIcon(from: previousURL, to: self.url) else { return }
         if favicon != nil {
             favicon = nil
             uiDelegate?.webContentsDidChangeFavicon(self)
         }
+        if let host = self.url?.host?.lowercased(), let iconURL = iconURLsByHost[host] { loadFavicon(iconURL) }
     }
     public func cefBrowserDidChangeLoadingState(_ isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
         if !isLoading { authenticationAttempts.removeAll() }
@@ -503,10 +507,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
+        loadFavicon(iconURL)
+    }
+    /// Shows the icon at `iconURL` and remembers it for the page's host, unless the tab moves to another host while it loads; a page that changes its address with `history.replaceState` meanwhile keeps it.
+    private func loadFavicon(_ iconURL: URL) {
         let pageURL = url
         FaviconLoader.load(iconURL) { [weak self] image in
-            // Ignore icons loaded after the tab navigates to another page.
-            guard let self, let image, self.url == pageURL else { return }
+            guard let self, let image, FaviconLoader.keepsIcon(from: pageURL, to: self.url) else { return }
+            if let host = pageURL?.host?.lowercased() { self.iconURLsByHost[host] = iconURL }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }
@@ -652,30 +660,17 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidUpdate(_ download: ARCHCEFDownload) {
         context?.chromiumDownloads.update(download)
     }
-    /// The UI delegate decides whether to grant the site's request. Camera and microphone access also require the system's permission for this app, requested before the page gets access.
+    /// The UI delegate decides whether to grant the site's request. Camera and microphone access also require the system's permission for this app: a request for a device the system denies the app is denied without asking, and otherwise the system's permission is requested before the page gets access.
     public func cefBrowserDidRequestPermissions(_ permissions: ARCHCEFPermission, fromOrigin origin: String, decision: @escaping (Bool) -> Void) {
         let mapping: [(ARCHCEFPermission, EnginePermissionType)] = [(.camera, .camera), (.microphone, .microphone), (.screenCapture, .screenCapture), (.geolocation, .geolocation),
                                                                    (.notifications, .notifications), (.clipboard, .clipboard), (.midi, .midi)]
         let types = mapping.filter { permissions.contains($0.0) }.map(\.1)
-        guard let uiDelegate, !types.isEmpty else { return decision(false) }
+        let mediaTypes = EngineCaptureAccess.mediaTypes(for: types)
+        guard let uiDelegate, !types.isEmpty, !EngineCaptureAccess.isRefusedBySystem(mediaTypes) else { return decision(false) }
         let request = EnginePermissionRequest(origin: URL(string: origin) ?? URL(string: "about:blank")!, types: types)
         uiDelegate.webContents(self, requestPermission: request) { granted in
             guard granted else { return decision(false) }
-            let mediaTypes: [AVMediaType] = types.compactMap { $0 == .camera ? .video : $0 == .microphone ? .audio : nil }
-            Self.requestCaptureAccess(for: mediaTypes) { decision($0) }
-        }
-    }
-    /// Requests system permission for each media type in turn. Completes on the main thread with `false` as soon as one is denied.
-    private static func requestCaptureAccess(for mediaTypes: [AVMediaType], completion: @escaping (Bool) -> Void) {
-        guard let mediaType = mediaTypes.first else { return completion(true) }
-        AVCaptureDevice.requestAccess(for: mediaType) { granted in
-            DispatchQueue.main.async {
-                if granted {
-                    Self.requestCaptureAccess(for: Array(mediaTypes.dropFirst()), completion: completion)
-                } else {
-                    completion(false)
-                }
-            }
+            EngineCaptureAccess.requestAccess(for: mediaTypes, completion: decision)
         }
     }
     /// Presents the request as a `URLAuthenticationChallenge`, the form WebKit uses, so the same sheet serves both engines. CEF does not count failed attempts, so the adapter counts the credentials it sent for each space until a page finishes loading; a request after one of them means it failed.

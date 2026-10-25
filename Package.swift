@@ -77,6 +77,7 @@ let package = Package(
         .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         .testTarget(name: "AITests", dependencies: ["AI", "Plugins"], path: "Packages/ARCH/Tests/AITests"),
+        .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),

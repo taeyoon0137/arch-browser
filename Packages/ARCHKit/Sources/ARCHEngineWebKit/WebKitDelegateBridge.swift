@@ -1,7 +1,6 @@
 // Bridges WKNavigationDelegate, WKUIDelegate, and KVO into ARCHEngine delegate and observer calls.
 import AppKit
 import ARCHEngine
-import AVFoundation
 import Foundation
 import WebKit
 
@@ -181,33 +180,15 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         guard let delegate = owner.uiDelegate else { return decisionHandler(.prompt) }
         let types: [EnginePermissionType] = type == .camera ? [.camera] : type == .microphone ? [.microphone] : [.camera, .microphone]
-        let mediaTypes: [AVMediaType] = types.map { $0 == .camera ? .video : .audio }
+        let mediaTypes = EngineCaptureAccess.mediaTypes(for: types)
         // Skip the site's permission request if the system already denies this app access to the device.
-        let isRefusedBySystem = mediaTypes.contains { mediaType in
-            let status = AVCaptureDevice.authorizationStatus(for: mediaType)
-            return status == .denied || status == .restricted
-        }
-        guard !isRefusedBySystem else { return decisionHandler(.deny) }
+        guard !EngineCaptureAccess.isRefusedBySystem(mediaTypes) else { return decisionHandler(.deny) }
         // Port 0 stands for the scheme's default port; any other port belongs to the origin, as in Chromium's requests.
         let port = origin.port == 0 ? "" : ":\(origin.port)"
         let request = EnginePermissionRequest(origin: URL(string: "\(origin.protocol)://\(origin.host)\(port)") ?? URL(string: "about:blank")!, types: types)
         delegate.webContents(owner, requestPermission: request) { granted in
             guard granted else { return decisionHandler(.deny) }
-            Self.requestCaptureAccess(for: mediaTypes) { decisionHandler($0 ? .grant : .deny) }
-        }
-    }
-
-    /// Requests system permission for each media type in turn. Completes on the main thread with `false` as soon as one is denied.
-    private static func requestCaptureAccess(for mediaTypes: [AVMediaType], completion: @escaping (Bool) -> Void) {
-        guard let mediaType = mediaTypes.first else { return completion(true) }
-        AVCaptureDevice.requestAccess(for: mediaType) { granted in
-            DispatchQueue.main.async {
-                if granted {
-                    Self.requestCaptureAccess(for: Array(mediaTypes.dropFirst()), completion: completion)
-                } else {
-                    completion(false)
-                }
-            }
+            EngineCaptureAccess.requestAccess(for: mediaTypes) { decisionHandler($0 ? .grant : .deny) }
         }
     }
 }

@@ -119,12 +119,13 @@ arch-browser
 │   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
 │   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
-│   └── ARCHKit/Sources/
-│       ├── ARCHEngine/             # Engine protocols, registry, and selection
-│       ├── ARCHEngineChromium/     # Chromium adapter using CEF
-│       ├── ARCHEngineWebKit/       # WebKit adapter
-│       ├── ARCHPrivateAPI/         # Private API registry and flags
-│       └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
+│   ├── ARCHKit/Sources/
+│   │   ├── ARCHEngine/             # Engine protocols, registry, and selection
+│   │   ├── ARCHEngineChromium/     # Chromium adapter using CEF
+│   │   ├── ARCHEngineWebKit/       # WebKit adapter
+│   │   ├── ARCHPrivateAPI/         # Private API registry and flags
+│   │   └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
+│   └── ARCHKit/Tests/              # Tests: ARCHEngineTests
 ├── docs/                           # Design documents
 ├── resources/                      # README source, hero images, and app icon
 ├── scripts/                        # Build and README scripts (see Scripts)

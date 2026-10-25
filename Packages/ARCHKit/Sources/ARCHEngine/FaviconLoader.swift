@@ -21,12 +21,19 @@ public enum FaviconLoader {
             let image = data.flatMap(NSImage.init(data:))
             DispatchQueue.main.async {
                 if let image, url.scheme != "data" {
-                    if cache.count >= 200 { cache.removeAll() } // ponytail: full flush, LRU if icon churn matters
+                    // A full flush keeps the cache simple; an LRU cache would keep more icons if browsing churns through many.
+                    if cache.count >= 200 { cache.removeAll() }
                     cache[url] = image
                 }
                 pending.removeValue(forKey: url)?.forEach { $0(image) }
             }
         }.resume()
+    }
+
+    /// Whether a tab keeps its icon when its page changes from `oldURL` to `newURL`: the pages of one host share an icon until the new page reports its own, and a same-document navigation, such as `history.pushState` or a fragment, never leaves the host. A page without a host, such as `about:blank` or a file, keeps none.
+    public static func keepsIcon(from oldURL: URL?, to newURL: URL?) -> Bool {
+        guard let oldHost = oldURL?.host, let newHost = newURL?.host else { return false }
+        return oldHost.caseInsensitiveCompare(newHost) == .orderedSame
     }
 
     /// The usual icon URL for a page that declares no icon.
