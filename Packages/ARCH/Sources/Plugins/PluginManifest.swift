@@ -56,6 +56,21 @@ public enum PluginOrigin: Hashable, Sendable {
     case bundled
     /// Installed from the folder or archive at the address.
     case file(URL)
+    /// Written by AI through the AI interface, from what the user asked for.
+    case generated(PluginComposition)
+}
+
+/// How AI wrote a plugin, which the review and Settings show.
+public struct PluginComposition: Hashable, Codable, Sendable {
+    /// What the user typed: the request, then each change the user asked for in the review, in order.
+    public var requests: [String]
+    /// The model that wrote the plugin's last version, as Settings ▸ AI names it.
+    public var model: String
+
+    public init(requests: [String], model: String) {
+        self.requests = requests
+        self.model = model
+    }
 }
 
 /// A capability a plugin asks for. Each permission guards members of `PluginContext` or fields the plugin receives, and joins with them. A script plugin's manifest names it by its raw value.

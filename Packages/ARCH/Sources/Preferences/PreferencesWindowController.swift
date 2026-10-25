@@ -1,6 +1,8 @@
 // Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+import AI
 import AppKit
 import Browsing
+import Plugins
 import SwiftUI
 
 /// An appearance choice stored as a raw string under `ARCHAppearance`.
@@ -58,6 +60,8 @@ public final class PreferencesWindowController: NSWindowController {
         sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
         sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection()))
         if let session = Self.session {
+            // AI writes plugins only from Settings ▸ Plugins, so its feature joins Settings ▸ AI with the section.
+            AIService.shared.register(.pluginComposer)
             sections.addTabViewItem(Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session)))
         }
         sections.addTabViewItem(aiSection)

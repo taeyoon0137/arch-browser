@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders and archives, the packages Arch refuses, the scheme handler, and the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -7,6 +7,12 @@ import Testing
 /// The sample script plugin's package folder.
 private let sampleFolder = Bundle.module.resourceURL!.appendingPathComponent("Fixtures/Sample", isDirectory: true).absoluteURL
 private let sampleID = PluginID(rawValue: "org.example.sample")!
+/// The files of a plugin as the composer writes them, with one command.
+private let writtenFiles = [
+    "plugin.json": #"{"id": "local.arch.generated.test", "name": "Copier", "version": "1.0", "apiVersion": 1, "summary": "Copies.", "background": "background.js", "contributes": {"commands": [{"id": "copy", "title": "Copy It"}]}}"#,
+    "background.js": #"arch.commands.onRun("copy", () => arch.ui.copy("text"));"#,
+]
+private let composition = PluginComposition(requests: ["Copy some text"], model: "Provider \u{2014} model")
 
 @MainActor
 @Suite struct ScriptPluginPackageTests {
@@ -21,7 +27,7 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         let manifest = package.manifest
         #expect(manifest.id == sampleID && manifest.name == "Sample" && manifest.version == "1.0")
         #expect(manifest.permissions == [.clipboard] && manifest.sites.map(\.description) == ["https://example.org/*"])
-        #expect(package.background == "background.js" && package.sourceURL == sampleFolder)
+        #expect(package.background == "background.js" && package.origin == .file(sampleFolder))
         #expect(package.files == ["background.js", "plugin.json", "scripts/page.js"])
         let contributions = manifest.contributions
         #expect(contributions.commands.map(\.id) == ["remember", "probe", "wait"])
@@ -39,7 +45,7 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
             let archive = folder.url.appendingPathComponent("Sample-\(keepsFolder).zip")
             try runDitto(["-c", "-k"] + (keepsFolder ? ["--keepParent"] : []) + [sampleFolder.path, archive.path])
             let package = try await manager().stage(archive)
-            #expect(package.manifest.id == sampleID && package.sourceURL == archive)
+            #expect(package.manifest.id == sampleID && package.origin == .file(archive))
             #expect(package.files == ["background.js", "plugin.json", "scripts/page.js"])
         }
     }
@@ -97,10 +103,24 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         #expect(try staging.allSatisfy { try FileManager.default.contentsOfDirectory(atPath: $0).isEmpty })
     }
 
+    @Test func stagesTheFilesThatAIWrote() async throws {
+        let manager = manager()
+        let package = try await manager.stage(writtenFiles, writtenBy: composition)
+        #expect(package.origin == .generated(composition) && package.manifest.name == "Copier")
+        #expect(package.files == ["background.js", "plugin.json"] && package.text(of: "background.js") == writtenFiles["background.js"])
+        #expect(package.text(of: "../plugin.json") == nil)
+        let outside = writtenFiles.merging(["../outside.js": ""]) { $1 }
+        await #expect(throws: PluginError.invalidPackage("“../outside.js” is not a path inside the package.")) {
+            try await manager.stage(outside, writtenBy: composition)
+        }
+        let staging = folder.url.appendingPathComponent("Plugins").path
+        #expect(try FileManager.default.subpathsOfDirectory(atPath: staging).filter { $0.hasSuffix("outside.js") }.isEmpty)
+    }
+
     @Test func discardsStagedPackagesOnly() async throws {
         let manager = manager()
         let package = try await manager.stage(sampleFolder)
-        manager.discard(try PluginPackage(at: sampleFolder, source: sampleFolder))
+        manager.discard(try PluginPackage(at: sampleFolder, origin: .file(sampleFolder)))
         #expect(FileManager.default.fileExists(atPath: sampleFolder.appendingPathComponent("plugin.json").path))
         manager.discard(package)
         #expect(!FileManager.default.fileExists(atPath: package.rootURL.path))
@@ -114,7 +134,7 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
     }
 
     @Test func servesThePackageWithThePolicy() throws {
-        let handler = PluginSchemeHandler(package: try PluginPackage(at: sampleFolder, source: sampleFolder))
+        let handler = PluginSchemeHandler(package: try PluginPackage(at: sampleFolder, origin: .file(sampleFolder)))
         let document = handler.response(for: URL(string: "arch-plugin://org.example.sample/")!)
         #expect(document.status == 200 && document.contentType == "text/html; charset=utf-8")
         #expect(String(decoding: document.body, as: UTF8.self) == #"<!doctype html><meta charset="utf-8"><script src="/background.js"></script>"#)
@@ -288,6 +308,18 @@ private let sampleID = PluginID(rawValue: "org.example.sample")!
         try await Task.sleep(for: .milliseconds(700))
         #expect(!FileManager.default.fileExists(atPath: pluginFolder.path))
         #expect(self.manager().plugins.isEmpty)
+    }
+
+    @Test func installsAPluginThatAIWroteWithItsOrigin() async throws {
+        let manager = manager()
+        let package = try await manager.stage(writtenFiles, writtenBy: composition)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
+        #expect(manager.plugins.map(\.origin) == [.generated(composition)] && !manager.plugins[0].isEnabled)
+        #expect(manager.contributions.paletteCommands(matching: "copy").isEmpty)
+        let relaunched = self.manager()
+        #expect(relaunched.plugins.map(\.origin) == [.generated(composition)])
+        try relaunched.remove(package.manifest.id)
+        #expect(relaunched.plugins.isEmpty && self.manager().plugins.isEmpty)
     }
 
     @Test func listsInstalledPluginsAtLaunch() async throws {

@@ -1,6 +1,6 @@
 # AI interface design
 
-This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.6 built the interface, the providers, the page reader, questions in the page, and hooks; VII.7 in `docs/plan.md` builds the rest. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
+This note designs the AI interface (feature row 43) and the parts of rows 52 to 56 that depend on it. Tasks VII.2 to VII.7 built the interface, the providers, the page reader, questions in the page, hooks, and plugins that AI writes. Arch ships no model or provider account. The user connects providers and chooses a provider and model for each feature.
 
 ## Purpose and principles
 
@@ -15,10 +15,10 @@ This note designs the AI interface (feature row 43) and the parts of rows 52 to 
 | Module | Location | Role | Dependencies |
 |---|---|---|---|
 | `AI` | `Packages/ARCH/Sources/AI` | `AIClient` and its value types, `AIService` (routing, page access checks, fallbacks, rate limits, usage), providers, Keychain storage, `ai.json`, hooks | Foundation, Security |
-| `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI | `AI` |
+| `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI, and New Feature with AI… and its review in Settings ▸ Plugins | `AI`, `Plugins` |
 | `Terminal` | `Packages/ARCH/Sources/Terminal` | The built-in terminal window | Foundation, AppKit |
 | `Browsing` | `Packages/ARCH/Sources/Browsing` | The page reader, questions in the page, hook events and their actions, and the page source for the interface | `AI` |
-| `Plugins` | `Packages/ARCH/Sources/Plugins` | The plugin system (V.11), the AI plugin composer and review sheet (VII.7) | `AI` |
+| `Plugins` | `Packages/ARCH/Sources/Plugins` | The plugin system (V.11) and the plugin composer (VII.7) | `ARCHEngine`, `AI` |
 
 - `AI` does not depend on `Browsing`, `Plugins`, or an engine module. `Browsing` supplies page content through the `AIPageSource` protocol, and as the hook center's host (`AIHookHost`) it posts hook events and applies their actions.
 - The app shell gives Settings ▸ AI a closure that opens the built-in terminal, as `BrowserSession.showSettings` does for the Settings window. This keeps `Preferences` independent of `Terminal`.
@@ -279,7 +279,7 @@ The first features:
 | `hook.tabName` | VII.6 | automatic | page, with text limited to 2,000 characters | - |
 | `hook.downloadName` | VII.6 | automatic | download | - |
 | `pluginComposer` | VII.7 | user | text only | `jsonOutput` |
-| `plugin.<id>` | VII.7 | automatic when the manifest declares hooks, otherwise user | the kinds in the manifest's `ai` permission | - |
+| `plugin.<id>` | not built | automatic when the manifest declares hooks, otherwise user | the kinds in the manifest's `ai` permission | - |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
 
@@ -744,55 +744,28 @@ The first hooks (`BuiltInHooks` in `Browsing`):
 
 ## Features that AI adds at run time
 
-AI writes a plugin (row 55) from the user's request. The plugin runs on the plugin system from V.11. This section sets VII.7's requirements. Where V.11's design note decides the plugin runtime differently, V.11's note takes precedence. This section then covers only the AI-specific parts: the `ai` permission, the composer, the review sheet, and the origin record.
-
-### What VII.7 needs from V.11
-
-- A plugin is a folder with `manifest.json` and JavaScript files. AI-written plugins are always this kind; Swift plugins are only built in.
-- Plugins run in JavaScriptCore in a helper process that Arch can terminate. JavaScriptCore has no public way to stop a running script, so Arch ends the process to stop a stuck plugin. The process has no network or file access of its own.
-- The plugin sees one `arch` object. Every call goes to the app, which checks the manifest's permissions on each call.
-- Installed plugins belong to a Persona, under `Application Support/Arch/Plugins/<persona id>/<plugin ID>/`.
-
-### Permissions
-
-| Manifest key | Grants | Review sheet wording |
-|---|---|---|
-| `"ai": { "send": ["page", "selection"] }` | `arch.ai.stream` and `arch.ai.reply` with the feature `plugin.<id>`; parts limited to text and the listed kinds | Sends text and the listed data to the AI model you choose for it |
-| `"commands": [{ "id": "…", "title": "…" }]` | Palette commands; a command's result shows in the popover from VII.5 through `arch.ui.show` | Adds the commands … to the command palette |
-| `"hooks": ["pageLoaded"]` | `arch.hooks.on`, as a registration with priority 200; the plugin's feature becomes automatic, so its AI requests need their own route | Runs on its own when pages load |
-| `"pages": { "read": true, "sites": ["example.org"] }` or `["*"]` | `arch.page.content` and `arch.page.selection` for the selected tab or the event's tab, on the listed sites | Reads pages on example.org, or on all sites |
-| `"tabs": ["read", "rename", "open"]` | Titles and addresses of tabs in the current space; renaming through the `renameTab` action; opening tabs | Reads your tabs' titles and addresses; renames tabs; opens tabs |
-| `"downloads": ["rename"]` | The `renameDownload` action | Renames downloaded files |
-| `"storage": true` | `arch.storage`, a key-value store of up to 1 MB | Stores its own data |
-| `"clipboard": ["write"]` | `arch.clipboard.write` | Copies text to the clipboard |
-
-- AI-written plugins get no network access, no file access, and no page scripts that change pages; changing sites is out of scope (Decisions in `docs/plan.md`).
-- A plugin with both `ai` and `pages` cannot read pages on excluded sites because its code could copy page text into a text part.
-- The JavaScript calls match the Swift API: `arch.ai.stream(request)` returns an async iterator of the same events as `AIClient.stream`, with parts as objects such as `{ "page": … }`. `arch.hooks.on(kind, handler)` returns the same result values as an `AIHookRegistration` handler.
+AI writes a script plugin (row 55) from the user's request. The plugin runs on the plugin system from V.11 like any other, so `docs/plugins.md` decides its package, runtime, permissions, review, and lifetime. This section covers what AI adds: the composer, its checks, the review's additions, and the plugin's origin.
 
 ### Composing
 
-1. The user chooses New Feature with AI from the palette or from Settings ▸ Plugins and describes the feature.
-2. `pluginComposer` sends instructions containing the plugin API reference (a Markdown file kept next to V.11's API and updated with it) and the permission table above. The instructions require the fewest permissions, only the documented API, and a reply with one JSON object. The output schema is `{ "manifest": {…}, "files": { "main.js": "…" }, "summary": "…" }`. The composer sends only the user's text and Arch's own reference, never page data.
-3. Arch checks the reply: the JSON parses; the manifest matches the schema; every permission is known and offered to AI-written plugins; every file parses (`JSCheckScriptSyntax`); file names are plain names ending in `.js`; and all files together are at most 256 KB. On failure it sends the errors back once or twice before showing them to the user.
-4. Nothing runs before the user reviews and enables the plugin.
+1. Settings ▸ Plugins shows New Feature with AI… while a provider can serve `pluginComposer` (Plugin Writer), which Settings registers when its window opens. The user describes the feature in a sheet. The command palette does not offer it yet.
+2. `PluginComposer` in `Plugins` sends the description as the only message, with instructions that hold Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form, the manifest keys plugins that AI writes may use, the background script's sandbox and limits, and the `arch` calls, with the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}` and at most 8,192 output tokens. It sends no page data.
+3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; each file name is letters, digits, `-`, `_`, and `.`, starts with no dot, and ends in `.js`; each file parses as a classic script, as the background document runs it, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` come to at most 256 KB. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `local.arch.generated.<UUID>`, which the composer gives every version it writes, so that no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the checks of every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
+4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is asked for again without being sent back, and one over 256 KB ends the request at once, since it would cost more to send back than the model can fix. Then the request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
+5. Plugins that AI writes may ask for the permissions the script runtime has, `tabs` and `clipboard`, and run in the same sandbox as any script plugin: no network, no files, and no page scripts. Nothing runs before the user installs and enables the plugin.
 
 ### Review
 
-The review sheet shows:
+The review is the install sheet of `docs/plugins.md` (Lifecycle), with what a plugin that AI wrote adds: its subtitle names the model, a Requests section lists the request and each change, and its Files section shows the source of every file, `plugin.json` among them, read-only.
 
-- the name and the summary;
-- each permission in the wording above, with the sites for `pages` and the data for `ai`;
-- whether it runs on its own (hooks), and that its AI requests use the user's provider and count toward usage and limits;
-- the source of every file, read-only, and the request it came from.
-
-Its buttons are Enable, Ask for Changes, and Discard. Ask for Changes sends the user's note and current files back to the composer. Enable asks for Touch ID or the login password through LocalAuthentication, then installs and starts the plugin. The user grants all permissions together and removes a plugin rather than switching individual permissions off.
+- Ask for Changes… goes back to the request field. The composer sends the request, the last version's reply, and the change, and the new version replaces the one under review, which is discarded.
+- Cancel discards the version under review, as closing the sheet any other way does, such as deleting its Persona.
+- Install installs it switched off, and Install and Enable switched on, with everything it asks for. A plugin installed switched off runs only once the user switches it on in Settings ▸ Plugins. As for every package, only a grant of every website asks for Touch ID or the login password, which a plugin without sites never needs.
 
 ### Lifetime
 
-- The plugin folder holds `manifest.json`, the files, and `origin.json` (made by AI, the user's request, the model that wrote it, the date). `approval.json` keeps the SHA-256 digest (CryptoKit) of each file at approval. When a digest no longer matches, the plugin stays off until the user reviews it again.
-- Changing a plugin with AI makes a new version. Its review shows the new or removed permissions first and a line diff of each file. The old version keeps running until the user enables the new one.
-- Settings ▸ Plugins marks AI-written plugins and offers Disable and Remove. Remove deletes the folder, its storage, its route in `ai.json`, and its hook subscriptions. Usage totals keep the plugin's name.
+- `plugins.json` records a plugin that AI wrote with `generated`, the requests and the model's name, in place of `source` (`docs/plugins.md`, Storage). Its section in Settings ▸ Plugins says that AI wrote it, with which model, when, and from which requests. It switches off and is removed like any installed plugin.
+- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would register with the hook center at priority 200 and make that feature automatic; reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
 
 ## Errors
 
@@ -903,19 +876,9 @@ public struct AIPrice: Codable, Sendable {
 
 ## Testing
 
-- VII.2 adds an `AITests` test target in `Packages/ARCH/Tests/AITests` (Swift Testing, run with `swift test`). It depends only on `AI`.
+- VII.2 adds an `AITests` test target in `Packages/ARCH/Tests/AITests` (Swift Testing, run with `swift test`). It depends on `AI`, and on `Plugins` for the composer tests.
 - HTTP provider tests use a `URLProtocol` subclass that replays hand-written server-sent event transcripts for both formats: text deltas, tool calls whose arguments arrive in pieces, usage, error events, 401, 429 with and without `retry-after`, 5xx, and a cut stream. No test uses a real key or the network.
 - Command-line provider tests use a fixture script in the test target. It prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone. Adding the same script as a command-line tool in Settings ▸ AI lets the app run every feature without a provider account.
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, cool-down), the daily and monthly limits, and usage normalization.
 - Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
-- Plugin tests (VII.7) cover manifest checks, the syntax check, digest mismatches, and that each `arch` call fails without its permission.
-- In-app checks for the remaining tasks (the lead runs them from the bundle; `docs/plan.md`'s regression checklist covers the built ones):
-  - VII.7: a request produces a plugin whose review lists its permissions; it runs only after Enable; Remove deletes it.
-
-## Task breakdown
-
-| Task | Builds | Main files |
-|---|---|---|
-| VII.7 | The composer, checks, review sheet, and lifetime of AI-written plugins | `Plugins`, `AI` |
-
-VII.7 also needs V.11.
+- Composer tests (`PluginComposerTests`) run the composer against the scripted provider, one reply per request, and stage in temporary folders: a plugin staged without being installed, with the request and model as its origin and only text sent; a problem sent back and the corrected reply staged; each unusable reply, from the reply's form, sites, page scripts, file names, and text to the checks staging makes, ending after three; a reply over the size limit ending at once; a change sent with the last version and keeping its identifier; and a route without a JSON model. `PluginsTests` cover staging the files AI writes, a path that leaves the package, and installing, listing again at launch, and removing a plugin that AI wrote with its origin.

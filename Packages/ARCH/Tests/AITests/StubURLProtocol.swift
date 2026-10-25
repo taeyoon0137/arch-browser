@@ -201,12 +201,20 @@ func provider(_ name: String, models: [AIModelConfiguration], format: AIWireForm
 /// A service in a new folder whose providers replay `script`.
 @MainActor
 func scriptedService(providers: [AIProviderConfiguration], script: [String: [Step]], log: ProviderLog = ProviderLog()) -> AIService {
+    stubService(providers: providers) { configuration in
+        ScriptedProvider(configuration: configuration, script: script, log: log)
+    }
+}
+
+/// A service in a new folder that serves each request with the provider `makeProvider` makes for it.
+@MainActor
+func stubService(providers: [AIProviderConfiguration], makeProvider: @escaping @MainActor (AIProviderConfiguration) -> any AIProvider) -> AIService {
     let directory = temporaryDirectory()
     let keys = InMemoryKeys()
     let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
     settings.providers = providers
     return AIService(settings: settings, usage: AIUsageStore(fileURL: directory.appendingPathComponent("ai-usage.json")), keys: keys) { configuration, _ in
-        ScriptedProvider(configuration: configuration, script: script, log: log)
+        makeProvider(configuration)
     }
 }
 

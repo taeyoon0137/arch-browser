@@ -195,8 +195,8 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `failed` | Disabled by the host after repeated failures, with the reason |
 | `unavailable` | Cannot run on this system or engine, with the reason, such as a web extension below macOS 15.4 |
 
-1. Stage: the user chooses a folder or archive with `NSOpenPanel` in Settings ▸ Plugins, or VII.7 hands over a folder. Arch copies it to `Staging/<UUID>/` in the Persona's folder, off the main thread, reads and validates the manifest, and lists the files. `ditto` extracts an archive and keeps every entry inside the destination; the package is the archive's top level or its only folder. A package that is or holds a symbolic link is refused, since a link could lead to files outside it, and so is one with a built-in plugin's identifier, or with `plugins.json` or `plugins.unreadable.json` as its identifier, since its folder would take that file's name in the Persona's folder. Nothing in the package runs before the user installs it. The manager clears `Staging/` when it starts.
-2. Review: the install sheet shows the name, version, origin, permissions, sites, and files. For an AI-written plugin it also shows every file's source.
+1. Stage: the user chooses a folder or archive with `NSOpenPanel` in Settings ▸ Plugins, or the composer (VII.7) hands over the files that AI wrote. Arch copies the folder, or writes the files, to `Staging/<UUID>/` in the Persona's folder, off the main thread, reads and validates the manifest, and lists the files. `ditto` extracts an archive and keeps every entry inside the destination; the package is the archive's top level or its only folder. A package that is or holds a symbolic link is refused, since a link could lead to files outside it, and so is one with a built-in plugin's identifier, or with `plugins.json` or `plugins.unreadable.json` as its identifier, since its folder would take that file's name in the Persona's folder. Nothing in the package runs before the user installs it. The manager clears `Staging/` when it starts.
+2. Review: the install sheet shows the name, version, origin, permissions, sites, and files. For a plugin that AI wrote it also shows the requests it came from and every file's source, and offers Ask for Changes (`docs/ai.md`, Features that AI adds at run time).
 3. Install: Arch moves the staged package into the Persona's plugin folder and records it in `plugins.json`. It is disabled unless the user chose Install and Enable. Cancel deletes the staged package.
 4. Enable: Arch registers the contributions, adds the page scripts to the Persona's tabs from their next load, and sends `activate` when the background first starts.
 5. Update: installing the same `id` again replaces the package after review and keeps the plugin's place, storage, and secrets. A running background stops, and the next use starts the new code.
@@ -217,7 +217,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 - `<persona id>` is the Persona's UUID as `UUID.uuidString` writes it, so the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. The app gives `PluginManager` its Application Support folder, and the manager derives the Persona's folder from it.
 - `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; the limit never refuses removals and writes that do not grow it. A value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep, throws an encoding error, so every value the storage accepts reaches the file. Settings values live in the same file under keys that start with `arch.setting:`, which the plugin's own keys cannot use: `PluginStorage` throws `PluginError.reservedKey` for them, reads none, and leaves them out of `allKeys()`. A stored setting value that does not suit its field, such as an option a newer version no longer offers, reads as the default.
-- `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}], "installed": [{"id": "<plugin id>", "source": "file:///…/Sample.zip", "grant": {"permissions": ["clipboard"], "sites": ["https://example.org/*"]}, "installedAt": 814595493.0}]}`. The choices are in the order the user made them; a new choice for a plugin replaces its old one. A built-in plugin without a choice follows `BuiltInPlugin.isOnByDefault`, and an installed one is off. The installs are in the order the user installed the plugins; an update keeps its place. `installedAt` is the default `Date` encoding, seconds since 2001. The manifest stays in the package, so the grant cannot drift from it: the manager limits the recorded grant to what the package's manifest asks for. Each choice, install, and removal writes the file at once. An install entry that this build cannot read, such as one whose grant holds a permission that a newer build added, stays in the file as it is and out of the list; installing a plugin with its identifier replaces it. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
+- `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}], "installed": [{"id": "<plugin id>", "source": "file:///…/Sample.zip", "grant": {"permissions": ["clipboard"], "sites": ["https://example.org/*"]}, "installedAt": 814595493.0}]}`. A plugin that AI wrote has `"generated": {"requests": ["…"], "model": "…"}` in place of `source`: the request and each change the user asked for, and the model that wrote its last version as Settings ▸ AI named it. The choices are in the order the user made them; a new choice for a plugin replaces its old one. A built-in plugin without a choice follows `BuiltInPlugin.isOnByDefault`, and an installed one is off. The installs are in the order the user installed the plugins; an update keeps its place. `installedAt` is the default `Date` encoding, seconds since 2001. The manifest stays in the package, so the grant cannot drift from it: the manager limits the recorded grant to what the package's manifest asks for. Each choice, install, and removal writes the file at once. An install entry that this build cannot read, such as one whose grant holds a permission that a newer build added, stays in the file as it is and out of the list; installing a plugin with its identifier replaces it. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
 - Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing file counts as empty. A file that does not decode moves to `storage.unreadable.json`, replacing an older one, and the plugin starts empty, so its first change does not overwrite the old data. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
 - Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`, accessible when unlocked and not synchronizable, in the login keychain as the AI module's keys are. Settings ▸ Plugins shows only whether a secret is saved, which it reads without the secret, so macOS does not ask for the keychain password. Removing a plugin deletes the service's items whose accounts start with `<persona id>/`, which it finds by their attributes alone. A deleted Persona's items go at the next launch (see Personas).
 - Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
@@ -260,17 +260,17 @@ The `Extensions` module (IV.12) turns a web extension into a plugin. It synthesi
 
 ## AI hooks and plugins that AI writes
 
-- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. A plugin with `ai` that declares hooks registers with the same center under its own feature (VII.7).
+- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will register with the same center under its own feature.
 - The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
-- VII.7 writes a script plugin only, never a built-in plugin or a web extension, and never with `nativeMessaging`. It puts the package in a staging folder and calls `PluginManager.stage(_:)`.
-- An AI-written plugin uses the same review sheet, showing every file's full source and the permissions. It installs disabled with the origin `generated`, and Settings labels it Written by AI. The user enables it.
-- When the user requests a change, the AI writes a new plugin version with the same `id`. The review shows the files that changed and any added permission. Removing it works like any plugin.
-- Script plugins load code only from their package, so only reviewed files run. A plugin can still act on data it fetches, so its `network` hosts are part of the review.
-- The AI receives the JavaScript API reference below as its context for writing plugins (VII.7 decides how).
+- The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites or page scripts, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
+- A plugin that AI wrote uses the same review sheet, which also shows the requests it came from and every file's full source. Install installs it switched off and Install and Enable switched on, with the origin `generated`, and Settings says that AI wrote it.
+- Ask for Changes in the review has AI write a new version with the same identifier, which replaces the one under review. Changing an installed plugin with AI, with a review of what changed, is not built yet. Removing a plugin that AI wrote works like removing any plugin.
+- Script plugins load code only from their package, so only reviewed files run. A plugin can still act on data it fetches, so its `network` hosts will be part of the review.
+- The composer gives the model a reference of the manifest keys that plugins AI writes may use and of the JavaScript API below, in `PluginComposerInstructions.swift`.
 
 ## Swift API
 
-The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`. `Browsing` and `Preferences` depend on it to show contributions. `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements. This avoids a dependency loop. `Extensions` (IV.12) depends on `Plugins` and supplies the web extension runtime. All types below are public.
+The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine` and on `AI`, through which the composer writes plugins. `Browsing` and `Preferences` depend on it to show contributions. `Plugins` reaches tabs through `PluginBrowserHost`, which `Browsing` implements. This avoids a dependency loop. `Extensions` (IV.12) depends on `Plugins` and supplies the web extension runtime. All types below are public.
 
 ### Identity and manifest
 
@@ -290,8 +290,15 @@ public enum PluginKind: String, Codable, Sendable {
 public enum PluginOrigin: Hashable, Codable, Sendable {
     case bundled
     case file(URL)
-    /// Written by the AI feature (VII.7).
-    case generated
+    /// Written by AI through the composer (VII.7).
+    case generated(PluginComposition)
+}
+
+public struct PluginComposition: Hashable, Codable, Sendable {
+    /// The request, then each change the user asked for in the review.
+    public var requests: [String]
+    /// The model that wrote the last version, as Settings ▸ AI names it.
+    public var model: String
 }
 
 public struct PluginManifest: Hashable, Codable, Sendable {
@@ -665,10 +672,12 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
 public struct PluginPackage: Identifiable, Sendable {
     public let manifest: PluginManifest
     public let rootURL: URL
-    /// The folder or archive the user chose.
-    public let sourceURL: URL
+    /// The folder or archive the user chose, or how AI wrote the package.
+    public let origin: PluginOrigin
     /// Package-relative paths, shown in the review.
     public let files: [String]
+    /// A file's text, which the review of a plugin that AI wrote shows.
+    public func text(of path: String) -> String?
 }
 
 public struct PluginCommandRef: Hashable, Sendable {
@@ -742,9 +751,11 @@ public final class PluginManager: ObservableObject {
     public func load() throws
     /// Copies a folder or archive into staging and validates it.
     public func stage(_ url: URL) async throws -> PluginPackage
+    /// Writes the files of a plugin that AI wrote, by package path, into staging and validates them.
+    public func stage(_ files: [String: String], writtenBy composition: PluginComposition) async throws -> PluginPackage
     /// Deletes a staged package the user did not install.
     public func discard(_ package: PluginPackage)
-    /// The origin is the package's `sourceURL`; VII.7 adds `generated`.
+    /// Records the package's origin with the install.
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws
     /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID)
@@ -853,7 +864,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. IV.12 builds the web extension runtime on WebKit as a `PluginRuntime`; VI.1 adds Chromium; IV.13 follows both.
-6. VII.7 adds the `ai` permission and plugin hooks on VII.6's hook center, and builds on the staging and review path.
+6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
 
 ## Open decisions
 

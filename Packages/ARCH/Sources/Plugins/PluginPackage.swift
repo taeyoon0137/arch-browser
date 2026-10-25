@@ -1,4 +1,4 @@
-// Script plugin packages: a folder with `plugin.json` at its top, which the user chooses as the folder or as a `.zip` archive. The manager copies it into a staging folder, reads it there for the install sheet without running any of it, and moves it into the Persona's plugin folder when the user installs it.
+// Script plugin packages: a folder with `plugin.json` at its top, which the user chooses as the folder or as a `.zip` archive, or whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, and moves it into the Persona's plugin folder when the user installs it.
 import Foundation
 
 /// A script plugin's package, with its manifest read and checked: staged for review, or installed.
@@ -7,58 +7,87 @@ public struct PluginPackage: Identifiable, Sendable {
     public let manifest: PluginManifest
     /// The folder that holds `plugin.json`.
     public let rootURL: URL
-    /// The folder or archive the user chose.
-    public let sourceURL: URL
+    /// The folder or archive the user chose, or how AI wrote the package.
+    public let origin: PluginOrigin
     /// The package paths of the package's files, such as `scripts/count.js`, in ascending order, as the install sheet lists them.
     public let files: [String]
     /// The package path of the background script, if the plugin has one.
     let background: String?
 
     /// Reads the package at `root`. Throws as `ScriptManifest(packageAt:)` does, and `PluginError.invalidPackage` for a package that is or holds a symbolic link, which could lead to files outside it.
-    init(at root: URL, source: URL) throws {
+    init(at root: URL, origin: PluginOrigin) throws {
         let files = try Self.files(in: root)
         let declared = try ScriptManifest(packageAt: root)
-        self.init(manifest: declared.manifest, rootURL: root, sourceURL: source.absoluteURL, files: files, background: declared.background)
+        self.init(manifest: declared.manifest, rootURL: root, origin: origin, files: files, background: declared.background)
     }
 
-    private init(manifest: PluginManifest, rootURL: URL, sourceURL: URL, files: [String], background: String?) {
+    private init(manifest: PluginManifest, rootURL: URL, origin: PluginOrigin, files: [String], background: String?) {
         self.manifest = manifest
         self.rootURL = rootURL
-        self.sourceURL = sourceURL
+        self.origin = origin
         self.files = files
         self.background = background
     }
 
     /// The package once its folder has moved to `root`.
     func moved(to root: URL) -> PluginPackage {
-        PluginPackage(manifest: manifest, rootURL: root, sourceURL: sourceURL, files: files, background: background)
+        PluginPackage(manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
+    }
+
+    /// The text of the file at a package path, as the review shows it. Nil for a path that names no file of the package, and for a file that is not UTF-8 text.
+    public func text(of path: String) -> String? {
+        Self.file(path, in: rootURL).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
     }
 
     /// Copies the folder at `source`, or extracts the `.zip` archive there, to `root`, which must not exist yet, and reads the package. An archive's package is its top level or its only top folder, as an archive of a package folder has. A failure leaves nothing at `root`.
     static func stage(_ source: URL, at root: URL) throws -> PluginPackage {
-        let fileManager = FileManager.default
-        try fileManager.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
-        do {
+        try stage(at: root, origin: .file(source.absoluteURL)) {
             if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                try fileManager.copyItem(at: source, to: root)
+                try FileManager.default.copyItem(at: source, to: root)
             } else {
                 try extractArchive(source, to: root)
             }
-            return try PluginPackage(at: root, source: source)
+        }
+    }
+
+    /// Writes the text of each file at its package path in `root`, which must not exist yet, and reads the package. Throws `PluginError.invalidPackage` for a path that breaks the rules of `file(_:in:)`. A failure leaves nothing at `root`.
+    static func stage(_ files: [String: String], at root: URL, origin: PluginOrigin) throws -> PluginPackage {
+        try stage(at: root, origin: origin) {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+            for (path, text) in files {
+                guard isPackagePath(path) else { throw PluginError.invalidPackage("“\(path)” is not a path inside the package.") }
+                let url = root.appendingPathComponent(path, isDirectory: false)
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(text.utf8).write(to: url)
+            }
+        }
+    }
+
+    /// Has `fill` create the folder at `root`, then reads the package there. When either fails, it removes what `fill` left.
+    private static func stage(at root: URL, origin: PluginOrigin, filling fill: () throws -> Void) throws -> PluginPackage {
+        try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            try fill()
+            return try PluginPackage(at: root, origin: origin)
         } catch {
-            try? fileManager.removeItem(at: root)
+            try? FileManager.default.removeItem(at: root)
             throw error
         }
     }
 
-    /// The file at a package path such as `scripts/count.js`: names separated by `/`, none of them empty, `.`, or `..`. Nil for a path that breaks these rules, names no regular file, or leads out of the package through a link.
+    /// The file at a package path such as `scripts/count.js`. Nil for a path that `isPackagePath(_:)` refuses, names no regular file, or leads out of the package through a link.
     static func file(_ path: String, in root: URL) -> URL? {
-        guard path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        guard isPackagePath(path) else { return nil }
         let url = root.appendingPathComponent(path, isDirectory: false)
         // The attributes are those of a final link itself, and the resolved path catches a link among the folders.
         guard (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular,
               url.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/") else { return nil }
         return url
+    }
+
+    /// Whether `path` is names separated by `/`, none of them empty, `.`, or `..`.
+    private static func isPackagePath(_ path: String) -> Bool {
+        path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
     }
 
     /// Extracts the archive with `ditto`, which keeps every entry inside the destination, then moves the package folder in it to `root`.

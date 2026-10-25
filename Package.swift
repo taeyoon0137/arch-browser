@@ -62,7 +62,7 @@ let package = Package(
         ),
         .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .target(name: "Plugins", dependencies: ["ARCHEngine"], path: "Packages/ARCH/Sources/Plugins"),
+        .target(name: "Plugins", dependencies: ["ARCHEngine", "AI"], path: "Packages/ARCH/Sources/Plugins"),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "AI"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
@@ -71,7 +71,7 @@ let package = Package(
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
         .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHPrivateAPI", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
-        .testTarget(name: "AITests", dependencies: ["AI"], path: "Packages/ARCH/Tests/AITests"),
+        .testTarget(name: "AITests", dependencies: ["AI", "Plugins"], path: "Packages/ARCH/Tests/AITests"),
         .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),

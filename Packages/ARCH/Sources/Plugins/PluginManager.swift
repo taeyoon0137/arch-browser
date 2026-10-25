@@ -1,4 +1,4 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the script plugins the user installed, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages, installs, updates, and removes script plugins, and switches off a script plugin whose background script fails three times within five minutes.
+// The plugins of one Persona. The manager registers the built-in plugins and the script plugins the user installed, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages script plugins from the files the user chooses and from the files AI writes, installs, updates, and removes them, and switches off a script plugin whose background script fails three times within five minutes.
 import AppKit
 import ARCHEngine
 import Combine
@@ -80,10 +80,10 @@ public final class PluginManager: ObservableObject {
         var packages: [PluginID: PluginPackage] = [:]
         for case let .readable(install) in installs {
             guard let id = PluginID(rawValue: install.id), types[id] == nil, packages[id] == nil,
-                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), source: install.source),
+                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin),
                   package.manifest.id == id else { continue }
             packages[id] = package
-            plugins.append(InstalledPlugin(manifest: package.manifest, origin: .file(install.source), grant: install.grant.limited(to: package.manifest),
+            plugins.append(InstalledPlugin(manifest: package.manifest, origin: install.origin, grant: install.grant.limited(to: package.manifest),
                                            isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false, installedAt: install.installedAt))
         }
         self.plugins = plugins
@@ -150,8 +150,18 @@ public final class PluginManager: ObservableObject {
 
     /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one whose identifier `checkInstallable(_:)` refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
+        try await stage { root in try PluginPackage.stage(url, at: root) }
+    }
+
+    /// Writes the files of a plugin that AI wrote, `plugin.json` among them, at their package paths in the staging folder and reads its package there, as `stage(_:)` does for a folder.
+    public func stage(_ files: [String: String], writtenBy composition: PluginComposition) async throws -> PluginPackage {
+        try await stage { root in try PluginPackage.stage(files, at: root, origin: .generated(composition)) }
+    }
+
+    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:)` accepts its identifier.
+    private func stage(_ make: @escaping @Sendable (URL) throws -> PluginPackage) async throws -> PluginPackage {
         let root = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let package = try await Task.detached { try PluginPackage.stage(url, at: root) }.value
+        let package = try await Task.detached { try make(root) }.value
         do {
             try checkInstallable(package.manifest.id)
         } catch {
@@ -193,7 +203,7 @@ public final class PluginManager: ObservableObject {
             installedRoot = destination
         }
         packages[id] = package.moved(to: installedRoot)
-        let install = PluginListFile.Install(id: id.rawValue, source: package.sourceURL, grant: grant.limited(to: package.manifest), installedAt: Date())
+        let install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date())
         if let index = installs.firstIndex(where: { $0.id == install.id }) {
             installs[index] = .readable(install)
         } else {
@@ -202,7 +212,7 @@ public final class PluginManager: ObservableObject {
         recordChoice(isEnabled, for: id)
         saveList()
         failures[id] = nil
-        let plugin = InstalledPlugin(manifest: package.manifest, origin: .file(install.source), grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt)
+        let plugin = InstalledPlugin(manifest: package.manifest, origin: install.origin, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt)
         if let index = plugins.firstIndex(where: { $0.id == id }) {
             plugins[index] = plugin
         } else {
@@ -437,14 +447,50 @@ private struct PluginListFile: Codable {
         var isEnabled: Bool
     }
 
-    /// An installed plugin, whose manifest its package in `<id>/package/` holds.
+    /// An installed plugin, whose manifest its package in `<id>/package/` holds. The file names its origin with `source`, the folder or archive the user installed it from, or with `generated`, how AI wrote it.
     struct Install: Codable {
         /// The plugin's identifier as `PluginID` writes it.
         var id: String
-        /// The folder or archive the user installed it from.
-        var source: URL
+        /// A file or AI, never the app: built-in plugins are not installed.
+        var origin: PluginOrigin
         var grant: PluginGrant
         var installedAt: Date
+
+        private enum CodingKeys: String, CodingKey {
+            case id, source, generated, grant, installedAt
+        }
+
+        init(id: String, origin: PluginOrigin, grant: PluginGrant, installedAt: Date) {
+            self.id = id
+            self.origin = origin
+            self.grant = grant
+            self.installedAt = installedAt
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            if let composition = try container.decodeIfPresent(PluginComposition.self, forKey: .generated) {
+                origin = .generated(composition)
+            } else {
+                origin = .file(try container.decode(URL.self, forKey: .source))
+            }
+            grant = try container.decode(PluginGrant.self, forKey: .grant)
+            installedAt = try container.decode(Date.self, forKey: .installedAt)
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            switch origin {
+            case let .file(url): try container.encode(url, forKey: .source)
+            case let .generated(composition): try container.encode(composition, forKey: .generated)
+            // Nothing installs a built-in plugin.
+            case .bundled: break
+            }
+            try container.encode(grant, forKey: .grant)
+            try container.encode(installedAt, forKey: .installedAt)
+        }
     }
 
     /// An install as the file holds it. One this build cannot read, such as one whose grant holds a permission that a newer build added, stays as the file has it, so that writing the file keeps it.

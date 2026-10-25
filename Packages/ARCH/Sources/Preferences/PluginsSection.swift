@@ -1,4 +1,5 @@
-// Settings ▸ Plugins: the plugins of each Persona, each with its switch, what its grant lets it do, and its settings as a form, and Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
+// Settings ▸ Plugins: the plugins of each Persona, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
+import AI
 import Browsing
 import Plugins
 import SwiftUI
@@ -35,13 +36,17 @@ struct PluginsSection: View {
     }
 }
 
-/// Install Plugin…, then one section per plugin, in the order the manager registered them.
+/// Install Plugin… and New Feature with AI…, then one section per plugin, in the order the manager registered them.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
+    /// The providers and routes, which decide whether AI can write plugins.
+    @ObservedObject private var aiSettings = AIService.shared.settings
     /// The package under review.
     @State private var staged: PluginPackage?
+    /// Whether the sheet of New Feature with AI shows.
+    @State private var isComposing = false
     /// Why the last chosen folder or archive could not be staged.
     @State private var failure: String?
 
@@ -49,6 +54,12 @@ private struct PluginList: View {
         Section {
             LabeledContent("Install a plugin from a folder or a .zip archive") {
                 Button("Install Plugin…", action: choosePackage)
+            }
+            if AIService.shared.isAvailable(.pluginComposer) {
+                LabeledContent("Describe a feature, and AI writes a plugin for it") {
+                    Button("New Feature with AI\u{2026}") { isComposing = true }
+                }
+                .sheet(isPresented: $isComposing) { PluginComposerSheet(plugins: plugins) }
             }
         } footer: {
             if let failure {
@@ -151,9 +162,14 @@ private struct PluginSection: View {
         case .bundled:
             return "built into Arch"
         case let .file(url):
-            let date = plugin.installedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
-            return "installed from \(url.lastPathComponent)\(date)"
+            return "installed from \(url.lastPathComponent)\(installDate)"
+        case let .generated(composition):
+            return "written by AI with \(composition.model)\(installDate) from \(composition.requests.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", then "))"
         }
+    }
+
+    private var installDate: String {
+        plugin.installedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
     }
 
     private func remove() {

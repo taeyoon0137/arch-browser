@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files. The user can leave sites out before installing, and granting every website asks for Touch ID or the login password.
+// The review sheet of a plugin package the user chose to install or update, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website asks for Touch ID or the login password.
 import LocalAuthentication
 import Plugins
 import SwiftUI
@@ -8,15 +8,18 @@ struct PluginInstallSheet: View {
     let package: PluginPackage
     /// The installed plugin that the package updates, if any.
     private let installed: InstalledPlugin?
+    /// Takes the user back to the composer of a plugin that AI wrote, to ask for a change.
+    private let askForChanges: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     /// The sites the user grants: at first all that the manifest asks for, except, in an update, those that the installed version asked for and the user left out.
     @State private var sites: Set<MatchPattern>
     /// Why the last install failed.
     @State private var failure: String?
 
-    init(plugins: PluginManager, package: PluginPackage) {
+    init(plugins: PluginManager, package: PluginPackage, askForChanges: (() -> Void)? = nil) {
         self.plugins = plugins
         self.package = package
+        self.askForChanges = askForChanges
         let installed = plugins.plugins.first { $0.id == package.manifest.id }
         self.installed = installed
         let offered = installed.map { PluginGrant(updating: $0, to: package.manifest) } ?? PluginGrant(requestedBy: package.manifest)
@@ -29,10 +32,15 @@ struct PluginInstallSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(installed == nil ? "Install “\(manifest.name)”?" : "Update “\(manifest.name)”?")
                     .font(.headline)
-                Text("Version \(manifest.version) from \(package.sourceURL.lastPathComponent). \(manifest.summary)")
+                Text("Version \(manifest.version) \(origin). \(manifest.summary)")
                     .foregroundStyle(.secondary)
             }
             Form {
+                if let composition {
+                    Section("Requests") {
+                        ForEach(composition.requests.indices, id: \.self) { Text(composition.requests[$0]) }
+                    }
+                }
                 Section("Access") {
                     let permissions = PluginPermission.allCases.filter(manifest.permissions.contains)
                     if permissions.isEmpty && manifest.sites.isEmpty {
@@ -49,7 +57,19 @@ struct PluginInstallSheet: View {
                     }
                 }
                 Section("Files") {
-                    ForEach(package.files, id: \.self) { Text($0).font(.system(.body, design: .monospaced)) }
+                    ForEach(package.files, id: \.self) { path in
+                        if composition == nil {
+                            Text(path).font(.system(.body, design: .monospaced))
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(path).font(.system(.body, design: .monospaced).weight(.semibold))
+                                Text(package.text(of: path) ?? "")
+                                    .font(.system(.callout, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -64,6 +84,9 @@ struct PluginInstallSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                if let askForChanges {
+                    Button("Ask for Changes\u{2026}", action: askForChanges)
+                }
                 if let installed {
                     Button("Update") { install(isEnabled: installed.isEnabled) }
                         .keyboardShortcut(.defaultAction)
@@ -75,8 +98,24 @@ struct PluginInstallSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 480, height: 520)
+        // A plugin that AI wrote shows its sources.
+        .frame(width: composition == nil ? 480 : 600, height: composition == nil ? 520 : 640)
         .interactiveDismissDisabled()
+    }
+
+    /// How AI wrote the package, if it did.
+    private var composition: PluginComposition? {
+        guard case let .generated(composition) = package.origin else { return nil }
+        return composition
+    }
+
+    /// Where the package came from, as the subtitle says it.
+    private var origin: String {
+        switch package.origin {
+        case .bundled: return "built into Arch"
+        case let .file(url): return "from \(url.lastPathComponent)"
+        case let .generated(composition): return "written by AI with \(composition.model)"
+        }
     }
 
     /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website.
