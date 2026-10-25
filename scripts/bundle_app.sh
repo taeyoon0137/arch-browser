@@ -44,13 +44,14 @@ ${5:-}
 PLIST
 }
 
-# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, or location access on a page's behalf. AppleScript reads the app's terms from the scripting definition in Resources.
+# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, location, or Bluetooth access on a page's behalf; without one, macOS ends the app when Chromium reaches for that device, as it does for Bluetooth when a page signs in with a passkey on a phone. AppleScript reads the app's terms from the scripting definition in Resources.
 APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
 	<key>NSAppleScriptEnabled</key><true/>
 	<key>OSAScriptingDefinition</key><string>Arch.sdef</string>
 	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Web pages can use the microphone after you allow them.</string>
 	<key>NSLocationUsageDescription</key><string>Web pages can use your location after you allow them.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key><string>Web pages can use Bluetooth, for example to sign in with a passkey on your phone.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
