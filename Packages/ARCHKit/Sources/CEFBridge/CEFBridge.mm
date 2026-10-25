@@ -2193,6 +2193,14 @@ private:
         });
         return;
     }
+    // CEF ends the browser only once its view is released. A focused page view can stay held by the window's text input context, so the page gives up the focus first, and it is muted so that it is not heard while anything still holds the view.
+    NSWindow *window = _browserView.window;
+    if ([window.firstResponder isKindOfClass:NSView.class] && [(NSView *)window.firstResponder isDescendantOf:_browserView]) {
+        [window makeFirstResponder:nil];
+    }
+    if (_browser) {
+        _browser->GetHost()->SetAudioMuted(true);
+    }
     [_browserView removeFromSuperview];
     _browserView = nil;
     [self finishPendingClose:YES];

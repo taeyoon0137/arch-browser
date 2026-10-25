@@ -139,7 +139,7 @@ public final class WebKitBrowser: EngineBrowser {
     public func closeWebContents(_ webContents: any EngineWebContents) {
         guard let index = ownedWebContents.firstIndex(where: { $0 === (webContents as AnyObject) }) else { return }
         let closing = ownedWebContents.remove(at: index)
-        closing.webView.stopLoading()
+        closing.discard()
         closing.webView.removeFromSuperview()
     }
     public func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) {
@@ -490,7 +490,15 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
     public func exitFullscreen() { webView.closeAllMediaPresentations(completionHandler: nil) }
-    public func discard() { webView.stopLoading() }
+    /// Ends the page. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates.
+    public func discard() {
+        webView.stopLoading()
+        webView.closeAllMediaPresentations(completionHandler: nil)
+        webView.pauseAllMediaPlayback(completionHandler: nil)
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.load(URLRequest(url: URL(string: "about:blank")!))
+    }
     /// A `WKDownload` continues after its web view closes.
     public var closingStopsDownloads: Bool { false }
     /// WebKit has no public way to run `beforeunload` handlers.
