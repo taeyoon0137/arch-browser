@@ -65,7 +65,7 @@ A script plugin's `plugin.json`:
 
 | Field | Meaning |
 |---|---|
-| `id` | Reverse-DNS identifier, at most 128 characters of letters, digits, `-`, and `.`. Arch lowercases it, so identifiers that differ only in case name one plugin and one folder. A later install with the same `id` in the same Persona is an update |
+| `id` | Reverse-DNS identifier: two or more dot-separated labels of ASCII letters, digits, and `-`, none empty, at most 128 characters in all. Arch lowercases it, so identifiers that differ only in case name one plugin and one folder. A later install with the same `id` in the same Persona is an update |
 | `apiVersion` | The plugin API version the package targets. The app supports versions up to `PluginManifest.apiVersion` |
 | `permissions` | Capabilities from the permission table below |
 | `sites` | Match patterns (see below) for the pages the plugin's page scripts and page calls may reach |
@@ -473,9 +473,9 @@ The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `AR
 ```swift
 public typealias PersonaID = UUID
 
-public struct PluginID: RawRepresentable, Hashable, Codable, Sendable {
+public struct PluginID: RawRepresentable, Hashable, Sendable {
     public let rawValue: String
-    /// Fails for anything but letters, digits, `-`, and `.`, or more than 128 characters. Lowercases the letters.
+    /// Fails for anything but dot-separated labels of letters, digits, and `-`, fewer than two labels, or more than 128 characters. Empty labels fail. Lowercases the letters.
     public init?(rawValue: String)
 }
 

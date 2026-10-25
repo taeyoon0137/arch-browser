@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 final class PseudoTerminal {
-    /// Output from the shell and the programs it runs, on the main queue.
+    /// Output from the shell and the programs it runs, on the main queue, in batches of what was read since the last call.
     var onOutput: ((Data) -> Void)?
     /// Called on the main queue once the shell has exited.
     var onExit: (() -> Void)?
@@ -12,12 +12,20 @@ final class PseudoTerminal {
     private let shellID: pid_t
     private let master: Descriptor
     private let readSource: DispatchSourceRead
-    /// Keeps typed and pasted input in order.
+    /// Keeps typed and pasted input in order. `pendingInput` and `isWriteRetryScheduled` belong to it.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.terminal.write")
+    /// Input that the terminal had no room for yet, because the program in front has not read its earlier input.
+    private var pendingInput = Data()
+    private var isWriteRetryScheduled = false
     private var hasExited = false
 
     /// Starts the login shell in the user's home folder on a terminal of `size`. Throws a `POSIXError` when the terminal or the shell cannot start.
-    init(size: TerminalSize) throws {
+    convenience init(size: TerminalSize) throws {
+        try self.init(size: size, shell: Self.loginShell)
+    }
+
+    /// Starts `shell` with `-l` in the user's home folder on a terminal of `size`. Tests start a script of their own.
+    init(size: TerminalSize, shell: String) throws {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0 else { throw Self.lastError() }
         var nameBuffer = [CChar](repeating: 0, count: 128)
@@ -27,7 +35,7 @@ final class PseudoTerminal {
             throw error
         }
         _ = fcntl(master, F_SETFD, FD_CLOEXEC)
-        // Writes wait on the write queue rather than block while a program does not read its input.
+        // Input that a program does not read waits in `pendingInput` rather than blocking a write.
         _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK)
         let terminalPath = String(cString: nameBuffer)
         // The size can be set only while the terminal's other side is open, so it is opened here too, without becoming this app's terminal, until the shell has opened it.
@@ -40,7 +48,7 @@ final class PseudoTerminal {
         defer { Darwin.close(terminal) }
         Self.setSize(size, of: master)
         var processID: pid_t = 0
-        let status = Self.spawn(shell: Self.loginShell, terminalPath: terminalPath, processID: &processID)
+        let status = Self.spawn(shell: shell, terminalPath: terminalPath, processID: &processID)
         guard status == 0 else {
             Darwin.close(master)
             throw POSIXError(POSIXErrorCode(rawValue: status) ?? .EIO)
@@ -52,24 +60,44 @@ final class PseudoTerminal {
         waitForExit()
     }
 
-    /// Writes input for the program in front, such as typed keys or pasted text.
+    /// Writes input for the program in front, such as typed keys or pasted text. Input that the terminal has no room for waits, in order, until the program reads. A character that signals the program, such as Control-C, discards the waiting input and the input the program has not read, as the terminal does when it receives that character, so that it gets in and stops a program that reads nothing, such as `sleep` after a long paste.
     func write(_ data: Data) {
-        writeQueue.async { [master] in
-            data.withUnsafeBytes { buffer in
-                var offset = 0
-                while offset < buffer.count, let base = buffer.baseAddress {
-                    guard let written = master.use({ Darwin.write($0, base + offset, buffer.count - offset) }) else { return }
-                    if written > 0 {
-                        offset += written
-                    } else if errno == EAGAIN {
-                        // The program has not read its earlier input yet.
-                        usleep(10_000)
-                    } else if errno != EINTR {
-                        return
-                    }
+        writeQueue.async { [weak self] in
+            guard let self else { return }
+            if !pendingInput.isEmpty, data.count == 1, let settings = master.use(Self.settings) ?? nil, settings.signals(with: data[data.startIndex]) {
+                pendingInput.removeAll()
+                if settings.c_lflag & tcflag_t(NOFLSH) == 0 { master.use { _ = tcflush($0, TCIFLUSH) } }
+            }
+            pendingInput.append(data)
+            writePendingInput()
+        }
+    }
+
+    /// Writes as much waiting input as the terminal takes and, while some waits, tries again in 10 milliseconds, so that the write queue stays free for the next input. On the write queue.
+    private func writePendingInput() {
+        while !pendingInput.isEmpty {
+            guard let written = master.use({ descriptor in pendingInput.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) } }) else {
+                pendingInput.removeAll()
+                return
+            }
+            if written > 0 {
+                // A slice keeps the rest without copying it.
+                pendingInput = pendingInput.dropFirst(written)
+            } else if errno == EAGAIN {
+                guard !isWriteRetryScheduled else { return }
+                isWriteRetryScheduled = true
+                writeQueue.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in
+                    self?.isWriteRetryScheduled = false
+                    self?.writePendingInput()
                 }
+                return
+            } else if errno != EINTR {
+                pendingInput.removeAll()
+                return
             }
         }
+        // The empty slice would keep the written input's storage.
+        pendingInput = Data()
     }
 
     /// Tells the programs the new size; the kernel sends them SIGWINCH.
@@ -91,10 +119,14 @@ final class PseudoTerminal {
 
     // MARK: Reading
 
-    /// Reads until every program has closed the terminal or it is hung up, then closes it.
+    /// The most output that waits for the main queue before reading pauses. The screen takes it in about 10 milliseconds in a release build.
+    static let outputLimit = 65_536
+
+    /// Reads until every program has closed the terminal or it is hung up, then closes it. Output waits in `PendingOutput` until one block on the main queue takes all of it, so heavy output, such as `cat` of a large file, updates the screen once per batch rather than once per read, which returns about a kilobyte. Reading pauses while `outputLimit` bytes wait, so a program that writes faster than the screen keeps up waits for the terminal, and the main queue, which every window shares, stays free for events such as Control-C.
     private func startReading() {
         let source = readSource
         let master = master
+        let output = PendingOutput(limit: Self.outputLimit, pause: { source.suspend() }, resume: { source.resume() })
         let capacity = 65_536
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 1)
         source.setEventHandler { [weak self] in
@@ -104,8 +136,12 @@ final class PseudoTerminal {
                 if count == 0 || (errno != EAGAIN && errno != EINTR) { source.cancel() }
                 return
             }
-            let data = Data(bytes: buffer, count: count)
-            DispatchQueue.main.async { self?.onOutput?(data) }
+            guard output.append(Data(bytes: buffer, count: count)) else { return }
+            // The block holds `output`, which resumes a paused source, so a source that `close()` cancels while paused still ends.
+            DispatchQueue.main.async {
+                let data = output.take()
+                self?.onOutput?(data)
+            }
         }
         source.setCancelHandler {
             master.close()
@@ -192,6 +228,12 @@ final class PseudoTerminal {
         _ = ioctl(master, setWindowSize, &value)
     }
 
+    /// The terminal's current settings, which the program in front may have changed.
+    private static func settings(of master: Int32) -> termios? {
+        var settings = termios()
+        return tcgetattr(master, &settings) == 0 ? settings : nil
+    }
+
     private static func lastError() -> POSIXError {
         POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
@@ -201,6 +243,60 @@ final class PseudoTerminal {
         let pointers = strings.map { strdup($0) }
         defer { pointers.forEach { free($0) } }
         return body(pointers + [nil])
+    }
+}
+
+/// Output read from the terminal that the main queue has not taken yet. `append` runs on the read queue and `take` on the main queue.
+final class PendingOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private let pause: () -> Void
+    private let resume: () -> Void
+    private var data = Data()
+    private var isTakeScheduled = false
+    private var isPaused = false
+
+    /// `pause` and `resume` stop and restart reading; they run with the lock held, so `take` never resumes before `append` has paused.
+    init(limit: Int, pause: @escaping () -> Void, resume: @escaping () -> Void) {
+        self.limit = limit
+        self.pause = pause
+        self.resume = resume
+    }
+
+    /// Adds output just read and pauses reading once `limit` bytes wait. True when the caller must schedule `take`, which no earlier call has left scheduled.
+    func append(_ chunk: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        data.append(chunk)
+        if data.count >= limit, !isPaused {
+            pause()
+            isPaused = true
+        }
+        guard !isTakeScheduled else { return false }
+        isTakeScheduled = true
+        return true
+    }
+
+    /// Everything read since the last call, and reading again if it paused.
+    func take() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        let taken = data
+        data = Data()
+        isTakeScheduled = false
+        if isPaused {
+            resume()
+            isPaused = false
+        }
+        return taken
+    }
+}
+
+private extension termios {
+    /// Whether the terminal signals the program in front when it receives `character`: the interrupt, quit, or suspend character while signals are on.
+    func signals(with character: UInt8) -> Bool {
+        guard c_lflag & tcflag_t(ISIG) != 0 else { return false }
+        return withUnsafeBytes(of: c_cc) { characters in [VINTR, VQUIT, VSUSP].contains { characters[Int($0)] == character } }
     }
 }
 
