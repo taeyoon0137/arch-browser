@@ -55,13 +55,13 @@ struct SessionSnapshot: Codable {
     /// Deleted Personas whose cookies and website data the engines remove at the next launch, before any engine starts. `nil` in files before version 10.
     var removedPersonaIDs: [UUID]?
     var spaces: [Space]
-    /// The front main window's space, which builds before version 11 open. This build reads `windows`.
+    /// The front main window's space, written for builds before version 11. `normalized()` reads it to make the window of a file without `windows`.
     var currentSpaceID: UUID
     var favorites: [Favorite]
     var tabs: [TabRecord]
     /// Every space's folders, in sidebar order within each space's pinned and open tabs. Optional so files before version 6 still decode.
     var folders: [TabFolder]?
-    /// The index in `tabs` of the front main window's selected tab, which builds before version 11 open.
+    /// The index in `tabs` of the front main window's selected tab, written for builds before version 11. `normalized()` reads it, when `selectedFavoriteID` names no favorite tab, to select the tab of the window it makes for a file without `windows`.
     var selectedTabIndex: Int?
     /// Recently closed tabs, oldest first. Optional so older files without this field still decode.
     var closedTabs: [TabRecord]?
@@ -69,7 +69,7 @@ struct SessionSnapshot: Codable {
     var splitViews: [[Int]]?
     /// The favorites' tabs, in favorite order. `nil` in files before version 5.
     var favoriteTabs: [FavoriteTabRecord]?
-    /// The favorite whose tab the front main window selected, which builds before version 11 open. `nil` when a space's tab was selected and in files before version 5.
+    /// The favorite whose tab the front main window selected, written for builds before version 11. `normalized()` reads it first to select the tab of the window it makes for a file without `windows`. `nil` when a space's tab was selected and in files before version 5.
     var selectedFavoriteID: UUID?
     /// The main windows, front to back. `nil` in files before version 11; `normalized()` makes one from `currentSpaceID` and the selected tab.
     var windows: [WindowRecord]?
