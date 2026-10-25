@@ -487,6 +487,7 @@ struct SidebarView: View {
                             .padding(.horizontal, Self.inset)
                             .transition(.opacity)
                     }
+                    PluginSidebarItemsView(plugins: windowModel.plugins)
                     SpacePagesView(session: session, translation: swipeTranslation)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -1381,6 +1382,7 @@ struct TabRowView: View {
             }
             Divider()
             Button("Close Tab") { session.requestCloseTab(tab) }
+            PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -1714,6 +1716,7 @@ struct SpaceMenuItems: View {
         Button("Rename Persona\u{2026}") { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
         Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(space.resolvedPersonaID) }
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
+        PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
     }
 }
 

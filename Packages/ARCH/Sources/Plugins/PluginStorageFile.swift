@@ -1,10 +1,12 @@
-// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values. The file is read when the storage is created and written atomically once changes settle, and at quit.
+// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, and at quit.
 import AppKit
 
 @MainActor
 final class PluginStorageFile: PluginStorage {
-    /// 5 MB, counted as the UTF-8 bytes of each key plus the JSON of its value.
+    /// 5 MB, counted as the UTF-8 bytes of each key plus the JSON of its value, for the plugin's keys and its settings together.
     static let quota = 5_000_000
+    /// The start of the keys under which the plugin's setting values live, which the plugin's own keys cannot use.
+    static let settingKeyPrefix = "arch.setting:"
 
     private static let encoder = JSONEncoder()
 
@@ -22,7 +24,7 @@ final class PluginStorageFile: PluginStorage {
 
     init(fileURL: URL) {
         self.fileURL = fileURL
-        for (key, value) in Self.values(at: fileURL) {
+        for (key, value) in PluginFile.read([String: PluginValue].self, at: fileURL) ?? [:] {
             // Values read from the file always encode again.
             let entry = Entry(value: value, size: (try? Self.size(of: value, forKey: key)) ?? 0)
             entries[key] = entry
@@ -35,21 +37,26 @@ final class PluginStorageFile: PluginStorage {
     }
 
     func value(forKey key: String) -> PluginValue? {
-        entries[key]?.value
+        Self.isReserved(key) ? nil : entries[key]?.value
     }
 
-    /// Only a write that grows the storage can exceed the quota.
     func setValue(_ value: PluginValue?, forKey key: String) throws {
-        let oldSize = entries[key]?.size ?? 0
-        let newSize = try value.map { try Self.size(of: $0, forKey: key) } ?? 0
-        if newSize > oldSize, size - oldSize + newSize > Self.quota { throw PluginError.quotaExceeded }
-        entries[key] = value.map { Entry(value: $0, size: newSize) }
-        size += newSize - oldSize
-        scheduleSave()
+        guard !Self.isReserved(key) else { throw PluginError.reservedKey(key) }
+        try store(value, forKey: key)
     }
 
     func allKeys() -> [String] {
-        entries.keys.sorted()
+        entries.keys.filter { !Self.isReserved($0) }.sorted()
+    }
+
+    /// The value of the setting `key`, which Settings stored.
+    func settingValue(forKey key: String) -> PluginValue? {
+        entries[Self.settingKeyPrefix + key]?.value
+    }
+
+    /// nil removes the value, so the setting reads as its default. Throws like `setValue(_:forKey:)`.
+    func setSettingValue(_ value: PluginValue?, forKey key: String) throws {
+        try store(value, forKey: Self.settingKeyPrefix + key)
     }
 
     /// Writes the changes that have not reached the file yet, if any.
@@ -59,8 +66,23 @@ final class PluginStorageFile: PluginStorage {
         self.pendingSave = nil
         // Every entry encodes, since `size(of:forKey:)` checked each value where the file holds it.
         guard let data = try? Self.encoder.encode(entries.mapValues(\.value)) else { return }
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
+        PluginFile.write(data, to: fileURL)
+    }
+
+    /// Drops the changes that have not reached the file, for a plugin whose data goes, so that none writes the file again.
+    func discardChanges() {
+        pendingSave?.cancel()
+        pendingSave = nil
+    }
+
+    /// Only a write that grows the storage can exceed the quota.
+    private func store(_ value: PluginValue?, forKey key: String) throws {
+        let oldSize = entries[key]?.size ?? 0
+        let newSize = try value.map { try Self.size(of: $0, forKey: key) } ?? 0
+        if newSize > oldSize, size - oldSize + newSize > Self.quota { throw PluginError.quotaExceeded }
+        entries[key] = value.map { Entry(value: $0, size: newSize) }
+        size += newSize - oldSize
+        scheduleSave()
     }
 
     /// Combines rapid changes into one file write, like the app's other stores.
@@ -73,12 +95,8 @@ final class PluginStorageFile: PluginStorage {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    /// The values in the file. A missing file has none. A file that does not decode has none either and moves to `storage.unreadable.json` beside it, replacing an older one, so the first change does not overwrite it.
-    private static func values(at fileURL: URL) -> [String: PluginValue] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
-        if let values = try? JSONDecoder().decode([String: PluginValue].self, from: data) { return values }
-        _ = try? FileManager.default.replaceItemAt(fileURL.deletingLastPathComponent().appendingPathComponent("storage.unreadable.json"), withItemAt: fileURL)
-        return [:]
+    private static func isReserved(_ key: String) -> Bool {
+        key.hasPrefix(settingKeyPrefix)
     }
 
     /// Encodes the value inside an array, one level down as in the file's object, so that it throws for a value nested too deep for the file, and leaves out the brackets.

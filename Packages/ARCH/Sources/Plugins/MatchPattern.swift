@@ -52,6 +52,12 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
         "\(scheme ?? "*")://\(host.map { (includesSubdomains ? "*." : "") + $0 } ?? "*")\(path)"
     }
 
+    /// The sites the pattern covers in words, such as `example.com`, `example.com and its subdomains`, or `every website`, without its scheme and path.
+    public var siteName: String {
+        guard let host else { return "every website" }
+        return includesSubdomains ? "\(host) and its subdomains" : host
+    }
+
     /// Whether `pattern`, in which each `*` matches any run of bytes, matches all of `text`. After a mismatch it lets the last `*` take one more byte and tries again. Keep it in step with `glob` in `javaScriptMatcher`.
     private static func glob(_ pattern: [UInt8], matches text: [UInt8]) -> Bool {
         let star = UInt8(ascii: "*")

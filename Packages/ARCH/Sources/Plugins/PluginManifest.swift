@@ -48,11 +48,19 @@ public struct PluginManifest: Hashable, Sendable {
 }
 
 /// A capability a plugin asks for. Each permission guards members of `PluginContext` or fields the plugin receives, and joins with them.
-public enum PluginPermission: String, Hashable, Sendable {
+public enum PluginPermission: String, Hashable, Sendable, CaseIterable {
     /// Titles and addresses of tabs. Without it, a plugin sees a tab's identifier, space, engine, and pinned state only.
     case tabs
     /// Writing text to the clipboard.
     case clipboard
+
+    /// What the permission lets a plugin do, as a sentence that Settings shows.
+    public var summary: String {
+        switch self {
+        case .tabs: return "Read the titles and addresses of your tabs"
+        case .clipboard: return "Write text to the clipboard"
+        }
+    }
 }
 
 /// What the user granted a plugin: a subset of what its manifest asks for. `PluginContext` checks every call against it.
@@ -69,5 +77,10 @@ public struct PluginGrant: Hashable, Sendable {
     /// Whether the granted sites cover the page at `url`.
     func covers(_ url: URL) -> Bool {
         sites.contains { $0.matches(url) }
+    }
+
+    /// What the grant lets the plugin do, one sentence for each permission, in a fixed order, and for each site.
+    public var summaries: [String] {
+        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map { "Run scripts on pages from \($0.siteName)" }
     }
 }

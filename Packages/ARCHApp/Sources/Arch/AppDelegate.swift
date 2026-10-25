@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private static let recentPageTag = 9_100
     /// The Window menu, which becomes `NSApp.windowsMenu` once the shortcut settings have listed the menu bar.
     private var windowMenu: NSMenu?
+    /// Keeps the Plugins menu's controller, which its items target.
+    private var pluginsMenu: PluginsMenu?
     /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
     /// When Arch last became active. A link that arrives just after came with the activation the sending app gave Arch, so it counts as arriving in the background.
@@ -40,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.showSettings = { PreferencesWindowController.shared.show() }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        PreferencesWindowController.session = session
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }
@@ -51,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         installFullscreenEscape()
         installTabSwitcher()
         installShortcuts()
+        installPluginsMenu()
         // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu stays out of Settings ▸ Shortcuts.
         NSApp.windowsMenu = windowMenu
         // The small window's button names the shortcut, which Settings ▸ Shortcuts can change.
@@ -581,6 +585,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let shortcuts = ShortcutSettings.shared
         shortcuts.onGlobalShortcut = { [weak self] in self?.openNewTabFromAnyApp() }
         if let menuBar = NSApp.mainMenu { shortcuts.manage(menuBar) }
+    }
+
+    /// The Plugins menu changes with the active window's Persona and its plugins, so the shortcut settings list its items each time they change.
+    @MainActor private func installPluginsMenu() {
+        guard let menuBar = NSApp.mainMenu, let windowMenu else { return }
+        let pluginsMenu = PluginsMenu(session: session)
+        pluginsMenu.install(in: menuBar, before: windowMenu)
+        self.pluginsMenu = pluginsMenu
     }
 
     /// The global shortcut brings the sidebar target forward, out of the Dock if it is minimized, and opens the new tab palette in it.

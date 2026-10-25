@@ -51,7 +51,7 @@ A script plugin's `plugin.json`:
       { "command": "show", "location": "pageContextMenu", "contexts": ["page", "selection"] }
     ],
     "sidebarItems": [
-      { "id": "panel", "title": "Reading", "symbol": "book", "panel": "panel.html", "presentation": "popover" }
+      { "id": "panel", "title": "Reading", "symbol": "book", "panel": "panel.html" }
     ],
     "settings": [
       { "key": "wordsPerMinute", "title": "Words per minute", "type": "number", "default": 230, "min": 100, "max": 600 }
@@ -91,18 +91,31 @@ Symbols use SF Symbols names, so plugins need no image files. A package may stil
 - Text that breaks these rules throws `PluginError.invalidMatchPattern` with the text.
 - Without `tabs`, a plugin still sees the title and address of a tab whose page its granted sites cover.
 
+### Shortcuts
+
+A command's `shortcut` joins modifiers and a key with `+`, such as `ctrl+opt+r`.
+
+| Part | Rule |
+|---|---|
+| Modifiers | `ctrl`, `opt`, `shift`, and `cmd`, each at most once and in any order |
+| Key | Last: one printable ASCII character other than `+`, such as `r` or `/`, or `plus`, `space`, `up`, `down`, `left`, `right`, or `f1` to `f20` |
+
+- Case does not matter, so `R` names the same key as `r`; Shift counts only as `shift`.
+- A shortcut needs `cmd` or `ctrl` unless its key is a function key, so that typing never runs a command, as the app's own menu commands require.
+- Text that breaks these rules throws `PluginError.invalidShortcut` with the text.
+
 ## Contributions
 
 Each contribution names its plugin wherever it appears: in the palette row's subtitle, in the menu item's section, in the sidebar item's tooltip, and in the Settings section. Identifiers belong to the plugin, so two plugins can use the same command `id`.
 
 | Contribution | Where it appears | Notes |
 |---|---|---|
-| Command | The command palette, after the primary row and before history suggestions, when the typed text matches the title or a keyword; Settings ▸ Shortcuts (IV.3) | A command with `takesArgument` shows its title as a token in the palette field and receives the text the user types after it |
-| Shortcut | The command's menu item | App shortcuts take priority over plugin shortcuts. Between plugins, the first installed keeps the shortcut, and Settings shows the conflict |
-| Menu item | A Plugins menu in the menu bar, grouped by plugin; the page context menu for the listed contexts (page, link, image, selection, editable); the tab context menu; the space menu | Page context menu items run app-side, so they work alike on both engines, as row 49 requires |
-| Sidebar item | A row below the favorites with a symbol, a title, and an optional badge | It runs a command or opens a panel |
-| Panel | A popover beside the sidebar item, or a page that takes the sidebar's place as the library does | A script plugin's panel uses one of its HTML files in a sandboxed web view. A built-in plugin's panel uses a view controller |
-| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. A script plugin may add an HTML settings page below the form |
+| Command | The command palette, after the primary row and before history suggestions, when the typed text matches the title or a keyword; Settings ▸ Shortcuts, through its Plugins menu item | Menu items and sidebar items run commands too. A command with `takesArgument` shows its title as a token in the palette field and receives the text the user types after it |
+| Shortcut | The command's item in the Plugins menu, which a command with a shortcut gets after the plugin's own items when its manifest lists none | Settings ▸ Shortcuts lists the item under Plugins with the plugin's name, and the user can change the shortcut there. App shortcuts take priority over plugin shortcuts, and between plugins the first installed keeps a shortcut: a command goes without its default shortcut while an app command, a command the user gave it, or an earlier plugin's command has it, and its row in Settings ▸ Shortcuts names that command |
+| Menu item | A Plugins menu in the menu bar, before the Window menu, for the active window's Persona; the page context menu, after the app's items, when the click is on one of the listed contexts (page, link, image, selection, editable); a tab row's context menu and the space menu, after their items | In each menu, a plugin's items form a section under the plugin's name. A click is on `page` when it is on no link, image, media, selection, or field, where the app's menu offers Back, Forward, and Reload. Page context menu items run app-side, so they work alike on both engines, as row 49 requires. The command runs on the active window's selected tab from the Plugins menu, on the page's tab with the link, image, and selected text from the page context menu, on the row's tab from a tab row, and on the window's selected tab with the space from the space menu |
+| Sidebar item | A row below the favorites with a symbol, a title, and the badge the plugin sets | It runs a command on the window's selected tab or opens a panel |
+| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. A script plugin's panel uses one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
+| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin may add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
 | Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
 
@@ -115,6 +128,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - The Chromium difference: the page can see what a plugin's script changes in the DOM and can replace built-ins and DOM methods the script calls later. Through them the page can also see the values the script sends and receives. For example, a `then` getter on `Object.prototype` receives each object or array reply, because a promise reads `then` when it settles with one. A plugin therefore sends a Chromium page script only what the page may see. The channel's closure stays private, so the page cannot send through the channel unless the script hands it over. Plugins treat pages as untrusted on both engines. The app treats every page script message as page input. The difference therefore affects plugin reliability and what a plugin can keep from the page, not app safety. A CEF patch that adds isolated worlds can join Phase VI if a plugin needs one.
 - With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, the host runs them in the selected tab's current page through `executeJavaScript(_:inWorld:completion:)` when the user runs one of that plugin's commands there. They stay in that tab's list until it leaves the site.
 - Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs. Disabling a plugin closes its message channel at once. Running scripts cannot reach it and stop at the next load.
+- The session gives each web contents it creates for a tab the page scripts of its Persona's enabled plugins, because Chromium receives them only with the browser it creates. A tab also takes its Persona's scripts when it joins the session, since a page that another page opens, such as one the preview panel opens, starts with that page's scripts. When the scripts change, every tab of the Persona takes them. Values the scripts send reach `PluginManager.receive(_:from:)` through their tab, which counts as selected while a window selects it.
 - Messages carry JSON. The app delivers a page message to the plugin only when the sending frame's address still matches the plugin's grant.
 
 ## Permissions
@@ -176,25 +190,27 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 ```
 ~/Library/Application Support/Arch/Plugins/<persona id>/
-  plugins.json                  Installed plugins: manifest, origin, grant, enabled state, install date
+  plugins.json                  Which plugins the user switched on or off; installed plugins add their manifest, origin, grant, and install date
   <plugin id>/package/          The installed package (script and web extension plugins)
   <plugin id>/storage.json      Key-value storage, written atomically after changes settle
   <plugin id>/storage.unreadable.json  The last storage.json that did not decode
 ```
 
 - `<persona id>` is the Persona's UUID as `UUID.uuidString` writes it, so the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. The app gives `PluginManager` its Application Support folder, and the manager derives the Persona's folder from it.
-- `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; the limit never refuses removals and writes that do not grow it. A value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep, throws an encoding error, so every value the storage accepts reaches the file. Settings values live in the same file under a reserved prefix.
+- `storage.json` is a JSON object of the plugin's keys and `PluginValue`s, up to 5 MB (5,000,000 bytes) per plugin, counted as the UTF-8 bytes of each key plus the JSON of its value. A write that grows the storage past the limit throws `quotaExceeded`; the limit never refuses removals and writes that do not grow it. A value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep, throws an encoding error, so every value the storage accepts reaches the file. Settings values live in the same file under keys that start with `arch.setting:`, which the plugin's own keys cannot use: `PluginStorage` throws `PluginError.reservedKey` for them, reads none, and leaves them out of `allKeys()`. A stored setting value that does not suit its field, such as an option a newer version no longer offers, reads as the default.
+- `plugins.json` is `{"choices": [{"id": "<plugin id>", "isEnabled": false}]}`, in the order the user made the choices; a new choice for a plugin replaces its old one. A plugin without a choice follows `BuiltInPlugin.isOnByDefault`. Each choice writes the file at once. A file that does not decode moves to `plugins.unreadable.json`, as `storage.json` does.
 - Changes reach `storage.json` together 0.5 seconds after the last one, and at quit. A missing file counts as empty. A file that does not decode moves to `storage.unreadable.json`, replacing an older one, and the plugin starts empty, so its first change does not overwrite the old data. The manager keeps one storage per plugin while it runs, so a plugin that starts again after a failed activation finds the changes that have not reached the file.
-- Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`.
+- Secret settings and `arch.secrets` use Keychain Services: generic password items with the service `local.arch.browser.plugin.<plugin id>` and the account `<persona id>/<key>`, accessible when unlocked and not synchronizable, in the login keychain as the AI module's keys are. Settings ▸ Plugins shows only whether a secret is saved, which it reads without the secret, so macOS does not ask for the keychain password. A deleted Persona's items go at the next launch (see Personas).
 - Web extensions keep their own extension storage in the engine: WebKit under the Persona's `WKWebExtensionController` configuration identifier, Chromium in the Persona's CEF cache path.
 - Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
 
 ## Personas
 
 - Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them.
+- The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows the contributions of its Persona, its current space's, which for a small window is its tab's, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Settings offers Install in Another Persona, which copies the package and asks for a new grant.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
-- The session creates a Persona's manager when a window of the Persona first lists or runs a plugin command, and runs palette commands through the manager of the window's Persona. Deleting a Persona drops its manager, and the next launch deletes its `Plugins/<persona id>/` folder before any engine starts; the same pass removes its Keychain items once secret settings exist (Build order step 2).
+- Deleting a Persona closes its manager (`close()`): its plugins leave the list, so their contributions go and nothing starts them again, their running instances stop, and storage changes that have not reached the files are dropped. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
 
 ## Web extensions as plugins
 
@@ -280,6 +296,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case tabs
     case manageTabs = "tabs.manage"
     case history, downloads, clipboard, notifications, ai, nativeMessaging
+    /// The permission as a plain sentence, such as "Read the titles and addresses of your tabs".
+    public var summary: String { get }
 }
 
 public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible {
@@ -288,6 +306,8 @@ public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible
     public init(_ pattern: String) throws
     public func matches(_ url: URL) -> Bool
     public var description: String { get }
+    /// The sites in words, such as `example.com and its subdomains` or `every website`.
+    public var siteName: String { get }
 }
 
 public enum SiteAccess: String, Codable, Sendable {
@@ -303,6 +323,8 @@ public struct PluginGrant: Hashable, Codable, Sendable {
     public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess, network: [String])
     /// Everything the manifest asks for.
     public init(requestedBy manifest: PluginManifest)
+    /// One plain sentence for each permission and site, as Settings and the install sheet state the grant.
+    public var summaries: [String] { get }
 }
 ```
 
@@ -325,12 +347,32 @@ public struct PluginCommand: Identifiable, Hashable, Codable, Sendable {
     public var symbol: String?
     public var keywords: [String]
     public var takesArgument: Bool
-    /// For example `ctrl+opt+r`. The user can change it in Settings.
-    public var shortcut: String?
+    /// The shortcut of the command's item in the Plugins menu. The user can change it in Settings ▸ Shortcuts.
+    public var shortcut: PluginShortcut?
+}
+
+/// Written as Shortcuts describes, such as `ctrl+opt+r`.
+public struct PluginShortcut: Hashable, Codable, Sendable, CustomStringConvertible {
+    public enum Modifier: String, CaseIterable, Sendable {
+        case ctrl, opt, shift, cmd
+    }
+    public let modifiers: Set<Modifier>
+    public let key: String
+    /// Throws `PluginError.invalidShortcut`.
+    public init(_ text: String) throws
+    public var description: String { get }
+    /// The key equivalent and modifier mask of the command's menu item.
+    public var keyEquivalent: String { get }
+    public var modifierFlags: NSEvent.ModifierFlags { get }
 }
 
 public enum PluginPageContext: String, Hashable, Codable, Sendable {
     case page, link, image, selection, editable
+}
+
+extension Set where Element == PluginPageContext {
+    /// The contexts of a click: its link, image, selected text, and field, or `page` where it has none of those and no media.
+    public init(_ element: EngineContextMenuElement)
 }
 
 public enum PluginMenuLocation: Hashable, Codable, Sendable {
@@ -347,15 +389,12 @@ public struct PluginMenuItem: Hashable, Codable, Sendable {
     public var title: String?
 }
 
-public enum PluginPanelPresentation: String, Hashable, Codable, Sendable {
-    case popover, sidebar
-}
-
 public struct PluginSidebarItem: Identifiable, Hashable, Codable, Sendable {
     public enum Action: Hashable, Codable, Sendable {
+        /// Runs on the window's selected tab.
         case command(String)
-        /// A package path for script plugins; built-in plugins return their panel from `Plugin.panel(for:)`.
-        case panel(path: String?, presentation: PluginPanelPresentation)
+        /// The panel that `Plugin.panel(for:)` returns, in a popover beside the row. Step 4 adds the package path of a script plugin's panel.
+        case panel
     }
     public var id: String
     public var title: String
@@ -405,7 +444,7 @@ public protocol Plugin: AnyObject {
     func handle(_ event: PluginEvent) async
     /// A message from one of the plugin's page scripts. The returned value is the script's reply.
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
-    /// The panel for a sidebar item whose action is `.panel(path: nil, …)`.
+    /// The panel for a sidebar item whose action is `.panel`. The manager asks each time the item opens it.
     func panel(for sidebarItemID: String) -> NSViewController?
     func settingsPage() -> NSViewController?
 }
@@ -523,7 +562,9 @@ public struct PluginInvocation: Sendable {
     public var source: Source
     public var argument: String?
     public var tab: PluginTab?
-    /// Set for page context menu items.
+    /// Set for space menu items: the space whose menu holds the item.
+    public var spaceID: UUID?
+    /// Set for page context menu items: what the user clicked on, which the plugin receives whatever its grant, since the user chose the item there.
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
@@ -554,7 +595,7 @@ public enum PluginEvent: Sendable {
 @MainActor
 public protocol PluginStorage: AnyObject {
     func value(forKey key: String) -> PluginValue?
-    /// nil removes the key. Throws `quotaExceeded` past 5 MB.
+    /// nil removes the key. Throws `quotaExceeded` past 5 MB, and `reservedKey` for a key of the plugin's settings.
     func setValue(_ value: PluginValue?, forKey key: String) throws
     func allKeys() -> [String]
 }
@@ -571,6 +612,9 @@ public enum PluginError: Error, Hashable, Sendable {
     case unsupportedAPIVersion(Int)
     case permissionDenied(PluginPermission?)
     case invalidMatchPattern(String)
+    case invalidShortcut(String)
+    /// A storage key that starts with `arch.setting:`, the prefix of the plugin's settings.
+    case reservedKey(String)
     case siteNotGranted(URL)
     case networkHostNotGranted(String)
     case quotaExceeded
@@ -618,11 +662,27 @@ public struct Attributed<Item: Sendable>: Sendable {
     public var item: Item
 }
 
+/// A menu item as a menu shows it: its command, the item's title or the command's, and the command's shortcut, which the Plugins menu gives the item.
+public struct PluginMenuEntry: Hashable, Sendable {
+    public let command: PluginCommandRef
+    public let title: String
+    public let shortcut: PluginShortcut?
+}
+
+/// One plugin's items at a menu location, which the menu shows under the plugin's name.
+public struct PluginMenuSection: Hashable, Sendable {
+    public let pluginName: String
+    public let items: [PluginMenuEntry]
+}
+
+/// The contributions of the enabled plugins, in the order the manager registered them. Menu items and sidebar items whose commands the manifest does not list are left out.
 public struct PluginContributionIndex: Sendable {
     public func paletteCommands(matching text: String) -> [Attributed<PluginCommand>]
     public var sidebarItems: [Attributed<PluginSidebarItem>] { get }
-    public func menuItems(at location: PluginMenuLocation) -> [Attributed<PluginMenuItem>]
-    public var shortcutConflicts: [PluginCommandRef] { get }
+    /// For the page context menu, `location` names the contexts of the click, and an item shows when it lists one of them.
+    public func menuSections(at location: PluginMenuLocation) -> [PluginMenuSection]
+    /// The page scripts, wrapped with their address guards, for every tab of the Persona.
+    public var pageScripts: [EnginePageScript] { get }
 }
 
 /// Runs installed plugins of one kind in one Persona. `Plugins` provides the script runtime; `Extensions` provides the web extension runtime.
@@ -662,16 +722,35 @@ public final class PluginManager: ObservableObject {
     /// Copies a folder or archive into staging and validates it.
     public func stage(_ url: URL) async throws -> PluginPackage
     public func install(_ package: PluginPackage, origin: PluginOrigin, grant: PluginGrant, enable: Bool) async throws
-    public func setEnabled(_ isEnabled: Bool, for id: PluginID) async throws
+    /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance.
+    public func setEnabled(_ isEnabled: Bool, for id: PluginID)
     public func setGrant(_ grant: PluginGrant, for id: PluginID) async throws
     public func remove(_ id: PluginID) async throws
 
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async
+    /// Starts the plugin if needed and asks it for the item's panel. Nil, with a beep, when it offers none.
+    public func panel(for item: Attributed<PluginSidebarItem>) async -> NSViewController?
+    public func badge(on item: Attributed<PluginSidebarItem>) -> String?
     public func post(_ event: PluginEvent)
-    /// The page scripts of every enabled plugin, wrapped with their address guards, for a tab of this Persona.
-    public func pageScripts() -> [EnginePageScript]
+    /// Whether one of the enabled plugin's page scripts runs at `url`, for Reload Matching Tabs.
+    public func pageScriptsCover(_ url: URL, of id: PluginID) -> Bool
     /// A message from a page script in `tab`, which the session describes in full; the manager removes what the grant does not cover. Returns the JSON reply, or nil.
     public func receive(_ message: EnginePageScriptMessage, from tab: PluginTab) async -> String?
+
+    /// Stops the plugins for good when the user deletes the Persona, dropping storage changes that have not reached the files.
+    public func close()
+    /// At launch, deletes a deleted Persona's plugin secrets and folder. Reports whether all of it is gone.
+    nonisolated public static func removeData(ofPersona persona: PersonaID, in directory: URL) -> Bool
+
+    // Settings ▸ Plugins.
+    /// The user's value or the default; nil for a secret setting.
+    public func value(of setting: PluginSetting, for id: PluginID) -> PluginValue?
+    /// nil restores the default.
+    public func setValue(_ value: PluginValue?, of setting: PluginSetting, for id: PluginID) throws
+    /// Reads only whether the Keychain item exists.
+    public func hasSecret(_ setting: PluginSetting, for id: PluginID) throws -> Bool
+    /// nil deletes the Keychain item.
+    public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) throws
 }
 ```
 

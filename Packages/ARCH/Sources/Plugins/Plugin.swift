@@ -1,21 +1,28 @@
 // The plugin API: the protocols a plugin implements, the context through which it reaches the browser, and the values it receives. Every kind of plugin calls the same API, and a plugin gains a capability only when `PluginContext` gains a member.
+import AppKit
 import ARCHEngine
-import Foundation
 
 /// A running plugin in one Persona.
 @MainActor
 public protocol Plugin: AnyObject {
     /// Called once, before the plugin's first command runs. The context stays valid while the plugin runs.
     func activate(in context: any PluginContext) async throws
+    /// Called when the user switches the plugin off or deletes its Persona, after which the manager drops it. Switching it on again starts a new instance.
+    func deactivate() async
     /// Runs one of the commands the manifest lists.
     func run(_ command: String, _ invocation: PluginInvocation) async throws
     /// A value one of the plugin's page scripts sent. The returned value is the script's reply.
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
+    /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows.
+    func panel(for sidebarItemID: String) -> NSViewController?
 }
 
 extension Plugin {
+    public func deactivate() async {}
     /// Without an implementation, the plugin replies with nothing.
     public func receive(_ message: PluginPageMessage) async throws -> PluginValue? { nil }
+    /// Without an implementation, the item opens nothing.
+    public func panel(for sidebarItemID: String) -> NSViewController? { nil }
 }
 
 /// A plugin compiled into the app. The app passes the list of these types to the plugin manager.
@@ -35,17 +42,33 @@ public protocol PluginContext: AnyObject {
     var grant: PluginGrant { get }
     /// The plugin's own storage in its Persona. Needs no permission.
     var storage: any PluginStorage { get }
+    /// The plugin's secrets in its Persona, its secret settings among them under their keys. Needs no permission.
+    var secrets: any PluginSecrets { get }
+    /// The value of one of the plugin's settings: the user's, or the manifest's default. Nil for a key the manifest does not list and for a secret setting, whose value `secrets` holds.
+    func setting(_ key: String) -> PluginValue?
+    /// Shows `text` as the badge of one of the plugin's sidebar items, or no badge for nil or empty text. The badge goes when the plugin stops.
+    func setBadge(_ text: String?, onSidebarItem id: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
 }
 
 /// What a command runs on.
 public struct PluginInvocation: Sendable {
-    /// The selected tab, or nil when no tab is selected or an internal page covers it.
+    /// The tab the command acts on: the selected tab, or the tab of the page or tab row the user chose the item on. Nil when there is none or an internal page covers it.
     public var tab: PluginTab?
+    /// The space whose menu holds the item, for a space menu item.
+    public var spaceID: UUID?
+    /// For a page context menu item, the link, image, and selected text the user clicked on. The user chose the item there, so the plugin receives them whatever its grant.
+    public var linkURL: URL?
+    public var imageURL: URL?
+    public var selection: String?
 
-    public init(tab: PluginTab?) {
+    public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil) {
         self.tab = tab
+        self.spaceID = spaceID
+        self.linkURL = linkURL
+        self.imageURL = imageURL
+        self.selection = selection
     }
 }
 
@@ -136,11 +159,20 @@ extension PluginValue: Codable {
 /// A plugin's key-value storage in one Persona. Values last across launches until the plugin removes them.
 @MainActor
 public protocol PluginStorage: AnyObject {
+    /// Nil for a key the storage does not hold, and for a reserved key.
     func value(forKey key: String) -> PluginValue?
-    /// nil removes the key. Throws `PluginError.quotaExceeded` when the storage would grow past its limit, and an encoding error for a value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep; the storage then keeps its previous value.
+    /// nil removes the key. Throws `PluginError.reservedKey` for a key that starts with the prefix of the plugin's settings, `PluginError.quotaExceeded` when the storage would grow past its limit, and an encoding error for a value JSON cannot hold, such as infinity or arrays and objects nested more than 510 levels deep; the storage then keeps its previous value.
     func setValue(_ value: PluginValue?, forKey key: String) throws
-    /// In ascending order.
+    /// In ascending order, without the reserved keys.
     func allKeys() -> [String]
+}
+
+/// A plugin's secrets in one Persona, kept in the Keychain.
+@MainActor
+public protocol PluginSecrets: AnyObject {
+    func secret(forKey key: String) throws -> String?
+    /// nil deletes the Keychain item.
+    func setSecret(_ secret: String?, forKey key: String) throws
 }
 
 public enum PluginError: Error, Hashable, Sendable {
@@ -150,6 +182,10 @@ public enum PluginError: Error, Hashable, Sendable {
     case noPage
     /// The text is not a match pattern.
     case invalidMatchPattern(String)
+    /// The text is not a shortcut.
+    case invalidShortcut(String)
+    /// The storage key starts with the prefix that the plugin's settings use.
+    case reservedKey(String)
     /// A write would take the plugin's storage past its limit.
     case quotaExceeded
 }

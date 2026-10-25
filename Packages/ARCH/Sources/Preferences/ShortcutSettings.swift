@@ -10,6 +10,8 @@ struct ShortcutCommand: Identifiable {
     /// The item's title after the titles of its submenus.
     let title: String
     let defaultShortcut: KeyShortcut?
+    /// For a command of a changing menu, the command that has this one's default shortcut, so that this one goes without it.
+    fileprivate(set) var defaultOwner: String?
     fileprivate let item: NSMenuItem?
     /// Hidden items that give the action a second key, such as ⌘= for Zoom In. They keep that key only while the command keeps its default.
     fileprivate var aliases: [(item: NSMenuItem, shortcut: KeyShortcut)] = []
@@ -21,7 +23,7 @@ struct ShortcutCommand: Identifiable {
     }
 }
 
-/// Applies the user's shortcuts to the menu bar and registers the global shortcut. The app builds the menu bar once at launch, then hands it over with `manage(_:)`, which keeps its key equivalents as the defaults.
+/// Applies the user's shortcuts to the menu bar and registers the global shortcut. The app builds the menu bar once at launch, then hands it over with `manage(_:)`, which keeps its key equivalents as the defaults. A menu whose items change while the app runs, such as the Plugins menu, goes through `manageChangingMenu(_:)` after each change.
 @MainActor
 public final class ShortcutSettings: ObservableObject {
     public static let shared = ShortcutSettings()
@@ -43,6 +45,10 @@ public final class ShortcutSettings: ObservableObject {
 
     private let defaults: UserDefaults
     private lazy var hotKey = GlobalHotKey { [weak self] in self?.onGlobalShortcut() }
+    /// The menu bar `manage(_:)` lists, among whose menus a changing menu's commands take their place.
+    private weak var menuBar: NSMenu?
+    /// The titles of the changing menus, whose items' default shortcuts give way to other commands'.
+    private var changingMenus: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -52,6 +58,7 @@ public final class ShortcutSettings: ObservableObject {
 
     /// Lists the menu bar's commands, applies the saved choices to their items, and registers the global shortcut.
     public func manage(_ menuBar: NSMenu) {
+        self.menuBar = menuBar
         var commands: [ShortcutCommand] = []
         for menuItem in menuBar.items {
             guard let menu = menuItem.submenu else { continue }
@@ -62,10 +69,22 @@ public final class ShortcutSettings: ObservableObject {
         registerGlobalShortcut()
     }
 
+    /// Lists the commands of `menu`, a menu of the menu bar whose items change while the app runs, in place of the ones listed for it before, and applies the saved choices to its items. Each item's key equivalent is its default shortcut, which it goes without while another command has that shortcut: one outside the changing menus, one the user chose it for, or an earlier item of a changing menu.
+    public func manageChangingMenu(_ menu: NSMenu) {
+        guard let menuBar, let menuItem = menuBar.items.first(where: { $0.submenu === menu }) else { return }
+        changingMenus.insert(menuItem.title)
+        var collected: [ShortcutCommand] = []
+        collect(menu, menuTitle: menuItem.title, path: [], into: &collected)
+        // The menu's commands go between those of the menus around it, as Settings lists them.
+        let others = Dictionary(grouping: commands.filter { $0.menu != menuItem.title }, by: \.menu)
+        commands = menuBar.items.flatMap { $0 === menuItem ? collected : others[$0.title] ?? [] }
+        resolveChangingMenus()
+    }
+
     /// The command's current shortcut, or `nil` when it has none.
     func shortcut(for command: ShortcutCommand) -> KeyShortcut? {
         if let choice = choices[command.id] { return choice }
-        return command.defaultShortcut
+        return command.defaultOwner == nil ? command.defaultShortcut : nil
     }
 
     func isChanged(_ command: ShortcutCommand) -> Bool {
@@ -80,25 +99,47 @@ public final class ShortcutSettings: ObservableObject {
             choices.updateValue(shortcut, forKey: command.id)
         }
         defaults.set(choices.mapValues { $0?.propertyList ?? [:] }, forKey: Self.defaultsKey)
-        apply(command)
+        // The change can take or free the default shortcut of a changing menu's command.
+        resolveChangingMenus()
+        apply(commands.first { $0.id == command.id } ?? command)
     }
 
     func resetShortcut(for command: ShortcutCommand) {
         setShortcut(command.defaultShortcut, for: command)
     }
 
-    /// Another command that uses `shortcut`, if any. A hidden twin's key belongs to its command while the command keeps its default.
+    /// Another command that uses `shortcut`, if any.
     func command(using shortcut: KeyShortcut, except command: ShortcutCommand) -> ShortcutCommand? {
-        ([Self.globalCommand] + commands).first { other in
-            other.id != command.id && (self.shortcut(for: other) == shortcut || (!isChanged(other) && other.aliases.contains { $0.shortcut == shortcut }))
+        ([Self.globalCommand] + commands).first { $0.id != command.id && uses($0, shortcut) }
+    }
+
+    /// A hidden twin's key belongs to its command while the command keeps its default.
+    private func uses(_ command: ShortcutCommand, _ shortcut: KeyShortcut) -> Bool {
+        self.shortcut(for: command) == shortcut || (!isChanged(command) && command.aliases.contains { $0.shortcut == shortcut })
+    }
+
+    /// Gives each command of a changing menu, in menu bar order, its default shortcut unless another command has it, then applies them. A later command that the user has not changed does not count yet, so the earlier of two commands keeps a default they share.
+    private func resolveChangingMenus() {
+        let changing = commands.indices.filter { changingMenus.contains(commands[$0].menu) }
+        for (position, index) in changing.enumerated() {
+            let unresolved = Set(changing[(position + 1)...].filter { !isChanged(commands[$0]) })
+            let others = [Self.globalCommand] + commands.indices.filter { $0 != index && !unresolved.contains($0) }.map { commands[$0] }
+            commands[index].defaultOwner = commands[index].defaultShortcut.flatMap { shortcut in others.first { uses($0, shortcut) } }?.title
         }
+        changing.forEach { apply(commands[$0]) }
     }
 
     // MARK: Menu bar
 
-    /// Adds the items of `menu` and its submenus that run an action. A hidden item becomes an alias of the visible item before it with the same action; another item that repeats an action keeps its built-in key and is not listed.
+    /// Adds the items of `menu` and its submenus that run an action, each titled after the submenus and the section header above it. A hidden item becomes an alias of the visible item before it with the same action; another item that repeats an action keeps its built-in key and is not listed.
     private func collect(_ menu: NSMenu, menuTitle: String, path: [String], into commands: inout [ShortcutCommand]) {
+        var section: [String] = []
         for item in menu.items where !item.isSeparatorItem {
+            if item.isSectionHeader {
+                section = [item.title]
+                continue
+            }
+            let path = path + section
             if let submenu = item.submenu {
                 collect(submenu, menuTitle: menuTitle, path: path + [item.title], into: &commands)
                 continue

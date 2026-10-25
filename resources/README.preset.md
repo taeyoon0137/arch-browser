@@ -116,7 +116,7 @@ arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
 │   ├── ARCH/Sources/               # Feature modules: AI, Browsing, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, PluginsTests, TerminalTests
+│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   └── ARCHKit/Sources/
 │       ├── ARCHEngine/             # Engine protocols, registry, and selection

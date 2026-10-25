@@ -1,5 +1,6 @@
-// Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+// Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
 import AppKit
+import Browsing
 import SwiftUI
 
 /// An appearance choice stored as a raw string under `ARCHAppearance`.
@@ -40,6 +41,8 @@ public final class PreferencesWindowController: NSWindowController {
     public static let defaultArchiveAfterHours = 12
     /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
     public static var openTerminal: (() -> Void)?
+    /// The session whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens.
+    public static var session: BrowserSession?
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
     private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())
@@ -54,6 +57,9 @@ public final class PreferencesWindowController: NSWindowController {
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
         sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
         sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection()))
+        if let session = Self.session {
+            sections.addTabViewItem(Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session)))
+        }
         sections.addTabViewItem(aiSection)
         let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]

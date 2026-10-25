@@ -263,7 +263,7 @@ final class PersonaEngines {
     let personaID: Persona.ID
     var runtimes: [EngineKind: EngineRuntime] = [:]
     let cookieSync = CookieSync()
-    /// Step 13: created when a window of the Persona first lists or runs a plugin command; deleting the Persona drops it.
+    /// Created when a tab or window of the Persona first needs it; deleting the Persona closes it and drops it.
     var plugins: PluginManager?
     init(personaID: Persona.ID)
 }
@@ -385,8 +385,8 @@ func addPersona(named name: String) -> Persona
 func renamePersona(_ id: Persona.ID, to name: String)
 public func canDeletePersona(_ id: Persona.ID) -> Bool
 func deletePersona(_ id: Persona.ID)
-/// The Persona's plugin manager, created on first use with the built-in plugins that the app passes to `init(registry:userDataDirectory:builtInPlugins:)`.
-@MainActor func plugins(in persona: Persona.ID) -> PluginManager
+/// The Persona's plugin manager, created on first use with the built-in plugins that the app passes to `init(registry:userDataDirectory:builtInPlugins:)`. Settings ▸ Plugins reaches it too.
+@MainActor public func plugins(in persona: Persona.ID) -> PluginManager
 
 // Step 11
 /// Whether a link from another app opens in a small window, judged by timing alone; the caller checks the preference first: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
@@ -643,18 +643,18 @@ Preference
   3. Its tabs close with reason `.user` into the closed list, without asking their pages, as `docs/sync.md` states for a deleted Persona. The undo count resets. The records keep `personaID`; reopening one whose space is gone uses its Persona's preferred space, or the sidebar target's current space once its Persona is gone.
   4. Its unfinished downloads are cancelled, and its kept download pages close through their runtimes. Finished rows stay in the library.
   5. Its spaces are removed with their folders and split views, and its favorites with the tabs saved for them.
-  6. Each of its browsers is asked to close, its plugin manager goes, so its plugins write nothing more, and its `PersonaEngines` moves to `retiredPersonaEngines` until quit, because download items hold their lists and contexts `unowned`.
+  6. Each of its browsers is asked to close, its plugin manager closes and goes (`docs/plugins.md`, Personas), so its plugins stop and write nothing more, and its `PersonaEngines` moves to `retiredPersonaEngines` until quit, because download items hold their lists and contexts `unowned`.
   7. Its ID joins `removedPersonaIDs`, and the session saves at once.
-  8. At the next launch, before any engine starts, the session calls each registered engine's `removeStoredData` for each listed ID. An ID leaves the list once both WebKit and Chromium have reported removal; while the Chromium framework is missing, it stays. The same pass first deletes `Plugins/<id>/`, which no engine holds open; an ID whose folder stays asks the engines at the next launch instead. Once plugin secrets exist (`docs/plugins.md`, Build order step 2), the pass also removes the Keychain items whose account starts with `<id>/`.
+  8. At the next launch, before any engine starts, the session calls each registered engine's `removeStoredData` for each listed ID. An ID leaves the list once both WebKit and Chromium have reported removal; while the Chromium framework is missing, it stays. The same pass first deletes the plugin data, which no engine holds open: `PluginManager.removeData(ofPersona:in:)` removes the Keychain items whose account starts with `<id>/` and `Plugins/<id>/`. An ID whose plugin data stays asks the engines at the next launch instead.
 
 ## Interactions with other features
 
 Plugins (V.11)
 - One `PluginManager` per Persona, at `Plugins/<Persona.id>/`; the default Persona's folder is `Plugins/D59DAF4B-E372-4AF9-890E-455B8B3860F3/`. `Persona.defaultID` exists from step 2, so V.11 uses Persona folders from its start, and the interim `Plugins/<plugin ID>/` folder in `docs/ai.md` is not needed.
 - `PluginBrowserHost.tabs(in:)` filters `session.tabs` by `personaID`. `openTab(_:_:in:)` uses `preferredSpace(in:)`. `selectTab` goes to the window that shows the tab, else to the sidebar target. `present` uses the active window.
-- Page scripts come from the tab's Persona's manager when its web contents is created; `openTab` knows the Persona.
+- Page scripts come from the tab's Persona's manager: `makeWebContents(url:engine:state:in:)` passes them to each web contents it creates, a tab takes them again when it joins the session, and every tab of the Persona takes new ones when they change (`PluginPages`).
 - Download entries record their Persona, so a plugin sees only its Persona's downloads. History stays app-wide in this design, while `docs/plugins.md` says a plugin sees only its Persona's history (open decision 2).
-- The half of III.12's done condition about separate plugins can be checked only once V.11 exists (open decision 15).
+- The half of III.12's done condition about separate plugins is part of V.11's done condition (open decision 15), which regression check 43 in `docs/plan.md` covers with the built-in Page Address plugin.
 
 Sync (V.9)
 - `Persona.defaultID` maps to the record name `default`; other Personas use their UUID string. Step 1's `TabRecord.id` supplies the stable tab record names that `docs/sync.md` asks for.
@@ -801,7 +801,7 @@ Coordination
       - Dragging a default-Persona tab onto a Work space symbol neither lights the symbol nor moves the tab. Move Left on Work's first space does not cross into the default group.
       - Delete Work: its tabs are in the closed list, its spaces and favorites are gone, and the windows on it moved to the default Persona. After a relaunch, its `Persona-<UUID>` directories, under Application Support and under `~/Library/Caches`, and its WebKit store are gone, and `removedPersonaIDs` is empty. The default Persona's Delete Persona… is disabled.
       - The developer tools of a Work Chromium tab show Work's cookies under Application ▸ Cookies.
-      - Separate plugins per Persona are checked when V.11 lands.
+      - Separate plugins per Persona are checked with V.11 (regression check 43 in `docs/plan.md`).
 
 ## Documents
 

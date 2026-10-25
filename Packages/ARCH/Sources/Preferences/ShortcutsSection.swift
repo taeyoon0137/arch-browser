@@ -1,4 +1,4 @@
-// Settings ▸ Shortcuts: the global shortcut and every menu bar command, each with a button that records a new shortcut and one that restores the default.
+// Settings ▸ Shortcuts: the global shortcut and every menu bar command, plugin commands among them, each with a button that records a new shortcut and one that restores the default.
 import AppKit
 import SwiftUI
 
@@ -50,8 +50,9 @@ struct ShortcutsSection: View {
         }
     }
 
+    /// A command whose default another command has says so below its title.
     private func row(_ command: ShortcutCommand) -> some View {
-        LabeledContent(command.title) {
+        LabeledContent {
             HStack(spacing: 4) {
                 if shortcuts.isChanged(command) {
                     Button { shortcuts.resetShortcut(for: command) } label: {
@@ -65,6 +66,11 @@ struct ShortcutsSection: View {
                     Text(label(for: command))
                         .frame(minWidth: 84)
                 }
+            }
+        } label: {
+            Text(command.title)
+            if let owner = command.defaultOwner, let shortcut = command.defaultShortcut, !shortcuts.isChanged(command) {
+                Text("\(shortcut.displayName) is used by \(owner).")
             }
         }
     }

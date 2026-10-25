@@ -91,7 +91,9 @@ public final class BrowserSession: ObservableObject {
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
-                                                configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory), directory: userDataDirectory)
+                                                configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
+            PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
+        }
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
@@ -116,8 +118,11 @@ public final class BrowserSession: ObservableObject {
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
         nowPlaying = NowPlaying(session: self)
-        // The session is created on the main thread, where the AI interface runs.
-        MainActor.assumeIsolated { pageAssistant.attach(to: self) }
+        // The session is created on the main thread, where the AI interface and the plugins run.
+        MainActor.assumeIsolated {
+            pageAssistant.attach(to: self)
+            pluginPages.attach(to: self)
+        }
     }
 
     public enum SessionError: Error {
@@ -546,7 +551,7 @@ public final class BrowserSession: ObservableObject {
         personas.removeAll { $0.id == id }
         // Its browsers close, and its plugins stop. Download items refer to their lists and profiles unowned, so its runtimes stay until quit.
         if let engines = personaEngines.removeValue(forKey: id) {
-            engines.plugins = nil
+            MainActor.assumeIsolated { closePlugins(of: engines) }
             engines.runtimes.values.forEach { $0.browser.tryToClose(skipBeforeUnloadHandlers: true) { _ in } }
             retiredPersonaEngines.append(engines)
         }
@@ -646,9 +651,10 @@ public final class BrowserSession: ObservableObject {
         return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
 
-    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given.
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the page scripts of the Persona's enabled plugins, which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state))
+        let pageScripts = MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts }
+        return runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state, pageScripts: pageScripts))
     }
 
     /// The Persona of the space `id`, or of the sidebar target's current space when no space has that ID.
@@ -771,7 +777,7 @@ public final class BrowserSession: ObservableObject {
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
             guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             let old = tab.webContents
-            let replacement = target.browser.createWebContents(EngineWebContentsConfiguration(initialURL: tab.url ?? Self.newTabURL))
+            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID)
             // Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
             self.sheets.cancel(for: tab)
             let window = self.windows.first { $0.selectedTabID == tab.id }
@@ -934,14 +940,32 @@ public final class BrowserSession: ObservableObject {
 
     /// The plugins the app ships, which every Persona's manager offers.
     private let builtInPlugins: [any BuiltInPlugin.Type]
+    /// Connects each tab to its Persona's plugins.
+    private let pluginPages = PluginPages()
 
     /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use.
-    @MainActor func plugins(in personaID: Persona.ID) -> PluginManager {
+    @MainActor public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
         if let plugins = engines.plugins { return plugins }
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins)
         engines.plugins = plugins
+        pluginPages.follow(plugins, of: personaID)
         return plugins
+    }
+
+    /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch.
+    @MainActor private func closePlugins(of engines: PersonaEngines) {
+        pluginPages.stopFollowing(engines.personaID)
+        engines.plugins?.close()
+        engines.plugins = nil
+    }
+
+    /// Reloads the Persona's tabs whose pages the plugin's page scripts cover, so that the scripts of a plugin the user just switched on run there.
+    @MainActor public func reloadTabs(coveredByPageScriptsOf id: PluginID, in personaID: Persona.ID) {
+        let plugins = plugins(in: personaID)
+        for tab in allTabs where tab.personaID == personaID && tab.url.map({ plugins.pageScriptsCover($0, of: id) }) == true {
+            tab.webContents.navigationController.reload()
+        }
     }
 
     // MARK: Downloads

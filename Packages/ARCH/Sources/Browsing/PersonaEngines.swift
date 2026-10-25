@@ -8,7 +8,7 @@ final class PersonaEngines {
     let personaID: Persona.ID
     var runtimes: [EngineKind: EngineRuntime] = [:]
     let cookieSync = CookieSync()
-    /// Created when a window of the Persona first lists or runs a plugin command. Deleting the Persona drops it, so its plugins stop and write nothing more to the Persona's folder.
+    /// Created when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`). Deleting the Persona closes it and drops it, so its plugins stop and write nothing more to the Persona's folder.
     var plugins: PluginManager?
 
     init(personaID: Persona.ID) {

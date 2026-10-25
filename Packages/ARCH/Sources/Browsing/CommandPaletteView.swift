@@ -22,7 +22,7 @@ struct CommandPaletteView: View {
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
-        Array(session.plugins(in: windowModel.personaID).contributions.paletteCommands(matching: text).prefix(5))
+        Array(windowModel.plugins.contributions.paletteCommands(matching: text).prefix(5))
     }
 
     /// The listed tabs of the window's Persona to switch to. A small window shows only its own tab, so its palette offers none.
@@ -92,7 +92,10 @@ struct CommandPaletteView: View {
                         .paletteAction { windowModel.submitCommandPalette(text) }
                     ForEach(pluginCommands, id: \.ref) { command in
                         PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
-                            .paletteAction { windowModel.runPluginCommand(command.ref) }
+                            .paletteAction {
+                                windowModel.dismissCommandPalette()
+                                windowModel.runPluginCommand(command.ref)
+                            }
                     }
                     if offersAskAboutPage {
                         PaletteRow(symbol: "sparkles", title: "Ask About This Page")

@@ -57,6 +57,10 @@ public final class Tab: ObservableObject, Identifiable {
     var openURLInNewTab: ((URL) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
     var askAboutSelection: ((String) -> Void)?
+    /// The session's plugins set this callback to pass a value one of the page's scripts sent to the plugin it belongs to, with the reply. Without it, the script's promise settles with nothing.
+    var receivePageScriptMessage: ((EnginePageScriptMessage, @escaping (String?) -> Void) -> Void)?
+    /// The session's plugins set this callback to add their items for what the user clicked on to the end of the page's context menu.
+    var addPluginMenuItems: ((EngineContextMenuElement, NSMenu) -> Void)?
     /// The session sets this callback to show a web link the user clicked with Shift in the preview panel instead of opening it.
     var previewLink: ((URL) -> Void)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
@@ -88,6 +92,7 @@ public final class Tab: ObservableObject, Identifiable {
         self.favicon = webContents.favicon
         webContents.uiDelegate = self
         webContents.navigationDelegate = self
+        webContents.pageScriptDelegate = self
     }
 
     /// The engine that renders the tab.
@@ -154,9 +159,11 @@ extension Tab: EngineWebContentsUIDelegate {
     func replaceWebContents(with replacement: any EngineWebContents) {
         webContents.uiDelegate = nil
         webContents.navigationDelegate = nil
+        webContents.pageScriptDelegate = nil
         webContents = replacement
         replacement.uiDelegate = self
         replacement.navigationDelegate = self
+        replacement.pageScriptDelegate = self
         isLoading = replacement.isLoading
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
@@ -214,7 +221,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Context menus
 
-    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, editing or Copy, and Ask About Selection, separated by lines. Back, Forward, and Reload show only when none of those apply. The engine's own items keep their actions and enabled state.
+    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, editing or Copy, and Ask About Selection, separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow. The engine's own items keep their actions and enabled state.
     public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
         let engineItems = menu.items
         menu.removeAllItems()
@@ -262,6 +269,7 @@ extension Tab: EngineWebContentsUIDelegate {
             if index > 0 { menu.addItem(.separator()) }
             section.forEach(menu.addItem)
         }
+        addPluginMenuItems?(element, menu)
     }
 
     /// Only web addresses open in a tab; a link for another app offers just Copy Link.
@@ -374,6 +382,15 @@ extension Tab: EngineWebContentsUIDelegate {
     }
 }
 
+// MARK: Page scripts
+
+extension Tab: EnginePageScriptDelegate {
+    public func webContents(_ webContents: any EngineWebContents, didReceive message: EnginePageScriptMessage, reply: @escaping (String?) -> Void) {
+        guard let receivePageScriptMessage else { return reply(nil) }
+        receivePageScriptMessage(message, reply)
+    }
+}
+
 // MARK: Link previews
 
 extension Tab: EngineWebContentsNavigationDelegate {
@@ -388,7 +405,7 @@ extension Tab: EngineWebContentsNavigationDelegate {
 }
 
 /// A menu item that runs a closure, because a tab is not an Objective-C object that menu actions can target.
-private final class ActionMenuItem: NSMenuItem {
+final class ActionMenuItem: NSMenuItem {
     private let handler: () -> Void
 
     init(_ title: String, isEnabled: Bool = true, handler: @escaping () -> Void) {
