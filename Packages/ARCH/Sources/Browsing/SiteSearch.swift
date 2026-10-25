@@ -40,6 +40,8 @@ public final class SiteSearchStore: ObservableObject {
 
     @Published public private(set) var shortcuts: [SiteSearchShortcut]
     private let fileURL: URL
+    /// Set while the store keeps its defaults in place of a file that did not decode. The first write moves that file aside.
+    private var hasUnreadableFile = false
 
     private struct File: Codable {
         var shortcuts: [SiteSearchShortcut]
@@ -52,11 +54,13 @@ public final class SiteSearchStore: ObservableObject {
         SiteSearchShortcut(keyword: "m", name: "Google Maps", template: "https://www.google.com/maps/search/?api=1&query=%s"),
     ]
 
-    /// A file that cannot be read leaves the defaults in memory and stays as it is until the user changes the list.
+    /// A file that does not decode leaves the defaults in memory. It stays as it is until the first write moves it to `site-search.unreadable.json`, as an unreadable `session.json` is moved, so that neither Settings nor an import overwrites it.
     init(directory: URL) {
         fileURL = directory.appendingPathComponent("site-search.json")
         if let data = try? Data(contentsOf: fileURL) {
-            shortcuts = (try? JSONDecoder().decode(File.self, from: data))?.shortcuts ?? Self.defaultShortcuts
+            let file = try? JSONDecoder().decode(File.self, from: data)
+            shortcuts = file?.shortcuts ?? Self.defaultShortcuts
+            hasUnreadableFile = file == nil
         } else {
             shortcuts = Self.defaultShortcuts
             write()
@@ -97,6 +101,18 @@ public final class SiteSearchStore: ObservableObject {
         write()
     }
 
+    /// Appends, in order, the shortcuts that `canSave` accepts, writes the file once, and returns how many it added. A keyword that an earlier shortcut uses, among them one added just before, is skipped, so the first one wins. Import uses it for the shortcuts of other browsers.
+    @discardableResult
+    public func add(_ candidates: [SiteSearchShortcut]) -> Int {
+        var count = 0
+        for candidate in candidates where canSave(candidate) {
+            shortcuts.append(Self.trimmed(candidate))
+            count += 1
+        }
+        if count > 0 { write() }
+        return count
+    }
+
     public func remove(_ shortcut: SiteSearchShortcut) {
         shortcuts.removeAll { $0.id == shortcut.id }
         write()
@@ -116,6 +132,10 @@ public final class SiteSearchStore: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(File(shortcuts: shortcuts)) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if hasUnreadableFile {
+            _ = try? FileManager.default.replaceItemAt(fileURL.deletingLastPathComponent().appendingPathComponent("site-search.unreadable.json"), withItemAt: fileURL)
+            hasUnreadableFile = false
+        }
         try? data.write(to: fileURL, options: .atomic)
     }
 }

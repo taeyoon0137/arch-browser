@@ -419,15 +419,27 @@ public final class BrowserSession: ObservableObject {
         folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
     }
 
-    /// Adds a space to the Persona and returns it, named `name` or else "Space" with the lowest number no space uses, and with the next tint of the rotation. The space goes last in that Persona's group, because each Persona's spaces stay together in the order `normalized()` restores at launch.
+    /// Adds a space to the Persona and returns it, named `name` or else as `newSpaceName(among:)` names it, and with the next tint of the rotation.
     func makeSpace(in personaID: Persona.ID, named name: String? = nil) -> Space {
-        let tint = SpaceTint.colors[spaces.count % SpaceTint.colors.count]
-        // The lowest number no space uses, so names do not repeat after a deletion.
-        let name = name ?? (1...).lazy.map { "Space \($0)" }.first { name in !spaces.contains { $0.name == name } }!
-        let space = Space(name: name, tint: tint, personaID: personaID)
-        let groupEnd = spaces.lastIndex { $0.resolvedPersonaID == personaID }.map { $0 + 1 } ?? spaces.endIndex
-        spaces.insert(space, at: groupEnd)
+        let space = Space(name: name ?? Self.newSpaceName(among: spaces), tint: Self.newSpaceTint(among: spaces), personaID: personaID)
+        insert(space)
         return space
+    }
+
+    /// The name of a new space without one: "Space" with the lowest number no space in `spaces` uses, so names do not repeat after a deletion.
+    static func newSpaceName(among spaces: [Space]) -> String {
+        (1...).lazy.map { "Space \($0)" }.first { name in !spaces.contains { $0.name == name } }!
+    }
+
+    /// The tint of a new space: the next of the rotation after `spaces`.
+    static func newSpaceTint(among spaces: [Space]) -> SpaceTint {
+        SpaceTint.colors[spaces.count % SpaceTint.colors.count]
+    }
+
+    /// Puts the space last in its Persona's group, because each Persona's spaces stay together in the order `normalized()` restores at launch.
+    private func insert(_ space: Space) {
+        let groupEnd = spaces.lastIndex { $0.resolvedPersonaID == space.resolvedPersonaID }.map { $0 + 1 } ?? spaces.endIndex
+        spaces.insert(space, at: groupEnd)
     }
 
     public func setTint(_ tint: SpaceTint, ofSpace id: UUID) {
@@ -510,12 +522,20 @@ public final class BrowserSession: ObservableObject {
         return space.resolvedPersonaID == tab.personaID
     }
 
+    /// The name of the one space a new Persona starts with.
+    static let newPersonaSpaceName = "Personal"
+
     /// Appends a Persona with one space named Personal and returns it. Its profiles and plugins start when a window of it first needs them.
     func addPersona(named name: String) -> Persona {
         let persona = Persona(name: name)
-        personas.append(persona)
-        _ = makeSpace(in: persona.id, named: "Personal")
+        add(persona, spaces: [Space(name: Self.newPersonaSpaceName, tint: Self.newSpaceTint(among: spaces), personaID: persona.id)])
         return persona
+    }
+
+    /// Appends `persona` with its spaces, of which every Persona has at least one.
+    private func add(_ persona: Persona, spaces: [Space]) {
+        personas.append(persona)
+        spaces.forEach(insert)
     }
 
     /// The window's sheet passes only a name with text in it.
@@ -580,10 +600,9 @@ public final class BrowserSession: ObservableObject {
         favorites.append(Favorite(url: url, title: tab.displayTitle, personaID: tab.personaID))
     }
 
-    /// Appends, in order, the favorites whose addresses are not favorites of the Persona of the sidebar target's current space yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
+    /// Appends, in order, the favorites whose addresses are not favorites of the Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
     @discardableResult
-    public func addFavorites(_ candidates: [Favorite]) -> Int {
-        let personaID = sidebarTarget().currentSpace.resolvedPersonaID
+    public func addFavorites(_ candidates: [Favorite], in personaID: Persona.ID) -> Int {
         var addresses = Set(favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
         let added = candidates.filter { addresses.insert($0.url).inserted }.map { candidate in
             var favorite = candidate
@@ -1354,6 +1373,39 @@ public final class BrowserSession: ObservableObject {
     /// `id` while it names a folder in that space's pinned or open list, so that a saved or closed tab returns to its folder unless the folder has gone or moved.
     private func existingFolderID(_ id: UUID?, spaceID: UUID, pinned: Bool) -> UUID? {
         folders.first { $0.id == id && $0.spaceID == spaceID && $0.isPinned == pinned }?.id
+    }
+
+    // MARK: Browser import
+
+    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected. `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
+    public func addImport(_ row: SidebarImport, to destination: SidebarImport.Destination, record: inout SidebarImport.Record) -> SidebarImport.Counts {
+        let plan = SidebarImport.Plan(row, to: destination, entry: record.entry(for: row.profile), in: importSidebar)
+        if let persona = plan.newPersona {
+            add(persona, spaces: plan.spaces)
+        } else {
+            plan.spaces.forEach(insert)
+        }
+        folders += plan.folders
+        addFavorites(plan.favorites, in: plan.personaID)
+        for pinned in plan.pinnedTabs {
+            let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
+            tab.folderID = pinned.folderID
+            tab.customTitle = pinned.customTitle
+            // It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing. So it is marked before it joins the list that the hooks follow.
+            tab.isRestored = true
+            tab.recordedURL = pinned.url
+            tabs.append(tab)
+        }
+        record.update(plan.entry)
+        record.removeGoneItems(in: importSidebar)
+        return plan.counts
+    }
+
+    /// The sidebar as the browser import's plan resolves a row against it.
+    private var importSidebar: SidebarImport.Sidebar {
+        SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap { tab in
+            tab.spaceID.map { SidebarImport.Sidebar.TabState(id: tab.id, spaceID: $0, isPinned: tab.isPinned, url: tab.url) }
+        })
     }
 
     // MARK: Split view

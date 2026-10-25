@@ -22,6 +22,25 @@ extension SpaceTint {
         case .gray: return .systemGray
         }
     }
+
+    /// The tint for a theme color read from another browser: gray for a color below 20% saturation, else the tint whose system color in the light appearance has the nearest hue. The components are read as sRGB whatever color space the source names, which moves hue and saturation only a little.
+    public static func nearest(red: Double, green: Double, blue: Double) -> SpaceTint {
+        let color = hueAndSaturation(red: red, green: green, blue: blue)
+        guard color.saturation >= 0.2 else { return .gray }
+        // Hues lie on a circle from 0 to 1.
+        func distance(to tint: SpaceTint) -> Double {
+            let tintColor = SRGBColor(tint.nsColor, in: .light)
+            let difference = abs(hueAndSaturation(red: tintColor.red, green: tintColor.green, blue: tintColor.blue).hue - color.hue)
+            return min(difference, 1 - difference)
+        }
+        return colors.filter { $0 != .gray }.min { distance(to: $0) < distance(to: $1) } ?? .gray
+    }
+
+    private static func hueAndSaturation(red: Double, green: Double, blue: Double) -> (hue: Double, saturation: Double) {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: 1).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return (Double(hue), Double(saturation))
+    }
 }
 
 /// How strongly the current space's tint washes the window, saved by its raw value under `ARCHTintStrength`.

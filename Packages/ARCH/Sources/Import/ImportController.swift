@@ -45,8 +45,9 @@ public final class ImportController {
         }
     }
 
-    /// Adds the favorites and history pages the files held, then sums them up in a sheet on `window`.
+    /// Adds the favorites and history pages the files held, the favorites to the Persona of the sidebar target's current space, then sums them up in a sheet on `window`.
     private func add(_ results: [Result<ImportedFile, Error>], in window: NSWindow) {
+        let personaID = session.sidebarTarget().personaID
         var bookmarkCount = 0
         var addedFavoriteCount = 0
         var pageCount = 0
@@ -55,7 +56,7 @@ public final class ImportController {
             switch result {
             case .success(let file):
                 bookmarkCount += file.favorites.count
-                addedFavoriteCount += session.addFavorites(file.favorites)
+                addedFavoriteCount += session.addFavorites(file.favorites, in: personaID)
                 history.importEntries(file.history)
                 pageCount += file.history.count
             case .failure(let error):
