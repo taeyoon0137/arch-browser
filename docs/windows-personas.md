@@ -213,6 +213,8 @@ public final class BrowserWindowModel: ObservableObject {
     func firstFreeTab(inSpace id: UUID) -> Tab?
     /// Lets go of what the window shows as it closes (Windows and menus ▸ Engine and tab events).
     @MainActor func prepareToClose()
+    /// Closes the window from code, first ending with Cancel a sheet that `TabSheetQueue` does not show (Small window ▸ Closing).
+    func close()
     /// Step 11: a page that one of the window's pages or its preview opened becomes a selected tab of a main window's current space, or opens in a small window of its own beside a small window (open decision 11).
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID)
 }
@@ -565,7 +567,7 @@ When
 - Until step 12 adds the preference, the first condition always holds.
 
 The tab
-- Its destination space is the last main window's current space, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.
+- Its destination space is the last main window's current space when the small window opens, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.
 - `isInSmallWindow` is true. The tab stays in `session.tabs`, so sheets, permissions, downloads, zoom, crash notices, Now Playing, and the close log work.
 - `isListedInSidebar` keeps it out of `tabs(in:pinned:)` (and with it the sidebar, ⌘-numbers, `orderedTabs`, `moveSelectedTab`, and AppleScript's space order), `closeOtherTabs`, the `closeTab` fallback, `recentTabs`, the `switchToSpace` candidates, `openFavorite`'s reuse, the palette's matching tabs, the restore fallback, and archiving. `deleteSpace` moves it with its space. `snapshot()` writes it as an open tab of its destination space.
 - A main window never selects it. Selecting it explicitly runs Move to Main Window instead.
@@ -583,6 +585,7 @@ Move to Main Window (the button, Window ▸ Move to Main Window, ⌥⌘N)
 
 Closing
 - Closing a small window asks to close its tab, so a Chromium page with a `beforeunload` handler can ask to stay. The tab goes to the closed list, and ⇧⌘T reopens it in the main window. A small window whose tab closes for any reason closes with it.
+- AppKit would take a sheet away unanswered when code closes its window, so `BrowserWindowModel.close()` first ends a sheet that `TabSheetQueue` does not show, the print panel or Export as PDF's save panel, with Cancel. A download's save panel therefore never opens as a sheet on a small window, which a download-only tab closes on the next turn of the run loop; it opens as a panel of its own.
 
 Preference
 - Settings ▸ General: "Open links from other apps in a small window when Arch is in the background", stored under `ARCHOpensLinksInSmallWindow` (`BrowserSession.opensLinksInSmallWindowKey`), on by default. Off restores today's behavior exactly.
@@ -738,7 +741,7 @@ Coordination
     - Re-check: 1, 4 and 18 as updated below, 6, 12, 13, 21, 27.
     - New checks:
       - With Arch in the background, each link opens a small window in front with no sidebar, and only that window comes forward.
-      - The button and ⌥⌘N move the tab into the last main window's current space, selected, and the small window closes. Text typed into a form field there survives on both engines.
+      - The button and ⌥⌘N move the tab into its destination space, the last main window's current space when the small window opened, selected in the last main window, and the small window closes. Text typed into a form field there survives on both engines.
       - Settings ▸ Shortcuts lists Move to Main Window with ⌥⌘N.
       - An `alert` shows on the small window. ⌘F and ⌘L work there. ⌘T opens the palette in the main window.
       - Closing the small window puts its tab in the closed list, and ⇧⌘T reopens it in the main window.

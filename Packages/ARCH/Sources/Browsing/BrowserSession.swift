@@ -709,7 +709,7 @@ public final class BrowserSession: ObservableObject {
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         for window in windows where window.selectedTabID == tab.id {
             guard window.kind == .main else {
-                window.nsWindow?.close()
+                window.close()
                 continue
             }
             let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
@@ -1385,7 +1385,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask.
+    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         guard runtime(owning: downloads)?.context.preferences.promptForDownloadPath == true else {
             return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
@@ -1394,7 +1394,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         panel.nameFieldStringValue = defaultFilename
         panel.directoryURL = downloadsDirectory
         let finish = { (response: NSApplication.ModalResponse) in completion(response == .OK ? panel.url : nil) }
-        if let window = NSApp.keyWindow {
+        if let window = NSApp.keyWindow, self.window(for: window)?.kind != .small {
             panel.beginSheetModal(for: window, completionHandler: finish)
         } else {
             panel.begin(completionHandler: finish)

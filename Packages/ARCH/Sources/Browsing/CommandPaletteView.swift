@@ -117,10 +117,12 @@ struct CommandPaletteView: View {
                 }
             }
         }
-        .frame(width: 600)
+        // A window narrower than the palette, such as a small window, keeps the page margin on both sides of it.
+        .frame(maxWidth: 600)
         .modifier(CommandPaletteAppearance(offset: arrivalOffset, isHidden: !hasArrived || isLeaving))
         .allowsHitTesting(!isLeaving)
         .padding(.top, Self.top)
+        .padding(.horizontal, BrowserWindowView.pageMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             guard !isWarmUp else { return }

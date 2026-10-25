@@ -23,7 +23,7 @@ public final class BrowserWindowModel: ObservableObject {
     let id: UUID
     public let kind: BrowserWindowKind
 
-    /// The space the sidebar shows.
+    /// The space the sidebar shows. A small window has no sidebar; its current space is the space its tab moves to, whose tint it shows.
     @Published public var currentSpaceID: UUID
     /// Selecting a tab switches to its space so the sidebar and page match. Another window that shows the tab gives it up first (window rule 2).
     @Published public var selectedTabID: UUID? {
@@ -293,10 +293,7 @@ public final class BrowserWindowModel: ObservableObject {
     func giveUp(_ tab: Tab) {
         shownTabIDs.removeAll { $0 == tab.id }
         if tab.id == selectedTabID {
-            guard kind == .main else {
-                nsWindow?.close()
-                return
-            }
+            guard kind == .main else { return close() }
             selectedTabID = fallbackTab(excluding: tab.id)?.id
         } else {
             if fullscreenTabID == tab.id { exitPageFullscreen() }
@@ -574,6 +571,14 @@ public final class BrowserWindowModel: ObservableObject {
         shownTabIDs = []
         session.sheets.deferSheet(of: self)
         devToolsDock.track(nil)
+    }
+
+    /// Closes the window from code, as a small window does once its tab leaves or closes. AppKit would take an attached sheet away unanswered, so a sheet that the sheet queue does not show, such as the print panel or Export as PDF's save panel, ends first with Cancel. The queue's own sheet waits for its tab's next window (`prepareToClose()`).
+    func close() {
+        if let nsWindow, let sheet = nsWindow.attachedSheet, sheet !== visibleSheet?.alert.window {
+            nsWindow.endSheet(sheet, returnCode: .cancel)
+        }
+        nsWindow?.close()
     }
 
     // MARK: Find in page
