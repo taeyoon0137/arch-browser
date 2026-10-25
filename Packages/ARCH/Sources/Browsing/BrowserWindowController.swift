@@ -3,27 +3,25 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The AppKit window of one `BrowserWindowModel`: a titled window with an empty unified toolbar that hosts `BrowserWindowView`. It reports becoming main and closing to the session, records the frame that the saved session keeps, and gives the window the title that the Window menu and Mission Control show.
+/// The AppKit window of one `BrowserWindowModel`: a titled window with an empty unified toolbar that hosts `BrowserWindowView`, or `SmallWindowView` for a small window. It reports becoming main and closing to the session, records the frame that the saved session keeps, and gives the window the title that the Window menu and Mission Control show.
 final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     let model: BrowserWindowModel
     private var titleObserver: AnyCancellable?
     /// Set from the start of the transition into full screen until the window is back, while its frame is not the one to keep.
     private var isInFullScreen = false
 
-    /// The size of a window without a saved frame that cascades from no other.
-    private static let defaultContentSize = NSSize(width: 1200, height: 800)
     /// How far a saved frame must reach onto a screen's visible area, across and down, for the window to open there.
     private static let minimumVisibleLength: CGFloat = 100
 
-    /// Builds the window hidden: at the model's saved frame, kept on a screen; without one, at `source`'s size and cascaded from it, or centered at the default size without a source or while the source is in full screen.
+    /// Builds the window hidden: at the model's saved frame, kept on a screen; without one, at `source`'s size and cascaded from it, or at the kind's default size without a source or while the source is in full screen, a main window centered and a small window centered on the screen with the pointer.
     init(model: BrowserWindowModel, cascadingFrom source: NSWindow?) {
         self.model = model
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: model.kind.defaultContentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the sidebar's top row.
+        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the line of the sidebar's top row or the small window's row.
         window.toolbar = NSToolbar(identifier: "Main")
         window.toolbarStyle = .unified
         window.titlebarSeparatorStyle = .none
@@ -33,10 +31,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         window.isRestorable = false
         // The controller owns the window, which goes with it.
         window.isReleasedWhenClosed = false
-        let hostingController = NSHostingController(rootView: BrowserWindowView(session: model.session, window: model))
-        hostingController.sizingOptions = []
-        window.contentViewController = hostingController
-        window.contentMinSize = NSSize(width: 800, height: 500)
+        window.contentViewController = Self.contentViewController(for: model)
+        window.contentMinSize = model.kind.minimumContentSize
         if let frame = model.restorableFrame {
             window.setFrame(Self.restoredFrame(frame, screens: NSScreen.screens.map(\.visibleFrame)), display: false)
         } else if let source, !source.styleMask.contains(.fullScreen) {
@@ -44,8 +40,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
             // The first call places the window on the source and returns the next cascade point, where the second places it within the screen.
             window.cascadeTopLeft(from: window.cascadeTopLeft(from: NSPoint(x: source.frame.minX, y: source.frame.maxY)))
         } else {
-            window.setContentSize(Self.defaultContentSize)
-            window.center()
+            window.setContentSize(model.kind.defaultContentSize)
+            switch model.kind {
+            case .main: window.center()
+            case .small: window.setFrame(Self.centeredFrame(size: window.frame.size, pointer: NSEvent.mouseLocation, screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) }), display: false)
+            }
         }
         super.init(window: window)
         window.delegate = self
@@ -63,6 +62,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         fatalError("BrowserWindowController is created with a window model")
     }
 
+    /// The window's content: the main window's sidebar and page, or the small window's row and page.
+    private static func contentViewController(for model: BrowserWindowModel) -> NSViewController {
+        switch model.kind {
+        case .main: hostingController(BrowserWindowView(session: model.session, window: model))
+        case .small: hostingController(SmallWindowView(session: model.session, window: model))
+        }
+    }
+
+    private static func hostingController(_ rootView: some View) -> NSViewController {
+        let controller = NSHostingController(rootView: rootView)
+        controller.sizingOptions = []
+        return controller
+    }
+
     /// Where a window with the saved `frame` opens, given the screens' visible areas with the main screen first: at `frame` while it reaches far enough onto one of them, as it does unless its display is gone. Otherwise at the same size, at most the main screen's, centered on the main screen.
     static func restoredFrame(_ frame: CGRect, screens: [CGRect]) -> CGRect {
         let isOnScreen = screens.contains { screen in
@@ -70,8 +83,19 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
             return overlap.width >= minimumVisibleLength && overlap.height >= minimumVisibleLength
         }
         guard !isOnScreen, let main = screens.first else { return frame }
-        let size = CGSize(width: min(frame.width, main.width), height: min(frame.height, main.height))
-        return CGRect(x: main.midX - size.width / 2, y: main.midY - size.height / 2, width: size.width, height: size.height)
+        return self.frame(of: frame.size, centeredIn: main)
+    }
+
+    /// Where a small window opens without another small window to cascade from: at `size`, at most the screen's visible area, centered on the visible area of the screen whose frame holds `pointer`, or of the main screen, the first, when none does.
+    static func centeredFrame(size: CGSize, pointer: CGPoint, screens: [(frame: CGRect, visibleFrame: CGRect)]) -> CGRect {
+        guard let screen = screens.first(where: { $0.frame.contains(pointer) }) ?? screens.first else { return CGRect(origin: .zero, size: size) }
+        return frame(of: size, centeredIn: screen.visibleFrame)
+    }
+
+    /// `size`, at most `area`'s, centered in `area`.
+    private static func frame(of size: CGSize, centeredIn area: CGRect) -> CGRect {
+        let fitted = CGSize(width: min(size.width, area.width), height: min(size.height, area.height))
+        return CGRect(x: area.midX - fitted.width / 2, y: area.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
     }
 
     /// The title bar hides the title. The Window menu and Mission Control show it: the selected tab's title, or the space's name with no tab selected.
@@ -83,6 +107,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeMain(_ notification: Notification) {
         model.session.windowDidBecomeMain(model)
+    }
+
+    /// A small window closes with its tab, which goes to the closed list once its page agrees, so that a page can ask to stay. The session closes the window when the tab closes.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard model.kind == .small, let tab = model.selectedTab else { return true }
+        model.session.requestCloseTab(tab)
+        return false
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -121,5 +152,23 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         isInFullScreen = false
         window?.toolbar?.isVisible = true
         recordFrame()
+    }
+}
+
+extension BrowserWindowKind {
+    /// The size of a window without a saved frame that cascades from no other.
+    var defaultContentSize: NSSize {
+        switch self {
+        case .main: NSSize(width: 1200, height: 800)
+        case .small: NSSize(width: 900, height: 640)
+        }
+    }
+
+    /// The smallest content the user can resize the window to.
+    var minimumContentSize: NSSize {
+        switch self {
+        case .main: NSSize(width: 800, height: 500)
+        case .small: NSSize(width: 480, height: 360)
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. Opens the browser windows and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
@@ -130,11 +130,11 @@ public final class BrowserSession: ObservableObject {
     /// The main windows that open while none is open, front to back: the saved session's until they open, then the last main window that closed. The saved session keeps them while no main window is open. Never empty.
     private var windowsToReopen: [SessionSnapshot.WindowRecord]
 
-    /// The browser window that page commands act on: the one that last became main, which stays the target while Settings or History is key (window rule 7). Nil while no browser window is open.
+    /// The browser window that page commands act on: the one of either kind that last became main, which stays the target while Settings or History is key (window rule 7). Nil while no browser window is open.
     public var activeWindow: BrowserWindowModel? { windows.first }
 
     /// The main window that last became main, or nil while none is open. Menu validation and other checks read it, because they must not create a window.
-    public var lastMainWindow: BrowserWindowModel? { windows.first }
+    public var lastMainWindow: BrowserWindowModel? { windows.first { $0.kind == .main } }
 
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
@@ -148,7 +148,7 @@ public final class BrowserSession: ObservableObject {
     @discardableResult
     public func openWindow() -> BrowserWindowModel {
         let spaceID = activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
-        let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true))
+        let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         return window
     }
@@ -157,7 +157,7 @@ public final class BrowserSession: ObservableObject {
     @discardableResult
     private func reopenWindows(_ records: [SessionSnapshot.WindowRecord]) -> [BrowserWindowModel] {
         // Created back to front, so that `windows` lists them front to back.
-        let reopened = Array(records.reversed().map(makeWindow(from:)).reversed())
+        let reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
         // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
         for (window, record) in zip(reopened, records) {
             if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectedTabID = tab.id }
@@ -170,12 +170,12 @@ public final class BrowserSession: ObservableObject {
         return reopened
     }
 
-    /// Creates a hidden main window as `record` describes it, on the first space when the record's space is gone. A window without a frame cascades from the active window. It goes first in `windows`, as it is about to come to the front, before its views exist.
-    private func makeWindow(from record: SessionSnapshot.WindowRecord) -> BrowserWindowModel {
-        let source = activeWindow?.nsWindow
+    /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A window without a frame cascades from the window of its kind that last became main. It goes first in `windows`, as it is about to come to the front, before its views exist.
+    private func makeWindow(from record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) -> BrowserWindowModel {
+        let source = windows.first { $0.kind == kind }?.nsWindow
         var record = record
         if !spaces.contains(where: { $0.id == record.currentSpaceID }) { record.currentSpaceID = spaces[0].id }
-        let window = BrowserWindowModel(session: self, record: record)
+        let window = BrowserWindowModel(session: self, record: record, kind: kind)
         windows.insert(window, at: 0)
         windowControllers.append(BrowserWindowController(model: window, cascadingFrom: source))
         updateFocusedTab()
@@ -192,10 +192,10 @@ public final class BrowserSession: ObservableObject {
         updateFocusedTab()
     }
 
-    /// Window rule 5: the window's tabs stay open. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. Its record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
+    /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
     @MainActor func windowWillClose(_ window: BrowserWindowModel) {
         window.prepareToClose()
-        windowsToReopen = [window.record]
+        if window.kind == .main { windowsToReopen = [window.record] }
         windows.removeAll { $0 === window }
         windows.forEach { $0.updateShownTabs() }
         sheets.showNext()
@@ -252,6 +252,56 @@ public final class BrowserSession: ObservableObject {
     /// Closes the question popovers that windows show about the tab's page, which the tab has left.
     @MainActor func closePageQuestions(ofTab id: UUID) {
         windows.forEach { $0.closePageQuestion(ofTab: id) }
+    }
+
+    // MARK: Small windows
+
+    /// How long after Arch becomes active a link still counts as arriving while Arch was in the background, because the app that sends a link can activate Arch just before the link arrives. `docs/windows-personas.md` (Small window) says how the value was chosen.
+    static let smallWindowActivationGrace: TimeInterval = 0.5
+
+    /// Whether a link from another app opens in a small window: Arch was not active when the link arrived, or became active at `becameActiveAt`, less than `smallWindowActivationGrace` before `now`. A nil `becameActiveAt` means Arch has been active since it launched.
+    public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool {
+        guard isAppActive else { return true }
+        guard let becameActiveAt else { return false }
+        return now.timeIntervalSince(becameActiveAt) < smallWindowActivationGrace
+    }
+
+    /// The app sets this to name Move to Main Window's shortcut, which Settings can change, in the small window's button.
+    public var moveToMainWindowShortcut: () -> String? = { nil }
+
+    /// Opens `url` in a small window of its own, made key and ordered front, in a new tab of the default engine. The tab belongs to the space it moves to: the last main window's current space, or the last closed main window's, or the first space once that one is gone, and to that space's Persona (open decision 6).
+    @discardableResult
+    public func openSmallWindow(url: URL) -> BrowserWindowModel {
+        let lastSpaceID = lastMainWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+        let spaceID = spaces.contains { $0.id == lastSpaceID } ? lastSpaceID : spaces[0].id
+        let personaID = personaID(ofSpace: spaceID)
+        return openSmallWindow(makeWebContents(url: url, engine: nil, state: nil, in: personaID), spaceID: spaceID, personaID: personaID)
+    }
+
+    /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
+    @discardableResult
+    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
+        let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
+        tab.isInSmallWindow = true
+        tabs.append(tab)
+        let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
+        window.selectedTabID = tab.id
+        window.nsWindow?.makeKeyAndOrderFront(nil)
+        window.focusPage()
+        return window
+    }
+
+    /// Move to Main Window: the small window's tab joins the end of its space's open tabs, and the sidebar target selects it, which takes it from the small window (window rule 2) and so closes that window, then comes forward with the page focused. The page moves without loading again. The tab's space is still there, because deleting a space moves its tabs, a small window's among them.
+    public func moveToMainWindow(_ smallWindow: BrowserWindowModel) {
+        guard smallWindow.kind == .small, let tab = smallWindow.selectedTab, let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+        tab.isInSmallWindow = false
+        var reordered = tabs
+        reordered.append(reordered.remove(at: index))
+        tabs = reordered
+        let target = sidebarTarget()
+        target.selectedTabID = tab.id
+        target.nsWindow?.makeKeyAndOrderFront(nil)
+        target.focusPage()
     }
 
     // MARK: Engines
@@ -516,17 +566,12 @@ public final class BrowserSession: ObservableObject {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. It goes in the page's space or, for a favorite's page, the current space of the page's window or else the sidebar target. The window that shows the page selects it; a page that no window shows opens it behind, marked unread.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, the sidebar target's current space.
         tab.openNewTab = { [weak self, weak tab] popup in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
-            let window = self.window(showing: tab)
-            let popupTab = self.adopt(popup, spaceID: tab.spaceID ?? (window ?? self.sidebarTarget()).currentSpaceID, personaID: personaID, pinned: false, select: false)
-            if let window {
-                window.selectedTabID = popupTab.id
-            } else {
-                popupTab.isUnread = true
-            }
+            if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID) }
+            self.adopt(popup, spaceID: tab.spaceID ?? self.sidebarTarget().currentSpaceID, personaID: personaID, pinned: false, select: false).isUnread = true
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
@@ -660,10 +705,14 @@ public final class BrowserSession: ObservableObject {
             closedTabs.append(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
             if closedTabs.count > 100 { closedTabs.removeFirst() }
         }
-        // Each window that selected the tab selects one that no other window shows (window rule 3): the pane beside it, so the rest of its split view stays on screen, or else an open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space.
+        // Each main window that selected the tab selects one that no other window shows (window rule 3): the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         for window in windows where window.selectedTabID == tab.id {
-            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) }
+            guard window.kind == .main else {
+                window.nsWindow?.close()
+                continue
+            }
+            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
             let candidates = [splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectedTabID = candidates.first { !window.isShownInAnotherWindow($0) }?.id
         }
@@ -712,11 +761,11 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Closes unpinned tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables). The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
+    /// Closes unpinned listed tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables), so a small window's tab stays. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
         windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = Date() }
-        for tab in tabs where !tab.isPinned && tab.lastActivatedAt < cutoff {
+        for tab in tabs where tab.isListedInSidebar && !tab.isPinned && tab.lastActivatedAt < cutoff {
             closeTab(tab, reason: .archive)
             undoableCloseCount = 0
         }
@@ -1066,9 +1115,9 @@ public final class BrowserSession: ObservableObject {
         folders.contains { $0.id == tab.folderID && $0.isCollapsed }
     }
 
-    /// A space's pinned or open tabs that are in no folder, in sidebar order.
+    /// A space's pinned or open tabs that are in no folder, in sidebar order. A small window's tab, which is in no folder, is left out until it moves to a main window.
     public func tabsOutsideFolders(in spaceID: UUID, pinned: Bool) -> [Tab] {
-        tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil }
+        tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
     /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list.
@@ -1233,9 +1282,10 @@ public final class BrowserSession: ObservableObject {
         store.saveNow(snapshot())
     }
 
-    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them.
+    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4).
     private func snapshot() -> SessionSnapshot {
-        let windowRecords = windows.isEmpty ? windowsToReopen : windows.map(\.record)
+        let mainWindows = windows.filter { $0.kind == .main }
+        let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
                                tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },

@@ -8,12 +8,12 @@
 	<suite name="Arch Suite" code="Arch" description="Web addresses and tabs in Arch.">
 
 		<!-- AppKit delivers this event to `application(_:open:)` in `AppDelegate.swift`, as it does links from other apps, so no command class handles it. -->
-		<command name="open location" code="GURLGURL" description="Open a web address in a new tab.">
+		<command name="open location" code="GURLGURL" description="Open a web address in a new tab, or in a small window while Arch is in the background.">
 			<direct-parameter type="text" description="The address to open, such as https://example.org or example.org."/>
 		</command>
 
 		<class-extension extends="application" description="The Arch application.">
-			<element type="tab" access="r" description="Every tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs.">
+			<element type="tab" access="r" description="Every tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs, then the tabs of small windows.">
 				<cocoa key="scriptTabs"/>
 			</element>
 			<property name="active tab" code="ArAT" type="tab" access="r" description="The selected tab of the browser window that was last in front.">

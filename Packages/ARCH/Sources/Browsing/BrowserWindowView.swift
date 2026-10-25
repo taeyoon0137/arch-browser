@@ -8,13 +8,6 @@ public struct BrowserWindowView: View {
     /// The window this view shows. Its subviews read it from the environment.
     @ObservedObject var windowModel: BrowserWindowModel
     @State private var windowButtons = WindowButtonMetrics()
-    /// The displayed palette mode. It stays set while the palette closes because removal transitions do not run in this window. A state change fades out the palette and its dimming, then the window removes both.
-    @State private var shownPaletteMode: CommandPaletteMode?
-    @State private var isPaletteLeaving = false
-    /// Set after the hidden warm-up palette is drawn.
-    @State private var isPaletteWarm = false
-    /// The palette's entry motion, fixed when it opens.
-    @State private var paletteMotion = PaletteMotion()
     /// How far the address pill's contents have moved toward the palette.
     @State private var addressPillPull = CGSize.zero
     /// The address pill's frame in the window.
@@ -32,8 +25,6 @@ public struct BrowserWindowView: View {
     @State private var childWindowsBeforePeek: Set<ObjectIdentifier> = []
     @State private var windowReference = WindowReference()
     @StateObject private var tabDrag = TabDragState()
-    /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
-    @State private var enteredFullScreenForPage = false
 
     public init(session: BrowserSession, window: BrowserWindowModel) {
         self.session = session
@@ -49,9 +40,6 @@ public struct BrowserWindowView: View {
     /// The floating card's corners match the window's own 16-point corners rather than the page's.
     static let cardCornerRadius: CGFloat = 16
 
-    /// While the selected tab's page is in fullscreen, it fills the window without the sidebar or margins.
-    private var isPageFullscreen: Bool { windowModel.fullscreenTabID != nil && windowModel.fullscreenTabID == windowModel.selectedTabID }
-
     /// The sidebar's own margin is part of the gap beside it.
     private var pageMargins: EdgeInsets {
         EdgeInsets(top: Self.pageMargin, leading: windowModel.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin, bottom: Self.pageMargin, trailing: Self.pageMargin)
@@ -60,23 +48,19 @@ public struct BrowserWindowView: View {
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                if windowModel.isSidebarVisible, !isPageFullscreen {
+                if windowModel.isSidebarVisible, !windowModel.isPageFullscreen {
                     SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
                         sidebarWidth = Double(SidebarView.clampedWidth($0))
                     }
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
-                PageAreaView(session: session, tabDrag: tabDrag, isPageFullscreen: isPageFullscreen)
-                    // A preview floats over the whole page area, whatever its panes.
-                    .overlay { if let preview = windowModel.preview { PagePreviewPanel(preview: preview) } }
-                    .padding(isPageFullscreen ? EdgeInsets() : pageMargins)
-                    .modifier(DevToolsDockSpace(dock: windowModel.devToolsDock, isHidden: isPageFullscreen, margins: pageMargins))
-                if !isPageFullscreen {
+                PageAreaView(session: session, tabDrag: tabDrag, margins: pageMargins)
+                if !windowModel.isPageFullscreen {
                     PageReaderColumn(session: session)
                 }
             }
-            if !windowModel.isSidebarVisible || isSidebarPeeking, !isPageFullscreen {
+            if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {
                 peekingSidebar
             }
             SplitDropIndicator(tabDrag: tabDrag)
@@ -84,24 +68,7 @@ public struct BrowserWindowView: View {
                 .modifier(SidebarAppearance())
             SidebarItemDragLayer(session: session, tabDrag: tabDrag)
                 .modifier(SidebarAppearance())
-            if shownPaletteMode != nil {
-                Color.black.opacity(isPaletteLeaving ? 0 : 0.15)
-                    .onTapGesture { windowModel.dismissCommandPalette() }
-                    .transition(.opacity)
-            }
-            // Drawing a hidden palette once at launch builds the text field, material, and fonts before the first visible palette opens. Otherwise, that palette would appear only after its arrival animation ends.
-            if !isPaletteWarm {
-                CommandPaletteView(session: session, mode: .newTab, isWarmUp: true)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { isPaletteWarm = true } }
-            }
-            if let mode = shownPaletteMode {
-                // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
-                CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving, arrivalOffset: paletteMotion.arrival,
-                                   onArrival: { addressPillPull = paletteMotion.pull })
-                    .id(windowModel.commandPaletteGeneration)
-            }
+            CommandPaletteLayer(session: session, addressPillFrame: addressPillFrame, windowWidth: windowSize.width, addressPillPull: $addressPillPull)
             if windowModel.isTabSwitcherVisible {
                 TabSwitcherView(session: session)
             }
@@ -116,25 +83,6 @@ public struct BrowserWindowView: View {
                 .onAppear { windowSize = proxy.size }
                 .onChange(of: proxy.size) { windowSize = $1 }
         })
-        .onAppear { shownPaletteMode = windowModel.commandPaletteMode }
-        .onChange(of: windowModel.commandPaletteMode) { _, mode in
-            guard mode == nil else {
-                isPaletteLeaving = false
-                paletteMotion = PaletteMotion(origin: windowModel.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowSize.width)
-                if paletteMotion.pull == .zero { withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero } }
-                return withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) { shownPaletteMode = mode }
-            }
-            withAnimation(.paletteOut) { isPaletteLeaving = true }
-            // The pill's contents return as the palette leaves.
-            withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero }
-            let generation = windowModel.commandPaletteGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {
-                // A palette reopened during this delay has a new generation and stays until it finishes closing.
-                guard windowModel.commandPaletteGeneration == generation else { return }
-                shownPaletteMode = nil
-                isPaletteLeaving = false
-            }
-        }
         .background(SpaceBackgroundView())
         .modifier(SpaceThemeModifier(tint: windowModel.currentSpace.tint))
         .background(WindowButtonsReader { windowButtons = $0 })
@@ -145,27 +93,9 @@ public struct BrowserWindowView: View {
         .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !windowModel.isSidebarVisible && !isSidebarPeeking,
                                             slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
                                             reference: windowReference))
-        // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
-        .onChange(of: isPageFullscreen) { _, isFullscreen in
-            guard let window = windowReference.window else { return }
-            let isWindowFullScreen = window.styleMask.contains(.fullScreen)
-            if isFullscreen, !isWindowFullScreen {
-                enteredFullScreenForPage = true
-                window.toggleFullScreen(nil)
-            } else if !isFullscreen, enteredFullScreenForPage {
-                enteredFullScreenForPage = false
-                if isWindowFullScreen { window.toggleFullScreen(nil) }
-            }
-        }
         // Full screen adds or removes the toolbar's child window, which must not hold the card open.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification).merge(with: NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification))) { notification in
             if notification.object as? NSWindow === windowReference.window { recordChildWindows() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
-            guard notification.object as? NSWindow === windowReference.window else { return }
-            recordChildWindows()
-            enteredFullScreenForPage = false
-            if isPageFullscreen { windowModel.exitPageFullscreen() }
         }
         // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
         .onChange(of: windowModel.isSidebarVisible) { _, isVisible in
@@ -182,7 +112,7 @@ public struct BrowserWindowView: View {
             }
         }
         .ignoresSafeArea()
-        .frame(minWidth: 800, minHeight: 500)
+        .frame(minWidth: BrowserWindowKind.main.minimumContentSize.width, minHeight: BrowserWindowKind.main.minimumContentSize.height)
     }
 
     /// A strip along the window's leading edge reveals the hidden sidebar as a card over the page.
@@ -710,10 +640,11 @@ struct SidebarTopRow: View {
     }
 }
 
-/// A borderless symbol button that shows a soft highlight under the pointer. `label` names it in its tooltip and for VoiceOver.
+/// A borderless symbol button that shows a soft highlight under the pointer. `label` names it in its tooltip, after which comes its `shortcut` when it has one, and for VoiceOver.
 struct SidebarIconButton: View {
     let symbol: String
     let label: String
+    var shortcut: String?
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovering = false
@@ -729,7 +660,7 @@ struct SidebarIconButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .onHover { isHovering = $0 }
-        .help(label)
+        .help(shortcut.map { "\(label) (\($0))" } ?? label)
         .accessibilityLabel(label)
     }
 }
@@ -746,10 +677,14 @@ struct AddressPillView: View {
 
     private var url: URL? { tab?.url }
 
-    /// The site's host, a local file's name, or the whole address of a page without a host, such as `about:blank`.
+    /// The internal page's address, the page's site, or the placeholder with no tab open.
     private var host: String {
         if let page = windowModel.internalPage { return page.address }
-        guard let url else { return "Search or enter address" }
+        return url.map(Self.siteName(of:)) ?? "Search or enter address"
+    }
+
+    /// The page's site as the address pill and the small window show it: its host without `www.`, a local file's name, or the whole address of a page without a host, such as `about:blank`.
+    static func siteName(of url: URL) -> String {
         if url.isFileURL { return url.lastPathComponent }
         guard let host = url.host, !host.isEmpty else { return url.absoluteString }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host

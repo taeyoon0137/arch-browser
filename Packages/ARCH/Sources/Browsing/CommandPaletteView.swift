@@ -25,11 +25,12 @@ struct CommandPaletteView: View {
         Array((session.plugins?.contributions.paletteCommands(matching: text) ?? []).prefix(5))
     }
 
+    /// The listed tabs to switch to. A small window shows only its own tab, so its palette offers none.
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return [] }
+        guard !query.isEmpty, windowModel.kind == .main else { return [] }
         return Array(session.allTabs.filter { tab in
-            tab.id != windowModel.selectedTabID &&
+            tab.id != windowModel.selectedTabID && tab.isListedInSidebar &&
                 (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
     }
@@ -132,6 +133,75 @@ struct CommandPaletteView: View {
                 }
             }
             DispatchQueue.main.async { isFocused = true }
+        }
+    }
+}
+
+/// The command palette over a window of either kind, with the dimming behind it that a click dismisses. Each opening gets a fresh palette, which arrives with its origin's motion; closing fades out the palette and the dimming, then removes both.
+struct CommandPaletteLayer: View {
+    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    /// The frame of the address pill that a palette opened from the pill comes out of.
+    let addressPillFrame: CGRect?
+    /// The window's width, which with the pill's frame sets the line that such a palette travels along.
+    let windowWidth: CGFloat
+    /// How far the address pill's contents have moved toward the palette.
+    @Binding var addressPillPull: CGSize
+    /// The displayed palette mode. It stays set while the palette closes because removal transitions do not run in this window.
+    @State private var shownPaletteMode: CommandPaletteMode?
+    @State private var isPaletteLeaving = false
+    /// Set after the hidden warm-up palette is drawn.
+    @State private var isPaletteWarm = false
+    /// The palette's entry motion, fixed when it opens.
+    @State private var paletteMotion = PaletteMotion()
+
+    /// A window without an address pill leaves out the pill's frame and pull and the width that places the palette relative to the pill.
+    init(session: BrowserSession, addressPillFrame: CGRect? = nil, windowWidth: CGFloat = 0, addressPillPull: Binding<CGSize> = .constant(.zero)) {
+        self.session = session
+        self.addressPillFrame = addressPillFrame
+        self.windowWidth = windowWidth
+        _addressPillPull = addressPillPull
+    }
+
+    var body: some View {
+        ZStack {
+            if shownPaletteMode != nil {
+                Color.black.opacity(isPaletteLeaving ? 0 : 0.15)
+                    .onTapGesture { windowModel.dismissCommandPalette() }
+                    .transition(.opacity)
+            }
+            // Drawing a hidden palette once as the window opens builds the text field, material, and fonts before the first visible palette opens. Otherwise, that palette would appear only after its arrival animation ends.
+            if !isPaletteWarm {
+                CommandPaletteView(session: session, mode: .newTab, isWarmUp: true)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { isPaletteWarm = true } }
+            }
+            if let mode = shownPaletteMode {
+                // Each opening gets a fresh view, with reset text and a focused field, even if the previous palette is still leaving.
+                CommandPaletteView(session: session, mode: mode, isLeaving: isPaletteLeaving, arrivalOffset: paletteMotion.arrival,
+                                   onArrival: { addressPillPull = paletteMotion.pull })
+                    .id(windowModel.commandPaletteGeneration)
+            }
+        }
+        .onAppear { shownPaletteMode = windowModel.commandPaletteMode }
+        .onChange(of: windowModel.commandPaletteMode) { _, mode in
+            guard mode == nil else {
+                isPaletteLeaving = false
+                paletteMotion = PaletteMotion(origin: windowModel.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowWidth)
+                if paletteMotion.pull == .zero { withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero } }
+                return withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) { shownPaletteMode = mode }
+            }
+            withAnimation(.paletteOut) { isPaletteLeaving = true }
+            // The pill's contents return as the palette leaves.
+            withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero }
+            let generation = windowModel.commandPaletteGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + Animation.paletteOutDuration) {
+                // A palette reopened during this delay has a new generation and stays until it finishes closing.
+                guard windowModel.commandPaletteGeneration == generation else { return }
+                shownPaletteMode = nil
+                isPaletteLeaving = false
+            }
         }
     }
 }

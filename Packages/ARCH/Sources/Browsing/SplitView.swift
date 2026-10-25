@@ -1,17 +1,45 @@
-// The page area and split view. The page area shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. A pane whose tab another window shows holds a placeholder instead. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
+// The page area and split view. The page area of either kind of window shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. A pane whose tab another window shows holds a placeholder instead. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
 import SwiftUI
 
-/// The page area: the window's panes, or the empty page frame with no tab open. While the selected page fills the window in fullscreen, only its pane shows. A pane whose page another window shows holds a placeholder, because a page's view has one superview (window rule 1).
+/// The page area of either kind of window: the window's panes, or the empty page frame with no tab open, at `margins` from the window's edges and controls, with the preview panel over it and room beside it for docked developer tools. While the selected page fills the window in fullscreen, only its pane shows, without margins, and the window enters full screen with it. A pane whose page another window shows holds a placeholder, because a page's view has one superview (window rule 1).
 struct PageAreaView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    /// Receives the panes' frames, so that a dragged tab can open beside one. The page area itself does not change during a drag.
-    let tabDrag: TabDragState
-    let isPageFullscreen: Bool
+    /// Receives the panes' frames, so that a tab dragged from the sidebar can open beside one; nil in a window without a sidebar. The page area itself does not change during a drag.
+    let tabDrag: TabDragState?
+    let margins: EdgeInsets
+    /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
+    @State private var enteredFullScreenForPage = false
 
     var body: some View {
+        let isPageFullscreen = windowModel.isPageFullscreen
+        panes(isPageFullscreen: isPageFullscreen)
+            // A preview floats over the whole page area, whatever its panes.
+            .overlay { if let preview = windowModel.preview { PagePreviewPanel(preview: preview) } }
+            .padding(isPageFullscreen ? EdgeInsets() : margins)
+            .modifier(DevToolsDockSpace(dock: windowModel.devToolsDock, isHidden: isPageFullscreen, margins: margins))
+            // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
+            .onChange(of: isPageFullscreen) { _, isFullscreen in
+                guard let window = windowModel.nsWindow else { return }
+                let isWindowFullScreen = window.styleMask.contains(.fullScreen)
+                if isFullscreen, !isWindowFullScreen {
+                    enteredFullScreenForPage = true
+                    window.toggleFullScreen(nil)
+                } else if !isFullscreen, enteredFullScreenForPage {
+                    enteredFullScreenForPage = false
+                    if isWindowFullScreen { window.toggleFullScreen(nil) }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
+                guard notification.object as? NSWindow === windowModel.nsWindow else { return }
+                enteredFullScreenForPage = false
+                if windowModel.isPageFullscreen { windowModel.exitPageFullscreen() }
+            }
+    }
+
+    private func panes(isPageFullscreen: Bool) -> some View {
         let panes = isPageFullscreen ? windowModel.selectedTab.map { [$0] } ?? [] : windowModel.paneTabs
-        Group {
+        return Group {
             if panes.isEmpty {
                 PageBackgroundView(isEmpty: true)
                     .overlay { InternalPageOverlay() }
@@ -35,7 +63,7 @@ struct PageAreaView: View {
                 }
             }
         }
-        .onPreferenceChange(PaneFramesKey.self) { tabDrag.paneFrames = $0 }
+        .onPreferenceChange(PaneFramesKey.self) { tabDrag?.paneFrames = $0 }
     }
 }
 

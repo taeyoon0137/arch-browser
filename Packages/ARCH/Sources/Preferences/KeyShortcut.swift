@@ -19,7 +19,7 @@ public struct KeyShortcut {
     }
 
     /// The item's key equivalent, or `nil` when it has none.
-    init?(menuItem: NSMenuItem) {
+    public init?(menuItem: NSMenuItem) {
         guard !menuItem.keyEquivalent.isEmpty else { return nil }
         self.init(key: menuItem.keyEquivalent, modifiers: menuItem.keyEquivalentModifierMask)
     }

@@ -10,8 +10,10 @@ public final class Tab: ObservableObject, Identifiable {
     public let id: UUID
     /// Replaced when the tab switches engines.
     @Published public private(set) var webContents: any EngineWebContents
-    /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space.
+    /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space. A small window's tab joins this space's list when it moves to a main window.
     @Published public var spaceID: UUID?
+    /// Set while a small window shows the tab, which keeps it out of its space's list until Move to Main Window clears it.
+    @Published public internal(set) var isInSmallWindow = false
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
     @Published public var isPinned: Bool
@@ -88,6 +90,9 @@ public final class Tab: ObservableObject, Identifiable {
 
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
+
+    /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
+    var isListedInSidebar: Bool { !isInSmallWindow }
 
     public var displayTitle: String { customTitle ?? pageTitle }
 

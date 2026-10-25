@@ -1,4 +1,4 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
+// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
 import AI
 import AppKit
 import ARCHEngine
@@ -9,11 +9,19 @@ import Plugins
 import SwiftUI
 import UniformTypeIdentifiers
 
+public enum BrowserWindowKind {
+    /// A window with the sidebar. `session.json` keeps the main windows.
+    case main
+    /// A window without a sidebar for one link from another app, which `session.json` does not keep. Its tab stays out of its space's list until it moves to a main window, and the window closes with the tab.
+    case small
+}
+
 /// The state of one browser window: what it shows and what the user is doing in it. Its commands read and change the user's data through the session.
 public final class BrowserWindowModel: ObservableObject {
     unowned let session: BrowserSession
     /// The window's identity in `session.json`, which it keeps across launches.
     let id: UUID
+    public let kind: BrowserWindowKind
 
     /// The space the sidebar shows.
     @Published public var currentSpaceID: UUID
@@ -91,10 +99,11 @@ public final class BrowserWindowModel: ObservableObject {
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
 
-    /// A window as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
-    init(session: BrowserSession, record: SessionSnapshot.WindowRecord) {
+    /// A window of `kind` as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
+    init(session: BrowserSession, record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) {
         self.session = session
         id = record.id
+        self.kind = kind
         currentSpaceID = record.currentSpaceID
         isSidebarVisible = record.isSidebarVisible
         restorableFrame = record.frame
@@ -217,11 +226,11 @@ public final class BrowserWindowModel: ObservableObject {
         let runtime = session.runtime(for: engine, in: personaID)
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url, disallowDownloads: true))
         let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
-        // A page the preview opens, as for a link to a new window, comes from the preview's runtime, so it becomes a selected tab of the preview's Persona and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
+        // A page the preview opens, as for a link to a new window, comes from the preview's runtime, so it becomes a tab of the preview's Persona and takes the panel's place. The engine is still in its callback, so the panel closes on the next turn of the run loop.
         preview.openNewTab = { [weak self, weak preview] popup in
             guard let self else { return }
             runtime.browser.takeOwnership(of: popup)
-            self.selectedTabID = self.session.adopt(popup, spaceID: self.currentSpaceID, personaID: personaID, pinned: false, select: false).id
+            self.showOpenedPage(popup, personaID: personaID)
             DispatchQueue.main.async { [weak self] in
                 if let self, let preview, self.preview === preview { self.closePreview() }
             }
@@ -239,8 +248,7 @@ public final class BrowserWindowModel: ObservableObject {
     func openPreviewInTab() {
         guard let preview else { return }
         closePreview()
-        let webContents = session.makeWebContents(url: preview.url, engine: preview.webContents.engineKind, state: nil, in: preview.personaID)
-        selectedTabID = session.adopt(webContents, spaceID: currentSpaceID, personaID: preview.personaID, pinned: false, select: false).id
+        showOpenedPage(session.makeWebContents(url: preview.url, engine: preview.webContents.engineKind, state: nil, in: preview.personaID), personaID: preview.personaID)
         focusPage()
     }
 
@@ -281,10 +289,14 @@ public final class BrowserWindowModel: ObservableObject {
         if ids != shownTabIDs { shownTabIDs = ids }
     }
 
-    /// Lets another window take `tab` (window rule 2). The window selects its fallback when `tab` is its selected tab. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
+    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen, sheet, and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
     func giveUp(_ tab: Tab) {
         shownTabIDs.removeAll { $0 == tab.id }
         if tab.id == selectedTabID {
+            guard kind == .main else {
+                nsWindow?.close()
+                return
+            }
             selectedTabID = fallbackTab(excluding: tab.id)?.id
         } else {
             if fullscreenTabID == tab.id { exitPageFullscreen() }
@@ -302,9 +314,20 @@ public final class BrowserWindowModel: ObservableObject {
         selectedTabID = session.openTab(url: url, in: currentSpaceID, select: false).id
     }
 
+    /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11).
+    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID) {
+        switch kind {
+        case .main: selectedTabID = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false).id
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID)
+        }
+    }
+
     private func followSelectedTab() {
         selectedTabObserver = selectedTab?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
+
+    /// Whether the selected tab's page fills the window in fullscreen, without margins or the controls around the page.
+    var isPageFullscreen: Bool { fullscreenTabID != nil && fullscreenTabID == selectedTabID }
 
     /// Records whether the tab's page fills the window.
     func setPageFullscreen(_ isFullscreen: Bool, of tab: Tab) {
@@ -323,10 +346,10 @@ public final class BrowserWindowModel: ObservableObject {
         if session.windows.count > 1 { nsWindow?.performClose(nil) }
     }
 
-    /// Closes other tabs in the selected tab's space, keeping pinned tabs.
+    /// Closes other tabs in the selected tab's space, keeping pinned tabs and the tabs of small windows. A small window has no other tabs.
     public func closeOtherTabs() {
-        guard let selected = selectedTab else { return }
-        for tab in session.tabs where tab.spaceID == selected.spaceID && !tab.isPinned && tab.id != selected.id {
+        guard kind == .main, let selected = selectedTab else { return }
+        for tab in session.tabs where tab.spaceID == selected.spaceID && tab.isListedInSidebar && !tab.isPinned && tab.id != selected.id {
             session.requestCloseTab(tab)
         }
     }
@@ -833,9 +856,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     public var isTabSwitcherVisible: Bool { tabSwitcherHighlightID != nil }
 
-    /// The current space's tabs and the favorites' open tabs, which every space shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
+    /// The current space's listed tabs and the favorites' open tabs, which every space shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
     public var recentTabs: [Tab] {
-        let candidates = session.tabs.filter { $0.spaceID == currentSpaceID } + session.openFavoriteTabs
+        let candidates = session.tabs.filter { $0.spaceID == currentSpaceID && $0.isListedInSidebar } + session.openFavoriteTabs
         let selected = activationOrder.compactMap { id in candidates.first { $0.id == id } }
         let selectedIDs = Set(activationOrder)
         return selected + candidates.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }

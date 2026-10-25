@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var windowMenu: NSMenu?
     /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
+    /// When Arch last became active. A link that arrives just after came with the activation the sending app gave Arch, so it counts as arriving in the background.
+    private var becameActiveAt: Date?
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -38,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.loadPlugins(builtIns: [PageAddressPlugin.self])
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.becameActiveAt = Date()
+        }
         // The sidebar takes the place of window tabs, so AppKit offers no tab bar or tab menu items.
         NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.appearance = AppearanceSetting.current.appearance
@@ -48,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         installShortcuts()
         // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu stays out of Settings ▸ Shortcuts.
         NSApp.windowsMenu = windowMenu
+        // The small window's button names the shortcut, which Settings ▸ Shortcuts can change.
+        session.moveToMainWindowShortcut = { [weak self] in
+            self?.windowMenu?.items.first { $0.action == #selector(AppDelegate.moveToMainWindow) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
+        }
         // Engines register their private APIs when they start; the checks run without delaying launch.
         PrivateAPIFlags.shared.checkInBackground()
         session.restoreWindows()
@@ -63,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Opens links from other apps and addresses from `open location` scripts in new tabs. Links received before launch finishes wait for the session. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
+    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; while Arch is active, links open in new tabs of the sidebar target. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
     func application(_ application: NSApplication, open urls: [URL]) {
         let urls = urls.compactMap { url in
             url.scheme == nil ? BrowserSession.url(forInput: url.absoluteString.removingPercentEncoding ?? url.absoluteString) : url
@@ -73,6 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             pendingURLs += urls
             return
         }
+        if BrowserSession.opensLinkInSmallWindow(isAppActive: NSApp.isActive, becameActiveAt: becameActiveAt, now: Date()) {
+            urls.forEach { session.openSmallWindow(url: $0) }
+            // Without `.activateAllWindows`, only the key and main windows come forward.
+            NSRunningApplication.current.activate(options: [])
+            return
+        }
+        frontSidebarTarget()
         urls.forEach { session.openTab(url: $0) }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -236,6 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Move to Main Window", action: #selector(moveToMainWindow), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         self.windowMenu = windowMenu
         mainMenu.addItem(submenu(windowMenu, title: "Window"))
@@ -248,8 +266,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return item
     }
 
+    /// The window that sidebar commands act on (`BrowserSession.sidebarTarget()`). It comes forward while a small window is the active window, so that the command shows where it acts.
+    @discardableResult
+    private func frontSidebarTarget() -> BrowserWindowModel {
+        let target = session.sidebarTarget()
+        if session.activeWindow?.kind == .small { target.nsWindow?.makeKeyAndOrderFront(nil) }
+        return target
+    }
+
     // Page commands act on the active window, and sidebar commands, such as those of the Tab and Spaces menus, on the sidebar target.
-    @objc private func newTab() { session.sidebarTarget().showCommandPalette(.newTab) }
+    @objc private func newTab() { frontSidebarTarget().showCommandPalette(.newTab) }
     /// A new window shows no tab, so it opens with the new tab palette (open decision 8).
     @objc private func newWindow() { session.openWindow().showCommandPalette(.newTab) }
     /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it.
@@ -258,26 +284,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.activeWindow?.closeSelectedTab()
     }
     @objc private func closeOtherTabs() { session.activeWindow?.closeOtherTabs() }
-    @objc private func reopenClosedTab() { session.reopenLastClosedTab() }
-    @objc private func nextTab() { session.sidebarTarget().selectAdjacentTab(forward: true) }
-    @objc private func previousTab() { session.sidebarTarget().selectAdjacentTab(forward: false) }
-    @objc private func moveTabUp() { session.sidebarTarget().moveSelectedTab(up: true) }
-    @objc private func moveTabDown() { session.sidebarTarget().moveSelectedTab(up: false) }
-    @objc private func selectTab(_ sender: NSMenuItem) { session.sidebarTarget().selectTab(at: sender.tag - 1) }
-    @objc private func selectLastTab() { session.sidebarTarget().selectLastTab() }
+    /// The tab reopens in the sidebar target, which comes forward from behind a small window.
+    @objc private func reopenClosedTab() {
+        frontSidebarTarget()
+        session.reopenLastClosedTab()
+    }
+    @objc private func nextTab() { frontSidebarTarget().selectAdjacentTab(forward: true) }
+    @objc private func previousTab() { frontSidebarTarget().selectAdjacentTab(forward: false) }
+    @objc private func moveTabUp() { frontSidebarTarget().moveSelectedTab(up: true) }
+    @objc private func moveTabDown() { frontSidebarTarget().moveSelectedTab(up: false) }
+    @objc private func selectTab(_ sender: NSMenuItem) { frontSidebarTarget().selectTab(at: sender.tag - 1) }
+    @objc private func selectLastTab() { frontSidebarTarget().selectLastTab() }
     @objc private func openLocation() { session.activeWindow?.focusCommandBar() }
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
     @objc private func printPage() { session.activeWindow?.printPage() }
     @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
     @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
-    @objc private func toggleSidebar() { session.sidebarTarget().toggleSidebar() }
+    @objc private func toggleSidebar() { frontSidebarTarget().toggleSidebar() }
     @objc private func toggleDeveloperTools() { session.activeWindow?.toggleDeveloperTools() }
     /// Every window's tools follow the side.
     @objc private func chooseDevToolsSide(_ sender: NSMenuItem) {
         guard let side = (sender.representedObject as? String).flatMap(DevToolsSide.init(rawValue:)) else { return }
         DevToolsDockSettings.shared.side = side
     }
-    @objc private func toggleDownloads() { session.sidebarTarget().toggleLibrary() }
+    @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
@@ -340,12 +370,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self.item = item
         }
     }
-    @objc private func togglePinned() { session.sidebarTarget().selectedTab.map(session.togglePinned) }
+    @objc private func togglePinned() { frontSidebarTarget().selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.activeWindow?.selectedTab.map(session.addFavorite) }
-    @objc private func openInSplitView() { session.sidebarTarget().openSelectedTabInSplitView() }
-    @objc private func newSpace() { session.sidebarTarget().addSpace() }
-    @objc private func nextSpace() { session.sidebarTarget().switchToAdjacentSpace(forward: true) }
-    @objc private func previousSpace() { session.sidebarTarget().switchToAdjacentSpace(forward: false) }
+    @objc private func openInSplitView() { frontSidebarTarget().openSelectedTabInSplitView() }
+    @objc private func newSpace() { frontSidebarTarget().addSpace() }
+    @objc private func nextSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: true) }
+    @objc private func previousSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: false) }
+    @objc private func moveToMainWindow() {
+        guard let window = session.activeWindow, window.kind == .small else { return }
+        session.moveToMainWindow(window)
+    }
 
     // MARK: Appearance
 
@@ -393,8 +427,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) {
             return session?.lastMainWindow?.selectedTab?.spaceID != nil
         }
+        // A small window has no other tabs.
         if item.action == #selector(closeOtherTabs) {
-            return activeWindow?.selectedTab?.spaceID != nil
+            return activeWindow?.kind == .main && activeWindow?.selectedTab?.spaceID != nil
+        }
+        if item.action == #selector(moveToMainWindow) {
+            return activeWindow?.kind == .small
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
@@ -446,7 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let isUndo = modifiers == .command && Self.isKey(event, "z", keyCode: 6)
             if isUndo, session.undoableCloseCount > 0 {
-                session.reopenLastClosedTab()
+                self?.reopenClosedTab()
                 return nil
             }
             // Closing and reopening tabs keep the count. Any other key, whether typing or a shortcut such as ⌘V, makes ⌘Z undo where the user works.
@@ -473,12 +511,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Tab switcher
 
-    /// ⌃Tab in a browser window opens that window's switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
+    /// ⌃Tab in a main window opens that window's switcher on the tab selected before the current one. While Control stays down, Tab moves to the next less recent tab and ⇧Tab moves back; releasing Control selects the highlighted tab, and Escape closes the switcher without switching. Another key also closes it and goes on as usual. The monitors run before a focused page sees the keys.
     private func installTabSwitcher() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let session = self?.session else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], let windowModel = session.window(for: event.window) {
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], let windowModel = session.window(for: event.window), windowModel.kind == .main {
                 let backward = modifiers.contains(.shift)
                 if windowModel.isTabSwitcherVisible {
                     windowModel.moveTabSwitcherHighlight(backward: backward)
@@ -541,7 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private lazy var importController = ImportController(session: session)
 
     @objc private func importBookmarksAndHistory() {
-        guard let window = session.sidebarTarget().nsWindow else { return }
+        guard let window = frontSidebarTarget().nsWindow else { return }
         importController.chooseFiles(in: window)
     }
 

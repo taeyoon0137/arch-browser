@@ -45,9 +45,20 @@ Checked at runtime for step 5, with the bundled app on the Chromium engine, a Wo
 - WebKit keeps an identifier store, caches included, in `~/Library/WebKit/local.arch.browser/WebsiteDataStore/<UUID in lowercase>`, and `+removeDataStoreForIdentifier:completionHandler:` deletes that directory.
 - Chromium's `Local State` lists every profile it has loaded in `profile.info_cache` and `profile.profiles_order` and keeps the entry after the removal pass deletes the profile's directories. Chromium starts normally with such entries. An entry holds the default name and avatar and empty account fields, no site data, so the removal pass leaves the file alone.
 
+Checked at runtime for step 11, with the bundled app, temporary logging in `AppDelegate`, and the Mac's screen locked
+- A link that launches Arch (`open -a build/Arch.app <url>`) reaches `application(_:open:)` after `applicationWillFinishLaunching` and before `applicationDidFinishLaunching`, while the session does not exist yet, so it waits in `pendingURLs` and opens as a tab of the main window.
+- With Arch running, `open -a build/Arch.app <url>`, `open -g -a build/Arch.app <url>`, `open <url>` with Arch as the default browser, and `osascript -e 'tell application id "local.arch.browser" to open location "example.org"'` all reach `application(_:open:)`, the last one as text without a scheme. No automation prompt appeared for `open location`.
+- While the screen is locked, the login window stays in front: `lsappinfo front` names it, `osascript … activate` returns without effect, `NSApp.isActive` is false at every call, and no `didBecomeActiveNotification` arrives. The log therefore cannot order activation against the URL event, and the threshold stays at the proposed 0.5 seconds.
+
+Checked at runtime for step 11, with the screen locked and temporary code in `AppDelegate` that drove the windows and logged their state
+- Links sent while Arch was in the background, by `open -a` and by `open location`, opened small windows, the first 900×640 and centered on the screen, the second cascaded from it. A link that launched Arch opened as a tab of the main window.
+- `NSWindow.endSheet(_:returnCode:)` calls the sheet's completion handler at once and only then animates the sheet out, running the run loop for about 0.27 seconds before it returns. A sheet that the handler begins on another window stays on the first window, and that window's model no longer knows it. A deferred sheet therefore shows again only after `endSheet` returns (`TabSheetQueue`). With that, an `alert` moved with its tab between two main windows and from a small window to the main window, and OK there answered the page.
+- Move to Main Window put the tab last among its space's open tabs and selected it in the main window, which then held its page's view, and the small window closed. `performClose` on a small window closed its tab into the closed list, Reopen Last Closed Tab brought it back as a listed tab of the main window, and Close Tab closed both tab and window. Archiving left a small window's tab open. Quitting with a small window open saved its tab as an open tab of its space and only the main window in `windows`.
+- `window.open` without a user gesture opened no popup on Chromium, so popups from a small window remain a check for the screen.
+
 Not verified; the implementation order checks each
 - That a CEF Alloy browser keeps input, IME, focus, accessibility, and backing scale when its parent view moves to another `NSWindow`.
-- The order in which app activation and the URL event arrive when another app opens a link, and whether activation brings only the small window forward.
+- The order in which app activation and the URL event arrive when another app opens a link while the screen is unlocked, links from Mail and Notes among them, and whether activation brings only the small window forward. These need the screen.
 - That Chromium's developer tools for a tab use that tab's request context. The check needs the screen, so step 13 makes it.
 
 ## Decisions
@@ -143,7 +154,8 @@ public struct Persona: Identifiable, Codable, Hashable {
 `BrowserWindowModel` (new, `BrowserWindowModel.swift`)
 
 ```swift
-public enum BrowserWindowKind: String, Codable { case main, small }
+/// Small windows are not saved, so the kind needs no coding.
+public enum BrowserWindowKind { case main, small }
 
 /// The state of one browser window: what it shows and what the user is doing in it. Everything else belongs to the session.
 public final class BrowserWindowModel: ObservableObject {
@@ -191,14 +203,18 @@ public final class BrowserWindowModel: ObservableObject {
     /// A small window's tab's Persona, or the current space's.
     public var personaID: Persona.ID { get }
     public var recentTabs: [Tab] { get }
-    /// A window as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
-    init(session: BrowserSession, record: SessionSnapshot.WindowRecord)
+    /// Whether the selected tab's page fills the window, without margins or the controls around the page.
+    var isPageFullscreen: Bool { get }
+    /// A window of `kind` as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists. A small window's record has a new ID, no frame, and its tab's space.
+    init(session: BrowserSession, record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind)
     /// The window as `session.json` keeps it, which the session also keeps once the window closes.
     var record: SessionSnapshot.WindowRecord { get }
     /// Window rule 3 within a space: its first tab row that the sidebar shows and no other window shows, open tabs before pinned ones.
     func firstFreeTab(inSpace id: UUID) -> Tab?
     /// Lets go of what the window shows as it closes (Windows and menus ▸ Engine and tab events).
     @MainActor func prepareToClose()
+    /// Step 11: a page that one of the window's pages or its preview opened becomes a selected tab of a main window's current space, or opens in a small window of its own beside a small window (open decision 11).
+    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID)
 }
 ```
 
@@ -211,7 +227,7 @@ public final class BrowserWindowModel: ObservableObject {
   5. `devToolsDock.track(selectedTab?.webContents.devTools)`.
   6. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, and move keyboard focus from another pane of the split view to the selected page.
 - `shows(_:)` reads `shownTabIDs`, and `isShownInAnotherWindow(_:)` asks the other windows. `updateShownTabs()` runs after the selection or a split view changes and after another window closes: the window keeps its selected tab and the panes it shows already, and takes each other pane of `paneTabs` that no other window shows. `PageAreaView` fills each pane of `paneTabs` outside `shownTabIDs` with a placeholder (Interactions ▸ Split view).
-- `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection, ends the pane's page fullscreen, and defers its sheet.
+- `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection, ends the pane's page fullscreen, and defers its sheet. A small window that loses its tab closes instead, and `prepareToClose()` lets go of the page's fullscreen, sheet, and docked tools.
 - `fallbackTab(excluding:)` returns the first tab of `recentTabs` that is listed in the sidebar, is not `excluding`, and is not shown by another window, or nil. It can be another pane of the same split view; the window then shows a placeholder in the pane of the tab it gave up.
 - `isLibraryVisible.didSet` asks the session to mark finished downloads seen.
 - `focusPage` moves keyboard focus only while the selected page is in the window's own `nsWindow`, so a page that another window took in the meantime keeps that window's focus.
@@ -256,7 +272,7 @@ final class TabSheetQueue {
 }
 ```
 
-- The deferral response, the page-dialog flag, and the permission waiters keep today's rules. `isQuitting` stays on the session, whose `enqueueSheet` answers `.cancel` at once while the app quits.
+- The deferral response, the page-dialog flag, and the permission waiters keep today's rules. AppKit calls a sheet's completion handler before `endSheet` takes the sheet off its window, so the handler of a deferred sheet only puts it back in its queue, and the code that deferred it calls `showNext()` once `deferSheet(of:)` has returned. `isQuitting` stays on the session, whose `enqueueSheet` answers `.cancel` at once while the app quits.
 - `canPrint` and `canClearSiteData` read the window's `nsWindow?.attachedSheet`, so the queue needs no query of its own.
 
 `DevToolsDockSettings` (new, in `DevToolsDock.swift`)
@@ -288,8 +304,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 }
 ```
 
-- Only the session's `makeWindow(from:)` creates one, from a `SessionSnapshot.WindowRecord`: `openWindow()` (⌘N) passes a record with a new ID, no frame, and no tab, and restore and `sidebarTarget()`, which also serves the Dock's reopen, pass saved records. So all of them take one path, and from step 11 a small window too. The session keeps the controllers in `windowControllers` and releases each on the turn of the run loop after its window closes, because AppKit is still closing the window then. It lives in `Browsing`, which already builds a window (`TabCloseLogWindowController`) and holds both window views.
-- It hosts `BrowserWindowView(session:window:)`, from step 11 also `SmallWindowView(session:window:)`, reaching the session through `model.session`, sets `model.nsWindow`, and hides its own toolbar in full screen.
+- Only the session's `makeWindow(from:kind:)` creates one, from a `SessionSnapshot.WindowRecord`: `openWindow()` (⌘N) passes a record with a new ID, no frame, and no tab, restore and `sidebarTarget()`, which also serves the Dock's reopen, pass saved records, and `openSmallWindow` passes a record of its own with the kind `.small`. So all of them take one path. A window without a frame cascades from the window of its kind that last became main. The session keeps the controllers in `windowControllers` and releases each on the turn of the run loop after its window closes, because AppKit is still closing the window then. It lives in `Browsing`, which already builds a window (`TabCloseLogWindowController`) and holds both window views.
+- It hosts `BrowserWindowView(session:window:)`, or `SmallWindowView(session:window:)` for a small window, reaching the session through `model.session`, sets `model.nsWindow`, and hides its own toolbar in full screen. Both kinds keep the empty unified toolbar, so the small window's row sits on the traffic lights' line as the sidebar's top row does. `static func centeredFrame(size:pointer:screens:)` places a small window that has no other small window to cascade from.
 - It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; from step 13, with two or more Personas, followed by " — <Persona name>". It reads the title on the run loop turn after the model or the spaces change, because `objectWillChange` comes before the change.
 - It sets `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false`.
 - Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowWillClose` calls `session.windowWillClose(model)`. `windowDidMove` and `windowDidResize` record `model.restorableFrame` and schedule a save; resizing covers Zoom and window tiling, which are not live resizes. From `windowWillEnterFullScreen` until `windowDidExitFullScreen` or `windowDidFailToEnterFullScreen`, nothing is recorded, so the frame from before stays, and `windowDidExitFullScreen` records the frame again. From step 11, for a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does.
@@ -308,7 +324,7 @@ public var activeWindow: BrowserWindowModel? { get }
 public var lastMainWindow: BrowserWindowModel? { get }
 /// Window rule 7. While no main window is open, reopens the windows of `windowsToReopen` and returns the front one.
 public func sidebarTarget() -> BrowserWindowModel
-/// New Window: a main window on the active window's space, or the last main window's while none is open, with no tab selected (open decision 8). Step 11 adds `kind`.
+/// New Window: a main window on the active window's space, or the last main window's while none is open, with no tab selected (open decision 8).
 @discardableResult
 public func openWindow() -> BrowserWindowModel
 /// Creates the windows of the loaded snapshot, back to front (Windows and menus ▸ AppKit).
@@ -342,7 +358,13 @@ public func canDeletePersona(_ id: Persona.ID) -> Bool
 public func deletePersona(_ id: Persona.ID)
 
 // Step 11
+/// Whether a link from another app opens in a small window: Arch was not active, or became active less than `smallWindowActivationGrace` (0.5 seconds) before the link arrived.
+public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool
+/// The app sets it to name Move to Main Window's shortcut, which Settings ▸ Shortcuts can change, in the small window's button.
+public var moveToMainWindowShortcut: () -> String?
 @discardableResult public func openSmallWindow(url: URL) -> BrowserWindowModel
+/// A small window on a new tab for a page that a small window's page or preview opened.
+@discardableResult func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel
 public func moveToMainWindow(_ smallWindow: BrowserWindowModel)
 ```
 
@@ -352,15 +374,18 @@ public func moveToMainWindow(_ smallWindow: BrowserWindowModel)
 - The session's implementation of `EngineBrowserDelegate.browser(_:didCreateNewWebContents:isActive:)` is deleted, and the protocol's default applies, because no adapter calls it.
 - `validateMenuItem` and other checks read `lastMainWindow` and never create a window.
 
-`SmallWindowView` (new, internal, step 11): `init(session: BrowserSession, window: BrowserWindowModel)`; its layout is under Small window.
+`SmallWindowView` (new, internal, step 11, `SmallWindowView.swift`): `init(session: BrowserSession, window: BrowserWindowModel)`; its layout is under Small window.
 
-`PageAreaView` (new, internal, step 11, extracted from `BrowserWindowView`): `init(window: BrowserWindowModel, margins: EdgeInsets)`, holding the page host and its background, the crash notice, the internal page, the region capture overlay, the frame stroke, the margins, and the developer tools space. Both window kinds show the page through it, so page fullscreen and the docked tools behave the same in each.
+`PageAreaView` (internal, in `SplitView.swift`, where split view (III.5) put it before step 11): `init(session: BrowserSession, tabDrag: TabDragState?, margins: EdgeInsets)`, holding the panes with the page host and its background, the crash notice, the internal page, the region capture overlay, and the frame stroke, and around them the preview panel, the margins, the developer tools space, and the window's full screen for page fullscreen. Both window kinds show the page through it, so page fullscreen and the docked tools behave the same in each. A window without a sidebar passes no `tabDrag`.
+
+`CommandPaletteLayer` (internal, step 11, in `CommandPaletteView.swift`, extracted from `BrowserWindowView`): the palette, its dimming, the warm-up copy, and their motion, which both window kinds show. The main window passes its address pill's frame and pull; the small window passes none.
 
 ### Arch
 
 - `AppDelegate` keeps the menu bar, link routing, the key monitors, the global shortcut, and the app's lifecycle. Window building moves to `BrowserWindowController`. Every action resolves `session.activeWindow` (page commands) or `session.sidebarTarget()` (sidebar commands). Selector names stay unchanged, because `ShortcutSettings` keys saved shortcuts by them.
 - It adds `applicationShouldHandleReopen(_:hasVisibleWindows:)`: with no main window open, a Dock click opens one.
 - It records the time of each `NSApplication.didBecomeActiveNotification` for the small-window decision (step 11).
+- Sidebar commands go through `frontSidebarTarget()`, which brings the sidebar target forward while a small window is the active window (window rule 7).
 
 ### ARCHEngine
 
@@ -505,7 +530,7 @@ Tests
 AppKit
 - `NSWindow.allowsAutomaticWindowTabbing = false` before the first window opens.
 - The main window keeps today's style, empty unified toolbar, and minimum content size of 800×500. A small window's minimum is 480×360.
-- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen, the one with the menu bar, at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the active window at its size, or centers at 1200×800 while the active window is in full screen.
+- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen, the one with the menu bar, at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the last main window at its size, or centers at 1200×800 while that window is in full screen; a small window in front is not the source, so a new main window keeps the main windows' size.
 - Restore creates the windows back to front, so that `windows` lists them front to back, then selects their tabs: every window takes its saved tab, which a window in front of it gives up when it shows the tab as a split view pane, before any window falls back to its space's first free tab, so that no window falls back to a tab another one saved. The windows then come forward back to front, so the front one becomes key last. Sheets that restored tabs asked for show as each window appears. The favorites' tabs that windows selected open at launch.
 
 Menus
@@ -536,7 +561,8 @@ Engine and tab events
 ## Small window (III.7)
 
 When
-- `application(_:open:)` opens a link in a small window when three things hold: the preference is on, the first windows have been restored, and Arch was not active when the link arrived. Not active means `!NSApp.isActive`, or the app became active less than 0.5 seconds before; step 11 fixes the threshold from a log. Otherwise the link opens a tab in the sidebar target, as today. Links that arrive during launch open in the main window, so regression check 4's launch case holds. `open location` arrives the same way and follows the same rule. The global shortcut always uses the main window.
+- `application(_:open:)` opens a link in a small window when three things hold: the preference is on, the first windows have been restored, and Arch was not active when the link arrived. Not active means `!NSApp.isActive`, or the app became active less than 0.5 seconds before. Step 11's log was taken with the screen locked, when Arch never became active, so it could not set the threshold, which stays at the proposed value (Facts). Otherwise the link opens a tab in the sidebar target, as today, and the sidebar target comes forward from behind a small window. Links that arrive during launch reach `application(_:open:)` before the session exists and open in the main window, so regression check 4's launch case holds. `open location` arrives the same way and follows the same rule. The global shortcut always uses the main window.
+- Until step 12 adds the preference, the first condition always holds.
 
 The tab
 - Its destination space is the last main window's current space, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.
@@ -546,12 +572,14 @@ The tab
 
 The window
 - 900×640. The first is centered on the screen with the pointer, and later ones cascade from it. The window is made key and ordered front, then the app activates with `NSRunningApplication.current.activate(options: [])`. Without `.activateAllWindows`, only the key and main windows come forward (checked in step 11).
-- `SmallWindowView`: one row on the traffic-light line with the site's icon and host, back, forward, reload or stop, share, and a Move to Main Window button (an SF Symbol, with its shortcut in the tooltip). Below it, `PageAreaView` over the window material with the destination space's tint. Find, sheets, page fullscreen, the developer tools (with this window's dock), and the ⌘L palette in edit mode work. Sidebar commands go to the main window.
+- `SmallWindowView`: one row on the traffic-light line with the site's icon and host, which opens the palette like ⌘L, back, forward, reload or stop, share, and a Move to Main Window button (`arrow.up.left.and.arrow.down.right`, with its shortcut in the tooltip). Below it, `PageAreaView` over the window material with the destination space's tint, which is the window's current space. Find, sheets, page fullscreen, the developer tools (with this window's dock), the page reader, the question popover, the preview panel, and the ⌘L palette in edit mode work. The palette lists no tabs to switch to, because the window shows only its own. Sidebar commands go to the main window, which comes forward. ⌃Tab passes to the page, and Close Other Tabs is disabled.
+- A page that the small window's page or its preview opens, and the preview's Open in Tab, open in another small window (`showOpenedPage`, open decision 11).
 
 Move to Main Window (the button, Window ▸ Move to Main Window, ⌥⌘N)
-1. Clear `isInSmallWindow` and move the tab to the end of its destination space's open tabs, or of `preferredSpace(in: tab.personaID)` if that space is gone.
-2. The sidebar target selects the tab, which applies window rule 2: the small window gives it up (its sheet is deferred, page fullscreen ends, its dock lets the tools go), then the main window shows the tab and its sheet. The view moves without a reload.
-3. The small window closes without closing the tab, and the main window comes forward.
+1. Clear `isInSmallWindow` and move the tab to the end of its destination space's open tabs. That space is still there, because `deleteSpace` moves a small window's tab with its space, so `preferredSpace(in:)` is not needed.
+2. The sidebar target selects the tab, which applies window rule 2: the small window gives it up by closing (its sheet is deferred, page fullscreen ends, its dock lets the tools go), then the main window shows the tab and its sheet. The view moves without a reload.
+3. The main window comes forward with the page focused.
+- Main windows reach no small window's tab: every explicit selection in a main window goes through lists that `isListedInSidebar` filters, so the rule that selecting it runs Move to Main Window needs no code of its own.
 
 Closing
 - Closing a small window asks to close its tab, so a Chromium page with a `beforeunload` handler can ask to stay. The tab goes to the closed list, and ⇧⌘T reopens it in the main window. A small window whose tab closes for any reason closes with it.
