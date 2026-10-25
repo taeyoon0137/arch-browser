@@ -24,7 +24,7 @@ struct PageQuestion: Identifiable {
 
     @MainActor func ask(_ text: String) {
         conversation.startOver()
-        conversation.ask(text, about: selection.map(QuestionSelection.chosen) ?? .none)
+        conversation.ask(text, about: selection.map(QuestionSelection.chosen) ?? .wholePage)
     }
 }
 

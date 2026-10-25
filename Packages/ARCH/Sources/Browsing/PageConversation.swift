@@ -5,7 +5,7 @@ import Foundation
 /// The selected text a question is about.
 enum QuestionSelection {
     /// The question is about the whole page.
-    case none
+    case wholePage
     /// Text the user chose, as from the page's context menu.
     case chosen(AISelection)
     /// Whatever the page has selected when the question goes out.
@@ -71,7 +71,7 @@ final class PageConversation: ObservableObject {
     }
 
     /// Asks `prompt`, shown as `title`, and streams the reply. A question still being answered stops first.
-    func ask(_ prompt: String, title: String? = nil, about selection: QuestionSelection = .none) {
+    func ask(_ prompt: String, title: String? = nil, about selection: QuestionSelection = .wholePage) {
         cancel()
         let exchange = Exchange(prompt: prompt, title: title ?? prompt, selectionSource: selection)
         exchanges.append(exchange)
@@ -87,10 +87,11 @@ final class PageConversation: ObservableObject {
         ask(exchange.prompt, title: exchange.title, about: exchange.selectionSource)
     }
 
-    /// Stops the reply being written. What arrived stays on screen but does not join the conversation.
+    /// Stops the reply being written. The question shows as stopped at once, even while the engine still reads its page, and what arrived stays on screen but does not join the conversation.
     func cancel() {
         task?.cancel()
         task = nil
+        if let answeringID { update(answeringID) { $0.state = .stopped } }
         answeringID = nil
         isAnswering = false
     }
@@ -119,12 +120,14 @@ final class PageConversation: ObservableObject {
             if carriesPage {
                 parts.append(.page(try await pages.content(ofTab: tabID, limit: Self.pageTextLimit)))
             }
-            if let selection = try await selection(for: exchange.selectionSource) {
-                update(id) { $0.selection = selection.text }
-                parts.append(.selection(selection))
+            let selected = try await selection(for: exchange.selectionSource)
+            // An engine finishes a read it has started, so a question stopped during the read takes nothing from it.
+            try Task.checkCancellation()
+            if let selected {
+                update(id) { $0.selection = selected.text }
+                parts.append(.selection(selected))
             }
             parts.append(.text(exchange.prompt))
-            try Task.checkCancellation()
             update(id) { $0.state = .sent }
             let question = AIMessage(role: .user, parts: parts)
             var reply = ""
@@ -153,6 +156,8 @@ final class PageConversation: ObservableObject {
             try Task.checkCancellation()
             messages = history + [question, AIMessage(role: .assistant, parts: [.text(reply)])]
             if carriesPage { pageInMessages = pageRead }
+        } catch where Task.isCancelled {
+            // `cancel()` marked the question stopped, which an error from a read that ends later does not undo.
         } catch {
             update(id) { $0.state = Self.isCancellation(error) ? .stopped : .failed(error) }
         }
@@ -165,7 +170,7 @@ final class PageConversation: ObservableObject {
 
     private func selection(for source: QuestionSelection) async throws -> AISelection? {
         switch source {
-        case .none: return nil
+        case .wholePage: return nil
         case .chosen(let selection): return selection
         case .current: return try await pages.selection(ofTab: tabID)
         }
