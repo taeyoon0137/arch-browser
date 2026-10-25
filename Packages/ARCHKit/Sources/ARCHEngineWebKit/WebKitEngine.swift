@@ -487,7 +487,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             operation.run()
         }
     }
-    public func exitFullscreen() { webView.closeAllMediaPresentations() }
+    public func exitFullscreen() { webView.closeAllMediaPresentations(completionHandler: nil) }
     public func discard() { webView.stopLoading() }
     /// A `WKDownload` continues after its web view closes.
     public var closingStopsDownloads: Bool { false }
