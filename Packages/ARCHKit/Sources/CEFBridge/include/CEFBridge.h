@@ -100,6 +100,18 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandSelectAll = 1 << 3,
 };
 
+/// Where a page asked a popup to open, from Chromium's window open disposition.
+typedef NS_ENUM(NSInteger, ARCHCEFPopupDisposition) {
+    /// A new tab in front, as for a link to a new browsing context.
+    ARCHCEFPopupDispositionForegroundTab,
+    /// A new tab behind, as for such a link the user clicked with Command.
+    ARCHCEFPopupDispositionBackgroundTab,
+    /// A window with the features the page asked for, as `window.open` with a size asks.
+    ARCHCEFPopupDispositionPopup,
+    /// A new window, as for such a link the user clicked with Shift.
+    ARCHCEFPopupDispositionWindow,
+};
+
 /// Actions the media keys send to a frame's media: the page's Media Session handler runs when the page set one; play and pause otherwise reach the media itself.
 typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
     ARCHCEFMediaActionPlay,
@@ -146,6 +158,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly, copy) NSArray<NSString *> *spellingSuggestions;
 @end
 
+@class ARCHCEFBrowser;
+
 @protocol ARCHCEFBrowserDelegate <NSObject>
 - (void)cefBrowserDidCreateView;
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
@@ -154,7 +168,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks its last report.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
-- (void)cefBrowserDidRequestPopupWithURL:(NSString *)url;
+/// Reports a popup the page opened, which CEF has created in this browser's browsing context, so the page reaches it through the window `window.open` returned and the popup reaches the page through `window.opener`. `targetURL` is the address the page opened, empty when it gave none. Set the popup's `delegate` to keep it; a popup that has none when this returns closes.
+- (void)cefBrowserDidOpenPopup:(ARCHCEFBrowser *)popup targetURL:(NSString *)targetURL disposition:(ARCHCEFPopupDisposition)disposition;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
 /// Asks whether a link the user clicked with Shift, which Chromium opens in a new window, may open. Return NO to stop it; with YES it opens as an Alloy style browser opens it: in this browser or, for a link to a new browsing context, as a popup.
@@ -224,7 +239,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 + (int)runHelperWithArgc:(int)argc argv:(char *_Nonnull *_Nonnull)argv;
 @end
 
-/// One browser embedded as a child of `parentView`. CEF adds its own view inside `parentView`.
+/// One browser embedded as a child of `parentView`. CEF adds its own view inside `parentView`. Each popup a page opens is a browser of its own, which the bridge makes and the opener's delegate adopts through `cefBrowserDidOpenPopup:targetURL:disposition:`.
 @interface ARCHCEFBrowser : NSObject
 /// Creates the browser in `requestContext`, whose profile the page loads in. The renderer runs `pageScripts` from the first document on.
 - (instancetype)initWithParentView:(NSView *)parentView
@@ -232,6 +247,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
                     requestContext:(ARCHCEFRequestContext *)requestContext
                        pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;
+/// The delegate given at creation. A popup has none until its opener's delegate adopts it.
+@property (nonatomic, weak, nullable) id<ARCHCEFBrowserDelegate> delegate;
+/// The view that the browser's view fills: the one given at creation or, for a popup, a container of its opener's size.
+@property (nonatomic, readonly) NSView *parentView;
 @property (nonatomic, readonly, nullable) NSView *browserView;
 /// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops such downloads when the browser closes, and only this browser can resume an interrupted one.
 @property (nonatomic, readonly) BOOL hasDownloadsInProgress;

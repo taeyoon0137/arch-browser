@@ -1453,7 +1453,13 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
-- (void)handlePopup:(NSString *)url;
+- (void)handleBeforePopup:(int)popupID
+                ofBrowser:(int)browserIdentifier
+                      url:(NSString *)url
+              disposition:(cef_window_open_disposition_t)disposition
+               windowInfo:(CefWindowInfo &)windowInfo
+                   client:(CefRefPtr<CefClient> &)client
+                extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
 - (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
@@ -1517,6 +1523,42 @@ ARCHCEFPermission PermissionsFromPrompt(uint32_t requested) {
         }
     }
     return remaining == 0 ? permissions : 0;
+}
+
+// Maps Chromium's disposition for a popup to the bridge's. Any disposition that has no counterpart counts as a foreground tab.
+ARCHCEFPopupDisposition PopupDisposition(cef_window_open_disposition_t disposition) {
+    switch (disposition) {
+        case CEF_WOD_NEW_BACKGROUND_TAB:
+            return ARCHCEFPopupDispositionBackgroundTab;
+        case CEF_WOD_NEW_POPUP:
+            return ARCHCEFPopupDispositionPopup;
+        case CEF_WOD_NEW_WINDOW:
+            return ARCHCEFPopupDispositionWindow;
+        default:
+            return ARCHCEFPopupDispositionForegroundTab;
+    }
+}
+
+// A popup that CEF has yet to create, and what its opener's delegate learns once CEF has created it.
+struct PendingPopup {
+    ARCHCEFBrowser *popup;
+    __weak ARCHCEFBrowser *opener;
+    NSString *targetURL;
+    ARCHCEFPopupDisposition disposition;
+};
+
+// The popups that CEF has yet to create, by their opener browser's identifier and CEF's popup ID. No app object owns them yet, so each entry holds the popup's browser object, with the client CEF calls and the container view CEF adds the popup's view to, from `OnBeforePopup` until CEF creates the popup or aborts it. CEF calls both on the UI thread, which is the main thread here.
+std::map<std::pair<int, int>, PendingPopup> gPendingPopups;
+
+// Removes the popup's entry from `gPendingPopups` and returns it, or nothing for a browser that is not a pending popup.
+std::optional<PendingPopup> TakePendingPopup(ARCHCEFBrowser *popup) {
+    auto entry = std::find_if(gPendingPopups.begin(), gPendingPopups.end(), [&](const auto &item) { return item.second.popup == popup; });
+    if (entry == gPendingPopups.end()) {
+        return std::nullopt;
+    }
+    PendingPopup pending = std::move(entry->second);
+    gPendingPopups.erase(entry);
+    return pending;
 }
 
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.
@@ -1706,17 +1748,30 @@ public:
         [owner_ handleAfterCreated:browser];
     }
 
+    // A popup that the delegate allows and that belongs to no other app opens in a browser object of its own, which CEF creates in the opener's browsing context, so the page keeps the window `window.open` returns and the popup keeps `window.opener`. Returning true stops the popup.
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id, const CefString &target_url,
                        const CefString &target_frame_name, CefLifeSpanHandler::WindowOpenDisposition target_disposition,
                        bool user_gesture, const CefPopupFeatures &popupFeatures, CefWindowInfo &windowInfo,
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
-        if ([owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] &&
-            ![owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
-            [owner_ handlePopup:url];
+        if (!owner_.delegate || ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] ||
+            [owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
+            return true;
         }
-        return true;
+        [owner_ handleBeforePopup:popup_id
+                        ofBrowser:browser->GetIdentifier()
+                              url:url
+                      disposition:target_disposition
+                       windowInfo:windowInfo
+                           client:client
+                        extraInfo:extra_info];
+        return false;
+    }
+
+    // CEF tells the opener, also after the opener's `OnBeforeClose`, when it could not create a popup that `OnBeforePopup` allowed.
+    void OnBeforePopupAborted(CefRefPtr<CefBrowser> browser, int popup_id) override {
+        gPendingPopups.erase({browser->GetIdentifier(), popup_id});
     }
 
     // Returning false would make CEF close the window that holds the browser's view, which is the app's window. The view leaves its parent instead, and CEF finishes closing the browser once the view is released.
@@ -1896,8 +1951,6 @@ private:
     CefRefPtr<CefBrowser> _browser;
     CefRefPtr<BridgeDevToolsObserver> _devToolsObserver;
     CefRefPtr<CefRegistration> _devToolsRegistration;
-    __weak id<ARCHCEFBrowserDelegate> _delegate;
-    NSView *_parentView;
     NSMutableDictionary<NSNumber *, ARCHCEFDownload *> *_downloads;
     /// Set while `tryCloseWithCompletion:` waits for the page's `beforeunload` handlers.
     void (^_pendingClose)(BOOL);
@@ -1919,6 +1972,8 @@ private:
     BOOL _pageScriptsChanged;
 }
 
+@synthesize delegate = _delegate;
+@synthesize parentView = _parentView;
 @synthesize browserView = _browserView;
 @synthesize isLoading = _isLoading;
 @synthesize canGoBack = _canGoBack;
@@ -1931,6 +1986,22 @@ private:
                     requestContext:(ARCHCEFRequestContext *)requestContext
                        pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate {
+    self = [self initForBrowserInParentView:parentView url:url pageScripts:pageScripts delegate:delegate];
+    if (!self) {
+        return nil;
+    }
+    CefWindowInfo windowInfo;
+    [self placeInWindowInfo:windowInfo];
+    CefBrowserSettings settings;
+    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, [self creationExtraInfo], [requestContext cefContext]);
+    return self;
+}
+
+/// Sets up the object for a browser that CEF creates in `parentView` later: through `CreateBrowser`, or as a popup.
+- (instancetype)initForBrowserInParentView:(NSView *)parentView
+                                       url:(NSString *)url
+                               pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
+                                  delegate:(nullable id<ARCHCEFBrowserDelegate>)delegate {
     self = [super init];
     if (!self) {
         return nil;
@@ -1946,17 +2017,20 @@ private:
     _pageScripts = [pageScripts copy];
     [gBrowsers addObject:self];
     _client = new BridgeClient(self);
+    return self;
+}
 
-    CefWindowInfo windowInfo;
-    NSRect bounds = parentView.bounds;
-    windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(parentView),
-                          CefRect(0, 0, (int)NSWidth(bounds), (int)NSHeight(bounds)));
-    CefBrowserSettings settings;
-    // Every renderer process that hosts one of the browser's frames receives the extra info before the frame's first document.
+/// Makes CEF create the browser's view as a child that fills the parent view.
+- (void)placeInWindowInfo:(CefWindowInfo &)windowInfo {
+    NSRect bounds = _parentView.bounds;
+    windowInfo.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(_parentView), CefRect(0, 0, (int)NSWidth(bounds), (int)NSHeight(bounds)));
+}
+
+/// What CEF passes to every renderer process that hosts one of the browser's frames, before the frame's first document: the page scripts.
+- (CefRefPtr<CefDictionaryValue>)creationExtraInfo {
     CefRefPtr<CefDictionaryValue> extraInfo = CefDictionaryValue::Create();
     extraInfo->SetList(kPageScriptsKey, PageScriptList(_pageScripts));
-    CefBrowserHost::CreateBrowser(windowInfo, _client, CefString(url.UTF8String), settings, extraInfo, [requestContext cefContext]);
-    return self;
+    return extraInfo;
 }
 
 - (void)dealloc {
@@ -1968,12 +2042,23 @@ private:
 }
 
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser {
+    // A popup's entry keeps this object alive until the method returns; from then on the delegate that adopts it does.
+    std::optional<PendingPopup> popup = TakePendingPopup(self);
     _browser = browser;
     NSView *view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
     view.frame = _parentView.bounds;
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _browserView = view;
     [self applyAccessibilityState];
+    if (popup) {
+        if (gInitialized) {
+            [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
+        }
+        // A popup that nobody adopted, as when its opener has gone or the runtime shuts down, closes. CEF finishes closing it once its view goes with this object.
+        if (!_delegate) {
+            [self close];
+        }
+    }
     [_delegate cefBrowserDidCreateView];
 }
 
@@ -2082,8 +2167,20 @@ private:
     return delegate == nil || [delegate cefBrowserShouldOpenNewWindowWithURL:url];
 }
 
-- (void)handlePopup:(NSString *)url {
-    [_delegate cefBrowserDidRequestPopupWithURL:url];
+/// Fills CEF's parameters for a popup the page opens: CEF creates it in this browser's browsing context, as the bridge's own browser object, with its own client and a container view of this browser's size, and its renderers start with this browser's page scripts. CEF uses this browser's request context and settings. The object waits in `gPendingPopups` until CEF creates the popup or aborts it.
+- (void)handleBeforePopup:(int)popupID
+                ofBrowser:(int)browserIdentifier
+                      url:(NSString *)url
+              disposition:(cef_window_open_disposition_t)disposition
+               windowInfo:(CefWindowInfo &)windowInfo
+                   client:(CefRefPtr<CefClient> &)client
+                extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo {
+    NSView *container = [[NSView alloc] initWithFrame:_parentView.bounds];
+    ARCHCEFBrowser *popup = [[ARCHCEFBrowser alloc] initForBrowserInParentView:container url:url pageScripts:_pageScripts delegate:nil];
+    gPendingPopups[{browserIdentifier, popupID}] = {popup, self, url, PopupDisposition(disposition)};
+    [popup placeInWindowInfo:windowInfo];
+    client = popup->_client;
+    extraInfo = [popup creationExtraInfo];
 }
 
 - (void)handleDoClose {

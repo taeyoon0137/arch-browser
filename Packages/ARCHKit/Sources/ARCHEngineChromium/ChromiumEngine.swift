@@ -318,6 +318,20 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.allowsDownloads = !configuration.disallowDownloads
     }
 
+    /// Adopts a popup that a page of `opener` opened, which CEF created in the opener's browsing context and profile with the opener's page scripts. The popup may download, as a WebKit popup may.
+    private init(popup: ARCHCEFBrowser, opener: ChromiumWebContents) {
+        self.sessionID = UUID().uuidString
+        self.context = opener.context
+        self.requestContext = opener.requestContext
+        self.view = popup.parentView
+        self.view.wantsLayer = true
+        self.url = URL(engineString: popup.currentURL)
+        self.pageScripts = opener.pageScripts
+        self.browser = popup
+        super.init()
+        popup.delegate = self
+    }
+
     public enum PDFError: Error {
         case exportFailed
     }
@@ -525,10 +539,17 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow
     }
-    public func cefBrowserDidRequestPopup(withURL url: String) {
-        let popup = ChromiumWebContents(sessionID: UUID().uuidString, context: context, requestContext: requestContext,
-                                        configuration: EngineWebContentsConfiguration(initialURL: URL(string: url), pageScripts: pageScripts))
-        uiDelegate?.webContents(self, didCreateNewWebContents: popup, targetURL: URL(string: url), disposition: .newForegroundTab)
+    /// A popup keeps its `window.opener`, and it reaches the UI delegate as a WebKit popup does. Without a UI delegate, nothing adopts it, so it closes.
+    public func cefBrowserDidOpenPopup(_ popup: ARCHCEFBrowser, targetURL: String, disposition: ARCHCEFPopupDisposition) {
+        guard let uiDelegate else { return }
+        let engineDisposition: EngineNavigationDisposition = switch disposition {
+        case .backgroundTab: .newBackgroundTab
+        case .popup: .newPopup
+        case .window: .newWindow
+        default: .newForegroundTab
+        }
+        uiDelegate.webContents(self, didCreateNewWebContents: ChromiumWebContents(popup: popup, opener: self), targetURL: URL(engineString: targetURL),
+                               disposition: engineDisposition)
     }
     public func cefBrowserDidClose() {
         contextMenu?.cancelTracking()
