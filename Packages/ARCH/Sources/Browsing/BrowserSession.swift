@@ -461,8 +461,8 @@ public final class BrowserSession: ObservableObject {
         let moved = tabs.filter { $0.spaceID == id }
         let movedIDs = Set(moved.map(\.id))
         moved.forEach { $0.spaceID = destination }
-        tabs.removeAll { movedIDs.contains($0.id) }
-        tabs.append(contentsOf: moved)
+        // One change, so that what follows the session's tabs never sees the moved ones leave.
+        tabs = tabs.filter { !movedIDs.contains($0.id) } + moved
         var movedFolders = folders.filter { $0.spaceID == id }
         for folderIndex in movedFolders.indices { movedFolders[folderIndex].spaceID = destination }
         folders = folders.filter { $0.spaceID != id } + movedFolders
@@ -1387,7 +1387,10 @@ public final class BrowserSession: ObservableObject {
         var restored: [Int: Tab] = [:]
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
             if !record.isPinned, let cutoff, let last = record.lastActivatedAt, last < cutoff {
-                closedTabs.append(record)
+                // Closed-tab records keep no hook's name, as for a tab closed by hand.
+                var closed = record
+                closed.suggestedTitle = nil
+                closedTabs.append(closed)
                 closeLog.record(TabCloseLogEntry(archived: record))
                 continue
             }

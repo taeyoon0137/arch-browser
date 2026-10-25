@@ -74,9 +74,15 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         return true
     }
 
-    /// A file name from a suggested name: without `/` and `:`, with spaces for control characters such as line breaks, without dots or spaces at either end, with the original file's extension, which the suggestion may repeat, and at most `maximumFilenameLength` characters. Nil when nothing is left.
+    /// The extensions of compressed archives, which name two layers that a rename keeps together.
+    private static let archiveExtensions: Set<String> = ["tar.gz", "tar.bz2", "tar.xz", "tar.zst"]
+
+    /// A file name from a suggested name: without `/` and `:`, with spaces for control characters such as line breaks, without dots or spaces at either end, with the original file's extension, which the suggestion may repeat, and at most `maximumFilenameLength` characters. A compressed archive's extension, such as `.tar.gz`, counts as one. Nil when nothing is left.
     static func safeFilename(_ suggestion: String, keepingExtensionOf original: String) -> String? {
-        let pathExtension = (original as NSString).pathExtension
+        let name = original as NSString
+        let lastExtension = name.pathExtension
+        let archiveExtension = "\((name.deletingPathExtension as NSString).pathExtension).\(lastExtension)"
+        let pathExtension = archiveExtensions.contains(archiveExtension.lowercased()) ? archiveExtension : lastExtension
         let suffix = pathExtension.isEmpty ? "" : ".\(pathExtension)"
         var base = String(String.UnicodeScalarView(suggestion.unicodeScalars.filter { $0 != "/" && $0 != ":" }.map { CharacterSet.controlCharacters.contains($0) ? " " : $0 }))
         if !suffix.isEmpty, base.lowercased().hasSuffix(suffix.lowercased()) { base.removeLast(suffix.count) }

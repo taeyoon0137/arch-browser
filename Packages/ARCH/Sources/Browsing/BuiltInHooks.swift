@@ -7,7 +7,7 @@ extension AIFeature {
                                        summary: "Names a tab in a few words from its page's title, address, and first \(BuiltInHooks.tabNamePageText.formatted()) characters, unless you named the tab.",
                                        trigger: .automatic, data: AIDataScope(kinds: [.page], pageTextLimit: BuiltInHooks.tabNamePageText))
     static let downloadNameHook = AIFeature(id: .downloadNameHook, name: "Download Names",
-                                            summary: "Gives a finished download a descriptive file name from its name, type, size, and address, never its contents. Restore Original Name in its row undoes it.",
+                                            summary: "Gives a finished download a descriptive file name from its name, type, size, and the addresses of the file and its page, never its contents. Restore Original Name in its row undoes it.",
                                             trigger: .automatic, data: AIDataScope(kinds: [.download]))
 }
 
@@ -21,9 +21,8 @@ enum BuiltInHooks {
     static func tabName(needsName: @escaping @Sendable (AIPageLoad) async -> Bool) -> AIHookRegistration {
         AIHookRegistration(feature: .tabNameHook, events: [.pageLoaded], delay: .milliseconds(1_500), allowedActions: [.renameTab]) { event, context in
             guard case .pageLoaded(let load) = event, await needsName(load) else { return .none }
-            let page = try await context.pages.content(ofTab: load.tabID, limit: tabNamePageText)
-            // A tab that moved on during the wait gets its name from the newer page's event.
-            guard page.url.withoutFragment == load.url.withoutFragment else { return .none }
+            // A page without a document a script can read, such as an engine's error page, gets no name, and a tab that moved on during the wait gets its name from the newer page's event.
+            guard let page = try? await context.pages.content(ofTab: load.tabID, limit: tabNamePageText), page.url.withoutFragment == load.url.withoutFragment else { return .none }
             let reply = try await context.client.reply(AIRequest(feature: .tabNameHook, instructions: tabNameInstructions,
                                                                   messages: [AIMessage(role: .user, parts: [.page(page)])], maxOutputTokens: replyTokens))
             let name = plainReply(reply.text)

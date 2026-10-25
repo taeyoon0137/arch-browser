@@ -36,12 +36,12 @@ public enum AIHookEvent: Sendable {
         }
     }
 
-    /// The address the event comes from, to which site exclusions apply: the page, or the download's page or source.
-    public var url: URL? {
+    /// The addresses the event comes from, to which site exclusions apply: the page's, or the download's source and the page it started from.
+    public var urls: [URL] {
         switch self {
-        case .pageLoaded(let load): return load.url
-        case .tabOpened(let open): return open.url
-        case .downloadFinished(let download): return download.info.pageURL ?? download.info.sourceURL
+        case .pageLoaded(let load): return [load.url]
+        case .tabOpened(let open): return open.url.map { [$0] } ?? []
+        case .downloadFinished(let download): return [download.info.sourceURL, download.info.pageURL].compactMap { $0 }
         }
     }
 }
@@ -191,7 +191,7 @@ public final class AIHookSubscription {
 /// Runs the hooks for each event the host posts. Hook errors never show a sheet: each feature's last one stays here for its row in Settings ▸ AI.
 @MainActor
 public final class AIHookCenter: ObservableObject {
-    /// Each feature's error from its last hook that did not succeed, until one succeeds or the user changes the feature's route.
+    /// Each feature's last error: from its hooks' last request that failed, a hook that failed on its own or timed out, or a reached budget. A request that succeeds or a change to the feature's route clears it, and a hook that sends no request leaves it.
     @Published public private(set) var lastErrors: [AIFeatureID: any Error] = [:]
     /// Features whose hooks paused after consecutive authentication or provider errors, until the user resumes them or changes their route.
     @Published public private(set) var pausedFeatures: Set<AIFeatureID> = []
@@ -205,7 +205,7 @@ public final class AIHookCenter: ObservableObject {
     private var registrations: [UUID: AIHookRegistration] = [:]
     /// The hooks running or waiting for each event, by the event's kind and subject.
     private var chains: [ChainKey: Chain] = [:]
-    /// Each feature's consecutive authentication and provider errors.
+    /// Each feature's consecutive authentication and provider errors from its hooks' requests.
     private var failureCounts: [AIFeatureID: Int] = [:]
     /// The routes as last seen, to notice which features' routes the user changed.
     private var routes: [String: AIRoute]
@@ -310,24 +310,25 @@ public final class AIHookCenter: ObservableObject {
             }
             // The subscription, the feature's route, or the site's exclusion may have changed during the wait.
             guard registrations[id] != nil, reachesHooks(event), mayRun(registration.feature), let host else { continue }
-            let context = AIHookContext(client: AIHookClient(feature: registration.feature, base: service), pages: host.pages, appliedActions: applied)
+            let client = AIHookClient(feature: registration.feature, base: service) { [weak self] error in self?.recordRequest(endingWith: error, of: registration.feature) }
+            let context = AIHookContext(client: client, pages: host.pages, appliedActions: applied)
             let task = Task { try await registration.handler(event, context) }
             chain.running = RunningHook(registration: id, feature: registration.feature, task: task)
             let outcome = await outcome(of: task, timeout: registration.timeout)
             chain.running = nil
             if Task.isCancelled { return }
+            // The hook's requests counted as they ended; a hook's own error or its timeout shows without changing the count of consecutive request errors.
             switch outcome {
             case .finished(let result):
-                recordSuccess(of: registration.feature)
                 guard case .actions(let actions, let stop) = result else { continue }
                 for action in actions where registration.allowedActions.contains(action.kind) && host.apply(action, for: event) {
                     applied.append(action)
                 }
                 if stop { return }
             case .failed(let error):
-                record(error, of: registration.feature)
+                lastErrors[registration.feature] = error
             case .timedOut:
-                record(AIHookError.timedOut, of: registration.feature)
+                lastErrors[registration.feature] = AIHookError.timedOut
             case .stopped:
                 continue
             }
@@ -351,9 +352,9 @@ public final class AIHookCenter: ObservableObject {
         }
     }
 
-    /// Whether the event's address, if any, may reach hooks.
+    /// Whether every address of the event may reach hooks.
     private func reachesHooks(_ event: AIHookEvent) -> Bool {
-        event.url.map(service.settings.allowsAI(on:)) ?? true
+        event.urls.allSatisfy(service.settings.allowsAI(on:))
     }
 
     /// Whether the feature's hooks may run now. Hooks of a feature that is paused, not automatic, off, or without a usable model of its own skip quietly; hooks of one over a budget skip with that budget as their error, so that its row says so.
@@ -366,14 +367,13 @@ public final class AIHookCenter: ObservableObject {
         return true
     }
 
-    private func recordSuccess(of feature: AIFeatureID) {
-        if lastErrors[feature] != nil { lastErrors[feature] = nil }
-        failureCounts[feature] = nil
-    }
-
-    /// Keeps the error for the feature's row. Consecutive authentication and provider errors pause the feature's hooks, since every further request would fail the same way.
-    private func record(_ error: any Error, of feature: AIFeatureID) {
-        lastErrors[feature] = error
+    /// A hook's request that ended with a reply clears the feature's error, and one that failed keeps its error for the feature's row. Consecutive authentication and provider errors pause the feature's hooks, since every further request would fail the same way; any other end of a request starts the count again.
+    private func recordRequest(endingWith error: (any Error)?, of feature: AIFeatureID) {
+        if let error {
+            lastErrors[feature] = error
+        } else if lastErrors[feature] != nil {
+            lastErrors[feature] = nil
+        }
         switch error as? AIError {
         case .authentication?, .providerUnavailable?:
             let count = (failureCounts[feature] ?? 0) + 1
@@ -408,14 +408,30 @@ public final class AIHookCenter: ObservableObject {
     }
 }
 
-/// The client a hook gets: each request goes out under the hook's feature, so a hook uses its own route, data scope, and daily limit.
+/// The client a hook gets: each request goes out under the hook's feature, so a hook uses its own route, data scope, and daily limit, and the center learns how each request ended.
 private struct AIHookClient: AIClient {
     let feature: AIFeatureID
     let base: any AIClient
+    /// Gets the end of each request: nil for a reply, or its error. A request whose reader stopped reports nothing.
+    let requestDidEnd: @MainActor @Sendable ((any Error)?) -> Void
 
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         var request = request
         request.feature = feature
-        return base.stream(request)
+        let events = base.stream(request)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await event in events { continuation.yield(event) }
+                    // A stream read by a cancelled task ends without an error.
+                    if !Task.isCancelled { await requestDidEnd(nil) }
+                    continuation.finish()
+                } catch {
+                    if !Task.isCancelled { await requestDidEnd(error) }
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }

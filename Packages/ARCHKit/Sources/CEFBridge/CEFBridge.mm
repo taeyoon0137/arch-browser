@@ -1448,6 +1448,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+- (void)handleDocumentLoadEnd;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
 - (void)handleBeforePopup:(int)popupID
@@ -1842,6 +1843,13 @@ public:
         }
     }
 
+    // CEF calls this for every frame, and also after a load that failed, with its error code, which is negative.
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+        if (frame->IsMain() && httpStatusCode >= 0) {
+            [owner_ handleDocumentLoadEnd];
+        }
+    }
+
     void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString> &icon_urls) override {
         NSMutableArray<NSString *> *urls = [NSMutableArray arrayWithCapacity:icon_urls.size()];
         for (const CefString &url : icon_urls) {
@@ -2144,6 +2152,10 @@ private:
     _canGoBack = canGoBack;
     _canGoForward = canGoForward;
     [_delegate cefBrowserDidChangeLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+}
+
+- (void)handleDocumentLoadEnd {
+    [_delegate cefBrowserDidFinishLoadingDocument];
 }
 
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls {

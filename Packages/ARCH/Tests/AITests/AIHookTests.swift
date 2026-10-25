@@ -1,4 +1,4 @@
-// The hook center: ordering by priority, `stop`, allowed actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, actions dropped after cancellation, the checks that keep hooks from running, and pausing after consecutive failures.
+// The hook center: ordering by priority, `stop`, allowed actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, actions dropped after cancellation, the checks that keep hooks from running, the errors each feature's row shows, and pausing after consecutive failed requests.
 import Foundation
 import Testing
 @testable import AI
@@ -61,7 +61,7 @@ import Testing
         let fixture = HookFixture()
         let log = HookLog()
         fixture.center.subscribe(registration(delay: .milliseconds(100)) { event, _ in
-            log.record(event.url?.path ?? "")
+            log.record(event.urls.first?.path ?? "")
             return .none
         })
         let tab = UUID()
@@ -77,7 +77,7 @@ import Testing
         let fixture = HookFixture()
         let log = HookLog()
         fixture.center.subscribe(registration(timeout: .seconds(60)) { event, _ in
-            let path = event.url?.path ?? ""
+            let path = event.urls.first?.path ?? ""
             log.record("start \(path)")
             do {
                 try await Task.sleep(for: .seconds(30))
@@ -191,7 +191,7 @@ import Testing
         let fixture = HookFixture()
         let log = HookLog()
         fixture.center.subscribe(registration { event, _ in
-            log.record(event.url?.absoluteString ?? "")
+            log.record(event.urls.first?.absoluteString ?? "")
             return .none
         })
         fixture.service.settings.excludedSites.append(AISitePattern("example.org"))
@@ -201,6 +201,23 @@ import Testing
         #expect(await eventually { log.entries == ["https://example.com/"] })
         try? await Task.sleep(for: .milliseconds(100))
         #expect(log.entries == ["https://example.com/"])
+    }
+
+    @Test func aDownloadFromAPageWhereAIIsOffReachesNoHook() async {
+        let fixture = HookFixture()
+        let log = HookLog()
+        fixture.center.subscribe(AIHookRegistration(feature: automaticFeature.id, events: [.downloadFinished], allowedActions: []) { event, _ in
+            log.record(event.urls.map(\.absoluteString).joined(separator: " "))
+            return .none
+        })
+        fixture.service.settings.excludedSites.append(AISitePattern("mail.example.org"))
+        for page in ["https://mail.example.org/inbox", "https://example.com/files"] {
+            let info = AIDownloadInfo(filename: "a.pdf", sourceURL: URL(string: "https://attachments.example.net/a.pdf")!, pageURL: URL(string: page)!)
+            fixture.center.post(.downloadFinished(AIDownloadFinish(downloadID: UUID(), fileURL: URL(fileURLWithPath: "/tmp/a.pdf"), info: info, isNamedByUser: false)))
+        }
+        #expect(await eventually { log.entries.count == 1 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(log.entries == ["https://attachments.example.net/a.pdf https://example.com/files"])
     }
 
     @Test func requestsGoOutUnderTheHooksOwnFeature() async throws {
@@ -260,6 +277,44 @@ import Testing
         fixture.center.resume(automaticFeature.id)
         fixture.center.post(pageLoad())
         #expect(await eventually { hookLog.entries.filter { $0 == "request" }.count == AIHookCenter.failuresBeforePause + 1 })
+    }
+
+    @Test func aHookThatSendsNoRequestLeavesTheErrorAndTheCount() async {
+        let fixture = HookFixture(script: ["model-a": [.fail(.authentication(AIProviderID()))]])
+        let log = HookLog()
+        fixture.center.subscribe(pathRegistration(log: log))
+        for (index, path) in ["/request", "/skip", "/request", "/skip", "/request"].enumerated() {
+            fixture.center.post(pageLoad(path: path))
+            #expect(await eventually { log.entries.count == index + 1 })
+            if path == "/skip" {
+                try? await Task.sleep(for: .milliseconds(50))
+                #expect(fixture.center.lastErrors[automaticFeature.id] != nil)
+            }
+        }
+        #expect(await eventually { fixture.center.pausedFeatures == [automaticFeature.id] })
+    }
+
+    @Test func aHooksOwnErrorShowsWithoutStartingTheCountAgain() async {
+        let fixture = HookFixture(script: ["model-a": [.fail(.authentication(AIProviderID()))]])
+        let log = HookLog()
+        fixture.center.subscribe(pathRegistration(log: log))
+        for (index, path) in ["/request", "/request", "/throw"].enumerated() {
+            fixture.center.post(pageLoad(path: path))
+            #expect(await eventually { log.entries.count == index + 1 })
+        }
+        #expect(await eventually { fixture.center.lastErrors[automaticFeature.id] is HookTestError })
+        #expect(fixture.center.pausedFeatures.isEmpty)
+        fixture.center.post(pageLoad(path: "/request"))
+        #expect(await eventually { fixture.center.pausedFeatures == [automaticFeature.id] })
+    }
+
+    @Test func aRequestThatSucceedsClearsTheError() async {
+        let fixture = HookFixture(script: ["model-a": [.event(.text("Name")), .event(.finished(.completed))]])
+        fixture.center.subscribe(pathRegistration(log: HookLog()))
+        fixture.center.post(pageLoad(path: "/throw"))
+        #expect(await eventually { fixture.center.lastErrors[automaticFeature.id] is HookTestError })
+        fixture.center.post(pageLoad(path: "/request"))
+        #expect(await eventually { fixture.center.lastErrors.isEmpty })
     }
 
     @Test func changingTheRouteResumesAPausedHookAndClearsItsError() async {
@@ -391,6 +446,23 @@ func requestingRegistration(log: HookLog) -> AIHookRegistration {
         return .none
     }
 }
+
+/// A hook that sends one text request for a page at `/request`, throws an error of its own at `/throw`, and sends nothing elsewhere, logging the path once it is done.
+func pathRegistration(log: HookLog) -> AIHookRegistration {
+    registration { event, context in
+        let path = event.urls.first?.path ?? ""
+        defer { log.record(path) }
+        switch path {
+        case "/request": _ = try await context.client.reply(textRequest(automaticFeature))
+        case "/throw": throw HookTestError()
+        default: break
+        }
+        return .none
+    }
+}
+
+/// An error a test's hook throws outside its requests.
+struct HookTestError: Error {}
 
 func pageLoad(_ tabID: UUID = UUID(), path: String = "/page") -> AIHookEvent {
     .pageLoaded(AIPageLoad(tabID: tabID, url: URL(string: "https://example.org\(path)")!, isRestore: false))

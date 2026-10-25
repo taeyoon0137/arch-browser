@@ -52,6 +52,7 @@ public final class WebKitDownloads: EngineDownloads {
 final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate {
     let id = UUID().uuidString
     let sourceURL: URL
+    let pageURL: URL?
     private(set) var targetPath: URL?
     private(set) var state: EngineDownloadState = .inProgress
     private(set) var completedBytes: Int64 = 0
@@ -68,6 +69,8 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
         self.webView = webView
         self.owner = owner
         self.sourceURL = download.originalRequest?.url ?? webView.url ?? URL(string: "about:blank")!
+        // While a navigation turns into a download, the web view's address can already be the download's, so the page is the current back-forward item.
+        self.pageURL = webView.backForwardList.currentItem?.url
         super.init()
         attach(download)
     }

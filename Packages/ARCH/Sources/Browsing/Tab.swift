@@ -24,7 +24,7 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var title: String
     /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
     @Published public internal(set) var customTitle: String?
-    /// A name a hook gave the page, shown while the user has not named the tab. Another document clears it, and the session restores it.
+    /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it, even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
     @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
     @Published public private(set) var isLoading: Bool
@@ -47,6 +47,8 @@ public final class Tab: ObservableObject, Identifiable {
     var didClose: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.
     var didFinishLoad: (() -> Void)?
+    /// Sends each time the main frame finishes loading a document, for the AI interface's hooks. Loads of frames inside the page and navigations within the document send nothing.
+    let didLoadDocument = PassthroughSubject<Void, Never>()
     /// The session sets this callback to close the sheets of a page whose dialogs no longer apply.
     var didCancelDialogs: (() -> Void)?
     /// The session sets this callback to bring the tab forward, so that a sheet it needs can show.
@@ -118,7 +120,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
-        if let url, let suggested = suggestedTitle, url.withoutFragment != suggested.url.withoutFragment { suggestedTitle = nil }
+        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
@@ -138,6 +140,7 @@ extension Tab: EngineWebContentsUIDelegate {
             HistoryStore.shared.record(url, title: webContents.title)
         }
     }
+    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
     }
@@ -408,10 +411,16 @@ extension Tab: EngineWebContentsNavigationDelegate {
     }
 }
 
-/// A name a hook gave a tab's page, with the page's address, so that the name goes when the tab shows another document.
+/// A hook's name for a tab's document, with the document's address, so that the name goes when the tab moves to another address.
 struct SuggestedTitle: Codable, Equatable {
-    var title: String
+    /// Nil once the user turned the name down: the tab shows the page's title, and hooks leave the document unnamed.
+    var title: String?
     var url: URL
+
+    /// Whether the name or its refusal is about the document at `url`, whose fragment only names a place in it.
+    func isFor(_ url: URL) -> Bool {
+        self.url.withoutFragment == url.withoutFragment
+    }
 }
 
 extension URL {

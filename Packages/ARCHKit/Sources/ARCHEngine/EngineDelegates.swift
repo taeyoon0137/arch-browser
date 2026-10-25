@@ -106,6 +106,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents)
     func webContentsDidChangeURL(_ webContents: any EngineWebContents)
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents)
+    /// The main frame finished loading a document, whose frames may still be loading. Navigations within the document report nothing.
+    func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents)
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents)
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
@@ -143,6 +145,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeURL(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {}
+    func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}

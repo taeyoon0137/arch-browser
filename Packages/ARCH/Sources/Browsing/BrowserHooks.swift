@@ -1,4 +1,4 @@
-// The session's side of the AI interface's hooks: posts the tabs' finished page loads, new tabs, and finished downloads to the hook center, applies the actions hooks return while they still fit their event, and subscribes the built-in hooks. It follows the session's tabs and downloads, so the session only attaches it.
+// The session's side of the AI interface's hooks: posts the tabs' document loads, new tabs, and finished downloads to the hook center, applies the actions hooks return while they still fit their event, and subscribes the built-in hooks. It follows the session's tabs and downloads, so the session only attaches it.
 import AI
 import Combine
 import Foundation
@@ -12,11 +12,11 @@ final class BrowserHooks: AIHookHost {
     private weak var session: BrowserSession?
     private let pageSource = TabPageSource()
     private var center: AIHookCenter { AIService.shared.hooks }
-    /// The loading state of each followed tab, by tab.
+    /// The document loads of each followed tab, by tab.
     private var tabObservers: [UUID: AnyCancellable] = [:]
     /// The state of each followed download, by entry.
     private var downloadObservers: [UUID: AnyCancellable] = [:]
-    /// The tabs whose first finished load went out, to mark a restored tab's first load.
+    /// The tabs whose first document load went out, to mark a restored tab's first load.
     private var loadedTabIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
 
@@ -45,7 +45,7 @@ final class BrowserHooks: AIHookHost {
 
     // MARK: Events
 
-    /// Follows each tab's loads and posts a tab that opens, other than one restored from the saved session. A tab that leaves stops its hooks.
+    /// Follows each tab's document loads and posts a tab that opens, other than one restored from the saved session. A tab that leaves stops its hooks.
     private func follow(_ tabs: [Tab], postingNewTabs: Bool) {
         let ids = Set(tabs.map(\.id))
         for id in tabObservers.keys where !ids.contains(id) {
@@ -54,17 +54,17 @@ final class BrowserHooks: AIHookHost {
             center.cancel(subject: id)
         }
         for tab in tabs where tabObservers[tab.id] == nil {
-            tabObservers[tab.id] = tab.$isLoading.removeDuplicates().dropFirst().filter { !$0 }
-                .sink { [weak self, weak tab] _ in
+            tabObservers[tab.id] = tab.didLoadDocument
+                .sink { [weak self, weak tab] in
                     MainActor.assumeIsolated {
-                        if let self, let tab { self.tabDidFinishLoading(tab) }
+                        if let self, let tab { self.tabDidLoadDocument(tab) }
                     }
                 }
             if postingNewTabs, !tab.isRestored { center.post(.tabOpened(AITabOpen(tabID: tab.id, url: tab.url))) }
         }
     }
 
-    private func tabDidFinishLoading(_ tab: Tab) {
+    private func tabDidLoadDocument(_ tab: Tab) {
         guard let url = tab.url else { return }
         let isFirstLoad = loadedTabIDs.insert(tab.id).inserted
         center.post(.pageLoaded(AIPageLoad(tabID: tab.id, url: url, isRestore: tab.isRestored && isFirstLoad)))
@@ -91,12 +91,12 @@ final class BrowserHooks: AIHookHost {
         }
     }
 
-    /// Hooks learn the file's name, type, size, and address, never its contents. The engines do not report the page that started a download.
+    /// Hooks learn the file's name, type, size, and address, and the page it started from, never its contents.
     private func downloadDidFinish(_ entry: DownloadEntry, isNamedByUser: Bool) {
         guard let fileURL = entry.fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return }
         let byteCount = max(entry.totalBytes, entry.completedBytes)
         let info = AIDownloadInfo(filename: fileURL.lastPathComponent, mediaType: UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType,
-                                  byteCount: byteCount > 0 ? byteCount : nil, sourceURL: entry.item.sourceURL)
+                                  byteCount: byteCount > 0 ? byteCount : nil, sourceURL: entry.item.sourceURL, pageURL: entry.item.pageURL)
         center.post(.downloadFinished(AIDownloadFinish(downloadID: entry.id, fileURL: fileURL, info: info, isNamedByUser: isNamedByUser)))
     }
 
@@ -117,17 +117,23 @@ final class BrowserHooks: AIHookHost {
         }
     }
 
-    /// Whether the tab name hook asks for a name for the load's page: not for a restored tab's first load, so that launching sends nothing, and not for a page the tab has a hook's name for already.
+    /// Whether the tab name hook asks for a name for the load's page: not for a restored tab's first load, so that launching sends nothing, and not for a document the tab has a hook's name for already.
     func needsName(_ load: AIPageLoad) -> Bool {
         guard !load.isRestore, let tab = unnamedTab(showing: load) else { return false }
-        return tab.suggestedTitle?.url.withoutFragment != load.url.withoutFragment
+        return tab.suggestedTitle?.isFor(load.url) != true
     }
 
-    /// The load's tab while it is a space's tab without the user's name that still shows the loaded document. A favorite's tab goes by its favorite's name.
+    /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
-        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }), tab.customTitle == nil,
-              tab.url?.withoutFragment == load.url.withoutFragment else { return nil }
+        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }),
+              Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.url) else { return nil }
         return tab
+    }
+
+    /// Whether a tab that shows `shownURL`, with the user's name `customTitle` and a hook's name or its refusal `suggestedTitle`, takes a hook's name for the document at `url`: while it still shows the document, the user has not named it, and the user has not turned down a hook's name for the document.
+    static func takesName(for url: URL, customTitle: String?, suggestedTitle: SuggestedTitle?, shownURL: URL?) -> Bool {
+        let isTurnedDown = suggestedTitle.map { $0.title == nil && $0.isFor(url) } ?? false
+        return customTitle == nil && !isTurnedDown && shownURL?.withoutFragment == url.withoutFragment
     }
 
     /// The first line of a hook's name, trimmed and cut to `maximumTabNameLength` characters, or nil when nothing is left.

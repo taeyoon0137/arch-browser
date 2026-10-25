@@ -25,7 +25,7 @@ struct SessionSnapshot: Codable {
         var state: Data?
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
-        /// The name a hook gave the tab's page, with the page's address. `nil` without one, in closed-tab records, and in files before version 12.
+        /// The name a hook gave the tab's document, or the user's refusal of it, with the document's address. `nil` without either, in closed-tab records, and in files before version 12.
         var suggestedTitle: SuggestedTitle?
     }
 

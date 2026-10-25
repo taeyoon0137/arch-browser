@@ -1,4 +1,4 @@
-// What the built-in hooks' actions do to the browser: a downloaded file's new name is safe, keeps the extension, and avoids taken names, Restore Original Name undoes it, and a tab's name is the first line of the reply, cut to length.
+// What the built-in hooks' actions do to the browser: a downloaded file's new name is safe, keeps the extension, and avoids taken names, Restore Original Name undoes it, a tab's name is the first line of the reply, cut to length, and a tab takes one only while the user has neither named it nor turned the name down for its document.
 import ARCHEngine
 import Foundation
 import Testing
@@ -10,6 +10,9 @@ import Testing
         #expect(DownloadEntry.safeFilename("Quarterly Report.PDF", keepingExtensionOf: "a1b2.pdf") == "Quarterly Report.pdf")
         #expect(DownloadEntry.safeFilename("../2026/Q3: Plan\nFinal", keepingExtensionOf: "x.zip") == "2026Q3 Plan Final.zip")
         #expect(DownloadEntry.safeFilename("Notes", keepingExtensionOf: "README") == "Notes")
+        #expect(DownloadEntry.safeFilename("Project Backup", keepingExtensionOf: "backup-2026.tar.gz") == "Project Backup.tar.gz")
+        #expect(DownloadEntry.safeFilename("Project Backup.tar.gz", keepingExtensionOf: "backup.TAR.GZ") == "Project Backup.TAR.GZ")
+        #expect(DownloadEntry.safeFilename("Notes", keepingExtensionOf: "notes.v2.gz") == "Notes.gz")
         #expect(DownloadEntry.safeFilename(" ... ", keepingExtensionOf: "x.zip") == nil)
         let long = DownloadEntry.safeFilename(String(repeating: "a", count: 100), keepingExtensionOf: "x.pdf")
         #expect(long?.count == DownloadEntry.maximumFilenameLength)
@@ -50,12 +53,27 @@ import Testing
         #expect(BrowserHooks.tabName(from: String(repeating: "a", count: 100))?.count == BrowserHooks.maximumTabNameLength)
         #expect(BrowserHooks.tabName(from: "   ") == nil)
     }
+
+    @Test func aTabTakesAHooksNameUntilTheUserNamesItOrTurnsTheNameDown() {
+        let page = URL(string: "https://example.org/a")!
+        let named = SuggestedTitle(title: "Example", url: page)
+        let turnedDown = SuggestedTitle(title: nil, url: page)
+        #expect(BrowserHooks.takesName(for: page, customTitle: nil, suggestedTitle: nil, shownURL: URL(string: "https://example.org/a#top")))
+        #expect(BrowserHooks.takesName(for: page, customTitle: nil, suggestedTitle: named, shownURL: page))
+        #expect(!BrowserHooks.takesName(for: page, customTitle: "Mine", suggestedTitle: nil, shownURL: page))
+        #expect(!BrowserHooks.takesName(for: page, customTitle: nil, suggestedTitle: turnedDown, shownURL: page))
+        #expect(!BrowserHooks.takesName(for: URL(string: "https://example.org/a#part")!, customTitle: nil, suggestedTitle: turnedDown, shownURL: page))
+        #expect(!BrowserHooks.takesName(for: page, customTitle: nil, suggestedTitle: nil, shownURL: URL(string: "https://example.org/b")))
+        #expect(named.isFor(URL(string: "https://example.org/a#top")!))
+        #expect(!turnedDown.isFor(URL(string: "https://example.org/b")!))
+    }
 }
 
 /// A download the engine finished at `targetPath`.
 private final class FinishedDownload: EngineDownloadItem {
     let id = "1"
     let sourceURL = URL(string: "https://example.org/files/a1b2.pdf")!
+    let pageURL: URL? = URL(string: "https://example.org/files")
     let targetPath: URL?
     let state = EngineDownloadState.completed
     let completedBytes: Int64 = 3

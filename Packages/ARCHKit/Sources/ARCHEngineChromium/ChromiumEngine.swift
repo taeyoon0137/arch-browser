@@ -500,6 +500,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.canGoForward = canGoForward
         uiDelegate?.webContentsDidChangeLoadingState(self)
     }
+    public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
         let pageURL = url
@@ -643,9 +644,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let uiDelegate, let url = URL(string: url) else { return true }
         return uiDelegate.webContents(self, shouldDownload: url, hasPage: hasDocument)
     }
+    /// CEF reports a main frame's address once its navigation commits, so `url` is still the page's while a navigation turns into a download.
     public func cefBrowserDidStart(_ download: ARCHCEFDownload, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
         guard let downloads = context?.chromiumDownloads else { return decision(nil, true) }
-        downloads.begin(download, suggestedName: suggestedName, decision: decision)
+        downloads.begin(download, pageURL: url, suggestedName: suggestedName, decision: decision)
     }
     public func cefBrowserDidUpdate(_ download: ARCHCEFDownload) {
         context?.chromiumDownloads.update(download)

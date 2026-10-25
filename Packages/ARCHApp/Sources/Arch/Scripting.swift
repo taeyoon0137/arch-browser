@@ -33,7 +33,7 @@ extension ArchApplication {
     }
 
     @objc var uniqueID: String { tab.id.uuidString }
-    /// The user's name for the tab, or the page's title.
+    /// The tab's name as the sidebar shows it: the user's, a hook's, or the page's title.
     @objc var name: String { tab.displayTitle }
     @objc var url: String { tab.url?.absoluteString ?? "" }
 

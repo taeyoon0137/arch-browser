@@ -165,6 +165,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
 - (void)cefBrowserDidChangeURL:(NSString *)url;
 - (void)cefBrowserDidChangeLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+/// Reports that the main frame finished loading a document. The loading state, unlike this, also follows the frames inside the page.
+- (void)cefBrowserDidFinishLoadingDocument;
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks its last report.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;

@@ -601,8 +601,8 @@ public enum AIHookEvent: Sendable {
     public var kind: AIHookEventKind { get }
     /// The tab or download the event is about. A newer event of the same kind and subject replaces an older one.
     public var subject: UUID { get }
-    /// The address the event comes from, to which site exclusions apply: the page, or the download's page or source.
-    public var url: URL? { get }
+    /// The addresses the event comes from, to which site exclusions apply: the page's, or the download's source and the page it started from.
+    public var urls: [URL] { get }
 }
 
 public struct AIPageLoad: Sendable {
@@ -629,8 +629,8 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's `isLoading` turns false and the tab has an address. Whether Chromium reports a same-document navigation that way needs verification; the tab name hook asks nothing for a page it has named already. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A download that started while Settings ▸ General asked where to save each download is named by the user.
-- The engines do not report the page that started a download, so `AIDownloadInfo` carries the file's name, media type (from its extension), size, and source address, without a page address or title.
+- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's main frame finishes loading a document, which the engines report through `webContentsDidFinishLoadingDocument`, and the tab has an address. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
 - `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
 
 ### Subscription
@@ -674,7 +674,7 @@ public protocol AIHookHost: AnyObject {
 
 @MainActor
 public final class AIHookCenter: ObservableObject {
-    /// Each feature's error from its last hook that did not succeed, until one succeeds or the user changes the feature's route.
+    /// Each feature's last error: from its hooks' last request that failed, a hook that failed on its own or timed out, or a reached budget. A request that succeeds or a change to the feature's route clears it, and a hook that sends no request leaves it.
     @Published public private(set) var lastErrors: [AIFeatureID: any Error]
     /// Features whose hooks paused after consecutive authentication or provider errors.
     @Published public private(set) var pausedFeatures: Set<AIFeatureID>
@@ -716,7 +716,7 @@ The center cancels a running hook and its request when:
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 
-The center discards canceled hooks' actions, even ones a hook returns after it was cancelled. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. Three consecutive `authentication` or `providerUnavailable` errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route; changing the route also clears the last error.
+The center discards canceled hooks' actions, even ones a hook returns after it was cancelled. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. The hook's client tells the center how each request ends, other than one the hook stopped reading: a reply clears the feature's last error, and a failure becomes it. Three consecutive `authentication` or `providerUnavailable` request errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route, and any other end of a request starts the count again; changing the route also clears the last error. A hook's own error, outside its requests, and a timeout become the last error without changing the count, and a hook that sends no request changes neither.
 
 ### Actions
 
@@ -733,12 +733,12 @@ public enum AIHookAction: Sendable {
 
 `BrowserHooks` checks each action before applying it:
 
-- `renameTab` applies only to a `pageLoaded` event's tab, while it is a space's tab that the user has not named and that still shows the event's address, ignoring the fragment; a favorite's tab goes by its favorite's name. It takes the first line of the title, trimmed and cut to 60 characters, and sets `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle ?? pageTitle`. Moving to another document clears the suggested title. Renaming the tab to an empty name or to the page's title clears both, and confirming the name the row shows changes nothing. `session.json` (snapshot version 12) stores each open tab's suggested title with its address; closed-tab records keep none.
-- `renameDownload` applies only to a `downloadFinished` event's download, while the user has not chosen its name and its file is still at the event's path. It removes `/` and `:`, turns control characters into spaces, trims spaces and dots from both ends, keeps the file's extension (dropping it from the suggestion when the suggestion repeats it), limits the name to 80 characters with the extension, and picks an unused name in the file's folder. The download row then shows the new name and offers Restore Original Name in its context menu, which gives the file its original name, or the nearest unused one. A finished download's notification keeps the original path, so clicking it after a rename opens the file's folder.
+- `renameTab` applies only to a `pageLoaded` event's tab, while it is a space's tab that the user has neither named nor turned the name down for, and that still shows the event's address, ignoring the fragment; a favorite's tab goes by its favorite's name. It takes the first line of the title, trimmed and cut to 60 characters, and sets `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle?.title ?? pageTitle`. Moving to another address clears the suggested title; another fragment does not, and an address a single-page site sets within its document does, so the row shows the page's title, which such sites update, until the next document load. Renaming the tab to an empty name or to the page's title clears the user's name and turns the hook's name down: `suggestedTitle` keeps the address with a nil title, and hooks leave the tab until it moves to another address. Confirming the name the row shows changes nothing. `session.json` (snapshot version 12) stores each open tab's suggested title or refusal with its address; closed-tab records keep none.
+- `renameDownload` applies only to a `downloadFinished` event's download, while the user has not chosen its name and its file is still at the event's path. It removes `/` and `:`, turns control characters into spaces, trims spaces and dots from both ends, keeps the file's extension (dropping it from the suggestion when the suggestion repeats it), with a compressed archive's `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.tar.zst` as one extension, limits the name to 80 characters with the extension, and picks an unused name in the file's folder. The download row then shows the new name and offers Restore Original Name in its context menu, which gives the file its original name, or the nearest unused one. A finished download's notification keeps the original path, so clicking it after a rename opens the file's folder.
 
 The first hooks (`BuiltInHooks` in `Browsing`):
 
-- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips a restored tab's first load, so that launching sends no request, and a page that has a suggested title already. It reads the tab's page with a 2,000-character limit, skips a page that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
+- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips a restored tab's first load, so that launching sends no request, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
 - `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
 - Both ask for at most 256 output tokens and take the reply's first line without the quotes, emphasis, or final period a model may add.
 

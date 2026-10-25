@@ -204,11 +204,12 @@ import Testing
         #expect(reloadedWindows.map(\.isSidebarVisible) == windows.map(\.isSidebarVisible))
     }
 
-    @Test func suggestedTitlesLoadAndSaveWithTheirAddresses() throws {
+    @Test func suggestedTitlesAndTheirRefusalsLoadAndSaveWithTheirAddresses() throws {
         let folder = try SessionFolder()
         try folder.write(version12File)
         let loaded = try #require(folder.store.load())
-        #expect(loaded.tabs.map(\.suggestedTitle) == [SuggestedTitle(title: "Example Article", url: URL(string: "https://example.org/a")!), nil, nil])
+        #expect(loaded.tabs.map(\.suggestedTitle) == [SuggestedTitle(title: "Example Article", url: URL(string: "https://example.org/a")!),
+                                                      SuggestedTitle(title: nil, url: URL(string: "https://example.org/b")!), nil])
         folder.store.saveNow(loaded)
         #expect(try #require(folder.store.load()).tabs.map(\.suggestedTitle) == loaded.tabs.map(\.suggestedTitle))
     }
@@ -445,7 +446,8 @@ private let version11File = version8File.replacingOccurrences(of: #""version": 8
   ],
 """)
 
-/// A version 12 file: the version 8 file with a suggested title for its first tab.
+/// A version 12 file: the version 8 file with a suggested title for its first tab and the user's refusal of one for its second.
 private let version12File = version8File
     .replacingOccurrences(of: #""version": 8,"#, with: #""version": 12,"#)
     .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "suggestedTitle": { "title": "Example Article", "url": "https://example.org/a" }, "isPinned": true,"#)
+    .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "suggestedTitle": { "url": "https://example.org/b" }, "isPinned": false,"#)
