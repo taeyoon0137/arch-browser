@@ -166,7 +166,8 @@ import Testing
         }
         // Under load the timeout can end the tool before it writes its process group; that tool has already ended.
         guard let group = try? await processGroup(in: pidFile) else { return }
-        #expect(await processGroupEnds(group, within: .seconds(1.5)))
+        // SIGTERM ends the group, or under load the SIGKILL two seconds later does.
+        #expect(await processGroupEnds(group, within: .seconds(4)))
     }
 }
 
