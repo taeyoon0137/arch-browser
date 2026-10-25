@@ -7,6 +7,8 @@ import Foundation
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
     public let capabilities: Set<EngineCapability> = [.devTools, .cookies]
+    /// Chromium runs no web extensions until VI.1, which gives the CEF version here.
+    public let extensionRuntimeVersion: String? = nil
     let frameworkPath: String
     let helperPath: String?
     private let accessibility = MainActor.assumeIsolated { ChromiumAccessibility() }

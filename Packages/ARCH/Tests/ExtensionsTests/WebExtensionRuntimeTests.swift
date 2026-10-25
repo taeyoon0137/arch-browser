@@ -15,7 +15,7 @@ struct WebExtensionRuntimeTests {
     private let manager: PluginManager
 
     init() {
-        host.engines = [engine]
+        host.engines = [.webKit: engine]
         runtime = WebExtensionRuntime(persona: UUID(), host: host, nativeMessagingHosts: folder.url)
         manager = PluginManager.withWebExtensions(runtime, in: folder)
     }
@@ -77,7 +77,7 @@ struct WebExtensionRuntimeTests {
         engine.refused = [sampleID]
         let installed = try await manager.installEverything(from: sampleExtensionFolder)
         #expect(await eventually { manager.plugins.first?.isEnabled == false })
-        #expect(manager.plugins.first?.failure == "Arch could not start the extension: The engine refused it.")
+        #expect(manager.plugins.first?.failure == "Arch could not start it on WebKit tabs: The engine refused it.")
         #expect(manager.contributions.paletteCommands(matching: installed.manifest.name).isEmpty)
     }
 

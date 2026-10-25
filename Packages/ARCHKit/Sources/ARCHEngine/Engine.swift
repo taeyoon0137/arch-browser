@@ -44,6 +44,8 @@ public struct EngineApplicationConfiguration: Sendable {
 public protocol Engine: AnyObject {
     var kind: EngineKind { get }
     var capabilities: Set<EngineCapability> { get }
+    /// The version of the engine's web extension runtime, read without starting the engine, or nil without the `extensions` capability. What a check of a package found holds while the engine has this version.
+    var extensionRuntimeVersion: String? { get }
     func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication
     /// Removes what a context with the storage identifier `identifier` stored, while no context of this process uses it, as at launch before `makeApplication`. Reports on the main thread whether the data is gone; false means try again at a later launch.
     func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void)

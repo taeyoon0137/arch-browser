@@ -1,4 +1,4 @@
-// What the web extension tests share: the sample extension, whether this Mac runs web extensions, temporary folders, a plugin manager whose secrets stay out of the Keychain, a host that records what the runtime asks of the browser, and an engine that records what the runtime loads.
+// What the web extension tests share: the sample extension, whether this Mac runs web extensions, temporary folders, a plugin manager whose secrets stay out of the Keychain, a host that records what the runtime asks of the browser, and an engine that records what the runtime checks and loads.
 import AppKit
 import ARCHEngine
 import ARCHEngineWebKit
@@ -60,13 +60,19 @@ extension PluginManager {
 /// A browser that gives the runtime its engines and records the popups and sheets the runtime asks it to show. Sheets get the answer the test chose.
 @MainActor
 final class RecordingHost: WebExtensionHost {
-    var engines: [any EngineExtensions] = []
+    var engines: [EngineKind: any EngineExtensions] = [:]
+    /// The version of each engine's extension runtime, `1` for an engine the test does not name.
+    var versions: [EngineKind: String] = [:]
     var tabs: [UUID: any EngineWebContents] = [:]
     private(set) var popups: [NSPopover] = []
     private(set) var sheets: [NSAlert] = []
     var sheetAnswer = NSApplication.ModalResponse.alertFirstButtonReturn
 
-    func extensionEngines(in persona: PersonaID) -> [any EngineExtensions] { engines }
+    var extensionEngineVersions: [EngineKind: String] {
+        Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
+    }
+
+    func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions] { engines }
     func webContents(ofTab id: UUID) -> (any EngineWebContents)? { tabs[id] }
     func activate(_ tab: any EngineWebContents) {}
     func close(_ tab: any EngineWebContents) {}
@@ -82,16 +88,27 @@ final class RecordingHost: WebExtensionHost {
     }
 }
 
-/// An engine that records what the runtime loads, unloads, and deletes, and refuses to load the identifiers in `refused`.
+/// An engine that records what the runtime checks, loads, unloads, and deletes, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`.
 final class RecordingEngine: EngineExtensions {
     weak var delegate: (any EngineExtensionsDelegate)?
     private(set) var loaded: [String: EngineExtension] = [:]
+    /// How often each identifier loaded.
+    private(set) var loadCounts: [String: Int] = [:]
+    private(set) var checkCount = 0
     private(set) var removedData: [String] = []
+    var refusedNames: Set<String> = []
     var refused: Set<String> = []
+
+    func check(_ packageURL: URL) async throws {
+        checkCount += 1
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: packageURL.appendingPathComponent("manifest.json"))) as? [String: Any]
+        if let name = manifest?["name"] as? String, refusedNames.contains(name) { throw RecordingEngineError.refused }
+    }
 
     func load(_ extension: EngineExtension) async throws {
         guard !refused.contains(`extension`.id) else { throw RecordingEngineError.refused }
         loaded[`extension`.id] = `extension`
+        loadCounts[`extension`.id, default: 0] += 1
     }
 
     func unload(_ id: String) {

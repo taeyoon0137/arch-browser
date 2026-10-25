@@ -1010,11 +1010,12 @@ public final class BrowserSession: ObservableObject {
         if let plugins = engines.plugins { return plugins }
         let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost,
                                                 nativeMessagingHosts: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
+        // The host knows the session before the manager asks the runtime which engines run extensions.
+        webExtensionHost.follow(webExtensions, of: personaID, in: self)
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
         engines.plugins = plugins
         engines.webExtensions = webExtensions
         pluginPages.follow(plugins, of: personaID)
-        webExtensionHost.follow(webExtensions, of: personaID, in: self)
         return plugins
     }
 
@@ -1024,11 +1025,24 @@ public final class BrowserSession: ObservableObject {
         return engines(of: personaID).webExtensions
     }
 
-    /// The Persona's profiles in the engines that run web extensions, which start if they have not started.
-    func extensionEngines(in personaID: Persona.ID) -> [any EngineExtensions] {
-        guard personas.contains(where: { $0.id == personaID }) else { return [] }
-        return registry.registeredKinds.filter { registry.engine(for: $0)?.capabilities.contains(.extensions) == true }
-            .compactMap { runtime(for: $0, in: personaID).context.extensions }
+    /// The registered engines that run web extensions on this Mac, each with its extension runtime's version, without starting any of them.
+    var extensionEngineVersions: [EngineKind: String] {
+        var versions: [EngineKind: String] = [:]
+        for kind in registry.registeredKinds {
+            guard let engine = registry.engine(for: kind), engine.capabilities.contains(.extensions), let version = engine.extensionRuntimeVersion else { continue }
+            versions[kind] = version
+        }
+        return versions
+    }
+
+    /// The Persona's profiles in the engines that run web extensions, by engine, which start if they have not started.
+    func extensionEngines(in personaID: Persona.ID) -> [EngineKind: any EngineExtensions] {
+        guard personas.contains(where: { $0.id == personaID }) else { return [:] }
+        var engines: [EngineKind: any EngineExtensions] = [:]
+        for kind in extensionEngineVersions.keys {
+            engines[kind] = runtime(for: kind, in: personaID).context.extensions
+        }
+        return engines
     }
 
     /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch. Its web extensions leave the engines with them.

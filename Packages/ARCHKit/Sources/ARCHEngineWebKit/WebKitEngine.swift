@@ -13,6 +13,12 @@ public final class WebKitEngine: Engine {
         return capabilities.union([.extensions])
     }
 
+    /// The WebKit framework's bundle version, such as `22625.2.5.11.1`, which a macOS update changes; the system's version if the framework names none.
+    public var extensionRuntimeVersion: String? {
+        guard #available(macOS 15.4, *) else { return nil }
+        return Bundle(for: WKWebView.self).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ProcessInfo.processInfo.operatingSystemVersionString
+    }
+
     public init() {}
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {

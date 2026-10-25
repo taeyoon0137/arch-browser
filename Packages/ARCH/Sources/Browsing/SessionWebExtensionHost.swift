@@ -17,7 +17,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
     /// Made with the session, which passes itself with each runtime it follows.
     nonisolated init() {}
 
-    /// Reports the Persona's windows to the runtime now and each time they change.
+    /// Reports the Persona's windows to the runtime now and each time they change. The session follows a runtime before its plugin manager reads the engines that run extensions.
     func follow(_ runtime: WebExtensionRuntime, of personaID: Persona.ID, in session: BrowserSession) {
         self.session = session
         runtimes[personaID] = runtime
@@ -77,8 +77,12 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     // MARK: WebExtensionHost
 
-    func extensionEngines(in persona: PersonaID) -> [any EngineExtensions] {
-        session?.extensionEngines(in: persona) ?? []
+    var extensionEngineVersions: [EngineKind: String] {
+        session?.extensionEngineVersions ?? [:]
+    }
+
+    func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions] {
+        session?.extensionEngines(in: persona) ?? [:]
     }
 
     func webContents(ofTab id: UUID) -> (any EngineWebContents)? {

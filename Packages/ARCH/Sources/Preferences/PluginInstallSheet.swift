@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data.
 import LocalAuthentication
 import Plugins
 import SwiftUI
@@ -35,6 +35,10 @@ struct PluginInstallSheet: View {
                 Text("Version \(manifest.version) \(origin). \(manifest.summary)")
                     .foregroundStyle(.secondary)
                 if let note = package.kind.note {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(package.engineNotes, id: \.self) { note in
                     Text(note)
                         .foregroundStyle(.secondary)
                 }

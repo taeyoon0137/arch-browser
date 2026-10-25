@@ -1,5 +1,6 @@
 // Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it.
 import AI
+import ARCHEngine
 import Browsing
 import Plugins
 import SwiftUI
@@ -101,7 +102,7 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. The footer says where the plugin came from, where a web extension runs, why the plugin cannot run on this Mac, if it cannot, and why the manager switched it off, if it did.
+/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, and, while it is on, why it could not start on an engine.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -146,6 +147,10 @@ private struct PluginSection: View {
                     Text(note)
                         .foregroundStyle(.secondary)
                 }
+                if let note = plugin.enginesNote {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                }
                 if let reason = plugin.unavailability {
                     Text(reason)
                         .foregroundStyle(.red)
@@ -153,6 +158,13 @@ private struct PluginSection: View {
                 if let reason = plugin.failure {
                     Text(reason)
                         .foregroundStyle(.red)
+                }
+                // A plugin that failed on every engine is off, and its failure says why.
+                if plugin.isEnabled {
+                    ForEach(EngineKind.allCases.compactMap { plugin.engineFailures[$0] }, id: \.self) { reason in
+                        Text(reason)
+                            .foregroundStyle(.red)
+                    }
                 }
                 if let failure {
                     Text(failure)
@@ -285,9 +297,9 @@ private struct PluginSecretRow<Title: View>: View {
 }
 
 extension PluginKind {
-    /// What Settings and the install sheet say about plugins of the kind, if anything.
+    /// What Settings and the install sheet say about plugins of the kind, if anything, before where the plugin runs.
     var note: String? {
-        self == .webExtension ? "A web extension, which runs on WebKit tabs." : nil
+        self == .webExtension ? "A web extension." : nil
     }
 }
 

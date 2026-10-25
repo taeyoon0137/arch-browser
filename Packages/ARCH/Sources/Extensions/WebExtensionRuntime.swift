@@ -1,4 +1,4 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run extensions, and does for those engines what the app does for extensions: it shows their popups, asks the user about access they request while they run, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs.
+// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, and does for those engines what the app does for extensions: it shows their popups, asks the user about access they request while they run, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
 import AppKit
 import ARCHEngine
 import Plugins
@@ -6,8 +6,10 @@ import Plugins
 /// What `Browsing` provides so that a Persona's web extensions reach its engines, tabs, and windows.
 @MainActor
 public protocol WebExtensionHost: AnyObject {
-    /// The Persona's profiles in the engines that run web extensions, which the host starts if they have not started.
-    func extensionEngines(in persona: PersonaID) -> [any EngineExtensions]
+    /// The engines whose runtime runs web extensions on this Mac, each with its runtime's version, read without starting any profile.
+    var extensionEngineVersions: [EngineKind: String] { get }
+    /// The Persona's profiles in the engines that run web extensions, by engine, which the host starts if they have not started.
+    func extensionEngines(in persona: PersonaID) -> [EngineKind: any EngineExtensions]
     /// The web contents of the tab while it is open.
     func webContents(ofTab id: UUID) -> (any EngineWebContents)?
     /// Selects the tab in a window, as a click on its row does.
@@ -23,7 +25,7 @@ public protocol WebExtensionHost: AnyObject {
 public struct WebExtensionActionItem: Identifiable {
     public let id: PluginID
     public let name: String
-    /// Nil while the tab's engine does not run the extension, as on a Chromium tab, or before the extension has loaded.
+    /// Nil while the tab's engine does not run the extension, as on a Chromium tab or one whose engine refused its package, or before the extension has loaded.
     public let action: EngineExtensionAction?
 }
 
@@ -32,15 +34,17 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     public nonisolated let kind = PluginKind.webExtension
     public nonisolated let manifestFileName = WebExtensionManifest.fileName
     public var onFailure: ((PluginID, String) -> Void)?
+    public var onCheck: ((PluginID, [EngineKind: PluginEngineCheck]) -> Void)?
+    public var onEngineFailure: ((PluginID, EngineKind, String) -> Void)?
     private let persona: PersonaID
     private weak var host: (any WebExtensionHost)?
     private let nativeMessaging: NativeMessaging
-    /// The Persona's profiles in the engines that run extensions, from the first extension that loads or goes.
-    private var engines: [any EngineExtensions]?
+    /// The Persona's profiles in the engines that run extensions, from the first extension that is checked, loads, or goes.
+    private var attached: [EngineKind: any EngineExtensions]?
     /// The enabled extensions, in the order the user installed them, as the manager last listed them.
     private var enabled: [InstalledPlugin] = []
-    /// The extensions the engines run, with the install each loaded.
-    private var loaded: [PluginID: InstalledPlugin] = [:]
+    /// The extensions each engine runs, with what it loaded.
+    private var loaded: [EngineKind: [PluginID: LoadedExtension]] = [:]
     /// The last change to the engines; each waits for the one before, so that loads and unloads reach the engines in order.
     private var engineChange: Task<Void, Never>?
     /// The Persona's windows and the focused one, as the host last reported them, for engines that attach later.
@@ -58,10 +62,35 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         try WebExtensionManifest(packageAt: root, source: source).manifest
     }
 
-    /// WebKit runs web extensions from macOS 15.4; Chromium does not run them yet.
+    /// The engines that the host reports as running web extensions, with their runtimes' versions: WebKit from macOS 15.4; Chromium does not run them yet.
+    public var engines: [EngineKind: String] {
+        host?.extensionEngineVersions ?? [:]
+    }
+
+    /// Web extensions are unavailable only while no engine runs them on this Mac.
     public var unavailability: String? {
+        guard engines.isEmpty else { return nil }
         guard #available(macOS 15.4, *) else { return "Web extensions need macOS 15.4 or later." }
-        return nil
+        return "No engine on this Mac runs web extensions."
+    }
+
+    /// Checks the package in each engine that runs extensions, in the order of `EngineKind`, starting the Persona's profile there as loading does.
+    public func check(packageAt root: URL) async -> [EngineKind: PluginEngineCheck] {
+        guard unavailability == nil else { return [:] }
+        var checks: [EngineKind: PluginEngineCheck] = [:]
+        for (kind, engine) in orderedEngines() {
+            checks[kind] = await Self.check(root, in: engine, of: kind)
+        }
+        return checks
+    }
+
+    private static func check(_ packageURL: URL, in engine: any EngineExtensions, of kind: EngineKind) async -> PluginEngineCheck {
+        do {
+            try await engine.check(packageURL)
+            return .runs
+        } catch {
+            return .refused("\(kind.displayName) cannot run this extension: \(error.localizedDescription)")
+        }
     }
 
     public func run(_ enabled: [InstalledPlugin]) {
@@ -73,15 +102,25 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         WebExtensionPlugin(runtime: self, id: installed.id)
     }
 
-    /// Takes the extension out of the engines and deletes its storage there.
+    /// Takes the extension out of every engine and deletes its storage there.
     public func remove(_ installed: InstalledPlugin) {
         enabled.removeAll { $0.id == installed.id }
         changeEngines { runtime in
             let id = WebExtensionManifest.extensionID(of: installed.id)
-            let engines = runtime.attachedEngines()
-            engines.forEach { $0.unload(id) }
-            runtime.loaded[installed.id] = nil
-            for engine in engines { await engine.removeData(of: id) }
+            let engines = runtime.orderedEngines()
+            for (kind, engine) in engines {
+                engine.unload(id)
+                runtime.loaded[kind]?[installed.id] = nil
+            }
+            for (_, engine) in engines { await engine.removeData(of: id) }
+        }
+    }
+
+    /// Waits until the changes to the engines asked for so far, and those they lead to, are done.
+    func waitForEngines() async {
+        while let change = engineChange {
+            await change.value
+            if engineChange == change { return }
         }
     }
 
@@ -95,22 +134,48 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// Unloads the extensions that are no longer enabled or whose install changed, then loads the enabled ones that are not loaded. An extension that an engine cannot start goes out of every engine, and the manager switches it off with why.
-    private func loadEnabledExtensions() async {
-        guard !enabled.isEmpty || !loaded.isEmpty else { return }
-        let engines = attachedEngines()
-        for (id, installed) in loaded where !enabled.contains(installed) {
-            engines.forEach { $0.unload(WebExtensionManifest.extensionID(of: id)) }
-            loaded[id] = nil
+    /// What one engine loaded for an extension. An update gives the install a new date, so that the engine loads the new package.
+    private struct LoadedExtension {
+        let installed: InstalledPlugin
+        let engineExtension: EngineExtension
+
+        /// Whether the engine loaded what it would load for `installed`. The engines' answers and failures do not count, so that recording them leaves a running copy alone.
+        func matches(_ installed: InstalledPlugin, _ engineExtension: EngineExtension) -> Bool {
+            self.engineExtension == engineExtension && self.installed.installedAt == installed.installedAt
         }
-        for installed in enabled where loaded[installed.id] == nil {
-            guard let engineExtension = Self.engineExtension(installed) else { continue }
-            do {
-                for engine in engines { try await engine.load(engineExtension) }
-                loaded[installed.id] = installed
-            } catch {
-                engines.forEach { $0.unload(engineExtension.id) }
-                onFailure?(installed.id, "Arch could not start the extension: \(error.localizedDescription)")
+    }
+
+    /// In each engine, unloads the extensions that are no longer enabled, whose install changed, or that no longer run there; then, for each enabled extension, checks its package in the engines without a current answer, which the manager records, and loads it in each engine that runs it where it is not loaded. An extension that an engine cannot start goes out of that engine, and the manager keeps why.
+    private func loadEnabledExtensions() async {
+        let enabled = enabled
+        guard !enabled.isEmpty || loaded.values.contains(where: { !$0.isEmpty }) else { return }
+        let engines = orderedEngines()
+        let wanted = Dictionary(enabled.compactMap { installed in Self.engineExtension(installed).map { (installed.id, (installed, $0)) } }) { first, _ in first }
+        for (kind, engine) in engines {
+            for (id, load) in loaded[kind] ?? [:] {
+                if let (installed, engineExtension) = wanted[id], load.matches(installed, engineExtension),
+                   installed.engineChecks[kind] != false, installed.engineFailures[kind] == nil { continue }
+                engine.unload(load.engineExtension.id)
+                loaded[kind]?[id] = nil
+            }
+        }
+        for installed in enabled {
+            guard let engineExtension = wanted[installed.id]?.1 else { continue }
+            // Every answer reaches the manager before any failure to start, so that it knows each engine the extension runs on.
+            var checks: [EngineKind: PluginEngineCheck] = [:]
+            for (kind, engine) in engines where installed.engineChecks[kind] == nil && loaded[kind]?[installed.id] == nil {
+                checks[kind] = await Self.check(engineExtension.packageURL, in: engine, of: kind)
+            }
+            if !checks.isEmpty { onCheck?(installed.id, checks) }
+            for (kind, engine) in engines where loaded[kind]?[installed.id] == nil && installed.engineFailures[kind] == nil {
+                guard checks[kind].map({ $0 == .runs }) ?? installed.engineChecks[kind] == true else { continue }
+                do {
+                    try await engine.load(engineExtension)
+                    loaded[kind, default: [:]][installed.id] = LoadedExtension(installed: installed, engineExtension: engineExtension)
+                } catch {
+                    engine.unload(engineExtension.id)
+                    onEngineFailure?(installed.id, kind, "Arch could not start it on \(kind.displayName) tabs: \(error.localizedDescription)")
+                }
             }
         }
         objectWillChange.send()
@@ -125,16 +190,29 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
                                permissions: Set(installed.manifest.extensionPermissions).union(mapped), sites: Set(sites))
     }
 
-    /// The Persona's engines that run extensions, attached at first use with the runtime as their delegate and the windows the host reported.
-    private func attachedEngines() -> [any EngineExtensions] {
-        if let engines { return engines }
-        let attached = host?.extensionEngines(in: persona) ?? []
-        for engine in attached {
+    /// The Persona's engines that run extensions, in the order of `EngineKind`, attached at first use with the runtime as their delegate and the windows the host reported.
+    private func orderedEngines() -> [(EngineKind, any EngineExtensions)] {
+        let engines = attached ?? attach()
+        return EngineKind.allCases.compactMap { kind in engines[kind].map { (kind, $0) } }
+    }
+
+    private func attach() -> [EngineKind: any EngineExtensions] {
+        let engines = host?.extensionEngines(in: persona) ?? [:]
+        for engine in engines.values {
             engine.delegate = self
             engine.setWindows(windows, focusedWindowID: focusedWindowID)
         }
-        engines = attached
-        return attached
+        attached = engines
+        return engines
+    }
+
+    /// The engine that runs the extension and has an action for the tab, which only the tab's own engine has.
+    private func engine(runningActionOf id: PluginID, for tab: any EngineWebContents) -> (any EngineExtensions)? {
+        let extensionID = WebExtensionManifest.extensionID(of: id)
+        return EngineKind.allCases.lazy.compactMap { kind -> (any EngineExtensions)? in
+            guard self.loaded[kind]?[id] != nil, let engine = self.attached?[kind], engine.action(of: extensionID, for: tab) != nil else { return nil }
+            return engine
+        }.first
     }
 
     // MARK: Windows and actions
@@ -143,14 +221,13 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     public func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?) {
         self.windows = windows
         self.focusedWindowID = focusedWindowID
-        engines?.forEach { $0.setWindows(windows, focusedWindowID: focusedWindowID) }
+        attached?.values.forEach { $0.setWindows(windows, focusedWindowID: focusedWindowID) }
     }
 
     /// The actions of the enabled extensions that have one, in the order the user installed them, for the tab.
     public func actions(for tab: any EngineWebContents) -> [WebExtensionActionItem] {
         enabled.filter { $0.manifest.contributions.commands.contains { $0.id == WebExtensionManifest.actionCommand } }.map { installed in
-            let id = WebExtensionManifest.extensionID(of: installed.id)
-            let action = loaded[installed.id] == nil ? nil : (engines ?? []).lazy.compactMap { $0.action(of: id, for: tab) }.first
+            let action = engine(runningActionOf: installed.id, for: tab)?.action(of: WebExtensionManifest.extensionID(of: installed.id), for: tab)
             return WebExtensionActionItem(id: installed.id, name: installed.manifest.name, action: action)
         }
     }
@@ -158,10 +235,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     /// Runs the extension's action for the tab in the engine that runs the extension there. Returns false when none does, as on a tab of an engine without extensions.
     @discardableResult
     public func performAction(of id: PluginID, for tab: any EngineWebContents) -> Bool {
-        let extensionID = WebExtensionManifest.extensionID(of: id)
-        guard enabled.contains(where: { $0.id == id }), loaded[id] != nil,
-              let engine = engines?.first(where: { $0.action(of: extensionID, for: tab) != nil }) else { return false }
-        engine.performAction(of: extensionID, for: tab)
+        guard enabled.contains(where: { $0.id == id }), let engine = engine(runningActionOf: id, for: tab) else { return false }
+        engine.performAction(of: WebExtensionManifest.extensionID(of: id), for: tab)
         return true
     }
 
@@ -171,9 +246,10 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         return performAction(of: id, for: tab)
     }
 
-    /// The loaded extension with the engine identifier, while its grant has `permission`.
-    private func loadedExtension(_ extensionID: String, granted permission: PluginPermission? = nil) -> InstalledPlugin? {
-        guard let installed = loaded[WebExtensionManifest.pluginID(of: extensionID)] else { return nil }
+    /// The extension with the engine identifier that the calling engine loaded, while its grant has `permission`.
+    private func loadedExtension(_ extensionID: String, in engine: any EngineExtensions, granted permission: PluginPermission? = nil) -> InstalledPlugin? {
+        guard let kind = attached?.first(where: { $0.value === engine })?.key,
+              let installed = loaded[kind]?[WebExtensionManifest.pluginID(of: extensionID)]?.installed else { return nil }
         if let permission, !installed.grant.permissions.contains(permission) { return nil }
         return installed
     }
@@ -199,7 +275,7 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
     /// Asks with a sheet for the tab. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, requests access: Set<EngineExtensionAccess>, in tab: (any EngineWebContents)?,
                            completion: @escaping (Set<EngineExtensionAccess>) -> Void) {
-        guard let host, let installed = loadedExtension(id) else { return completion([]) }
+        guard let host, let installed = loadedExtension(id, in: extensions) else { return completion([]) }
         let prompt = WebExtensionAccessPrompt(requested: access, extensionName: installed.manifest.name)
         guard !prompt.access.isEmpty else { return completion([]) }
         host.presentSheet(prompt.alert(), for: tab) { response in
@@ -210,12 +286,12 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
 
     public func extensions(_ extensions: any EngineExtensions, extension id: String, sendNativeMessage message: Data, toApplication application: String?,
                            reply: @escaping (Result<Data, any Error>) -> Void) {
-        guard loadedExtension(id, granted: .nativeMessaging) != nil else { return reply(.failure(PluginError.permissionDenied(.nativeMessaging))) }
+        guard loadedExtension(id, in: extensions, granted: .nativeMessaging) != nil else { return reply(.failure(PluginError.permissionDenied(.nativeMessaging))) }
         nativeMessaging.send(message, to: application, from: id, reply: reply)
     }
 
     public func extensions(_ extensions: any EngineExtensions, extension id: String, connect port: any EngineNativeMessagingPort) throws {
-        guard loadedExtension(id, granted: .nativeMessaging) != nil else { throw PluginError.permissionDenied(.nativeMessaging) }
+        guard loadedExtension(id, in: extensions, granted: .nativeMessaging) != nil else { throw PluginError.permissionDenied(.nativeMessaging) }
         try nativeMessaging.connect(port, from: id)
     }
 }

@@ -103,6 +103,8 @@ public protocol EngineExtensionsDelegate: AnyObject {
 /// The web extensions of one browser context.
 public protocol EngineExtensions: AnyObject {
     var delegate: (any EngineExtensionsDelegate)? { get set }
+    /// Reads the package in the folder at `packageURL` as `load(_:)` would, without starting any of it. Throws with why the engine cannot run it.
+    func check(_ packageURL: URL) async throws
     /// Loads the extension, in place of a loaded one with the same identifier, and starts it: its background, and its content scripts in the pages its granted sites cover from their next load. Throws when the engine cannot read or start it.
     func load(_ extension: EngineExtension) async throws
     /// Stops the extension and takes it out of the profile. Its storage stays.

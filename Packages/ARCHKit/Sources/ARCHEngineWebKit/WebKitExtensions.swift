@@ -39,6 +39,11 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
 
     // MARK: Loading
 
+    /// `WKWebExtension` throws only for a manifest it cannot read and keeps other problems in its `errors`, which do not count here.
+    func check(_ packageURL: URL) async throws {
+        _ = try await WKWebExtension(resourceBaseURL: packageURL)
+    }
+
     /// The extension reaches `webkit-extension://<id>/`, and its storage stays under its identifier across launches.
     func load(_ extension: EngineExtension) async throws {
         let webExtension = try await WKWebExtension(resourceBaseURL: `extension`.packageURL)

@@ -1,4 +1,4 @@
-// The sample extension on a WebKit tab, as the app runs it: installed through the plugin manager, loaded by the runtime into a profile's `WKWebExtensionController`, its content script running in the tab's page and telling its background script, which sets the action's badge for the tab, and its popup finding the tab through the windows the runtime reports. Windows that repeat an identity count once.
+// The sample extension on a WebKit tab, as the app runs it: installed through the plugin manager, loaded by the runtime into a profile's `WKWebExtensionController`, its content script running in the tab's page and telling its background script, which sets the action's badge for the tab, and its popup finding the tab through the windows the runtime reports. Windows that repeat an identity count once. WebKit's check passes the sample and refuses a package it cannot read, and the engine names its extension runtime's version.
 import ARCHEngine
 import ARCHEngineWebKit
 @testable import Extensions
@@ -15,7 +15,7 @@ struct WebKitExtensionTests {
     @Test func runsTheContentScriptAndThePopupOnAWebKitTab() async throws {
         try await WebKitProfile.run { profile in
             let host = RecordingHost()
-            host.engines = [try #require(profile.context.extensions)]
+            host.engines = [.webKit: try #require(profile.context.extensions)]
             let runtime = WebExtensionRuntime(persona: UUID(), host: host, nativeMessagingHosts: folder.url)
             let manager = PluginManager.withWebExtensions(runtime, in: folder)
             let installed = try await manager.installEverything(from: sampleExtensionFolder)
@@ -36,6 +36,17 @@ struct WebKitExtensionTests {
 
             try manager.remove(installed.id)
             #expect(await eventually { runtime.actions(for: tab).isEmpty })
+        }
+    }
+
+    @Test func checksPackagesWithoutRunningThem() async throws {
+        #expect(WebKitEngine().extensionRuntimeVersion?.isEmpty == false)
+        try await WebKitProfile.run { profile in
+            let extensions = try #require(profile.context.extensions)
+            try await extensions.check(sampleExtensionFolder)
+            let unreadable = try folder.package("unreadable", ["manifest.json": "{"])
+            await #expect(throws: (any Error).self) { try await extensions.check(unreadable) }
+            await #expect(throws: (any Error).self) { try await extensions.check(folder.package("empty", ["notes.txt": ""])) }
         }
     }
 

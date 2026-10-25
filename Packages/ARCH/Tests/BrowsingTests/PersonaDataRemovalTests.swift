@@ -62,6 +62,7 @@ import Testing
 private final class StubEngine: Engine {
     let kind: EngineKind
     let capabilities: Set<EngineCapability> = []
+    let extensionRuntimeVersion: String? = nil
     private(set) var requests: [UUID] = []
     private var completions: [(Bool) -> Void] = []
 

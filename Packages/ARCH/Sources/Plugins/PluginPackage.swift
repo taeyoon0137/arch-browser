@@ -1,4 +1,5 @@
-// Plugin packages: a folder with `plugin.json` at its top for a script plugin, or with the manifest file of a runtime's kind, such as a web extension's `manifest.json`, which the user chooses as the folder or as a `.zip` archive, or a script plugin's folder whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, and moves it into the Persona's plugin folder when the user installs it.
+// Plugin packages: a folder with `plugin.json` at its top for a script plugin, or with the manifest file of a runtime's kind, such as a web extension's `manifest.json`, which the user chooses as the folder or as a `.zip` archive, or a script plugin's folder whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, has the engines that run the kind check it, and moves it into the Persona's plugin folder when the user installs it.
+import ARCHEngine
 import Foundation
 
 /// A plugin's package, with its manifest read and checked: staged for review, or installed.
@@ -14,6 +15,8 @@ public struct PluginPackage: Identifiable, Sendable {
     public let files: [String]
     /// The package path of a script plugin's background script, if it has one.
     let background: String?
+    /// What each engine that runs the kind on this Mac found when it checked the package at staging. Empty for kinds that Arch runs alike on every engine.
+    public internal(set) var engineChecks: [EngineKind: PluginEngineCheck] = [:]
 
     /// Reads the package at `root`: a script plugin's when `plugin.json` is at its top, else, for a folder or archive the user chose, the package of the runtime whose manifest file is there. Throws as `ScriptManifest(packageAt:)` or the runtime does, and `PluginError.invalidPackage` for a package of no kind that Arch runs and for one that is or holds a symbolic link, which could lead to files outside it.
     init(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = []) throws {
@@ -40,12 +43,31 @@ public struct PluginPackage: Identifiable, Sendable {
 
     /// The package once its folder has moved to `root`.
     func moved(to root: URL) -> PluginPackage {
-        PluginPackage(kind: kind, manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
+        var moved = PluginPackage(kind: kind, manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
+        moved.engineChecks = engineChecks
+        return moved
     }
 
     /// The text of the file at a package path, as the review shows it. Nil for a path that names no file of the package, and for a file that is not UTF-8 text.
     public func text(of path: String) -> String? {
         Self.file(path, in: rootURL).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+    }
+
+    /// Where the package runs, as the review sheet says it: the engines whose check it passed, such as "Runs on WebKit tabs.", then why each engine that refused it did. Empty without checks.
+    public var engineNotes: [String] {
+        let refusals = EngineKind.allCases.compactMap { engine -> String? in
+            guard case let .refused(reason)? = engineChecks[engine] else { return nil }
+            return reason
+        }
+        return [Self.runsNote(on: Set(engineChecks.filter { $0.value == .runs }.keys))].compactMap { $0 } + refusals
+    }
+
+    /// "Runs on WebKit tabs." or "Runs on WebKit and Chromium tabs.", in the order of `EngineKind`; nil for no engine.
+    static func runsNote(on engines: Set<EngineKind>) -> String? {
+        let names = EngineKind.allCases.filter(engines.contains).map(\.displayName)
+        guard let last = names.last else { return nil }
+        let list = names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + ", and " + last
+        return "Runs on \(list) tabs."
     }
 
     /// The manifest files that tell a package's kind: `plugin.json`, then the runtimes'.

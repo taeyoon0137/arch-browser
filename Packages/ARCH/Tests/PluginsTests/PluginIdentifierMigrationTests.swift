@@ -40,7 +40,7 @@ import Testing
         try write(#"{"runs": 2}"#, to: "\(previous)/storage.json")
         let composition = PluginComposition(requests: ["Copy some text"], model: "Provider \u{2014} model")
         let list = PluginListFile(choices: [.init(id: "local.arch.browser.page-address", isEnabled: false), .init(id: previous, isEnabled: true)], installed: [
-            .readable(.init(id: previous, origin: .generated(composition), grant: PluginGrant(permissions: [.clipboard], sites: []), installedAt: Date(timeIntervalSinceReferenceDate: 0))),
+            .readable(.init(id: previous, origin: .generated(composition), grant: PluginGrant(permissions: [.clipboard], sites: []), installedAt: Date(timeIntervalSinceReferenceDate: 0), engineChecks: nil)),
             .unreadable(.object(["id": .string("local.arch.generated.newer"), "grant": .string("newer")])),
         ])
         try write(String(decoding: try JSONEncoder().encode(list), as: UTF8.self), to: "plugins.json")
@@ -81,7 +81,7 @@ import Testing
         try write(#"{"apiVersion": 1, "id": "\#(previous)", "name": "Copier", "summary": "Copies.", "version": "1.0"}"#, to: "\(previous)/package/plugin.json")
         let list = PluginListFile(choices: [], installed: [
             .readable(.init(id: previous, origin: .generated(PluginComposition(requests: ["Copy"], model: "model")), grant: PluginGrant(permissions: [], sites: []),
-                            installedAt: Date(timeIntervalSinceReferenceDate: 0))),
+                            installedAt: Date(timeIntervalSinceReferenceDate: 0), engineChecks: nil)),
         ])
         try write(String(decoding: try JSONEncoder().encode(list), as: UTF8.self), to: "plugins.json")
         // A package folder that takes no new file, as on a full disk, keeps plugin.json from taking the new identifier.

@@ -1,4 +1,4 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
+// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
 import AppKit
 import ARCHEngine
 import Combine
@@ -19,6 +19,21 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var failure: String?
     /// Why the plugin's runtime cannot run it on this Mac, which Settings shows; its contributions stay out meanwhile.
     public var unavailability: String?
+    /// The current answers: whether each engine that checked the package at the engine's present version runs it. Empty for kinds that Arch runs alike on every engine, and for engines that have not checked the package.
+    public var engineChecks: [EngineKind: Bool] = [:]
+    /// Why the package failed to start in this run on engines whose check it passed, each as a sentence that names the engine, which Settings shows until the plugin is switched on again or updates.
+    public var engineFailures: [EngineKind: String] = [:]
+
+    /// The engines a web extension runs on: those whose current answer runs its package, less those where it failed to start. Empty for other kinds.
+    public var engines: Set<EngineKind> {
+        Set(engineChecks.filter(\.value).keys).subtracting(engineFailures.keys)
+    }
+
+    /// Where the plugin runs, as Settings says it, such as "Runs on WebKit tabs.", once an engine has checked its package.
+    public var enginesNote: String? {
+        guard !engineChecks.isEmpty else { return nil }
+        return PluginPackage.runsNote(on: engines) ?? "No engine on this Mac runs it."
+    }
 
     /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
     public var accessSummaries: [String] {
@@ -100,8 +115,10 @@ public final class PluginManager: ObservableObject {
                   let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin, runtimes: runtimes),
                   package.manifest.id == id else { continue }
             packages[id] = package
+            let runtime = self.runtimes[package.kind]
             plugins.append(Self.installedPlugin(package, grant: install.grant, isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false,
-                                                installedAt: install.installedAt, unavailability: self.runtimes[package.kind]?.unavailability))
+                                                installedAt: install.installedAt, unavailability: runtime?.unavailability,
+                                                engineChecks: Self.currentChecks(install.engineChecks, engines: runtime?.engines ?? [:])))
         }
         self.plugins = plugins
         self.builtIns = types
@@ -113,14 +130,46 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: stagingDirectory)
         for runtime in self.runtimes.values {
             runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: id, failure: reason) }
+            runtime.onCheck = { [weak self] id, checks in self?.record(checks, for: id) }
+            runtime.onEngineFailure = { [weak self] id, engine, reason in self?.recordEngineFailure(reason, of: id, on: engine) }
         }
         runEnabledPlugins()
     }
 
-    /// The installed package as the list shows it, with the part of `grant` that its manifest asks for, and with why its runtime cannot run it, if it cannot.
-    private static func installedPlugin(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, installedAt: Date, unavailability: String?) -> InstalledPlugin {
+    /// The installed package as the list shows it, with the part of `grant` that its manifest asks for, with why its runtime cannot run it, if it cannot, and with the current answers of the engines that checked it.
+    private static func installedPlugin(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, installedAt: Date, unavailability: String?,
+                                        engineChecks: [EngineKind: Bool]) -> InstalledPlugin {
         InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, packageURL: package.rootURL, grant: grant.limited(to: package.manifest),
-                        isEnabled: isEnabled, installedAt: installedAt, unavailability: unavailability)
+                        isEnabled: isEnabled, installedAt: installedAt, unavailability: unavailability, engineChecks: engineChecks)
+    }
+
+    /// The answers in an install entry that engines of `engines` gave at their present versions. An engine name this build does not know, and an answer from another version of the engine, count as no check.
+    private static func currentChecks(_ checks: [String: PluginListFile.EngineCheck]?, engines: [EngineKind: String]) -> [EngineKind: Bool] {
+        var current: [EngineKind: Bool] = [:]
+        for (name, check) in checks ?? [:] {
+            guard let engine = EngineKind(rawValue: name), engines[engine] == check.version else { continue }
+            current[engine] = check.runs
+        }
+        return current
+    }
+
+    /// The answers as an install entry keeps them, each with the version of the engine of `engines` that gave it.
+    private static func fileChecks(_ checks: [EngineKind: PluginEngineCheck], engines: [EngineKind: String]) -> [String: PluginListFile.EngineCheck] {
+        var file: [String: PluginListFile.EngineCheck] = [:]
+        for (engine, check) in checks {
+            guard let version = engines[engine] else { continue }
+            file[engine.rawValue] = PluginListFile.EngineCheck(runs: check == .runs, version: version)
+        }
+        return file
+    }
+
+    /// The first engine's refusal, in the order of `EngineKind`, when every engine that checked a package refused it; nil when one runs it or none checked it.
+    private static func refusal(in checks: [EngineKind: PluginEngineCheck]) -> String? {
+        guard !checks.values.contains(.runs) else { return nil }
+        return EngineKind.allCases.lazy.compactMap { engine -> String? in
+            guard case let .refused(reason)? = checks[engine] else { return nil }
+            return reason
+        }.first
     }
 
     /// Tells each runtime the enabled plugins of its kind, none while it cannot run them on this Mac.
@@ -145,6 +194,8 @@ public final class PluginManager: ObservableObject {
         var plugin = plugins[index]
         plugin.isEnabled = isEnabled
         plugin.failure = failure
+        // Switching a plugin on tries again the engines where it failed to start.
+        if isEnabled { plugin.engineFailures = [:] }
         plugins[index] = plugin
         failures[id] = nil
         if !isEnabled {
@@ -182,7 +233,7 @@ public final class PluginManager: ObservableObject {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 
-    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, and for one whose identifier `checkInstallable(_:of:)` refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
+    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. The engines that run the kind on this Mac check the package, and the installed plugin it would update, in the engines that have no current answer for it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, for one whose identifier `checkInstallable(_:of:)` refuses, and, with the first engine's reason, for one that every engine refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
         let runtimes = Array(runtimes.values)
         return try await stage { root in try PluginPackage.stage(url, at: root, runtimes: runtimes) }
@@ -193,17 +244,30 @@ public final class PluginManager: ObservableObject {
         try await stage { root in try PluginPackage.stage(files, at: root, origin: .generated(composition)) }
     }
 
-    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:of:)` accepts its identifier.
+    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:of:)` accepts its identifier and, for a kind that engines check, while an engine runs it.
     private func stage(_ make: @escaping @Sendable (URL) throws -> PluginPackage) async throws -> PluginPackage {
         let root = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let package = try await Task.detached { try make(root) }.value
+        var package = try await Task.detached { try make(root) }.value
         do {
             try checkInstallable(package.manifest.id, of: package.kind)
+            if let runtime = self.runtimes[package.kind], !runtime.engines.isEmpty {
+                await checkInstalledPlugin(updatedBy: package, in: runtime)
+                package.engineChecks = await runtime.check(packageAt: package.rootURL)
+                if let refusal = Self.refusal(in: package.engineChecks) { throw PluginError.invalidPackage(refusal) }
+            }
         } catch {
             discard(package)
             throw error
         }
         return package
+    }
+
+    /// Checks the installed plugin that the package would update, on or off, in the runtime's engines that have no current answer for it, and records the answers.
+    private func checkInstalledPlugin(updatedBy package: PluginPackage, in runtime: any PluginRuntime) async {
+        guard let installed = plugins.first(where: { $0.id == package.manifest.id && $0.kind == package.kind }), let packageURL = installed.packageURL else { return }
+        let unanswered = Set(runtime.engines.keys).subtracting(installed.engineChecks.keys)
+        guard !unanswered.isEmpty else { return }
+        record(await runtime.check(packageAt: packageURL).filter { unanswered.contains($0.key) }, for: installed.id)
     }
 
     /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
@@ -245,7 +309,10 @@ public final class PluginManager: ObservableObject {
         }
         let installed = package.moved(to: installedRoot)
         packages[id] = installed
-        let install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date())
+        let engines = runtimes[installed.kind]?.engines ?? [:]
+        let checks = Self.fileChecks(package.engineChecks, engines: engines)
+        let install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
+                                             engineChecks: checks.isEmpty ? nil : checks)
         if let index = installs.firstIndex(where: { $0.id == install.id }) {
             installs[index] = .readable(install)
         } else {
@@ -254,12 +321,42 @@ public final class PluginManager: ObservableObject {
         recordChoice(isEnabled, for: id)
         saveList()
         failures[id] = nil
-        let plugin = Self.installedPlugin(installed, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtimes[installed.kind]?.unavailability)
+        let plugin = Self.installedPlugin(installed, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtimes[installed.kind]?.unavailability,
+                                          engineChecks: Self.currentChecks(install.engineChecks, engines: engines))
         if let index = plugins.firstIndex(where: { $0.id == id }) {
             plugins[index] = plugin
         } else {
             plugins.append(plugin)
         }
+    }
+
+    // MARK: Engines
+
+    /// Records what engines found when they checked an installed plugin's package, each answer with the engine's version, in the plugin and its install entry, which keeps the answers of engines this build does not know. An enabled plugin that every engine of its kind's runtime now refuses is switched off with the first engine's reason.
+    private func record(_ checks: [EngineKind: PluginEngineCheck], for id: PluginID) {
+        guard let index = plugins.firstIndex(where: { $0.id == id }), let runtime = runtimes[plugins[index].kind],
+              let entry = installs.firstIndex(where: { $0.id == id.rawValue }), case var .readable(install) = installs[entry] else { return }
+        let answers = Self.fileChecks(checks, engines: runtime.engines)
+        guard !answers.isEmpty else { return }
+        install.engineChecks = (install.engineChecks ?? [:]).merging(answers) { $1 }
+        installs[entry] = .readable(install)
+        saveList()
+        var plugin = plugins[index]
+        plugin.engineChecks = Self.currentChecks(install.engineChecks, engines: runtime.engines)
+        plugins[index] = plugin
+        if plugin.isEnabled, runtime.engines.keys.allSatisfy({ plugin.engineChecks[$0] == false }), let reason = Self.refusal(in: checks) {
+            setEnabled(false, for: id, failure: reason)
+        }
+    }
+
+    /// Keeps why the plugin failed to start on the engine for the run, so that the engine counts as one it does not run on, and switches the plugin off with every engine's reason once it has failed on each engine it ran on.
+    private func recordEngineFailure(_ reason: String, of id: PluginID, on engine: EngineKind) {
+        guard let index = plugins.firstIndex(where: { $0.id == id }), plugins[index].isEnabled else { return }
+        var plugin = plugins[index]
+        plugin.engineFailures[engine] = reason
+        plugins[index] = plugin
+        guard plugin.engines.isEmpty else { return }
+        setEnabled(false, for: id, failure: EngineKind.allCases.compactMap { plugin.engineFailures[$0] }.joined(separator: "\n"))
     }
 
     /// Deletes an installed plugin from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
@@ -501,16 +598,19 @@ struct PluginListFile: Codable {
         var origin: PluginOrigin
         var grant: PluginGrant
         var installedAt: Date
+        /// What each engine that checked the package found, by engine name as `EngineKind` writes it. Names stay text, so that the answers of engines this build does not know survive its writes. Absent from entries of builds before engine checks and of kinds that run alike on every engine.
+        var engineChecks: [String: EngineCheck]?
 
         private enum CodingKeys: String, CodingKey {
-            case id, source, generated, grant, installedAt
+            case id, source, generated, grant, installedAt, engineChecks
         }
 
-        init(id: String, origin: PluginOrigin, grant: PluginGrant, installedAt: Date) {
+        init(id: String, origin: PluginOrigin, grant: PluginGrant, installedAt: Date, engineChecks: [String: EngineCheck]?) {
             self.id = id
             self.origin = origin
             self.grant = grant
             self.installedAt = installedAt
+            self.engineChecks = engineChecks
         }
 
         init(from decoder: any Decoder) throws {
@@ -523,6 +623,7 @@ struct PluginListFile: Codable {
             }
             grant = try container.decode(PluginGrant.self, forKey: .grant)
             installedAt = try container.decode(Date.self, forKey: .installedAt)
+            engineChecks = try container.decodeIfPresent([String: EngineCheck].self, forKey: .engineChecks)
         }
 
         func encode(to encoder: any Encoder) throws {
@@ -536,7 +637,14 @@ struct PluginListFile: Codable {
             }
             try container.encode(grant, forKey: .grant)
             try container.encode(installedAt, forKey: .installedAt)
+            try container.encodeIfPresent(engineChecks, forKey: .engineChecks)
         }
+    }
+
+    /// Whether an engine runs a package, with the version of the engine's extension runtime that gave the answer.
+    struct EngineCheck: Codable {
+        var runs: Bool
+        var version: String
     }
 
     /// An install as the file holds it. One this build cannot read, such as one whose grant holds a permission that a newer build added, stays as the file has it, so that writing the file keeps it.
