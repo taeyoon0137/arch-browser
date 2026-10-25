@@ -56,7 +56,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 - Do not create graphic assets. Leave placeholders for the user to fill.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. By default, features use macOS facilities on both engines; for example, picture in picture uses AVKit rather than an engine's implementation. Follow the Platform integration table in `docs/features.md`.
 - Prefer public APIs. Use a private API (an undocumented class, selector, function, or key in a system framework or engine) only behind flags on `flags://`: one for all private APIs, one for each private API, and one for each feature that uses one. Check each private API's availability quietly and quickly, in the background or just before use. If a feature's private API is unavailable or switched off, the feature falls back to its public behavior or stays hidden. List every private API in the Private APIs section of `docs/features.md`.
-- You may fork the Chromium (CEF) or WebKit source when a feature needs it. Keep each patch small and list it in `docs/plan.md`.
+- You may change the Chromium (CEF) or WebKit source when a feature needs it. CEF changes are commits in the private repository `taeyoon0137/arch-chromium`, which follows its own `AGENTS.md`, and reach the app only through a release that `scripts/setup_cef.sh` pins. Keep each change small and list it in the engine changes table in `docs/plan.md`.
 
 ## Language
 
