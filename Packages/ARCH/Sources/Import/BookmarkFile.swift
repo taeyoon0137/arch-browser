@@ -46,7 +46,7 @@ struct BookmarkTree: Equatable {
     struct Folder: Equatable {
         /// Where the paths of the folders below a folder start.
         enum Kind {
-            /// A bookmarks bar: its own items become favorites, and the paths of its folders start below it.
+            /// A bookmarks bar, or a container read like one: `split()` returns its own items as `barItems`, outside any folder, and the paths of its folders start below it.
             case bar
             /// Any other top-level folder: its own items go into a folder named after it, and the paths of its folders start with its name.
             case root

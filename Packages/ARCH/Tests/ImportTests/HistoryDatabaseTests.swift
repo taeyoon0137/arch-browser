@@ -1,10 +1,13 @@
-// History from synthetic SQLite databases: a `history_items` database and a Chromium-format History database, both read from copies.
+// History from synthetic SQLite databases: a `history_items` database and a Chromium-format History database, both read from copies, including one behind a symbolic link and one damaged partway through.
 import Foundation
 import History
 import Testing
 @testable import Import
 
 @Suite struct HistoryDatabaseTests {
+    /// The Chromium-format `urls` table.
+    private static let urlsTable = "CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER, hidden INTEGER)"
+
     @Test func historyItemsCountOnlyVisitsThatLoadedWithoutRedirecting() throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
@@ -36,7 +39,7 @@ import Testing
         // Chromium times visits in microseconds since 1601; this one is 2001-01-01, the reference date.
         let referenceDate = 12_622_780_800_000_000
         let file = try folder.database("History", [
-            "CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER, hidden INTEGER)",
+            Self.urlsTable,
             "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES ('https://a.example/', 'A', 3, 0, \(referenceDate), 0), ('https://frame.example/', 'Frame', 1, 0, \(referenceDate), 1)",
         ])
         let entries = try HistoryDatabase.entries(at: file)
@@ -49,5 +52,48 @@ import Testing
         defer { folder.remove() }
         let file = try folder.database("History.db", ["CREATE TABLE other (id INTEGER)"])
         #expect(throws: ImportError.unreadableHistory(file)) { try HistoryDatabase.historyItemEntries(at: file) }
+    }
+
+    @Test func aDatabaseBehindALinkIsReadFromItsTargetWithoutChangingIt() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let target = try folder.databaseWithLog("Elsewhere/History", [
+            Self.urlsTable,
+            "INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES ('https://a.example/', 'A', 1, 0, 1, 0)",
+        ])
+        let link = folder.url.appendingPathComponent("Default/History")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        func targetFiles() throws -> [String: Data] {
+            let names = try FileManager.default.contentsOfDirectory(atPath: target.deletingLastPathComponent().path)
+            return try Dictionary(uniqueKeysWithValues: names.map { ($0, try Data(contentsOf: target.deletingLastPathComponent().appendingPathComponent($0))) })
+        }
+        let before = try targetFiles()
+        #expect(before.keys.sorted() == ["History", "History-wal"])
+
+        // The page is only in the log, so reading it shows that the log beside the target came along.
+        #expect(try HistoryDatabase.entries(at: link).map(\.url.absoluteString) == ["https://a.example/"])
+        #expect(try targetFiles() == before)
+    }
+
+    @Test func aDatabaseDamagedPartwayThroughCannotBeRead() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let pageSize = 4_096
+        let file = try folder.database("History", [
+            "PRAGMA page_size = \(pageSize)",
+            Self.urlsTable,
+            """
+            WITH RECURSIVE page(number) AS (SELECT 1 UNION ALL SELECT number + 1 FROM page WHERE number < 200)
+            INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden)
+            SELECT 'https://page' || number || '.example/', printf('%.200c', 'T'), 1, 0, 1, 0 FROM page
+            """,
+        ])
+        // The last page holds the last rows of the table, so the read fails only after the rows before it.
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seek(toOffset: try handle.seekToEnd() - UInt64(pageSize))
+        try handle.write(contentsOf: Data(repeating: 0xFF, count: pageSize))
+        try handle.close()
+        #expect(throws: ImportError.unreadableHistory(file)) { try HistoryDatabase.entries(at: file) }
     }
 }

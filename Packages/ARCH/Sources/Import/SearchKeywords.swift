@@ -21,7 +21,7 @@ struct SearchKeywords {
         var isUserShortcut: Bool
     }
 
-    /// Reads the `Web Data` database at `url` from a copy. `preferences` is the profile's `Preferences` JSON. Throws `ImportError.unreadableFile` when the database lacks the `keywords` table or its columns.
+    /// Reads the `Web Data` database at `url` from a copy. `preferences` is the profile's `Preferences` JSON. Throws `ImportError.unreadableFile` when the database lacks the `keywords` table or its columns, or cannot be read to its last row.
     static func read(at url: URL, preferences: [String: Any]?) throws -> SearchKeywords {
         // A user's shortcut is not built in (`prepopulate_id`, `starter_pack_id`), not offered by a site and left unused (`safe_for_autoreplace`), not set by policy, and not deactivated by the user (`is_active` 2).
         let query = """
@@ -29,10 +29,10 @@ struct SearchKeywords {
                 safe_for_autoreplace = 0 AND prepopulate_id = 0 AND starter_pack_id = 0 AND created_by_policy = 0 AND is_active <> 2
             FROM keywords ORDER BY id
             """
-        let rows = try HistoryDatabase.withCopy(of: url, unreadable: .unreadableFile(url)) { database in
+        let rows = try DatabaseCopy.read(url, unreadable: .unreadableFile(url)) { database in
             var rows: [Row] = []
-            try HistoryDatabase.forEachRow(in: database, query, unreadable: .unreadableFile(url)) { row in
-                let text = { HistoryDatabase.text(row, $0) ?? "" }
+            try DatabaseCopy.forEachRow(in: database, query, unreadable: .unreadableFile(url)) { row in
+                let text = { DatabaseCopy.text(row, $0) ?? "" }
                 rows.append(Row(name: text(0), keyword: text(1), template: text(2), guid: text(3),
                                 prepopulateID: Int(sqlite3_column_int(row, 4)), isUserShortcut: sqlite3_column_int(row, 5) != 0))
             }

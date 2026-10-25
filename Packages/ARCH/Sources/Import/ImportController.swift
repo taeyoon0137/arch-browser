@@ -38,7 +38,7 @@ public final class ImportController {
                 return
             }
             DispatchQueue.global(qos: .userInitiated).async {
-                HistoryDatabase.removeLeftoverCopies()
+                DatabaseCopy.removeLeftovers()
                 let results = urls.map { url in Result { try ImportedFile.read(url) } }
                 DispatchQueue.main.async { self.add(results, in: window) }
             }

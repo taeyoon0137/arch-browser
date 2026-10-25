@@ -44,9 +44,9 @@ struct ImportedFile {
 enum ImportError: LocalizedError, Equatable {
     /// The file is in none of the formats Import reads.
     case unrecognizedFormat(URL)
-    /// SQLite could not open the copy of the database, or the copy lacks the history table or its columns.
+    /// SQLite could not open the copy of the database or read it to its last row, or the copy lacks the history table or its columns.
     case unreadableHistory(URL)
-    /// The file does not parse, or the database copy lacks the expected table or columns.
+    /// The file does not parse, or the database copy cannot be read to its last row or lacks the expected table or columns.
     case unreadableFile(URL)
     /// macOS privacy protection keeps Arch from reading the file (`EPERM`). A privacy setting in System Settings opens it.
     case blockedByPrivacy(URL)

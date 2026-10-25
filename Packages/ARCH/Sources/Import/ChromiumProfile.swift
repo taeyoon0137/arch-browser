@@ -7,22 +7,25 @@ struct ChromiumProfile: Equatable {
     let folder: URL
     /// The name the browser shows for the profile.
     let name: String
-    /// Whether `Local State` names the profile as the one used last.
+    /// Whether `Local State` names the profile as the one used last, or the profile is `Default` and `Local State` names none, as Chromium then opens `Default`.
     let isLastUsed: Bool
 
     static func localStateFile(in userData: URL) -> URL {
         userData.appendingPathComponent("Local State")
     }
 
-    /// The profiles `Local State` lists under `profile.info_cache`, in the order of `profile.profiles_order` and then by folder. Without a `Local State` that lists profiles, the `Default` profile stands alone as the last used, named after its folder.
+    /// The profiles `Local State` lists under `profile.info_cache`, in the order of `profile.profiles_order` and then by folder. Without a `Local State`, or with one that lists no profiles, the `Default` profile stands alone as the last used, named after its folder. Throws `ImportError.unreadableFile` for a `Local State` that does not parse or lacks `profile.info_cache`, which Chromium writes for each profile it creates, so that a changed format reports the file rather than hiding the profiles.
     static func profiles(in userData: URL) throws -> [ChromiumProfile] {
-        let localState = try FileAccess.read(localStateFile(in: userData)) { try Data(contentsOf: $0) }
-        let profile = localState.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["profile"] as? [String: Any]
-        guard let cache = profile?["info_cache"] as? [String: Any], !cache.isEmpty else {
+        let localState = try FileAccess.parse(localStateFile(in: userData)) { data -> (profile: [String: Any], cache: [String: Any])? in
+            guard let profile = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["profile"] as? [String: Any],
+                  let cache = profile["info_cache"] as? [String: Any] else { return nil }
+            return (profile, cache)
+        }
+        guard case let (profile, cache)? = localState, !cache.isEmpty else {
             return [ChromiumProfile(folder: userData.appendingPathComponent("Default"), name: "Default", isLastUsed: true)]
         }
-        let order = (profile?["profiles_order"] as? [String] ?? []).filter { cache[$0] != nil }
-        let lastUsed = profile?["last_used"] as? String
+        let order = (profile["profiles_order"] as? [String] ?? []).filter { cache[$0] != nil }
+        let lastUsed = (profile["last_used"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
         return (order + cache.keys.filter { !order.contains($0) }.sorted()).map { folderName in
             let name = ((cache[folderName] as? [String: Any])?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return ChromiumProfile(folder: userData.appendingPathComponent(folderName), name: name.isEmpty ? folderName : name, isLastUsed: folderName == lastUsed)

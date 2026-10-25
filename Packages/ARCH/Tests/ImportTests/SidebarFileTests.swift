@@ -1,4 +1,4 @@
-// A synthetic `StorableSidebar.json`: spaces on two profile references and a missing profile folder, their pinned tabs and folders, and each profile's favorites.
+// A synthetic `StorableSidebar.json`: spaces on two profile references and a missing profile folder, their pinned tabs and folders, and each profile's favorites; spaces that name their containers only in `newContainerIDs`, or name no pinned container.
 import Foundation
 import Testing
 @testable import Import
@@ -114,5 +114,27 @@ import Testing
         let space = try #require(SidebarFile(data: data)?.profiles.first?.spaces.first)
         #expect(space.folders.map(\.name) == ["Loop"])
         #expect(space.folders.map { $0.items.map(\.title) } == [["Tab"]])
+    }
+
+    @Test func labelObjectsNameThePinnedContainerWithoutTheLabelStrings() throws {
+        let items = Self.flat([
+            Self.container("pinned", ["tab"]),
+            Self.tab("tab", "https://tab.example/", savedTitle: "Tab"),
+            Self.container("unpinned", ["today"]),
+            Self.tab("today", "https://today.example/", savedTitle: "Today"),
+        ])
+        var space = Self.space("space", title: "Space", profile: Self.defaultProfile, pinned: "pinned", unpinned: "unpinned")
+        space["containerIDs"] = nil
+        space["newContainerIDs"] = [["unpinned": ["_0": [String: Any]()]], "unpinned", ["pinned": [String: Any]()], "pinned"]
+        let data = try Self.file(containers: [["items": items, "spaces": Self.flat([space])]])
+        let read = try #require(SidebarFile(data: data)?.profiles.first?.spaces.first)
+        #expect(read.pinnedItems.map(\.title) == ["Tab"])
+    }
+
+    @Test func spacesWithoutAPinnedContainerCannotBeRead() throws {
+        var space = Self.space("space", title: "Space", profile: Self.defaultProfile, pinned: "pinned", unpinned: "unpinned")
+        space["containerIDs"] = ["unpinned", "unpinned"]
+        let data = try Self.file(containers: [["items": Self.flat([Self.container("pinned", [])]), "spaces": Self.flat([space])]])
+        #expect(SidebarFile(data: data) == nil)
     }
 }

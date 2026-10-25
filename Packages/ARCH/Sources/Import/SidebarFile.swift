@@ -33,7 +33,7 @@ struct SidebarFile: Equatable {
     /// In the order the file first names each folder, spaces before favorites.
     var profiles: [Profile]
 
-    /// Returns nil for data that is not JSON or has no container with `items` and `spaces`. Files of other versions are read alike.
+    /// Returns nil for data that is not JSON, has no container with `items` and `spaces`, or has spaces of which none names a pinned container, so that a file whose spaces this reader cannot follow counts as unreadable rather than as spaces without pinned tabs. Files of other versions are read alike.
     init?(data: Data) {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let containers = (object["sidebar"] as? [String: Any])?["containers"] as? [[String: Any]],
@@ -42,6 +42,10 @@ struct SidebarFile: Equatable {
         func objects(_ key: String) -> [[String: Any]] {
             (container[key] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
         }
+        let spaces = objects("spaces")
+        // The unpinned container holds the day's tabs, which the browser archives on its own, so only the pinned one comes in.
+        let pinnedIDs = spaces.map(Self.pinnedContainerID)
+        guard spaces.isEmpty || pinnedIDs.contains(where: { $0 != nil }) else { return nil }
         var itemsByID: [String: [String: Any]] = [:]
         for item in objects("items") {
             if let id = item["id"] as? String { itemsByID[id] = item }
@@ -58,10 +62,9 @@ struct SidebarFile: Equatable {
                 profiles.append(profile)
             }
         }
-        for space in objects("spaces") {
+        for (space, pinnedID) in zip(spaces, pinnedIDs) {
             guard let id = space["id"] as? String, let folderName = Self.profileFolder(space["profile"]) else { continue }
-            // `containerIDs` pairs a label, `pinned` or `unpinned`, with that container's ID, in no fixed order. The unpinned container holds the day's tabs, which the browser archives on its own, so only the pinned one comes in.
-            let pinnedID = Self.pairs(space["containerIDs"] as? [Any] ?? []).first { $0.key as? String == "pinned" }?.value as? String
+            // As a bar, the pinned container gives its own tabs back outside any folder, as the space's pinned tabs, and its folders' paths start below it.
             let pinned = BookmarkTree(roots: [BookmarkTree.Folder(name: "", kind: .bar, children: pinnedID.map { items.nodes(in: $0) } ?? [])]).split()
             let title = (space["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let imported = ImportedSpace(sourceID: id, name: title.isEmpty ? nil : title, color: Self.color(of: space), pinnedItems: pinned.barItems, folders: pinned.folders)
@@ -112,6 +115,12 @@ struct SidebarFile: Equatable {
         guard let reference = reference as? [String: Any] else { return nil }
         if reference["default"] as? Bool == true { return "Default" }
         return ((reference["custom"] as? [String: Any])?["_0"] as? [String: Any])?["directoryBasename"] as? String
+    }
+
+    /// The ID of the space's pinned container. `containerIDs` pairs a label, `pinned` or `unpinned`, with that container's ID, in no fixed order. `newContainerIDs` pairs the same IDs with labels as objects, such as `{"pinned": {}}`; it is read when `containerIDs` names no pinned container.
+    private static func pinnedContainerID(of space: [String: Any]) -> String? {
+        if let id = pairs(space["containerIDs"] as? [Any] ?? []).first(where: { $0.key as? String == "pinned" })?.value as? String { return id }
+        return pairs(space["newContainerIDs"] as? [Any] ?? []).first { ($0.key as? [String: Any])?["pinned"] != nil }?.value as? String
     }
 
     /// The middle tone of the space's theme, `customInfo.windowTheme.primaryColorPalette.midTone`.

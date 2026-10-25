@@ -1,4 +1,4 @@
-// Chromium-format profiles over a synthetic user data folder: the profile list from `Local State` and a profile's two bookmark files.
+// Chromium-format profiles over a synthetic user data folder: the profile list from `Local State`, with a missing `last_used` and a file that cannot be read, and a profile's two bookmark files.
 import Foundation
 import Testing
 @testable import Import
@@ -23,6 +23,24 @@ import Testing
         defer { folder.remove() }
         let profiles = try ChromiumProfile.profiles(in: folder.url)
         #expect(profiles == [ChromiumProfile(folder: folder.url.appendingPathComponent("Default"), name: "Default", isLastUsed: true)])
+    }
+
+    @Test func withoutALastUsedProfileTheDefaultOneIsLastUsed() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        try folder.writeJSON(["profile": ["info_cache": ["Default": ["name": "Personal"], "Profile 1": ["name": "Work"]]]], to: "Local State")
+        let profiles = try ChromiumProfile.profiles(in: folder.url)
+        #expect(profiles.map(\.folder.lastPathComponent) == ["Default", "Profile 1"])
+        #expect(profiles.map(\.isLastUsed) == [true, false])
+    }
+
+    @Test func aLocalStateThatDoesNotListProfilesIsReportedByName() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let file = try folder.write(Data("{".utf8), to: "Local State")
+        #expect(throws: ImportError.unreadableFile(file)) { try ChromiumProfile.profiles(in: folder.url) }
+        try folder.writeJSON(["profile": ["last_used": "Profile 1"]], to: "Local State")
+        #expect(throws: ImportError.unreadableFile(file)) { try ChromiumProfile.profiles(in: folder.url) }
     }
 
     @Test func accountBookmarksFollowTheProfileBookmarksAndRepeatNoAddress() throws {
