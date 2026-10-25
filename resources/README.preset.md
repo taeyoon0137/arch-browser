@@ -125,7 +125,7 @@ arch-browser
 │   │   ├── ARCHEngineWebKit/       # WebKit adapter
 │   │   ├── ARCHPrivateAPI/         # Private API registry and flags
 │   │   └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
-│   └── ARCHKit/Tests/              # Tests: ARCHEngineTests
+│   └── ARCHKit/Tests/              # Tests: ARCHEngineTests, ARCHEngineWebKitTests
 ├── docs/                           # Design documents
 ├── resources/                      # README source, hero images, and app icon
 ├── scripts/                        # Build and README scripts (see Scripts)

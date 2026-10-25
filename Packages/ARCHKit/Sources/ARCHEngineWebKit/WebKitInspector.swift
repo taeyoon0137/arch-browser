@@ -74,32 +74,3 @@ final class WebKitDevTools: EngineDevTools {
         _ = inspector?.perform(NSSelectorFromString(action))
     }
 }
-
-/// A tab's view: its web view, and the Web Inspector once WebKit attaches it beside the web view, so the inspector moves with the tab.
-final class WebKitPageView: NSView {
-    let webView: WKWebView
-
-    init(webView: WKWebView) {
-        self.webView = webView
-        super.init(frame: .zero)
-        webView.frame = bounds
-        webView.autoresizingMask = [.width, .height]
-        addSubview(webView)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("WebKitPageView is created in code")
-    }
-
-    // Focusing the page focuses its web view, which takes the keys.
-    override var acceptsFirstResponder: Bool { true }
-
-    override func becomeFirstResponder() -> Bool {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.window?.firstResponder === self else { return }
-            self.window?.makeFirstResponder(self.webView)
-        }
-        return true
-    }
-}

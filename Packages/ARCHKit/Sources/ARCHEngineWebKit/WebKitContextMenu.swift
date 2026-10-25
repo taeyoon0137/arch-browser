@@ -3,36 +3,6 @@ import AppKit
 import ARCHEngine
 import WebKit
 
-/// A web view that hands its context menu to the adapter before the menu opens.
-final class WebKitWebView: WKWebView {
-    weak var contents: WebKitWebContents?
-    /// What the script reported for the click that opens the next menu.
-    var pendingElement: EngineContextMenuElement?
-
-    // A new click clears the last report, so a menu never shows what an earlier click was on.
-    override func rightMouseDown(with event: NSEvent) {
-        pendingElement = nil
-        super.rightMouseDown(with: event)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control) { pendingElement = nil }
-        super.mouseDown(with: event)
-    }
-
-    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        super.willOpenMenu(menu, with: event)
-        let element = pendingElement ?? EngineContextMenuElement()
-        pendingElement = nil
-        contents?.prepareContextMenu(menu, for: element)
-    }
-
-    /// Select All gets its own action, because WebKit's editable menu has none on macOS.
-    @objc func selectAllFromContextMenu(_ sender: Any?) {
-        selectAll(sender)
-    }
-}
-
 /// Reports the element under a context click. It runs in its own content world, so pages cannot read or replace it.
 final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
     static let world = WKContentWorld.world(name: "ARCHContextMenu")
@@ -83,7 +53,6 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
 
 extension WebKitWebContents {
     func installContextMenu() {
-        (webView as? WebKitWebView)?.contents = self
         WebKitContextMenuScript.install(in: webView.configuration.userContentController)
     }
 

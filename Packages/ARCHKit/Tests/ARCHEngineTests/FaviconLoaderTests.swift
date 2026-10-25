@@ -1,5 +1,5 @@
-// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one.
-import ARCHEngine
+// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one. Icons load without any profile's cookies or stored credentials.
+@testable import ARCHEngine
 import Foundation
 import Testing
 
@@ -21,5 +21,13 @@ import Testing
         #expect(!FaviconLoader.keepsIcon(from: url("file:///tmp/a.html"), to: url("file:///tmp/b.html")))
         #expect(!FaviconLoader.keepsIcon(from: nil, to: url("https://example.com/")))
         #expect(!FaviconLoader.keepsIcon(from: url("https://example.com/"), to: nil))
+    }
+
+    @Test func iconsLoadWithoutCookiesOrCredentials() {
+        let configuration = FaviconLoader.session.configuration
+        #expect(configuration.httpCookieStorage == nil)
+        #expect(!configuration.httpShouldSetCookies)
+        #expect(configuration.httpCookieAcceptPolicy == .never)
+        #expect(configuration.urlCredentialStorage == nil)
     }
 }

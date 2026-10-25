@@ -308,9 +308,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         if #available(macOS 15.4, *) { webConfiguration.webExtensionController = context.webExtensions?.controller }
         self.userContent = WebKitUserContentController()
         webConfiguration.userContentController = userContent
-        self.webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
+        let webView = WebKitWebView(frame: .zero, configuration: webConfiguration)
+        self.webView = webView
         self.view = WebKitPageView(webView: webView)
         super.init()
+        webView.contents = self
         installBridge()
         installContextMenu()
         installAudibleScript()
@@ -334,9 +336,11 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.context = context
         self.userContent = userContent
         self.allowsDownloads = true
-        self.webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
+        let webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
+        self.webView = webView
         self.view = WebKitPageView(webView: webView)
         super.init()
+        webView.contents = self
         installBridge()
         installContextMenu()
         installAudibleScript()

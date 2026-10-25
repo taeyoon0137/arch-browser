@@ -176,9 +176,9 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
     }
 
-    /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. WebKit handles geolocation through the app's location authorization.
+    /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. Without a UI delegate the request gets the safe answer, a denial, rather than a prompt of WebKit's own. WebKit handles geolocation through the app's location authorization.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        guard let delegate = owner.uiDelegate else { return decisionHandler(.prompt) }
+        guard let delegate = owner.uiDelegate else { return decisionHandler(.deny) }
         let types: [EnginePermissionType] = type == .camera ? [.camera] : type == .microphone ? [.microphone] : [.camera, .microphone]
         let mediaTypes = EngineCaptureAccess.mediaTypes(for: types)
         // Skip the site's permission request if the system already denies this app access to the device.
