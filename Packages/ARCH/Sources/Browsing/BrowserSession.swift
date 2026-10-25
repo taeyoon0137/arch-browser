@@ -174,10 +174,10 @@ public final class BrowserSession: ObservableObject {
         let reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
         // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
         for (window, record) in zip(reopened, records) {
-            if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectedTabID = tab.id }
+            if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectTab(tab.id) }
         }
         for window in reopened where window.selectedTabID == nil {
-            window.selectedTabID = window.firstFreeTab(inSpace: window.currentSpaceID)?.id
+            window.selectTab(window.firstFreeTab(inSpace: window.currentSpaceID)?.id)
         }
         // The front window comes forward last, so it becomes key.
         reopened.reversed().forEach { $0.nsWindow?.makeKeyAndOrderFront(nil) }
@@ -306,7 +306,7 @@ public final class BrowserSession: ObservableObject {
         tab.isInSmallWindow = true
         tabs.append(tab)
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
-        window.selectedTabID = tab.id
+        window.selectTab(tab.id)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         window.focusPage()
         return window
@@ -320,7 +320,7 @@ public final class BrowserSession: ObservableObject {
         reordered.append(reordered.remove(at: index))
         tabs = reordered
         let target = sidebarTarget()
-        target.selectedTabID = tab.id
+        target.selectTab(tab.id)
         target.nsWindow?.makeKeyAndOrderFront(nil)
         target.focusPage()
     }
@@ -697,7 +697,7 @@ public final class BrowserSession: ObservableObject {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tabs.append(tab)
-        if select { sidebarTarget().selectedTabID = tab.id }
+        if select { sidebarTarget().selectTab(tab.id) }
         return tab
     }
 
@@ -728,7 +728,7 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             guard let window = self.window(showing: tab) else { return self.selectUnshownTab(tab) }
             if window.selectedTabID != tab.id {
-                window.selectedTabID = tab.id
+                window.selectTab(tab.id)
             } else if window.internalPage != nil {
                 window.closeInternalPage()
             }
@@ -787,10 +787,10 @@ public final class BrowserSession: ObservableObject {
 
     /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        guard tab.spaceID == nil else { return sidebarTarget().selectedTabID = tab.id }
+        guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
         let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
         if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
-        window.selectedTabID = tab.id
+        window.selectTab(tab.id)
     }
 
     /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
@@ -863,7 +863,7 @@ public final class BrowserSession: ObservableObject {
             }
             let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
-            window.selectedTabID = candidates.first { !window.isShownInAnotherWindow($0) }?.id
+            window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
         }
     }
 

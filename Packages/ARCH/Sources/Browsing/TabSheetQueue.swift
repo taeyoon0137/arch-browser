@@ -46,6 +46,8 @@ final class TabSheetQueue {
     }
 
     /// Puts away the window's sheet once its tab has left the window's screen, as when the window selects another tab or another window takes the tab. The sheet shows again first when a window shows its tab: the caller then calls `showNext()`, by which time `endSheet` has taken the sheet off this window.
+    ///
+    /// `endSheet` runs the run loop while the sheet animates out, for about 0.27 seconds (`docs/windows-personas.md`, Facts), so events such as a click on another tab or an engine callback can arrive before this returns. The caller reads the windows' state again afterwards instead of what it read before.
     func deferSheet(of window: BrowserWindowModel) {
         guard let sheet = window.visibleSheet, !window.tabsOnScreen.contains(where: { $0.id == sheet.tabID }),
               let parent = sheet.alert.window.sheetParent else { return }

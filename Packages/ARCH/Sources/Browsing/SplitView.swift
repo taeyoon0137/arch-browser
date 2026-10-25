@@ -123,7 +123,7 @@ private struct PagePaneView: View {
 
     /// Selecting the tab again would close an internal page over it.
     private func selectTab() {
-        if windowModel.selectedTabID != tab.id { windowModel.selectedTabID = tab.id }
+        if windowModel.selectedTabID != tab.id { windowModel.selectTab(tab.id) }
     }
 }
 
@@ -144,7 +144,7 @@ private struct ShownElsewherePaneView: View {
             Text("This tab is shown in another window.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
-            Button("Show Here") { windowModel.selectedTabID = tab.id }
+            Button("Show Here") { windowModel.selectTab(tab.id) }
                 .controlSize(.large)
                 .padding(.top, 6)
         }

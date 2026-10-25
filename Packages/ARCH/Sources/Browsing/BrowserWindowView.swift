@@ -1373,13 +1373,13 @@ struct TabRowView: View {
         .contentShape(Rectangle())
         // The row truncates long titles, so the tooltip has the whole title and the address.
         .help([tab.displayTitle, tab.url?.absoluteString].compactMap { $0 }.joined(separator: "\n"))
-        .onTapGesture { windowModel.selectedTabID = tab.id }
+        .onTapGesture { windowModel.selectTab(tab.id) }
         // The first click selects the tab at once; the second starts renaming it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Rename Tab") {
-                windowModel.selectedTabID = tab.id
+                windowModel.selectTab(tab.id)
                 windowModel.renamingTabID = tab.id
             }
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
@@ -1405,7 +1405,7 @@ struct TabRowView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
-        .accessibilityAction { windowModel.selectedTabID = tab.id }
+        .accessibilityAction { windowModel.selectTab(tab.id) }
     }
 }
 

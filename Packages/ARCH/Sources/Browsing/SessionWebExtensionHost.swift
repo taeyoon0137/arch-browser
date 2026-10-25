@@ -89,7 +89,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
     func activate(_ tab: any EngineWebContents) {
         guard let session, let tab = self.tab(tab) else { return }
         if let window = session.window(showing: tab) {
-            window.selectedTabID = tab.id
+            window.selectTab(tab.id)
         } else {
             session.selectUnshownTab(tab)
         }

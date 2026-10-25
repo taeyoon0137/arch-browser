@@ -179,8 +179,8 @@ public final class BrowserWindowModel: ObservableObject {
     unowned let session: BrowserSession
 
     @Published public var currentSpaceID: UUID
-    /// Assigning it applies window rule 2: another window that shows the tab gives it up first.
-    @Published public var selectedTabID: UUID?
+    /// Only `selectTab(_:)` changes it, which applies window rule 2: another window that shows the tab gives it up first.
+    @Published public private(set) var selectedTabID: UUID?
     @Published public var isSidebarVisible: Bool
     @Published public var isLibraryVisible: Bool
     @Published public private(set) var internalPage: InternalPage?
@@ -213,6 +213,8 @@ public final class BrowserWindowModel: ObservableObject {
     /// The sheet the window shows, which `TabSheetQueue` sets and clears.
     var visibleSheet: TabSheet?
     public var selectedTab: Tab? { get }
+    /// Selects the tab, or the empty page for nil, in the steps below.
+    public func selectTab(_ id: UUID?)
     public var currentSpace: Space { get }
     /// The current space's Persona, which for a small window is its tab's. The window offers its favorites, tabs, and plugins.
     public var personaID: Persona.ID { get }
@@ -241,9 +243,9 @@ public final class BrowserWindowModel: ObservableObject {
 ```
 
 - These commands move here from the session with the same names and bodies, reading the user's data through `session`: `switchToSpace`, `switchToAdjacentSpace`, `addSpace` (adds a space to this window's Persona and switches to it), `selectTab(at:)`, `selectLastTab`, `selectAdjacentTab`, `moveSelectedTab`, `shortcutNumber(for:)`, `openTab(url:engine:)` (in the current space, selected here), `openFavorite`, `navigate(to:)`, `goHome`, `canGoHome`, `setCurrentPageAsHome(ofSpace:)`, `canSetCurrentPageAsHome`, `showCommandPalette`, `dismissCommandPalette`, `submitCommandPalette`, `focusCommandBar`, `closeInternalPage`, `exitPageFullscreen`, `focusPage`, `showFindBar`, `hideFindBar`, `findNext`, `findPrevious`, `toggleLibrary`, `toggleSidebar`, `goBack`, `goForward`, `go(to:inTab:)`, `recentBackItems`, `reload`, `stopLoading`, `toggleDeveloperTools` with the developer tools properties, zoom in, out, and reset with `canZoom`, `printPage`, `exportPageAsPDF`, `canPrint`, the capture commands with `canCapture`, `shareSelectedPage`, `canShareSelectedPage`, the tab switcher, `closeSelectedTab`, `closeOtherTabs`, `confirmClearSiteData`, `canClearSiteData`, `renameSpace`, `renameTab`, and `endRenaming`.
-- `selectedTabID.didSet` runs these in order:
+- `selectTab(_:)` sets `selectedTabID` and runs these in order. Ending a sheet runs the run loop, which steps 1 and 3 can do (Facts for step 11), so a click can select another tab meanwhile; each step reads the selection as it is when the step runs.
   1. `updateShownTabs()`, then `session.release(selectedTab, except: self)`, which makes every other window that shows the tab give it up first and then lets every window show the panes that no window shows any longer.
-  2. The window's side effects: leave the internal page, end another tab's page fullscreen, stamp the tab's activation date, record this window's activation, clear the unread dot, follow the tab's space (main windows only), stop find on the old tab, and close the question popover.
+  2. The window's side effects: leave the internal page, end another tab's page fullscreen, stamp the tab's activation date, record this window's activation, clear the unread dot, and follow the tab's space (main windows only). Only when the tab changed: close the command palette, stop find on the old tab, and close the question popover.
   3. `session.sheets.deferSheet(of: self)` and `session.sheets.showNext()`.
   4. `session.windowDidSelect(self)`, which updates the focused tab while this is the active window. The session's change observer saves the selection.
   5. `devToolsDock.track(selectedTab?.webContents.devTools)`.

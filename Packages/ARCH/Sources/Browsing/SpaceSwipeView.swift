@@ -36,6 +36,11 @@ final class SpaceSwipeNSView: NSView {
     private var velocity: CGFloat = 0
     private var lastTimestamp: TimeInterval = 0
 
+    // A window that closes releases its views without moving them out of it first.
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+
     // Clicks reach the sidebar's controls; this view only watches scroll events.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 

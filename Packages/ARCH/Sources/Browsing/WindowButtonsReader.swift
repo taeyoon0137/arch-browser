@@ -32,6 +32,11 @@ final class WindowButtonsReaderView: NSView {
     private var observers: [NSObjectProtocol] = []
     private var lastMetrics: WindowButtonMetrics?
 
+    // A window that closes releases its views without moving them out of it first.
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func viewDidMoveToWindow() {

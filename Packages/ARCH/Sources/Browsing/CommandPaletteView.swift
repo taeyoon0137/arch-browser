@@ -107,7 +107,7 @@ struct CommandPaletteView: View {
                     ForEach(matchingTabs) { tab in
                         PaletteTabRow(tab: tab)
                             .paletteAction {
-                                windowModel.selectedTabID = tab.id
+                                windowModel.selectTab(tab.id)
                                 windowModel.dismissCommandPalette()
                             }
                     }

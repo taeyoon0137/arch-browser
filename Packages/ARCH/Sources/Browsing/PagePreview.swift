@@ -141,6 +141,11 @@ private struct PreviewDismissal: NSViewRepresentable {
         var ignoresEscape: (() -> Bool)?
         private var monitors: [Any] = []
 
+        // A window that closes releases its views without moving them out of it first.
+        deinit {
+            monitors.forEach(NSEvent.removeMonitor)
+        }
+
         // The monitors run before the focused view, so Escape closes the panel even while the previewed page has focus.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()

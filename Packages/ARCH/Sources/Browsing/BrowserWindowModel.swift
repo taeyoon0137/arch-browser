@@ -1,4 +1,5 @@
 // The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
+// Isolation: AppKit, SwiftUI, and the session use the model on the main thread only. The members that reach the main actor types of `AI` and `Plugins` (the page assistant, page conversations, and plugin managers) are marked `@MainActor`, so only main actor code can call them; the rest stays unmarked, because the session, which calls it, is not isolated yet (`docs/plan.md`, task I.18). A new member follows the same rule. `selectTab(_:)` reaches one of the marked members through `MainActor.assumeIsolated`, which stops the app if it ever runs off the main thread.
 import AI
 import AppKit
 import ARCHEngine
@@ -22,53 +23,21 @@ public final class BrowserWindowModel: ObservableObject {
     /// The window's identity in `session.json`, which it keeps across launches.
     let id: UUID
     public let kind: BrowserWindowKind
-
-    /// The space the sidebar shows. A small window has no sidebar; its current space is the space its tab moves to, whose tint it shows.
-    @Published public var currentSpaceID: UUID
-    /// Selecting a tab switches to its space so the sidebar and page match. Another window that shows the tab gives it up first (window rule 2).
-    @Published public var selectedTabID: UUID? {
-        didSet {
-            // The window shows its selected tab, and another window that shows the tab lets go of its sheet, page fullscreen, and docked tools before this window takes them.
-            updateShownTabs()
-            session.release(selectedTab, except: self)
-            // Selecting a tab, even the one under the page, leaves an internal page.
-            internalPage = nil
-            // Another tab ends the fullscreen of the page that filled the window.
-            if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
-            selectedTab?.lastActivatedAt = Date()
-            recordActivation()
-            if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
-            // A favorite's tab belongs to no space, so selecting it keeps the current one.
-            if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
-            // Another tab takes the focus, so a palette left open over the old page closes, as when a link from another app or Move to Main Window selects a tab.
-            if commandPaletteMode != nil, oldValue != selectedTabID { commandPaletteMode = nil }
-            // Switching tabs ends the search because it belongs to one page.
-            if isFindBarVisible, oldValue != selectedTabID {
-                session.allTabs.first { $0.id == oldValue }?.webContents.stopFind()
-                isFindBarVisible = false
-                findResult = nil
-            }
-            // The question popover belongs to the page it opened over.
-            if oldValue != selectedTabID { MainActor.assumeIsolated { closePageQuestion() } }
-            session.sheets.deferSheet(of: self)
-            session.sheets.showNext()
-            session.windowDidSelect(self)
-            devToolsDock.track(selectedTab?.webContents.devTools)
-            followSelectedTab()
-            focusSelectedPane()
-        }
-    }
-    @Published public var isSidebarVisible = true
-    /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
-    @Published public var isLibraryVisible = false {
-        didSet { if isLibraryVisible { session.markDownloadsSeen() } }
-    }
-    /// Where the selected tab's developer tools show.
-    public let devToolsDock = DevToolsDock()
     /// The AppKit window, set when it is created. Sheets, printing, export, sharing, and Clear Site Data use it.
     public weak var nsWindow: NSWindow?
     /// The window's frame outside full screen, in screen coordinates: the saved one, where the window opens, then the one the window controller records as the window moves and resizes. `nil` until the window opens, when the window has no saved frame.
     var restorableFrame: CGRect?
+
+    // MARK: State: what the window shows
+
+    /// The space the sidebar shows. A small window has no sidebar; its current space is the space its tab moves to, whose tint it shows.
+    @Published public var currentSpaceID: UUID
+    /// The selected tab, or nil for the empty page. Only `selectTab(_:)` changes it, because a selection does more than show the tab.
+    @Published public private(set) var selectedTabID: UUID?
+    /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
+    private var selectedTabObserver: AnyCancellable?
+    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes.
+    @Published private(set) var shownTabIDs: [UUID] = []
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
@@ -79,6 +48,24 @@ public final class BrowserWindowModel: ObservableObject {
             session.sheets.showNext()
         }
     }
+    /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
+    @Published private(set) var preview: PagePreview?
+    /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
+    var visibleSheet: TabSheet?
+    @Published public var isSidebarVisible = true
+    /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
+    @Published public var isLibraryVisible = false {
+        didSet { if isLibraryVisible { session.markDownloadsSeen() } }
+    }
+    /// Whether the page reader shows beside the page.
+    @Published public private(set) var isPageReaderVisible = false
+    /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
+    @Published private(set) var pageQuestion: PageQuestion?
+    /// Where the selected tab's developer tools show.
+    public let devToolsDock = DevToolsDock()
+
+    // MARK: State: what the user does in the window
+
     /// `nil` when the command palette is hidden.
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Counts palette openings and mode changes so each gets a fresh view.
@@ -98,8 +85,26 @@ public final class BrowserWindowModel: ObservableObject {
     @Published public var renamingSpaceID: UUID?
     /// The tab whose name is being edited in the sidebar.
     @Published public var renamingTabID: UUID?
-    /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
-    private var selectedTabObserver: AnyCancellable?
+    /// The folder whose name is being edited in the sidebar.
+    @Published public var renamingFolderID: UUID?
+
+    /// The tab whose page shows the region capture overlay, from Capture Region until the user drags out a region or cancels.
+    @Published public private(set) var regionCaptureTabID: UUID?
+
+    /// Tab identifiers in the order the tabs were last selected, most recent first. Tabs not selected since launch are missing.
+    private var activationOrder: [UUID] = []
+    /// The tab the switcher highlights, which releasing Control selects. `nil` while the switcher is hidden.
+    @Published public private(set) var tabSwitcherHighlightID: UUID?
+
+    /// Set while the selected page renders as PDF for Print or Export as PDF, so a second request cannot start another.
+    private var isRenderingPDF = false
+
+    /// The share button in the address pill, set when it joins the window.
+    weak var shareButtonView: NSView?
+    /// The site settings button in the address pill, which web extensions' popups point at, set when it joins the window.
+    weak var siteSettingsButtonView: NSView?
+    /// The picker holds its delegate weakly, so the last one stays here until the next share.
+    private var sharePicker: PageSharePicker?
 
     /// A window of `kind` as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
     init(session: BrowserSession, record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) {
@@ -109,6 +114,66 @@ public final class BrowserWindowModel: ObservableObject {
         currentSpaceID = record.currentSpaceID
         isSidebarVisible = record.isSidebarVisible
         restorableFrame = record.frame
+    }
+
+    // MARK: Selection
+
+    public var selectedTab: Tab? {
+        session.tabs.first { $0.id == selectedTabID } ?? session.favoriteTabs.values.first { $0.id == selectedTabID }
+    }
+
+    /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
+    ///
+    /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot, and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 3. A sheet of a tab that left the screen waits, and the next sheet of a tab on screen shows.
+    /// 4. The session updates the focused tab.
+    /// 5. The docked developer tools follow the tab.
+    /// 6. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
+    ///
+    /// Steps 1 and 3 can end a sheet, and ending a sheet runs the run loop (`TabSheetQueue.deferSheet(of:)`), so a click can select yet another tab before the later steps run. Every step therefore reads the selection as it is when the step runs, not `id`.
+    public func selectTab(_ id: UUID?) {
+        let previousID = selectedTabID
+        selectedTabID = id
+        // 1. The window shows its selected tab, and another window that shows the tab lets go of its sheet, page fullscreen, and docked tools before this window takes them.
+        updateShownTabs()
+        session.release(selectedTab, except: self)
+        // 2. Selecting a tab, even the one under the page, leaves an internal page.
+        internalPage = nil
+        // Another tab ends the fullscreen of the page that filled the window.
+        if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
+        selectedTab?.lastActivatedAt = Date()
+        recordActivation()
+        if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
+        // A favorite's tab belongs to no space, so selecting it keeps the current one.
+        if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
+        // Only another tab.
+        if previousID != selectedTabID {
+            // Another tab takes the focus, so a palette left open over the old page closes, as when a link from another app or Move to Main Window selects a tab.
+            if commandPaletteMode != nil { commandPaletteMode = nil }
+            // Switching tabs ends the search because it belongs to one page.
+            if isFindBarVisible {
+                session.allTabs.first { $0.id == previousID }?.webContents.stopFind()
+                isFindBarVisible = false
+                findResult = nil
+            }
+            // The question popover belongs to the page it opened over.
+            MainActor.assumeIsolated { closePageQuestion() }
+        }
+        // 3. Ending a sheet runs the run loop.
+        session.sheets.deferSheet(of: self)
+        session.sheets.showNext()
+        // 4.
+        session.windowDidSelect(self)
+        // 5.
+        devToolsDock.track(selectedTab?.webContents.devTools)
+        // 6.
+        followSelectedTab()
+        focusSelectedPane()
+    }
+
+    private func followSelectedTab() {
+        selectedTabObserver = selectedTab?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     // MARK: Spaces
@@ -131,7 +196,7 @@ public final class BrowserWindowModel: ObservableObject {
         // A selected favorite's tab belongs to no space and shows in the current one. It stays selected while the space stays, and stays open behind a new space's own tab.
         let selectedSpaceID = selectedTab.map { $0.spaceID ?? currentSpaceID }
         currentSpaceID = id
-        if selectedSpaceID != id { selectedTabID = firstFreeTab(inSpace: id)?.id }
+        if selectedSpaceID != id { selectTab(firstFreeTab(inSpace: id)?.id) }
     }
 
     /// The first tab row of the space that the sidebar shows and no other window shows, open tabs before pinned ones (window rule 3). Only a space whose free tabs all sit in collapsed folders gives a hidden tab.
@@ -264,7 +329,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Selects the favorite's own tab, which the session opens if needed.
     public func openFavorite(_ favorite: Favorite) {
-        selectedTabID = session.openTab(for: favorite).id
+        selectTab(session.openTab(for: favorite).id)
     }
 
     /// The favorite whose tab is selected.
@@ -273,9 +338,6 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     // MARK: Previews
-
-    /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
-    @Published private(set) var preview: PagePreview?
 
     /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front leave the tab alone.
     private var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
@@ -343,49 +405,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Tabs
 
-    public var selectedTab: Tab? {
-        session.tabs.first { $0.id == selectedTabID } ?? session.favoriteTabs.values.first { $0.id == selectedTabID }
-    }
-
-    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview.
-    @Published private(set) var shownTabIDs: [UUID] = []
-
-    /// Whether the window shows `tab`, as its selected tab or a pane of its split view.
-    func shows(_ tab: Tab) -> Bool {
-        shownTabIDs.contains(tab.id)
-    }
-
-    /// Whether another window shows `tab`. Selection this window makes on its own passes such a tab by (window rule 3).
-    func isShownInAnotherWindow(_ tab: Tab) -> Bool {
-        session.windows.contains { $0 !== self && $0.shows(tab) }
-    }
-
-    /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows.
-    func updateShownTabs() {
-        let ids = paneTabs.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }.map(\.id)
-        if ids != shownTabIDs { shownTabIDs = ids }
-    }
-
-    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen, sheet, and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
-    func giveUp(_ tab: Tab) {
-        shownTabIDs.removeAll { $0 == tab.id }
-        if tab.id == selectedTabID {
-            guard kind == .main else { return close() }
-            selectedTabID = fallbackTab(excluding: tab.id)?.id
-        } else {
-            if fullscreenTabID == tab.id { exitPageFullscreen() }
-            session.sheets.deferSheet(of: self)
-        }
-    }
-
-    /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
-    func fallbackTab(excluding id: UUID) -> Tab? {
-        recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
-    }
-
     /// Opens a tab at `url` in the current space and the default engine, and selects it.
     func openTab(url: URL) {
-        selectedTabID = session.openTab(url: url, in: currentSpaceID, select: false).id
+        selectTab(session.openTab(url: url, in: currentSpaceID, select: false).id)
     }
 
     /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). A page of another Persona, as from a preview that stayed open while the window moved to another Persona's space, goes to its Persona's preferred space instead. `opener` is the page that opened it, which the window returns to when the new page closes itself.
@@ -394,13 +416,9 @@ public final class BrowserWindowModel: ObservableObject {
         case .main:
             let tab = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false)
             tab.opener = opener
-            selectedTabID = tab.id
+            selectTab(tab.id)
         case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID).selectedTab?.opener = opener
         }
-    }
-
-    private func followSelectedTab() {
-        selectedTabObserver = selectedTab?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     /// Whether the selected tab's page fills the window in fullscreen, without margins or the controls around the page.
@@ -439,11 +457,11 @@ public final class BrowserWindowModel: ObservableObject {
     public func selectTab(at index: Int) {
         let ordered = orderedTabs
         guard ordered.indices.contains(index) else { return }
-        selectedTabID = ordered[index].id
+        selectTab(ordered[index].id)
     }
 
     public func selectLastTab() {
-        if let last = orderedTabs.last { selectedTabID = last.id }
+        if let last = orderedTabs.last { selectTab(last.id) }
     }
 
     /// The ⌘-number shortcut for `tab`: 1 to 8 for the current space's first eight tabs, or 9 for its last tab beyond those.
@@ -457,7 +475,7 @@ public final class BrowserWindowModel: ObservableObject {
     public func selectAdjacentTab(forward: Bool) {
         let ordered = orderedTabs
         guard let index = ordered.firstIndex(where: { $0.id == selectedTabID }) else { return }
-        selectedTabID = ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count].id
+        selectTab(ordered[(index + (forward ? 1 : ordered.count - 1)) % ordered.count].id)
     }
 
     /// Swaps the selected tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.
@@ -577,11 +595,6 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Page reader and questions
 
-    /// Whether the page reader shows beside the page.
-    @Published public private(set) var isPageReaderVisible = false
-    /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
-    @Published private(set) var pageQuestion: PageQuestion?
-
     /// The reader opens beside a selected tab that no internal page covers, and closes at any time.
     public var canTogglePageReader: Bool {
         isPageReaderVisible || (selectedTab != nil && internalPage == nil)
@@ -634,18 +647,6 @@ public final class BrowserWindowModel: ObservableObject {
         guard let pageQuestion else { return }
         pageQuestion.conversation.cancel()
         self.pageQuestion = nil
-    }
-
-    // MARK: Sheets
-
-    /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
-    var visibleSheet: TabSheet?
-
-    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window. None once the window has let go of its tabs as it closes.
-    var tabsOnScreen: [Tab] {
-        guard let selected = selectedTab, shows(selected) else { return [] }
-        if fullscreenTabID == selected.id { return [selected] }
-        return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
     }
 
     // MARK: Closing
@@ -799,9 +800,6 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Printing
 
-    /// Set while the selected page renders as PDF for Print or Export as PDF, so a second request cannot start another.
-    private var isRenderingPDF = false
-
     /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it, no PDF is rendering, and the window shows no sheet.
     public var canPrint: Bool {
         guard selectedTab != nil, !isSelectedPageCovered, !isRenderingPDF else { return false }
@@ -855,9 +853,6 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     // MARK: Capture
-
-    /// The tab whose page shows the region capture overlay, from Capture Region until the user drags out a region or cancels.
-    @Published public private(set) var regionCaptureTabID: UUID?
 
     /// Whether the capture commands can act: a page is selected and no internal page or preview covers it.
     public var canCapture: Bool { selectedTab != nil && !isSelectedPageCovered }
@@ -926,13 +921,6 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Sharing and site controls
 
-    /// The share button in the address pill, set when it joins the window.
-    weak var shareButtonView: NSView?
-    /// The site settings button in the address pill, which web extensions' popups point at, set when it joins the window.
-    weak var siteSettingsButtonView: NSView?
-    /// The picker holds its delegate weakly, so the last one stays here until the next share.
-    private var sharePicker: PageSharePicker?
-
     /// Whether the selected tab shows a page to share. An internal page has nothing to share, and the preview panel hides the tab's page.
     public var canShareSelectedPage: Bool { !isSelectedPageCovered && selectedTab?.url != nil }
 
@@ -955,11 +943,6 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     // MARK: Tab switcher
-
-    /// Tab identifiers in the order the tabs were last selected, most recent first. Tabs not selected since launch are missing.
-    private var activationOrder: [UUID] = []
-    /// The tab the switcher highlights, which releasing Control selects. `nil` while the switcher is hidden.
-    @Published public private(set) var tabSwitcherHighlightID: UUID?
 
     public var isTabSwitcherVisible: Bool { tabSwitcherHighlightID != nil }
 
@@ -1005,7 +988,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard let id = tabSwitcherHighlightID else { return }
         tabSwitcherHighlightID = nil
         guard session.allTabs.contains(where: { $0.id == id }) else { return }
-        selectedTabID = id
+        selectTab(id)
         if commandPaletteMode != nil { dismissCommandPalette() } else { focusPage() }
     }
 
@@ -1040,9 +1023,6 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Folders
 
-    /// The folder whose name is being edited in the sidebar.
-    @Published public var renamingFolderID: UUID?
-
     /// Adds an empty folder after the space's folders among its pinned tabs, shows the space, and starts renaming the folder.
     public func addFolder(toSpace spaceID: UUID) {
         guard session.spaces.contains(where: { $0.id == spaceID }) else { return }
@@ -1070,7 +1050,13 @@ public final class BrowserWindowModel: ObservableObject {
         if renamingFolderID == id { renamingFolderID = nil }
     }
 
-    // MARK: Split view
+    // MARK: Panes and split view
+
+    // The page area shows one pane or a split view of up to four. The session keeps each space's split view (`BrowserSession.splitTabIDs`), and these names tell the window's lists of panes apart:
+    // - `splitOnScreen`: the selected tab's split view, or nil when the selected tab is in none. `isInSplitViewOnScreen(_:)` asks whether a tab is in it.
+    // - `paneTabs`: the page area's panes, left to right: the tabs of `splitOnScreen`, or the selected tab alone.
+    // - `shownTabIDs`: the panes whose pages this window shows. A pane that another window shows stays out, and the page area shows a placeholder in its place (window rule 1).
+    // - `tabsOnScreen`: the shown panes, the selected tab first, or the selected tab alone while its page fills the window. Their sheets can show on this window.
 
     /// The split view the page area shows: the selected tab's, if it is in one.
     private var splitOnScreen: [UUID]? {
@@ -1088,6 +1074,46 @@ public final class BrowserWindowModel: ObservableObject {
     /// Whether `tab` is a pane of the split view the page area shows.
     func isInSplitViewOnScreen(_ tab: Tab) -> Bool {
         splitOnScreen?.contains(tab.id) == true
+    }
+
+    /// Whether the window shows `tab`, as its selected tab or a pane of its split view.
+    func shows(_ tab: Tab) -> Bool {
+        shownTabIDs.contains(tab.id)
+    }
+
+    /// Whether another window shows `tab`. Selection this window makes on its own passes such a tab by (window rule 3).
+    func isShownInAnotherWindow(_ tab: Tab) -> Bool {
+        session.windows.contains { $0 !== self && $0.shows(tab) }
+    }
+
+    /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows.
+    func updateShownTabs() {
+        let ids = paneTabs.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }.map(\.id)
+        if ids != shownTabIDs { shownTabIDs = ids }
+    }
+
+    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen, sheet, and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
+    func giveUp(_ tab: Tab) {
+        shownTabIDs.removeAll { $0 == tab.id }
+        if tab.id == selectedTabID {
+            guard kind == .main else { return close() }
+            selectTab(fallbackTab(excluding: tab.id)?.id)
+        } else {
+            if fullscreenTabID == tab.id { exitPageFullscreen() }
+            session.sheets.deferSheet(of: self)
+        }
+    }
+
+    /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
+    func fallbackTab(excluding id: UUID) -> Tab? {
+        recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
+    }
+
+    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window. None once the window has let go of its tabs as it closes.
+    var tabsOnScreen: [Tab] {
+        guard let selected = selectedTab, shows(selected) else { return [] }
+        if fullscreenTabID == selected.id { return [selected] }
+        return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
     }
 
     /// Whether `tab` can open as a pane: it belongs to the selected tab's space, the page area does not show it yet, and the panes it joins have room.
@@ -1109,7 +1135,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard (2...BrowserSession.maximumPanes).contains(ids.count) else { return }
         session.setSplitView(ids, ofSpace: spaceID)
         // Selecting the tab again would close an internal page over it.
-        if selectedTabID != tab.id { selectedTabID = tab.id }
+        if selectedTabID != tab.id { selectTab(tab.id) }
     }
 
     /// Whether the menu bar's Open in Split View can act: the selected tab can open as a pane, and no internal page covers it.
@@ -1125,7 +1151,7 @@ public final class BrowserWindowModel: ObservableObject {
     /// Takes `tab` out of its split view and leaves the tab open. When it was the focused pane, the pane that takes its place is selected, so the rest of the split view stays on screen.
     func closePane(_ tab: Tab) {
         let neighborID = session.leaveSplitView(tab)
-        if selectedTabID == tab.id, let neighborID { selectedTabID = neighborID }
+        if selectedTabID == tab.id, let neighborID { selectTab(neighborID) }
     }
 
     /// The panes `tab` joins, left to right: those on screen, which are a split view or the selected tab alone. The selected tab shown alone joins its space's split view instead or, without one, the tab selected before it. Empty when `tab` is in another space or has no tab to join.

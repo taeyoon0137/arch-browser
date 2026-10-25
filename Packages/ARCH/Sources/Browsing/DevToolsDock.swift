@@ -188,13 +188,25 @@ private struct DevToolsResizeHandle: View {
     @Binding var size: CGFloat
     let sign: CGFloat
     @State private var startSize: CGFloat?
+    /// Whether the handle has pushed the resize pointer, which it pops once.
+    @State private var hasPushedCursor = false
 
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
             .onHover { isInside in
-                let cursor: NSCursor = axis == .horizontal ? .resizeLeftRight : .resizeUpDown
-                isInside ? cursor.push() : NSCursor.pop()
+                guard isInside != hasPushedCursor else { return }
+                hasPushedCursor = isInside
+                if isInside {
+                    (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            // Closing the tools removes the handle without ending its hover, which would leave the resize pointer on the page.
+            .onDisappear {
+                if hasPushedCursor { NSCursor.pop() }
+                hasPushedCursor = false
             }
             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
