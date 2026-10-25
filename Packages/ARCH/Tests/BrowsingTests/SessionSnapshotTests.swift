@@ -143,6 +143,65 @@ import Testing
         #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default")])
         #expect(snapshot.spaces.map(\.name) == ["Personal"])
         #expect(snapshot.spaces.map(\.personaID) == [Persona.defaultID])
+        #expect(snapshot.windows?.map(\.currentSpaceID) == snapshot.spaces.map(\.id))
+        #expect(snapshot.windows?.first?.selectedTabID == nil)
+    }
+
+    @Test(arguments: [1, 4, 7, 8])
+    func olderFilesOpenOneWindowOnTheirSelection(version: Int) throws {
+        let folder = try SessionFolder()
+        try folder.write(try #require(filesWithoutPersonas[version]))
+        let snapshot = try #require(folder.store.load())
+        let window = try #require(snapshot.windows?.first)
+        #expect(snapshot.windows?.count == 1)
+        #expect(window.currentSpaceID == spaceB)
+        #expect(window.selectedTabID == snapshot.tabs[2].id)
+        #expect(window.frame == nil)
+        #expect(window.isSidebarVisible)
+    }
+
+    @Test func olderFilesOpenTheirWindowOnTheSelectedFavoritesTab() throws {
+        let folder = try SessionFolder()
+        try folder.write(version8File.replacingOccurrences(of: #""selectedTabIndex": 2,"#, with: #""selectedFavoriteID": "\#(favoriteID)","#))
+        let window = try #require(folder.store.load()?.windows?.first)
+        // A favorite's tab shows in any space, so the window keeps the saved one.
+        #expect(window.currentSpaceID == spaceB)
+        #expect(window.selectedTabID == favoriteTab)
+    }
+
+    @Test func windowsKeepTheirOrderAndRepairWhatTheyLack() throws {
+        let folder = try SessionFolder()
+        try folder.write(version11File)
+        let windows = try #require(folder.store.load()?.windows)
+        #expect(windows.map(\.id) == [window1, window2, window3, window4, window5])
+        #expect(windows.map(\.frame) == [frontFrame, nil, nil, nil, nil])
+        #expect(windows.map(\.isSidebarVisible) == [false, true, true, true, true])
+        // The front window moves to its tab's space, and a window on a missing space goes to the first. A window whose tab the front window selects, or whose tab does not reopen, has none, while a favorite's tab keeps the window's space.
+        #expect(windows.map(\.currentSpaceID) == [spaceA, spaceA, spaceB, spaceB, spaceA])
+        #expect(windows.map(\.selectedTabID) == [tab1, nil, nil, favoriteTab, nil])
+    }
+
+    @Test func anEmptyWindowListOpensOneWindowOnTheSelection() throws {
+        let folder = try SessionFolder()
+        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 11, "windows": [],"#))
+        let windows = try #require(folder.store.load()?.windows)
+        #expect(windows.map(\.currentSpaceID) == [spaceB])
+        #expect(windows.map(\.selectedTabID) == [tab3])
+    }
+
+    @Test func savedWindowsLoadUnchanged() throws {
+        let folder = try SessionFolder()
+        try folder.write(version11File)
+        let loaded = try #require(folder.store.load())
+        folder.store.saveNow(loaded)
+        let reloaded = try #require(folder.store.load())
+        let windows = try #require(loaded.windows)
+        let reloadedWindows = try #require(reloaded.windows)
+        #expect(reloadedWindows.map(\.id) == windows.map(\.id))
+        #expect(reloadedWindows.map(\.frame) == windows.map(\.frame))
+        #expect(reloadedWindows.map(\.currentSpaceID) == windows.map(\.currentSpaceID))
+        #expect(reloadedWindows.map(\.selectedTabID) == windows.map(\.selectedTabID))
+        #expect(reloadedWindows.map(\.isSidebarVisible) == windows.map(\.isSidebarVisible))
     }
 
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
@@ -158,7 +217,7 @@ import Testing
 
     @Test func currentFilesLeaveNoCopy() throws {
         let folder = try SessionFolder()
-        try folder.write(version10File)
+        try folder.write(version11File)
         _ = try #require(folder.store.load())
         #expect(try folder.fileNames() == ["session.json"])
     }
@@ -229,6 +288,12 @@ private let workPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F31
 private let homePersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F32")!
 private let unlistedPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F33")!
 private let removedPersona = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F34")!
+private let window1 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F41")!
+private let window2 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F42")!
+private let window3 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F43")!
+private let window4 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F44")!
+private let window5 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F45")!
+private let frontFrame = CGRect(x: 100, y: 200, width: 1000, height: 700)
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]
@@ -357,4 +422,16 @@ private let version9File = """
 private let version10File = version9File.replacingOccurrences(of: #""version": 9,"#, with: """
 "version": 10,
   "removedPersonaIDs": ["\(removedPersona)", "\(Persona.defaultID)", "\(workPersona)", "\(unlistedPersona)"],
+""")
+
+/// A version 11 file: the version 8 file with five windows, front to back. The front window has a frame, a hidden sidebar, and a tab of another space. The others are on a missing space, on the front window's tab, on a favorite's tab, and on a closed tab.
+private let version11File = version8File.replacingOccurrences(of: #""version": 8,"#, with: """
+"version": 11,
+  "windows": [
+    { "id": "\(window1)", "frame": [[100, 200], [1000, 700]], "currentSpaceID": "\(spaceB)", "selectedTabID": "\(tab1)", "isSidebarVisible": false },
+    { "id": "\(window2)", "currentSpaceID": "\(missingSpace)", "isSidebarVisible": true },
+    { "id": "\(window3)", "currentSpaceID": "\(spaceB)", "selectedTabID": "\(tab1)", "isSidebarVisible": true },
+    { "id": "\(window4)", "currentSpaceID": "\(spaceB)", "selectedTabID": "\(favoriteTab)", "isSidebarVisible": true },
+    { "id": "\(window5)", "currentSpaceID": "\(spaceA)", "selectedTabID": "\(closedTab)", "isSidebarVisible": true }
+  ],
 """)

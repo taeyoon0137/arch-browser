@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 /// The state of one browser window: what it shows and what the user is doing in it. Its commands read and change the user's data through the session.
 public final class BrowserWindowModel: ObservableObject {
     unowned let session: BrowserSession
+    /// The window's identity in `session.json`, which it keeps across launches.
+    let id: UUID
 
     /// The space the sidebar shows.
     @Published public var currentSpaceID: UUID
@@ -55,6 +57,8 @@ public final class BrowserWindowModel: ObservableObject {
     public let devToolsDock = DevToolsDock()
     /// The AppKit window, set when it is created. Sheets, printing, export, sharing, and Clear Site Data use it.
     public weak var nsWindow: NSWindow?
+    /// The window's frame outside full screen, in screen coordinates: the saved one, where the window opens, then the one the window controller records as the window moves and resizes. `nil` until the window opens, when the window has no saved frame.
+    var restorableFrame: CGRect?
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
@@ -87,9 +91,13 @@ public final class BrowserWindowModel: ObservableObject {
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
 
-    init(session: BrowserSession, currentSpaceID: UUID) {
+    /// A window as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
+    init(session: BrowserSession, record: SessionSnapshot.WindowRecord) {
         self.session = session
-        self.currentSpaceID = currentSpaceID
+        id = record.id
+        currentSpaceID = record.currentSpaceID
+        isSidebarVisible = record.isSidebarVisible
+        restorableFrame = record.frame
     }
 
     // MARK: Spaces
@@ -526,8 +534,10 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Closing
 
-    /// The window's space and selected tab, which the session keeps once the window closes.
-    var record: WindowRecord { WindowRecord(currentSpaceID: currentSpaceID, selectedTabID: selectedTabID) }
+    /// The window as `session.json` keeps it. The session also keeps it once the window closes.
+    var record: SessionSnapshot.WindowRecord {
+        SessionSnapshot.WindowRecord(id: id, frame: restorableFrame, currentSpaceID: currentSpaceID, selectedTabID: selectedTabID, isSidebarVisible: isSidebarVisible)
+    }
 
     /// Lets go of what the window shows as it closes, so that other windows can show its tabs, which stay open (window rule 5): the page reader's replies about them, the palette, find, region capture, page fullscreen, the preview panel, the question popover, the sheet, which shows again in the next window that shows its tab, and the docked developer tools.
     @MainActor func prepareToClose() {
@@ -994,10 +1004,4 @@ public final class BrowserWindowModel: ObservableObject {
         if let split = session.splitTabIDs[spaceID] { return split }
         return recentTabs.first { $0.id != tab.id && $0.spaceID == tab.spaceID }.map { [$0.id] } ?? []
     }
-}
-
-/// A main window's space and selected tab. The session keeps the record of the last main window that closed, opens the next main window from it, and saves the front main window's.
-struct WindowRecord {
-    var currentSpaceID: UUID
-    var selectedTabID: UUID?
 }

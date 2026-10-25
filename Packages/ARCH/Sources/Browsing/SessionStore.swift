@@ -1,10 +1,10 @@
-// Saves and restores sidebar state (Personas, spaces, favorites and their tabs, tabs, tab folders, closed tabs, split views, and selection) in the JSON file `session.json`. The session supplies the app's Application Support folder.
+// Saves and restores sidebar state (Personas, spaces, favorites and their tabs, tabs, tab folders, closed tabs, and split views) and the main windows in the JSON file `session.json`. The session supplies the app's Application Support folder.
 import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, and version 10 the deleted Personas whose stored data the engines still have to remove. Files without a version are version 1.
-    static let currentVersion = 10
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, and version 11 the main windows. Files without a version are version 1.
+    static let currentVersion = 11
 
     struct TabRecord: Codable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -38,6 +38,16 @@ struct SessionSnapshot: Codable {
         var state: Data?
     }
 
+    /// A main window: what it shows and where it was.
+    struct WindowRecord: Codable {
+        var id: UUID
+        /// The frame outside full screen, in screen coordinates. `nil` for a window that has never opened, which opens centered.
+        var frame: CGRect?
+        var currentSpaceID: UUID
+        var selectedTabID: UUID?
+        var isSidebarVisible: Bool
+    }
+
     var version: Int?
 
     /// Every Persona, the default one among them. `nil` in files before version 9.
@@ -45,11 +55,13 @@ struct SessionSnapshot: Codable {
     /// Deleted Personas whose cookies and website data the engines remove at the next launch, before any engine starts. `nil` in files before version 10.
     var removedPersonaIDs: [UUID]?
     var spaces: [Space]
+    /// The front main window's space, which builds before version 11 open. This build reads `windows`.
     var currentSpaceID: UUID
     var favorites: [Favorite]
     var tabs: [TabRecord]
     /// Every space's folders, in sidebar order within each space's pinned and open tabs. Optional so files before version 6 still decode.
     var folders: [TabFolder]?
+    /// The index in `tabs` of the front main window's selected tab, which builds before version 11 open.
     var selectedTabIndex: Int?
     /// Recently closed tabs, oldest first. Optional so older files without this field still decode.
     var closedTabs: [TabRecord]?
@@ -57,8 +69,10 @@ struct SessionSnapshot: Codable {
     var splitViews: [[Int]]?
     /// The favorites' tabs, in favorite order. `nil` in files before version 5.
     var favoriteTabs: [FavoriteTabRecord]?
-    /// The favorite whose tab was selected. `nil` when a space's tab was selected and in files before version 5.
+    /// The favorite whose tab the front main window selected, which builds before version 11 open. `nil` when a space's tab was selected and in files before version 5.
     var selectedFavoriteID: UUID?
+    /// The main windows, front to back. `nil` in files before version 11; `normalized()` makes one from `currentSpaceID` and the selected tab.
+    var windows: [WindowRecord]?
 
     /// Fills in what older files lack and repairs what a file got wrong. The only migration point: `SessionStore.load()` returns every snapshot through it.
     func normalized() -> SessionSnapshot {
@@ -77,6 +91,7 @@ struct SessionSnapshot: Codable {
         snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.assignPersonas()
+        snapshot.repairWindows()
         // Only a Persona that is gone loses its stored data. The default Persona is always listed, so the engines' default storage is never removed.
         let listedIDs = Set((snapshot.personas ?? []).map(\.id))
         snapshot.removedPersonaIDs = removedPersonaIDs?.filter { !listedIDs.contains($0) }
@@ -116,6 +131,35 @@ struct SessionSnapshot: Codable {
             return record
         }
         self.personas = personas
+    }
+
+    /// Gives the snapshot at least one main window and each window a listed space and a tab that reopens, so that the windows open as they were. A file before version 11 lists none, so one window opens on its space and selected tab, with the sidebar visible and no frame.
+    private mutating func repairWindows() {
+        if windows?.isEmpty != false {
+            let selectedFavoriteTabID = favoriteTabs?.first { $0.favoriteID == selectedFavoriteID }?.id
+            let selectedTabID = selectedFavoriteTabID ?? selectedTabIndex.flatMap { tabs.indices.contains($0) ? tabs[$0].id : nil }
+            windows = [WindowRecord(id: UUID(), frame: nil, currentSpaceID: currentSpaceID, selectedTabID: selectedTabID, isSidebarVisible: true)]
+        }
+        // The tabs that reopen: those of listed spaces, and the tabs of listed favorites, which show in any space.
+        let spaceIDs = Set(spaces.map(\.id))
+        let firstSpaceID = spaces[0].id
+        let tabSpaceIDs = Dictionary(tabs.filter { spaceIDs.contains($0.spaceID) }.compactMap { record in record.id.map { ($0, record.spaceID) } }, uniquingKeysWith: { first, _ in first })
+        let favoriteIDs = Set(favorites.map(\.id))
+        let favoriteTabIDs = Set((favoriteTabs ?? []).filter { favoriteIDs.contains($0.favoriteID) }.compactMap(\.id))
+        // A window whose tab does not reopen, or whose tab a window in front of it selects, picks its tab at launch. A window shows its tab's space.
+        var claimedTabIDs: Set<UUID> = []
+        windows = windows?.map { record in
+            var record = record
+            if !spaceIDs.contains(record.currentSpaceID) { record.currentSpaceID = firstSpaceID }
+            guard let tabID = record.selectedTabID else { return record }
+            let tabSpaceID = tabSpaceIDs[tabID]
+            if (tabSpaceID == nil && !favoriteTabIDs.contains(tabID)) || !claimedTabIDs.insert(tabID).inserted {
+                record.selectedTabID = nil
+            } else if let tabSpaceID {
+                record.currentSpaceID = tabSpaceID
+            }
+            return record
+        }
     }
 }
 

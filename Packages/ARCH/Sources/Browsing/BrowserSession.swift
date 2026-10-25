@@ -96,8 +96,8 @@ public final class BrowserSession: ObservableObject {
         }
         guard let primary else { throw SessionError.noEngineStarted }
         primaryEngine = primary.engineKind
-        // The window opens once the app has built its menus (`restoreWindows()`).
-        lastWindowRecord = WindowRecord(currentSpaceID: snapshot.spaces.first { $0.id == snapshot.currentSpaceID }?.id ?? snapshot.spaces[0].id)
+        // The windows open once the app has built its menus (`restoreWindows()`). Normalizing gives every snapshot a window.
+        windowsToReopen = snapshot.windows ?? []
         personas = snapshot.personas ?? []
         spaces = snapshot.spaces
         favorites = snapshot.favorites
@@ -107,8 +107,8 @@ public final class BrowserSession: ObservableObject {
         start(primary)
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
-        let selectedTab = restoreTabs(snapshot)
-        lastWindowRecord.selectedTabID = (restoreFavoriteTabs(snapshot) ?? selectedTab)?.id
+        restoreTabs(snapshot)
+        restoreFavoriteTabs(snapshot)
         observeChanges()
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
@@ -127,8 +127,8 @@ public final class BrowserSession: ObservableObject {
     @Published public private(set) var windows: [BrowserWindowModel] = []
     /// The AppKit side of each open window, which owns the window.
     private var windowControllers: [BrowserWindowController] = []
-    /// The last main window's space and selected tab while no main window is open: the saved session's until the first window opens, then those of the last main window that closed. The next main window opens on them, and the saved session keeps them.
-    private var lastWindowRecord: WindowRecord
+    /// The main windows that open while none is open, front to back: the saved session's until they open, then the last main window that closed. The saved session keeps them while no main window is open. Never empty.
+    private var windowsToReopen: [SessionSnapshot.WindowRecord]
 
     /// The browser window that page commands act on: the one that last became main, which stays the target while Settings or History is key (window rule 7). Nil while no browser window is open.
     public var activeWindow: BrowserWindowModel? { windows.first }
@@ -136,38 +136,46 @@ public final class BrowserSession: ObservableObject {
     /// The main window that last became main, or nil while none is open. Menu validation and other checks read it, because they must not create a window.
     public var lastMainWindow: BrowserWindowModel? { windows.first }
 
-    /// The window that sidebar commands act on: the last main window, or, while none is open, a new main window on the last one's space and tab (window rule 7).
-    public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenLastWindow() }
+    /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
+    public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
 
-    /// Opens the saved session's main window once at launch, after the app has built its menus.
+    /// Opens the saved session's main windows once at launch, after the app has built its menus.
     public func restoreWindows() {
-        if windows.isEmpty { reopenLastWindow() }
+        if windows.isEmpty { reopenWindows(windowsToReopen) }
     }
 
     /// New Window: opens a main window on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
     @discardableResult
     public func openWindow() -> BrowserWindowModel {
-        let window = makeWindow(spaceID: activeWindow?.currentSpaceID ?? lastWindowRecord.currentSpaceID)
+        let spaceID = activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+        let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true))
         window.nsWindow?.makeKeyAndOrderFront(nil)
         return window
     }
 
-    /// Opens a main window on the last main window's space with its selected tab, or with that space's first free tab when the tab has closed or another window shows it (window rule 3).
+    /// Opens main windows as their records describe them, front to back, and returns them in that order. Each shows its saved tab, which a window in front of it then gives up when it shows the tab as a pane of its split view (window rule 2), or its space's first free tab when the tab has closed (window rule 3).
     @discardableResult
-    private func reopenLastWindow() -> BrowserWindowModel {
-        let record = lastWindowRecord
-        let window = makeWindow(spaceID: record.currentSpaceID)
-        // Selecting before the window shows puts the page in place when the window first draws.
-        let selected = allTabs.first { $0.id == record.selectedTabID && !window.isShownInAnotherWindow($0) }
-        window.selectedTabID = (selected ?? window.firstFreeTab(inSpace: window.currentSpaceID))?.id
-        window.nsWindow?.makeKeyAndOrderFront(nil)
-        return window
+    private func reopenWindows(_ records: [SessionSnapshot.WindowRecord]) -> [BrowserWindowModel] {
+        // Created back to front, so that `windows` lists them front to back.
+        let reopened = Array(records.reversed().map(makeWindow(from:)).reversed())
+        // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
+        for (window, record) in zip(reopened, records) {
+            if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectedTabID = tab.id }
+        }
+        for window in reopened where window.selectedTabID == nil {
+            window.selectedTabID = window.firstFreeTab(inSpace: window.currentSpaceID)?.id
+        }
+        // The front window comes forward last, so it becomes key.
+        reopened.reversed().forEach { $0.nsWindow?.makeKeyAndOrderFront(nil) }
+        return reopened
     }
 
-    /// Creates a hidden main window on the space `spaceID`, or on the first space when that space is gone, cascaded from the active window. It goes first in `windows`, as it is about to come to the front, before its views exist.
-    private func makeWindow(spaceID: UUID) -> BrowserWindowModel {
+    /// Creates a hidden main window as `record` describes it, on the first space when the record's space is gone. A window without a frame cascades from the active window. It goes first in `windows`, as it is about to come to the front, before its views exist.
+    private func makeWindow(from record: SessionSnapshot.WindowRecord) -> BrowserWindowModel {
         let source = activeWindow?.nsWindow
-        let window = BrowserWindowModel(session: self, currentSpaceID: spaces.contains { $0.id == spaceID } ? spaceID : spaces[0].id)
+        var record = record
+        if !spaces.contains(where: { $0.id == record.currentSpaceID }) { record.currentSpaceID = spaces[0].id }
+        let window = BrowserWindowModel(session: self, record: record)
         windows.insert(window, at: 0)
         windowControllers.append(BrowserWindowController(model: window, cascadingFrom: source))
         updateFocusedTab()
@@ -184,10 +192,10 @@ public final class BrowserSession: ObservableObject {
         updateFocusedTab()
     }
 
-    /// Window rule 5: the window's tabs stay open. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. Its space and selected tab stay for the next main window and the saved session, which the change of `windows` saves.
+    /// Window rule 5: the window's tabs stay open. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. Its record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
     @MainActor func windowWillClose(_ window: BrowserWindowModel) {
         window.prepareToClose()
-        lastWindowRecord = window.record
+        windowsToReopen = [window.record]
         windows.removeAll { $0 === window }
         windows.forEach { $0.updateShownTabs() }
         sheets.showNext()
@@ -1166,11 +1174,10 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Persistence
 
-    /// Reopens the saved tabs and their split views, and returns the tab that was selected unless archiving closed it.
-    private func restoreTabs(_ snapshot: SessionSnapshot) -> Tab? {
+    /// Reopens the saved tabs and their split views.
+    private func restoreTabs(_ snapshot: SessionSnapshot) {
         // Archive stale unpinned records before they have web contents.
         let cutoff = Self.archiveCutoff(now: Date())
-        var selected: Tab?
         // The reopened tabs by their records' indexes, which the split views refer to.
         var restored: [Int: Tab] = [:]
         for (index, record) in snapshot.tabs.enumerated() where spaces.contains(where: { $0.id == record.spaceID }) {
@@ -1187,25 +1194,27 @@ public final class BrowserSession: ObservableObject {
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
             tab.recordedURL = record.url
-            if index == snapshot.selectedTabIndex { selected = tab }
             restored[index] = tab
         }
         restoreSplitViews(snapshot.splitViews ?? [], from: restored)
-        return selected
     }
 
-    /// Keeps the favorites' tabs from the last session until their favorites open them. The tab of the favorite that was selected opens now and is returned, so that the window shows the page it showed.
-    private func restoreFavoriteTabs(_ snapshot: SessionSnapshot) -> Tab? {
+    /// Keeps the favorites' tabs from the last session until their favorites open them. The tabs that saved windows selected open now, so that those windows show the pages they showed.
+    private func restoreFavoriteTabs(_ snapshot: SessionSnapshot) {
+        let selectedIDs = Set((snapshot.windows ?? []).compactMap(\.selectedTabID))
         for record in snapshot.favoriteTabs ?? [] where favorites.contains(where: { $0.id == record.favoriteID }) {
             savedFavoriteTabs[record.favoriteID] = record
         }
-        return favorites.first { $0.id == snapshot.selectedFavoriteID }.map(openTab(for:))
+        for favorite in favorites {
+            guard let id = savedFavoriteTabs[favorite.id]?.id, selectedIDs.contains(id) else { continue }
+            _ = openTab(for: favorite)
+        }
     }
 
     private func observeChanges() {
-        // Opening, closing, and bringing a window forward also change which window's space and selection the file keeps.
+        // Opening, closing, and bringing a window forward change the windows the file keeps and their order. The window controllers save frame changes themselves.
         let windowChanges = $windows.map { windows in
-            Publishers.MergeMany(windows.map { Publishers.Merge($0.$currentSpaceID.map { _ in () }, $0.$selectedTabID.map { _ in () }) })
+            Publishers.MergeMany(windows.map { Publishers.Merge3($0.$currentSpaceID.map { _ in () }, $0.$selectedTabID.map { _ in () }, $0.$isSidebarVisible.map { _ in () }) })
         }.switchToLatest()
         Publishers.Merge4($tabs.map { _ in () }, $spaces.map { _ in () }, $favorites.map { _ in () }, windowChanges)
             .merge(with: $personas.map { _ in () }, $closedTabs.map { _ in () })
@@ -1215,7 +1224,8 @@ public final class BrowserSession: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func scheduleSave() {
+    /// Saves the session once changes stop for half a second. The window controllers call it for frame changes, which no published value reports.
+    func scheduleSave() {
         store.scheduleSave { [weak self] in self?.snapshot() ?? SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: [], currentSpaceID: UUID(), favorites: [], tabs: [], selectedTabIndex: nil) }
     }
 
@@ -1223,13 +1233,14 @@ public final class BrowserSession: ObservableObject {
         store.saveNow(snapshot())
     }
 
-    /// The session as `session.json` keeps it. The space and selection are the front main window's, or the last main window's while none is open, so that the next launch opens them.
+    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them.
     private func snapshot() -> SessionSnapshot {
-        let window = lastMainWindow?.record ?? lastWindowRecord
-        return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: window.currentSpaceID, favorites: favorites,
-                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? window.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
-                               folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == window.selectedTabID }, closedTabs: closedTabs,
-                               splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == window.selectedTabID }?.key)
+        let windowRecords = windows.isEmpty ? windowsToReopen : windows.map(\.record)
+        let front = windowRecords[0]
+        return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
+                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID) },
+                               folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
+                               splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.

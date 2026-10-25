@@ -146,8 +146,9 @@ public struct Persona: Identifiable, Codable, Hashable {
 public enum BrowserWindowKind: String, Codable { case main, small }
 
 /// The state of one browser window: what it shows and what the user is doing in it. Everything else belongs to the session.
-public final class BrowserWindowModel: ObservableObject, Identifiable {
-    public let id: UUID
+public final class BrowserWindowModel: ObservableObject {
+    /// The window's identity in `session.json`, which it keeps across launches.
+    let id: UUID
     public let kind: BrowserWindowKind
     unowned let session: BrowserSession
 
@@ -176,7 +177,7 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
     var sharePicker: PageSharePicker?
     /// The AppKit window, set when it is created. Sheets, printing, export, and sharing use it.
     public weak var nsWindow: NSWindow?
-    /// The frame outside full screen, which the window controller records.
+    /// The saved frame, where the window opens, then the frame outside full screen that the window controller records.
     var restorableFrame: CGRect?
 
     /// Window rule 1: the selected tab and the panes of its split view that no other window shows, left to right.
@@ -190,18 +191,14 @@ public final class BrowserWindowModel: ObservableObject, Identifiable {
     /// A small window's tab's Persona, or the current space's.
     public var personaID: Persona.ID { get }
     public var recentTabs: [Tab] { get }
-    /// The space and selected tab, which the session keeps once the window closes.
-    var record: WindowRecord { get }
+    /// A window as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
+    init(session: BrowserSession, record: SessionSnapshot.WindowRecord)
+    /// The window as `session.json` keeps it, which the session also keeps once the window closes.
+    var record: SessionSnapshot.WindowRecord { get }
     /// Window rule 3 within a space: its first tab row that the sidebar shows and no other window shows, open tabs before pinned ones.
     func firstFreeTab(inSpace id: UUID) -> Tab?
     /// Lets go of what the window shows as it closes (Windows and menus ▸ Engine and tab events).
     @MainActor func prepareToClose()
-}
-
-/// A main window's space and selected tab. Step 9 keeps it in memory; step 10 moves it into the snapshot as `SessionSnapshot.WindowRecord` with the window's ID, frame, and sidebar visibility.
-struct WindowRecord {
-    var currentSpaceID: UUID
-    var selectedTabID: UUID?
 }
 ```
 
@@ -284,8 +281,10 @@ public final class DevToolsDockSettings: ObservableObject {
 /// The AppKit window of one BrowserWindowModel: the main window, or from step 11 the small window. It reports becoming main and closing to the session and, from step 10, records the frame.
 final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     let model: BrowserWindowModel
-    /// Builds the window hidden, at `source`'s size and cascaded from it, or centered at 1200×800 without a source or while the source is in full screen. Step 10 adds the saved frame.
+    /// Builds the window hidden: at the model's saved frame, kept on a screen; without one, at `source`'s size and cascaded from it, or centered at 1200×800 without a source or while the source is in full screen.
     init(model: BrowserWindowModel, cascadingFrom source: NSWindow?)
+    /// Where a window with a saved frame opens, given the screens' visible frames with the main screen first (Windows and menus ▸ AppKit).
+    static func restoredFrame(_ frame: CGRect, screens: [CGRect]) -> CGRect
 }
 ```
 
@@ -293,7 +292,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 - It hosts `BrowserWindowView(session:window:)`, from step 11 also `SmallWindowView(session:window:)`, reaching the session through `model.session`, sets `model.nsWindow`, and hides its own toolbar in full screen.
 - It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; from step 13, with two or more Personas, followed by " — <Persona name>". It reads the title on the run loop turn after the model or the spaces change, because `objectWillChange` comes before the change.
 - It sets `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false`.
-- Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowWillClose` calls `session.windowWillClose(model)`. From step 10, `windowDidMove` and `windowDidEndLiveResize` record `model.restorableFrame` and schedule a save, except in full screen; `windowWillEnterFullScreen` keeps the frame from before. From step 11, for a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does.
+- Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowWillClose` calls `session.windowWillClose(model)`. `windowDidMove` and `windowDidResize` record `model.restorableFrame` and schedule a save; resizing covers Zoom and window tiling, which are not live resizes. From `windowWillEnterFullScreen` until `windowDidExitFullScreen` or `windowDidFailToEnterFullScreen`, nothing is recorded, so the frame from before stays, and `windowDidExitFullScreen` records the frame again. From step 11, for a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does.
 
 `BrowserSession` (changed; app-wide)
 
@@ -307,15 +306,15 @@ public var focusedTab: Tab? { get }
 /// Window rule 7.
 public var activeWindow: BrowserWindowModel? { get }
 public var lastMainWindow: BrowserWindowModel? { get }
-/// Window rule 7. While no main window is open, opens one from `lastWindowRecord`: its space, and its selected tab, or the space's first free tab when that tab closed.
+/// Window rule 7. While no main window is open, reopens the windows of `windowsToReopen` and returns the front one.
 public func sidebarTarget() -> BrowserWindowModel
 /// New Window: a main window on the active window's space, or the last main window's while none is open, with no tab selected (open decision 8). Step 11 adds `kind`.
 @discardableResult
 public func openWindow() -> BrowserWindowModel
-/// Creates the windows of the loaded snapshot, back to front: in step 9 the one window that `lastWindowRecord` describes, in step 10 each saved window record.
+/// Creates the windows of the loaded snapshot, back to front (Windows and menus ▸ AppKit).
 public func restoreWindows()
-/// The last main window's space and selection while no main window is open: the snapshot's until the first window opens, then those of the last main window that closed. The next main window opens on them, and `snapshot()` saves them.
-private var lastWindowRecord: WindowRecord
+/// The main windows that open while none is open, front to back: the snapshot's until they open, then the last main window that closed. `snapshot()` saves them while no main window is open. Never empty.
+private var windowsToReopen: [SessionSnapshot.WindowRecord]
 /// The window whose `shownTabIDs` has the tab.
 func window(showing tab: Tab) -> BrowserWindowModel?
 public func window(for nsWindow: NSWindow?) -> BrowserWindowModel?
@@ -486,12 +485,12 @@ Loading (`SessionStore.load()` keeps its signature)
 4. Spaces are stably sorted by Persona order, so each Persona's spaces are contiguous and keep their order.
 5. A Persona without spaces gets a space named "Personal", as sync's orphan rule and the first launch do.
 6. An open tab record takes its space's Persona. A closed record keeps its `personaID`, or takes its space's Persona, or the default Persona. Records whose space is missing are skipped at restore, as today.
-7. A nil `windows` becomes one record from `currentSpaceID`, the ID of the record at `selectedTabIndex`, a visible sidebar, and no frame. A window whose space is missing takes the first space. A selected tab that is missing, or that an earlier window record already claims, becomes nil. A selected tab in another space moves the window to that space.
+7. A nil or empty `windows` becomes one record from `currentSpaceID`, the ID of the favorite tab record of `selectedFavoriteID` or else of the record at `selectedTabIndex`, a visible sidebar, and no frame. A window whose space is missing takes the first space. A selected tab that does not reopen (an open tab record of a missing space, or no record of a listed favorite), or that an earlier window record already claims, becomes nil. A selected tab in another space moves the window to that space.
 8. `removedPersonaIDs` drops the IDs that are still in `personas`, and the default ID.
 
 Saving
-- `windows` lists the open main windows in `NSApp.orderedWindows` order. While none is open, it holds the record of the last main window that closed, which `windowWillClose` keeps, so quitting by closing the last window restores that window.
-- The top-level `currentSpaceID` and `selectedTabIndex` come from the front main window, so an older build still opens it.
+- `windows` lists the open main windows in the session's order, most recently main first, which is front to back and, unlike `NSApp.orderedWindows`, keeps minimized windows. While none is open, it holds the record of the last main window that closed, which `windowWillClose` keeps, so quitting by closing the last window restores that window.
+- The top-level `currentSpaceID`, `selectedTabIndex`, and `selectedFavoriteID` come from the front main window, so an older build still opens it.
 - Small-window tabs are written as open tabs of their destination space. Small windows are not saved (open decision 4).
 - Window records, frames, and `removedPersonaIDs` never sync. `docs/sync.md` already keeps window frames and the selection on each Mac.
 
@@ -506,8 +505,8 @@ Tests
 AppKit
 - `NSWindow.allowsAutomaticWindowTabbing = false` before the first window opens.
 - The main window keeps today's style, empty unified toolbar, and minimum content size of 800×500. A small window's minimum is 480×360.
-- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the active window at its size, or centers at 1200×800 while the active window is in full screen.
-- Restore creates the windows back to front, so the front one becomes key last. Sheets that restored tabs asked for show as each window appears.
+- Frames are saved on move and resize through the session's 0.5-second save. The frame from before full screen is kept, and full screen is not restored. At restore, a frame that does not overlap any screen's `visibleFrame` by at least 100×100 points is centered on the main screen, the one with the menu bar, at its saved size, clamped to that screen. A window without a frame is centered at 1200×800, as today. ⌘N cascades from the active window at its size, or centers at 1200×800 while the active window is in full screen.
+- Restore creates the windows back to front, so that `windows` lists them front to back, then selects their tabs: every window takes its saved tab, which a window in front of it gives up when it shows the tab as a split view pane, before any window falls back to its space's first free tab, so that no window falls back to a tab another one saved. The windows then come forward back to front, so the front one becomes key last. Sheets that restored tabs asked for show as each window appears. The favorites' tabs that windows selected open at launch.
 
 Menus
 - File: New Tab (⌘T), New Window (⌘N), Close Tab (⌘W), Close Window (⇧⌘W, `performClose:` on the key window), and the existing items.
@@ -701,7 +700,7 @@ Coordination
      - With Settings open, closing every browser window keeps the app running, and a Dock click opens a main window.
 
 10. III.6.6 Windows persist (bundle); finishes III.6
-    - Files: `SessionStore.swift` (`WindowRecord`, which moves from `BrowserWindowModel.swift`, `windows`, rule 7, version +1), `BrowserSession.swift` (save and restore), `BrowserWindowController.swift` (frames, clamping), `SessionSnapshotTests.swift`.
+    - Files: `SessionStore.swift` (`WindowRecord`, which moves from `BrowserWindowModel.swift`, `windows`, rule 7, version +1), `BrowserWindowModel.swift` (`id`, `restorableFrame`, the record), `BrowserSession.swift` (save and restore), `BrowserWindowController.swift` (frames, clamping), `SessionSnapshotTests.swift`, new `WindowFrameTests.swift` (`restoredFrame`).
     - Re-check: 9 (the width persists and is app-wide), 10, 22, 31.
     - New checks: two windows with different frames, spaces, selected tabs, and sidebar visibility return after a relaunch, with the same window in front. A window in full screen returns windowed at its earlier frame. A window left on an external display returns on the main screen after that display is disconnected. Closing the last window quits, and the relaunch restores it. The kept v4 file opens one window centered at 1200×800 with its selection.
 
