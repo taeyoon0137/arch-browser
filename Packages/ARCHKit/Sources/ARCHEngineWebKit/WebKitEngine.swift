@@ -228,11 +228,13 @@ final class PDFPrintJob: NSObject {
         self.completion = completion
     }
 
-    /// `contextInfo` holds the retain that keeps the job alive while the operation runs; it is released last.
+    /// `contextInfo` holds the retain that keeps the job alive while the operation runs; it is released last. A web view's print operation finishes on a thread of its own, so the job reports on the main thread, where the completion can open the print panel or a sheet.
     @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         let data = success ? try? Data(contentsOf: file) : nil
         try? FileManager.default.removeItem(at: file)
-        completion(data.map { .success($0) } ?? .failure(WebKitWebContents.PDFError.exportFailed))
+        let result: Result<Data, Error> = data.map { .success($0) } ?? .failure(WebKitWebContents.PDFError.exportFailed)
+        let completion = completion
+        DispatchQueue.main.async { completion(result) }
         if let contextInfo { Unmanaged<PDFPrintJob>.fromOpaque(contextInfo).release() }
     }
 }
