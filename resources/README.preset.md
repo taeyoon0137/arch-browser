@@ -90,6 +90,7 @@ git config core.hooksPath .githooks
 - [`docs/windows-personas.md`](../docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
 - [`docs/plugins.md`](../docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](../docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
+- [`docs/import-browsers.md`](../docs/import-browsers.md): importing from other browsers: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 
 <a id="scripts"></a>
 

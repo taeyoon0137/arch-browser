@@ -75,6 +75,7 @@ Arch uses system frameworks on both engines wherever macOS already provides the 
 |---|---|---|---|---|
 | 32 | Share menu and sharing settings | `NSSharingServicePicker` from the address pill's share button and File ▸ Share…, with the page's address, and its title and icon through `NSPreviewRepresentingActivityItem`; the title becomes the subject for services such as Mail. Sharing uses the system's settings | None | complete |
 | 33 | Import (bookmarks, history, passwords) | File ▸ Import Bookmarks and History… reads files the user picks in `NSOpenPanel` and recognizes them by their contents. HTML bookmark files, Chromium-format Bookmarks JSON, and WebKit-format Bookmarks.plist become favorites (folders flattened, duplicate addresses skipped). A Chromium-format History SQLite database, read from a temporary copy, goes into the history store. A sheet summarizes the result. The Passwords app handles password imports | None | complete |
+| 57 | Import from other browsers (Chrome, Dia, Arc, Safari) | File ▸ Import from Browser…, designed in `docs/import-browsers.md`: a sheet lists browsers found on the Mac, their profiles, and the items each can import. It reads Chromium-family profile files, Arc's `StorableSidebar.json`, and Safari's `Bookmarks.plist` and `History.db` in place, using copies for SQLite. Each profile goes to a new or existing Persona. Bars' bookmarks and Arc favorites become favorites. Arc spaces become spaces with their pinned tabs and folders. Other bookmarks become pinned folders in a space named after the browser, history goes into the history store, and shortcuts the user created become site search shortcuts. Importing again adds nothing. Where macOS requires Full Disk Access, as for Chrome and Safari, the sheet offers System Settings or the file import (row 33). Passwords, cookies, and extensions are excluded | None | not started |
 | 34 | Home button, badges, tooltips | A per-space home page set from the space menu, stored with the space in `session.json`, and opened in the selected tab with History ▸ Home (⇧⌘H); a speaker badge on tab rows while the page plays sound; a dot on tabs a page opened in the background until the user selects them; tab row tooltips with the full title and address. The sidebar has no home button | None | complete |
 
 ## 5. Accounts, Sync, and Settings
@@ -119,7 +120,7 @@ Arch ships no model or provider account. All AI features use one AI interface. T
 | 24 | Translation | Excluded. Neither engine offers page translation to embedding apps; translation can return if one does |
 | 30 | Site customizations (per-site CSS, JavaScript, and color changes) | Excluded. Browsers do not commonly provide this feature |
 | 31 | Notes and documents | Excluded. Browsers do not commonly provide this feature |
-| 47 | Prompts to switch browsers | None. Import (row 33) covers moving from another browser |
+| 47 | Prompts to switch browsers | None. Import (rows 33 and 57) covers moving from another browser |
 | 37 | Automatic updates | None. Arch adds no update service; builds are made manually from the repository |
 | 38 | Accounts | None. Arch needs no account of its own; sync uses the user's iCloud account (row 35) |
 
