@@ -15,6 +15,13 @@ protocol PluginSecretStore: AnyObject {
 
 /// Accessible when unlocked, not synchronizable, in the login keychain, as the AI module keeps provider keys.
 final class PluginKeychain: PluginSecretStore {
+    /// The start of the services of plugin secrets in earlier builds, from which `PluginIdentifierMigration` moves the items. The tests give their own.
+    let previousServicePrefix: String
+
+    init(previousServicePrefix: String = PluginKeychain.previousServicePrefix) {
+        self.previousServicePrefix = previousServicePrefix
+    }
+
     func secret(service: String, account: String) throws -> String? {
         var query = Self.query(service: service, account: account)
         query[kSecReturnData as String] = true
@@ -59,18 +66,13 @@ final class PluginKeychain: PluginSecretStore {
         }
     }
 
+    /// Items under `previousServicePrefix` that the migration has not moved yet, as when the user refused the keychain prompt, count by the service they move to, so that they go with their plugin or Persona rather than come back under the new service at a later launch.
     func removeSecrets(service: String?, accountPrefix: String) throws {
-        var query = Self.query(service: service, account: nil)
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status != errSecItemNotFound else { return }
-        guard status == errSecSuccess else { throw PluginKeychainError(status: status) }
-        for item in result as? [[String: Any]] ?? [] {
-            guard let itemService = item[kSecAttrService as String] as? String, itemService.hasPrefix(Self.servicePrefix),
-                  let account = item[kSecAttrAccount as String] as? String, account.hasPrefix(accountPrefix) else { continue }
-            try setSecret(nil, service: itemService, account: account)
+        for item in try items(withServicePrefix: "") where item.account.hasPrefix(accountPrefix) {
+            let current = item.service.hasPrefix(previousServicePrefix)
+                ? PluginIdentifierMigration.movedService(item.service, from: previousServicePrefix, to: Self.servicePrefix) : item.service
+            guard current.hasPrefix(Self.servicePrefix), service.map({ current == $0 }) ?? true else { continue }
+            try setSecret(nil, service: item.service, account: item.account)
         }
     }
 
@@ -91,6 +93,8 @@ final class PluginKeychain: PluginSecretStore {
     }
 
     static let servicePrefix = "xyz.taeyoon.arch.plugin."
+    /// The start of the services of plugin secrets in builds before `servicePrefix`, which the plugin identifier of those builds follows.
+    static let previousServicePrefix = "local.arch.browser.plugin."
 
     /// The service's item for `account`, or all of its items for nil, and the items of every service for a nil service.
     private static func query(service: String?, account: String?) -> [String: Any] {

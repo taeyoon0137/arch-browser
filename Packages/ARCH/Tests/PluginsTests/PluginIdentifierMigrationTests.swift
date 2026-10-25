@@ -76,6 +76,31 @@ import Testing
         #expect(file.choices.map(\.id) == ["xyz.taeyoon.arch.page-address"] && file.choices.map(\.isEnabled) == [true] && file.installed == nil)
     }
 
+    @Test func aFolderWhoseManifestCannotChangeKeepsItsNameUntilItCan() throws {
+        let previous = "local.arch.generated.abc", current = "xyz.taeyoon.arch.generated.abc"
+        try write(#"{"apiVersion": 1, "id": "\#(previous)", "name": "Copier", "summary": "Copies.", "version": "1.0"}"#, to: "\(previous)/package/plugin.json")
+        let list = PluginListFile(choices: [], installed: [
+            .readable(.init(id: previous, origin: .generated(PluginComposition(requests: ["Copy"], model: "model")), grant: PluginGrant(permissions: [], sites: []),
+                            installedAt: Date(timeIntervalSinceReferenceDate: 0))),
+        ])
+        try write(String(decoding: try JSONEncoder().encode(list), as: UTF8.self), to: "plugins.json")
+        // A package folder that takes no new file, as on a full disk, keeps plugin.json from taking the new identifier.
+        let packages = [previous, current].map { personaFolder.appendingPathComponent("\($0)/package").path }
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: packages[0])
+        defer {
+            for path in packages { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path) }
+        }
+        let migration = try migration()
+        migration.moveFiles()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: personaFolder.path).sorted() == [previous, "plugins.json"])
+        // A later launch whose write succeeds moves the folder, and the manager finds the plugin.
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: packages[0])
+        migration.moveFiles()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: personaFolder.path).sorted() == ["plugins.json", current])
+        let manager = PluginManager(persona: persona, directory: folder.url, builtIns: [], secretStore: MemorySecretStore())
+        #expect(manager.plugins.map(\.id.rawValue) == [current])
+    }
+
     @Test func secretsMoveToTheServicesOfTheNewIdentifiers() throws {
         let migration = try migration(suiteName: Self.secretsSuiteName)
         let keychain = PluginKeychain()
@@ -103,6 +128,29 @@ import Testing
         try keychain.setSecret("later", service: migration.previousServicePrefix + "org.example.later", account: account)
         migration.moveSecrets()
         #expect(try keychain.secret(service: migration.previousServicePrefix + "org.example.later", account: account) == "later")
+    }
+
+    @Test func secretsNotMovedYetGoWithTheirPluginAndPersona() throws {
+        let previousPrefix = "test.arch.plugin-migration.\(UUID().uuidString.lowercased()).previous.plugin."
+        let keychain = PluginKeychain(previousServicePrefix: previousPrefix)
+        defer {
+            for item in (try? keychain.items(withServicePrefix: previousPrefix)) ?? [] {
+                try? keychain.setSecret(nil, service: item.service, account: item.account)
+            }
+        }
+        // Items the migration left under the previous services, as when the user refused the keychain prompt.
+        let other = UUID()
+        for (id, owner) in [("local.arch.generated.abc", persona), ("org.example.sample", persona), ("org.example.sample", other)] {
+            try keychain.setSecret("secret", service: previousPrefix + id, account: "\(owner.uuidString)/key")
+        }
+        func left() throws -> Set<String> {
+            Set(try keychain.items(withServicePrefix: previousPrefix).map { "\($0.service.dropFirst(previousPrefix.count)) \($0.account)" })
+        }
+        // Removing a plugin takes its items in the Persona under the service they move to, and deleting the Persona takes the rest of its items.
+        try ScopedPluginSecrets(store: keychain, pluginID: try #require(PluginID(rawValue: "xyz.taeyoon.arch.generated.abc")), personaID: persona).removeAll()
+        #expect(try left() == ["org.example.sample \(persona.uuidString)/key", "org.example.sample \(other.uuidString)/key"])
+        #expect(PluginManager.removeData(ofPersona: persona, in: folder.url, secretStore: keychain))
+        #expect(try left() == ["org.example.sample \(other.uuidString)/key"])
     }
 
     @Test func shortcutsFollowTheirCommands() throws {

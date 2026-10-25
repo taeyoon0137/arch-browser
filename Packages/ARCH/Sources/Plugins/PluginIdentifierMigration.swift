@@ -24,7 +24,8 @@ public struct PluginIdentifierMigration {
     /// The app calls it after `BundleIdentifierMigration`, which moves the preferences it reads, and before any `PluginManager` exists.
     public static func runAtLaunch() {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
-        let migration = PluginIdentifierMigration(directory: directory, previousServicePrefix: "local.arch.browser.plugin.", servicePrefix: PluginKeychain.servicePrefix, defaults: .standard)
+        let migration = PluginIdentifierMigration(directory: directory, previousServicePrefix: PluginKeychain.previousServicePrefix, servicePrefix: PluginKeychain.servicePrefix,
+                                                  defaults: .standard)
         migration.moveFiles()
         migration.moveSecrets()
         migration.moveShortcuts()
@@ -35,7 +36,7 @@ public struct PluginIdentifierMigration {
         renamedPrefixes.first { id.hasPrefix($0.previous) }.map { $0.current + id.dropFirst($0.previous.count) }
     }
 
-    /// In each Persona's folder, renames each plugin folder named by a previous identifier while no folder has the new one, after giving the identifier in its package's `plugin.json` the new name, then renames the identifiers in `plugins.json`.
+    /// In each Persona's folder, renames each plugin folder named by a previous identifier while no folder has the new one, after giving the identifier in its package's `plugin.json` the new name, then renames the identifiers in `plugins.json`. A folder whose `plugin.json` could not take the new name keeps its own until a later launch, since the manager reads a plugin only from a package whose manifest names the folder's identifier.
     func moveFiles() {
         let manager = FileManager.default
         let plugins = directory.appendingPathComponent("Plugins", isDirectory: true)
@@ -44,23 +45,24 @@ public struct PluginIdentifierMigration {
                 let previous = folder.lastPathComponent
                 guard let id = Self.renamed(previous) else { continue }
                 let destination = persona.appendingPathComponent(id, isDirectory: true)
-                guard !manager.fileExists(atPath: destination.path) else { continue }
-                Self.renameManifest(at: folder.appendingPathComponent("package/\(ScriptManifest.fileName)"), from: previous, to: id)
+                guard !manager.fileExists(atPath: destination.path),
+                      Self.renameManifest(at: folder.appendingPathComponent("package/\(ScriptManifest.fileName)"), from: previous, to: id) else { continue }
                 try? manager.moveItem(at: folder, to: destination)
             }
             Self.renameEntries(at: persona.appendingPathComponent(PluginListFile.name))
         }
     }
 
-    /// Writes `id` in place of `previous` in a script plugin's `plugin.json`, formatted as `PluginComposer` writes it. A missing file, as of a built-in plugin's folder, which holds only its storage, stays missing.
-    private static func renameManifest(at url: URL, from previous: String, to id: String) {
-        guard let data = try? Data(contentsOf: url), case var .object(fields)? = try? JSONDecoder().decode(PluginValue.self, from: data),
-              case let .string(text)? = fields["id"], PluginID(rawValue: text)?.rawValue == previous else { return }
+    /// Writes `id` in place of `previous` in a script plugin's `plugin.json`, formatted as `PluginComposer` writes it, and reports whether the folder may take the new name: true when the file now names `id`, is missing, as in a built-in plugin's folder, which holds only its storage, or does not name `previous`, as after a run that wrote it but did not move the folder, and false when it exists but could not be read or rewritten.
+    private static func renameManifest(at url: URL, from previous: String, to id: String) -> Bool {
+        guard let data = try? Data(contentsOf: url) else { return !FileManager.default.fileExists(atPath: url.path) }
+        guard case var .object(fields)? = try? JSONDecoder().decode(PluginValue.self, from: data),
+              case let .string(text)? = fields["id"], PluginID(rawValue: text)?.rawValue == previous else { return true }
         fields["id"] = .string(id)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        guard let renamed = try? encoder.encode(PluginValue.object(fields)) else { return }
-        try? renamed.write(to: url, options: .atomic)
+        guard let renamed = try? encoder.encode(PluginValue.object(fields)) else { return false }
+        return (try? renamed.write(to: url, options: .atomic)) != nil
     }
 
     /// Renames the identifiers of the choices and installs in `plugins.json`, entries this build cannot read among them. An entry whose new identifier another entry of its list has goes, as the newer entry wins. A file that does not decode stays for the manager, which keeps it aside.
@@ -98,8 +100,7 @@ public struct PluginIdentifierMigration {
         guard let items = try? keychain.items(withServicePrefix: previousServicePrefix) else { return }
         var isFinished = true
         for item in items {
-            let id = String(item.service.dropFirst(previousServicePrefix.count))
-            let service = servicePrefix + (Self.renamed(id) ?? id)
+            let service = Self.movedService(item.service, from: previousServicePrefix, to: servicePrefix)
             do {
                 if try !keychain.containsSecret(service: service, account: item.account) {
                     guard let secret = try keychain.secret(service: item.service, account: item.account) else { continue }
@@ -111,6 +112,12 @@ public struct PluginIdentifierMigration {
             }
         }
         if isFinished { defaults.set(true, forKey: Self.secretsMovedKey) }
+    }
+
+    /// The service under `prefix` that `moveSecrets` moves the items of `service`, a service under `previousPrefix`, to: the one of its plugin's new identifier.
+    static func movedService(_ service: String, from previousPrefix: String, to prefix: String) -> String {
+        let id = String(service.dropFirst(previousPrefix.count))
+        return prefix + (renamed(id) ?? id)
     }
 
     /// Renames the plugin identifier in each command identifier of the user's shortcuts. A shortcut that the new command identifier has already wins.
