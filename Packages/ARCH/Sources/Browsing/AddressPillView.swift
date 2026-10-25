@@ -159,7 +159,7 @@ struct SiteSettingsView: View {
             if let tab {
                 TabEngineSection(session: session, tab: tab)
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
-                    WebExtensionActionsSection(webExtensions: webExtensions, tab: tab, close: close)
+                    WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
                 SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
                     Button("Clear Site Data\u{2026}") {

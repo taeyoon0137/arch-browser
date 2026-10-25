@@ -40,9 +40,13 @@ public struct PluginManifest: Hashable, Sendable {
     /// The API permissions of a web extension that no `PluginPermission` stands for, as its manifest names them, such as `storage`. They come with the install, as in other browsers, and the install sheet and Settings list them. Empty for other kinds.
     public var extensionPermissions: [String]
     public var contributions: PluginContributions
+    /// A web extension's `author`, as text or as the `email` of an author object, lowercased, by which a package matches an installed plugin as a version of the same extension. Nil for other kinds and without the field.
+    public var author: String?
+    /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
+    public var homepage: String?
 
     public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [],
-                extensionPermissions: [String] = [], contributions: PluginContributions) {
+                extensionPermissions: [String] = [], contributions: PluginContributions, author: String? = nil, homepage: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -51,6 +55,8 @@ public struct PluginManifest: Hashable, Sendable {
         self.sites = sites
         self.extensionPermissions = extensionPermissions
         self.contributions = contributions
+        self.author = author
+        self.homepage = homepage
     }
 
     /// The extension permissions as the sentence that the install sheet and Settings show, or nil without any.

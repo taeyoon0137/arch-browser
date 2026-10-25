@@ -8,7 +8,7 @@ public struct PluginPackage: Identifiable, Sendable {
     public let kind: PluginKind
     public let manifest: PluginManifest
     /// The folder that holds the manifest.
-    public let rootURL: URL
+    public private(set) var rootURL: URL
     /// The folder or archive the user chose, or how AI wrote the package.
     public let origin: PluginOrigin
     /// The package paths of the package's files, such as `scripts/count.js`, in ascending order, as the install sheet lists them.
@@ -17,6 +17,16 @@ public struct PluginPackage: Identifiable, Sendable {
     let background: String?
     /// What each engine that runs the kind on this Mac found when it checked the package at staging. Empty for kinds that Arch runs alike on every engine.
     public internal(set) var engineChecks: [EngineKind: PluginEngineCheck] = [:]
+    /// The installed plugin that the package matches as a version of the same extension, by the rule in Engine versions ▸ Counterparts: the one with the package's identifier, or else the first installed with its name and developer, while it is not in a pair. Nil without one, and for kinds that Arch runs alike on every engine.
+    public internal(set) var counterpart: PluginID?
+    /// The engines, in the order of `EngineKind`, that the package can join `counterpart` for: each that runs the package while the counterpart runs on the pair's other engine, by the answers at staging.
+    public internal(set) var joinableEngines: [EngineKind] = []
+    /// The joinable engine that the review's choice starts on when the package and the counterpart complement each other, each running on an engine that refused the other. Nil starts it on Update or on the separate plugin.
+    public internal(set) var suggestedEngine: EngineKind?
+    /// The installed plugin that the package updates, by the rule in Engine versions ▸ Counterparts, or nil for a new plugin. The review sets it to the version the user chooses where the rule leaves two.
+    public var updates: PluginID?
+    /// The two versions with the package's identifier that the review chooses between where the rule leaves both, in the order the user installed them; empty otherwise.
+    public internal(set) var updateChoices: [PluginID] = []
 
     /// Reads the package at `root`: a script plugin's when `plugin.json` is at its top, else, for a folder or archive the user chose, the package of the runtime whose manifest file is there. Throws as `ScriptManifest(packageAt:)` or the runtime does, and `PluginError.invalidPackage` for a package of no kind that Arch runs and for one that is or holds a symbolic link, which could lead to files outside it.
     init(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = []) throws {
@@ -43,8 +53,8 @@ public struct PluginPackage: Identifiable, Sendable {
 
     /// The package once its folder has moved to `root`.
     func moved(to root: URL) -> PluginPackage {
-        var moved = PluginPackage(kind: kind, manifest: manifest, rootURL: root, origin: origin, files: files, background: background)
-        moved.engineChecks = engineChecks
+        var moved = self
+        moved.rootURL = root
         return moved
     }
 
@@ -63,7 +73,7 @@ public struct PluginPackage: Identifiable, Sendable {
     }
 
     /// "Runs on WebKit tabs." or "Runs on WebKit and Chromium tabs.", in the order of `EngineKind`; nil for no engine.
-    static func runsNote(on engines: Set<EngineKind>) -> String? {
+    public static func runsNote(on engines: Set<EngineKind>) -> String? {
         let names = EngineKind.allCases.filter(engines.contains).map(\.displayName)
         guard let last = names.last else { return nil }
         let list = names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + ", and " + last

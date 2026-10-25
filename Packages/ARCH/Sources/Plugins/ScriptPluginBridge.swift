@@ -142,6 +142,7 @@ private extension PluginError {
         case .invalidPackage: return "invalidPackage"
         case .unsupportedAPIVersion: return "unsupportedAPIVersion"
         case .timedOut: return "timedOut"
+        case .invalidVersions: return "invalidVersions"
         }
     }
 }

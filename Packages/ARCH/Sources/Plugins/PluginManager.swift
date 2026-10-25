@@ -1,11 +1,13 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
+// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
 import AppKit
 import ARCHEngine
 import Combine
+import UniformTypeIdentifiers
 
 /// A plugin the manager knows, with its grant and whether it is enabled.
 public struct InstalledPlugin: Identifiable, Hashable, Sendable {
-    public var id: PluginID { manifest.id }
+    /// The install entry's identifier, which names the plugin's folder, choice, storage, and Keychain items: the manifest's, or, for a version that joined a plugin whose version has the same identifier, that followed by `.webkit` or `.chromium`. A built-in plugin's is its manifest's.
+    public var id: PluginID { entryID ?? manifest.id }
     public var kind: PluginKind = .builtIn
     public var manifest: PluginManifest
     public var origin: PluginOrigin = .bundled
@@ -23,17 +25,44 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var engineChecks: [EngineKind: Bool] = [:]
     /// Why the package failed to start in this run on engines whose check it passed, each as a sentence that names the engine, which Settings shows until the plugin is switched on again or updates.
     public var engineFailures: [EngineKind: String] = [:]
+    /// The install entry's identifier where it is not the manifest's.
+    var entryID: PluginID?
+    /// The other version of the plugin, in a pair.
+    public var counterpart: PluginID?
+    /// The engine that the pair's record gives the plugin, in a pair.
+    public var pairEngine: EngineKind?
+    /// The engines whose note asking for a version of the plugin the user dismissed.
+    public var dismissedVersionNotes: Set<EngineKind> = []
 
-    /// The engines a web extension runs on: those whose current answer runs its package, less those where it failed to start. Empty for other kinds.
+    /// The engines a web extension runs on: those whose current answer runs its package, less those where it failed to start, and in a pair only the engine that the pair's record gives it. Empty for other kinds.
     public var engines: Set<EngineKind> {
-        Set(engineChecks.filter(\.value).keys).subtracting(engineFailures.keys)
+        let running = Set(engineChecks.filter(\.value).keys).subtracting(engineFailures.keys)
+        guard let pairEngine else { return running }
+        return running.intersection([pairEngine])
     }
 
-    /// Where the plugin runs, as Settings says it, such as "Runs on WebKit tabs.", once an engine has checked its package, or "No engine on this Mac runs it." when every engine that checked it refuses it. Nil while it starts on none of the engines that run it, whose failures say why.
+    /// The engines whose current answer runs the package, in a pair or not.
+    var enginesRunningPackage: Set<EngineKind> {
+        Set(engineChecks.filter(\.value).keys)
+    }
+
+    /// Where the plugin runs, as Settings says it, such as "Runs on WebKit tabs.", once an engine has checked its package; for a version of a pair whose engine refuses its package, such as "Chromium does not run this version."; or "No engine on this Mac runs it." when every engine that checked it refuses it. Nil while it starts on none of the engines that run it, whose failures say why.
     public var enginesNote: String? {
         guard !engineChecks.isEmpty else { return nil }
         if let note = PluginPackage.runsNote(on: engines) { return note }
+        if let pairEngine, engineChecks[pairEngine] == false { return "\(pairEngine.displayName) does not run this version." }
         return engineChecks.values.contains(true) ? nil : "No engine on this Mac runs it."
+    }
+
+    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each engine of a pair among `running`, the engines that run the kind on this Mac, while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. None in a pair.
+    public func versionEngines(among running: Set<EngineKind>) -> [EngineKind] {
+        guard counterpart == nil else { return [] }
+        return PluginEngineVersions.engines.filter { engine in running.contains(engine) && engines.contains { $0 != engine } }
+    }
+
+    /// The engine whose version the plugin asks for, by the rule in Engine versions ▸ Guidance: one of `running` that has a current answer for the package and on which the plugin does not run, a failure to start counting, while it runs on another, and whose note the user has not dismissed. Nil in a pair.
+    public func missingEngine(among running: Set<EngineKind>) -> EngineKind? {
+        versionEngines(among: running).first { engineChecks[$0] != nil && !engines.contains($0) && !dismissedVersionNotes.contains($0) }
     }
 
     /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
@@ -51,7 +80,7 @@ public final class PluginManager: ObservableObject {
     private let persona: PersonaID
     /// `Plugins/<persona id>/` in the app's Application Support folder, with `plugins.json`, a folder for each plugin named by its identifier, and `Staging/` for packages under review.
     private let directory: URL
-    /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them.
+    /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.
     @Published public private(set) var plugins: [InstalledPlugin] {
         didSet {
             contributions = PluginContributionIndex(plugins)
@@ -59,6 +88,8 @@ public final class PluginManager: ObservableObject {
         }
     }
     @Published public private(set) var contributions: PluginContributionIndex
+    /// The pairs whose versions are both listed, in the order the user made them.
+    @Published public private(set) var engineVersions: [PluginEngineVersions] = []
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
@@ -70,6 +101,8 @@ public final class PluginManager: ObservableObject {
     private var choices: [PluginListFile.Choice]
     /// The installs `plugins.json` keeps, in the order the user installed the plugins, including those this build or its packages cannot read.
     private var installs: [PluginListFile.InstallEntry]
+    /// The pairs `plugins.json` keeps, as it holds them, including those whose versions are not both listed or that name an engine this build does not know, which stay in the file and are ignored.
+    private var pairRecords: [[String: String]]
     private let secretStore: any PluginSecretStore
     private let scriptLimits: ScriptPluginLimits
     /// Plugins whose code has started. Each starts at its first command, panel, or page script value and runs until it stops: when the user switches it off, updates it, removes it, or deletes the Persona, or the app quits, and a script plugin also when it stops on its own.
@@ -88,7 +121,7 @@ public final class PluginManager: ObservableObject {
         var isActive = false
     }
 
-    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. The runtimes learn the enabled plugins of their kinds at once.
+    /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. A version whose identifier ends in an engine and that no record pairs, as a build before engine versions leaves it, is paired again with the other plugin of its package's identifier. The runtimes learn the enabled plugins of their kinds at once.
     public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = []) {
         self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain())
     }
@@ -103,6 +136,7 @@ public final class PluginManager: ObservableObject {
         let list = PluginFile.read(PluginListFile.self, at: self.directory.appendingPathComponent(PluginListFile.name))
         let choices = list?.choices ?? []
         let installs = list?.installed ?? []
+        var pairRecords = list?.engineVersions ?? []
         var plugins: [InstalledPlugin] = []
         var types: [PluginID: any BuiltInPlugin.Type] = [:]
         for type in builtIns where types[type.manifest.id] == nil {
@@ -114,23 +148,27 @@ public final class PluginManager: ObservableObject {
         for case let .readable(install) in installs {
             guard let id = PluginID(rawValue: install.id), types[id] == nil, packages[id] == nil,
                   let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin, runtimes: runtimes),
-                  package.manifest.id == id else { continue }
+                  Self.isEntry(id, of: package.manifest.id) else { continue }
             packages[id] = package
-            let runtime = self.runtimes[package.kind]
-            plugins.append(Self.installedPlugin(package, grant: install.grant, isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false,
-                                                installedAt: install.installedAt, unavailability: runtime?.unavailability,
-                                                engineChecks: Self.currentChecks(install.engineChecks, engines: runtime?.engines ?? [:])))
+            plugins.append(Self.installedPlugin(package, id: id, install: install, isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false,
+                                                runtime: self.runtimes[package.kind]))
         }
-        self.plugins = plugins
+        let restored = Self.restoredRecords(for: plugins, records: pairRecords)
+        pairRecords += restored
+        let (paired, pairs) = Self.paired(plugins, records: pairRecords)
+        self.plugins = paired
+        engineVersions = pairs
         self.builtIns = types
         self.packages = packages
         self.choices = choices
         self.installs = installs
-        contributions = PluginContributionIndex(plugins)
+        self.pairRecords = pairRecords
+        contributions = PluginContributionIndex(paired)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
+        if !restored.isEmpty { saveList() }
         for runtime in self.runtimes.values {
-            runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: id, failure: reason) }
+            runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: [id], failure: reason) }
             runtime.onCheck = { [weak self] id, checks in self?.record(checks, for: id) }
             runtime.onEngineFailure = { [weak self] id, engine, reason in self?.recordEngineFailure(reason, of: id, on: engine) }
             runtime.onEnginesChange = { [weak self, kind = runtime.kind] in self?.readEngineChecks(of: kind) }
@@ -138,11 +176,62 @@ public final class PluginManager: ObservableObject {
         runEnabledPlugins()
     }
 
-    /// The installed package as the list shows it, with the part of `grant` that its manifest asks for, with why its runtime cannot run it, if it cannot, and with the current answers of the engines that checked it.
-    private static func installedPlugin(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, installedAt: Date, unavailability: String?,
-                                        engineChecks: [EngineKind: Bool]) -> InstalledPlugin {
-        InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, packageURL: package.rootURL, grant: grant.limited(to: package.manifest),
-                        isEnabled: isEnabled, installedAt: installedAt, unavailability: unavailability, engineChecks: engineChecks)
+    /// The installed package as the list shows it under its entry's identifier, with the part of the entry's grant that its manifest asks for, with why its runtime cannot run it, if it cannot, with the current answers of the engines that checked it, and with the engines whose note asking for a version the user dismissed.
+    private static func installedPlugin(_ package: PluginPackage, id: PluginID, install: PluginListFile.Install, isEnabled: Bool, runtime: (any PluginRuntime)?) -> InstalledPlugin {
+        InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, packageURL: package.rootURL, grant: install.grant.limited(to: package.manifest),
+                        isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtime?.unavailability,
+                        engineChecks: currentChecks(install.engineChecks, engines: runtime?.engines ?? [:]), entryID: id == package.manifest.id ? nil : id,
+                        dismissedVersionNotes: Set((install.dismissedVersionNotes ?? []).compactMap(EngineKind.init(rawValue:))))
+    }
+
+    /// Whether an install entry's identifier fits its package's: the same, or that followed by an engine's name, as a version that joined a plugin with the same identifier has it.
+    private static func isEntry(_ id: PluginID, of manifestID: PluginID) -> Bool {
+        id == manifestID || PluginEngineVersions.engines.contains { manifestID.version(for: $0) == id }
+    }
+
+    /// The plugins with the counterpart and the engine of each version of a pair, and the pairs: from the records, in their order, that give each engine one of two listed web extension plugins that no earlier record pairs.
+    private static func paired(_ plugins: [InstalledPlugin], records: [[String: String]]) -> ([InstalledPlugin], [PluginEngineVersions]) {
+        var plugins = plugins
+        for index in plugins.indices {
+            plugins[index].counterpart = nil
+            plugins[index].pairEngine = nil
+        }
+        var pairs: [PluginEngineVersions] = []
+        for record in records {
+            guard let pair = PluginEngineVersions(fileRecord: record), pair.isComplete else { continue }
+            let indices = pair.plugins.compactMap { id in plugins.firstIndex { $0.id == id } }
+            guard indices.count == 2, indices.allSatisfy({ plugins[$0].kind == .webExtension && plugins[$0].packageURL != nil && plugins[$0].counterpart == nil }) else { continue }
+            for (engine, id) in pair.versions {
+                guard let index = plugins.firstIndex(where: { $0.id == id }) else { continue }
+                plugins[index].pairEngine = engine
+                plugins[index].counterpart = pair.versions.values.first { $0 != id }
+            }
+            pairs.append(pair)
+        }
+        return (plugins, pairs)
+    }
+
+    /// Records that pair again each version whose identifier ends in an engine and that no record pairs, as a build before engine versions leaves it, with the only other unpaired plugin of its package's identifier: the version for the engine its identifier names, the other plugin for the pair's other engine.
+    private static func restoredRecords(for plugins: [InstalledPlugin], records: [[String: String]]) -> [[String: String]] {
+        let listed = paired(plugins, records: records).0
+        var restored: [[String: String]] = []
+        var taken: Set<PluginID> = []
+        for version in listed where version.kind == .webExtension && version.entryID != nil && version.counterpart == nil && !taken.contains(version.id) {
+            guard let engine = PluginEngineVersions.engines.first(where: { version.manifest.id.version(for: $0) == version.id }),
+                  let otherEngine = PluginEngineVersions.other(than: engine) else { continue }
+            let others = listed.filter { $0.id != version.id && $0.kind == version.kind && $0.manifest.id == version.manifest.id && $0.counterpart == nil && !taken.contains($0.id) }
+            guard others.count == 1, let other = others.first, other.entryID == nil || other.id == version.manifest.id.version(for: otherEngine) else { continue }
+            restored.append(PluginEngineVersions([engine: version.id, otherEngine: other.id]).fileRecord)
+            taken.formUnion([version.id, other.id])
+        }
+        return restored
+    }
+
+    /// Sets the list with the counterpart and the engine of each version of a pair, from the records the file keeps.
+    private func setPlugins(_ next: [InstalledPlugin]) {
+        let (paired, pairs) = Self.paired(next, records: pairRecords)
+        if pairs != engineVersions { engineVersions = pairs }
+        plugins = paired
     }
 
     /// The answers in an install entry that engines of `engines` gave at their present versions. An engine name this build does not know, and an answer from another version of the engine, count as no check.
@@ -183,26 +272,33 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Switching plugins on and off
 
-    /// Records the choice in `plugins.json`. Switching a plugin off removes its contributions, so its page scripts stop at each tab's next load and their values no longer reach it, drops its badges, and stops its code.
+    /// Records the choice in `plugins.json`. Switching a plugin off removes its contributions, so its page scripts stop at each tab's next load and their values no longer reach it, drops its badges, and stops its code. Either version of a pair switches both.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID) {
-        setEnabled(isEnabled, for: id, failure: nil)
+        setEnabled(isEnabled, for: [id] + [plugins.first { $0.id == id }?.counterpart].compactMap { $0 }, failure: nil)
     }
 
-    /// `failure` says why the manager switches the plugin off, for Settings.
-    private func setEnabled(_ isEnabled: Bool, for id: PluginID, failure: String?) {
-        guard let index = plugins.firstIndex(where: { $0.id == id }), plugins[index].isEnabled != isEnabled else { return }
-        recordChoice(isEnabled, for: id)
+    /// `failure` says why the manager switches the plugins off, for Settings. The manager switches off one version of a pair alone, so that its counterpart keeps running.
+    private func setEnabled(_ isEnabled: Bool, for ids: [PluginID], failure: String?) {
+        var next = plugins
+        var changed: [PluginID] = []
+        for id in ids {
+            guard let index = next.firstIndex(where: { $0.id == id }), next[index].isEnabled != isEnabled else { continue }
+            recordChoice(isEnabled, for: id)
+            next[index].isEnabled = isEnabled
+            next[index].failure = failure
+            // Switching a plugin on tries again the engines where it failed to start; the runtime checks again the package of one that every engine refused.
+            if isEnabled { next[index].engineFailures = [:] }
+            changed.append(id)
+        }
+        guard !changed.isEmpty else { return }
         saveList()
-        var plugin = plugins[index]
-        plugin.isEnabled = isEnabled
-        plugin.failure = failure
-        // Switching a plugin on tries again the engines where it failed to start; the runtime checks again the package of one that every engine refused.
-        if isEnabled { plugin.engineFailures = [:] }
-        plugins[index] = plugin
-        failures[id] = nil
-        if !isEnabled {
-            badges[id] = nil
-            stop(id)
+        plugins = next
+        for id in changed {
+            failures[id] = nil
+            if !isEnabled {
+                badges[id] = nil
+                stop(id)
+            }
         }
     }
 
@@ -212,9 +308,9 @@ public final class PluginManager: ObservableObject {
         choices.append(PluginListFile.Choice(id: id.rawValue, isEnabled: isEnabled))
     }
 
-    /// Choices and installs are few and rare, so each writes the file at once.
+    /// Choices, installs, pairs, and dismissals are few and rare, so each writes the file at once.
     private func saveList() {
-        guard let data = try? JSONEncoder().encode(PluginListFile(choices: choices, installed: installs)) else { return }
+        guard let data = try? JSONEncoder().encode(PluginListFile(choices: choices, installed: installs, engineVersions: pairRecords.isEmpty ? nil : pairRecords)) else { return }
         PluginFile.write(data, to: directory.appendingPathComponent(PluginListFile.name))
     }
 
@@ -235,7 +331,7 @@ public final class PluginManager: ObservableObject {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 
-    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. The engines that run the kind on this Mac check the package, and the installed plugin it would update, in the engines that have no current answer for it. Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, for one whose identifier `checkInstallable(_:of:)` refuses, and, with the first engine's reason, for one that every engine refuses. A staged package ends with `install(_:grant:isEnabled:)` or `discard(_:)`.
+    /// Copies a folder or `.zip` archive the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. The engines that run the kind on this Mac check the package, and the installed plugins it could update or join as a version, in the engines that have no current answer for them; the package then names what the review offers (see `PluginPackage`). Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, for one whose identifier `checkInstallable(_:of:)` refuses, and, with the first engine's reason, for one that every engine refuses. A staged package ends with `install(_:grant:isEnabled:asVersionOf:for:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
         let runtimes = Array(runtimes.values)
         return try await stage { root in try PluginPackage.stage(url, at: root, runtimes: runtimes) }
@@ -253,9 +349,12 @@ public final class PluginManager: ObservableObject {
         do {
             try checkInstallable(package.manifest.id, of: package.kind)
             if let runtime = self.runtimes[package.kind], !runtime.engines.isEmpty {
-                await checkInstalledPlugin(updatedBy: package, in: runtime)
+                await checkUnanswered(installedVersions(withIdentifier: package.manifest.id, kind: package.kind) + [counterpartCandidate(for: package)].compactMap { $0 }, in: runtime)
                 package.engineChecks = await runtime.check(packageAt: package.rootURL)
                 if let refusal = Self.refusal(in: package.engineChecks) { throw PluginError.invalidPackage(refusal) }
+                offerVersions(for: &package, running: Set(runtime.engines.keys))
+            } else {
+                package.updates = installedVersions(withIdentifier: package.manifest.id, kind: package.kind).first?.id
             }
         } catch {
             discard(package)
@@ -264,12 +363,54 @@ public final class PluginManager: ObservableObject {
         return package
     }
 
-    /// Checks the installed plugin that the package would update, on or off, in the runtime's engines that have no current answer for it, and records the answers.
-    private func checkInstalledPlugin(updatedBy package: PluginPackage, in runtime: any PluginRuntime) async {
-        guard let installed = plugins.first(where: { $0.id == package.manifest.id && $0.kind == package.kind }), let packageURL = installed.packageURL else { return }
-        let unanswered = Set(runtime.engines.keys).subtracting(installed.engineChecks.keys)
-        guard !unanswered.isEmpty else { return }
-        record(await runtime.check(packageAt: packageURL).filter { unanswered.contains($0.key) }, for: installed.id)
+    /// Checks the installed plugins, on or off, in the runtime's engines that have no current answer for them, and records the answers.
+    private func checkUnanswered(_ installed: [InstalledPlugin], in runtime: any PluginRuntime) async {
+        var checked: Set<PluginID> = []
+        for plugin in installed where checked.insert(plugin.id).inserted {
+            guard let packageURL = plugin.packageURL else { continue }
+            let unanswered = Set(runtime.engines.keys).subtracting(plugins.first { $0.id == plugin.id }?.engineChecks.keys ?? plugin.engineChecks.keys)
+            guard !unanswered.isEmpty else { continue }
+            record(await runtime.check(packageAt: packageURL).filter { unanswered.contains($0.key) }, for: plugin.id)
+        }
+    }
+
+    /// The installed plugins of the kind whose packages have the identifier: one, or the two versions of a pair that share it, in the order the user installed them.
+    private func installedVersions(withIdentifier id: PluginID, kind: PluginKind) -> [InstalledPlugin] {
+        plugins.filter { $0.packageURL != nil && $0.kind == kind && $0.manifest.id == id }
+    }
+
+    /// The installed plugin that the package matches as a version of the same extension, by the rule in Engine versions ▸ Counterparts: the one with the package's identifier while it is the only one and not in a pair, or, while no plugin has the identifier, the first installed that is not in a pair and whose manifest names the same extension.
+    private func counterpartCandidate(for package: PluginPackage) -> InstalledPlugin? {
+        let versions = installedVersions(withIdentifier: package.manifest.id, kind: package.kind)
+        guard versions.isEmpty else { return versions.count == 1 && versions[0].counterpart == nil ? versions[0] : nil }
+        return plugins.first { $0.kind == package.kind && $0.packageURL != nil && $0.counterpart == nil && $0.manifest.namesSameExtension(as: package.manifest) }
+    }
+
+    /// Sets what the review offers for the checked package, by the answers at staging: the plugin it updates and, where the rule leaves two, the versions to choose between; the plugin it matches; each engine of `running` that runs the package while the match runs on the pair's other engine; and the engine the choice starts on when the two complement each other.
+    private func offerVersions(for package: inout PluginPackage, running: Set<EngineKind>) {
+        (package.updates, package.updateChoices) = Self.updateTarget(of: package, among: installedVersions(withIdentifier: package.manifest.id, kind: package.kind))
+        guard let match = counterpartCandidate(for: package) else { return }
+        package.counterpart = match.id
+        package.joinableEngines = PluginEngineVersions.engines.filter { engine in
+            running.contains(engine) && package.engineChecks[engine] == .runs && PluginEngineVersions.other(than: engine).map(match.engines.contains) == true
+        }
+        package.suggestedEngine = package.joinableEngines.first { engine in
+            guard match.engineChecks[engine] == false, let other = PluginEngineVersions.other(than: engine), case .refused? = package.engineChecks[other] else { return false }
+            return match.engines.contains(other)
+        }
+    }
+
+    /// The installed plugin that a package with an installed identifier updates: the only one with it; of two versions with it, the one installed from the same source, else the one whose answers the package's checks equal, else the first, with both for the review to choose between.
+    private static func updateTarget(of package: PluginPackage, among versions: [InstalledPlugin]) -> (PluginID?, [PluginID]) {
+        guard versions.count > 1 else { return (versions.first?.id, []) }
+        if case let .file(packageSource) = package.origin,
+           let same = versions.first(where: { if case let .file(url) = $0.origin { return url.standardizedFileURL.path == packageSource.standardizedFileURL.path } else { return false } }) {
+            return (same.id, [])
+        }
+        let answers = package.engineChecks.mapValues { $0 == .runs }
+        let equal = versions.filter { $0.engineChecks == answers }
+        if equal.count == 1 { return (equal[0].id, []) }
+        return (versions[0].id, versions.map(\.id))
     }
 
     /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
@@ -278,7 +419,7 @@ public final class PluginManager: ObservableObject {
         if let renamed = PluginIdentifierMigration.renamed(id.rawValue) {
             throw PluginError.invalidPackage("Arch renames the identifier \(id.rawValue) to \(renamed) at launch, so no plugin can have it as its identifier.")
         }
-        if let installed = packages[id], installed.kind != kind {
+        if packages.values.contains(where: { $0.manifest.id == id && $0.kind != kind }) {
             throw PluginError.invalidPackage("An installed plugin of another kind has the identifier \(id.rawValue).")
         }
         let list = directory.appendingPathComponent(PluginListFile.name)
@@ -293,10 +434,21 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says. A package with an installed plugin's identifier updates it: the new package replaces the old one, the plugin keeps its place, storage, and secrets, and its running instance stops, so that its next use starts the new code.
-    public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws {
-        let id = package.manifest.id
-        try checkInstallable(id, of: package.kind)
+    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`).
+    @discardableResult
+    public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {
+        try checkInstallable(package.manifest.id, of: package.kind)
+        let id: PluginID
+        var isEnabled = isEnabled
+        var pair: PluginEngineVersions?
+        if let version, let engine {
+            let join = try versionJoin(package, joining: version, for: engine)
+            (id, pair, isEnabled) = (join.id, join.pair, join.isEnabled)
+        } else {
+            id = package.updates ?? installedVersions(withIdentifier: package.manifest.id, kind: package.kind).first?.id ?? package.manifest.id
+            if let refusal = updateRefusal(for: package, updating: id) { throw PluginError.invalidPackage(refusal) }
+        }
+        let isNew = !plugins.contains { $0.id == id }
         let destination = Self.packageFolder(of: id, in: directory)
         let fileManager = FileManager.default
         badges[id] = nil
@@ -311,25 +463,207 @@ public final class PluginManager: ObservableObject {
         }
         let installed = package.moved(to: installedRoot)
         packages[id] = installed
-        let engines = runtimes[installed.kind]?.engines ?? [:]
-        let checks = Self.fileChecks(package.engineChecks, engines: engines)
-        let install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
+        let runtime = runtimes[installed.kind]
+        let checks = Self.fileChecks(package.engineChecks, engines: runtime?.engines ?? [:])
+        var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
                                              engineChecks: checks.isEmpty ? nil : checks)
         if let index = installs.firstIndex(where: { $0.id == install.id }) {
+            if case let .readable(old) = installs[index] { install.dismissedVersionNotes = old.dismissedVersionNotes }
             installs[index] = .readable(install)
         } else {
             installs.append(.readable(install))
         }
         recordChoice(isEnabled, for: id)
-        saveList()
         failures[id] = nil
-        let plugin = Self.installedPlugin(installed, grant: install.grant, isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtimes[installed.kind]?.unavailability,
-                                          engineChecks: Self.currentChecks(install.engineChecks, engines: engines))
-        if let index = plugins.firstIndex(where: { $0.id == id }) {
-            plugins[index] = plugin
+        let plugin = Self.installedPlugin(installed, id: id, install: install, isEnabled: isEnabled, runtime: runtime)
+        var next = plugins
+        if let index = next.firstIndex(where: { $0.id == id }) {
+            next[index] = plugin
         } else {
-            plugins.append(plugin)
+            next.append(plugin)
         }
+        if let pair {
+            dropRecords(naming: pair.plugins)
+            pairRecords.append(pair.fileRecord)
+        } else if isNew, !package.joinableEngines.isEmpty, let counterpart = package.counterpart, let match = next.first(where: { $0.id == counterpart }) {
+            // The user chose to keep the two apart.
+            dismiss(match.enginesRunningPackage, notesOf: id, in: &next)
+            dismiss(plugin.enginesRunningPackage, notesOf: counterpart, in: &next)
+        }
+        saveList()
+        setPlugins(next)
+        return id
+    }
+
+    /// The entry identifier, the pair, and the switch of a package that joins the plugin `id` as its version for `engine`: the package's identifier, or, when the plugin's version has it too, that followed by the engine's name. The plugin keeps the pair's other engine, and the version takes its switch. Throws `PluginError.invalidPackage` for a plugin that is not an installed web extension outside a pair, a package that the engine has not checked or refused, a plugin whose answer refuses the other engine, and a package with the identifier of another installed plugin.
+    private func versionJoin(_ package: PluginPackage, joining id: PluginID, for engine: EngineKind) throws -> (id: PluginID, pair: PluginEngineVersions, isEnabled: Bool) {
+        guard let plugin = plugins.first(where: { $0.id == id }), plugin.kind == .webExtension, plugin.kind == package.kind, plugin.packageURL != nil,
+              let other = PluginEngineVersions.other(than: engine) else {
+            throw PluginError.invalidPackage("Only an installed web extension can have a version for \(engine.displayName).")
+        }
+        guard plugin.counterpart == nil else { throw PluginError.invalidPackage("\u{201C}\(plugin.manifest.name)\u{201D} already has a version for each engine.") }
+        switch package.engineChecks[engine] {
+        case .runs?: break
+        case let .refused(reason)?: throw PluginError.invalidPackage(reason)
+        case nil: throw PluginError.invalidPackage("\(engine.displayName) has not checked this package.")
+        }
+        guard plugin.engineChecks[other] != false else {
+            throw PluginError.invalidPackage("\(other.displayName) does not run \u{201C}\(plugin.manifest.name)\u{201D}, so it cannot keep \(other.displayName) tabs.")
+        }
+        let manifestID = package.manifest.id
+        guard !plugins.contains(where: { $0.id != plugin.id && $0.manifest.id == manifestID }) else {
+            throw PluginError.invalidPackage("Another installed plugin has this package's identifier, so it cannot join \u{201C}\(plugin.manifest.name)\u{201D} here. Join With\u{2026} joins installed plugins.")
+        }
+        let candidates = plugin.manifest.id == manifestID ? [manifestID.version(for: engine), manifestID] : [manifestID]
+        guard let entryID = candidates.compactMap({ $0 }).first(where: { candidate in !plugins.contains { $0.id == candidate } }) else {
+            throw PluginError.invalidPackage("An installed plugin has the identifier this version would take.")
+        }
+        return (entryID, PluginEngineVersions([engine: entryID, other: plugin.id]), plugin.isEnabled)
+    }
+
+    /// Why the package cannot join the plugin `id` as its version for `engine`, as the review states it, or nil when it can.
+    public func versionRefusal(for package: PluginPackage, joining id: PluginID, for engine: EngineKind) -> String? {
+        do {
+            _ = try versionJoin(package, joining: id, for: engine)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Why the package cannot update the plugin `id`, or `package.updates`, while its pair lasts: its check refuses the engine that the pair's record gives that version, such as "WebKit cannot run this package, and the other version of “Reader” runs on Chromium tabs." Nil when it can.
+    public func updateRefusal(for package: PluginPackage, updating id: PluginID? = nil) -> String? {
+        guard let target = (id ?? package.updates).flatMap({ id in plugins.first { $0.id == id } }), let engine = target.pairEngine, case .refused? = package.engineChecks[engine],
+              let counterpart = plugins.first(where: { $0.id == target.counterpart }), let otherEngine = counterpart.pairEngine, let name = leadVersion(of: target.id)?.manifest.name else { return nil }
+        return "\(engine.displayName) cannot run this package, and the other version of \u{201C}\(name)\u{201D} runs on \(otherEngine.displayName) tabs."
+    }
+
+    // MARK: Engine versions
+
+    /// The plugin, or, for a version of a pair, the version installed first, whose name and place in the list the pair takes.
+    public func leadVersion(of id: PluginID) -> InstalledPlugin? {
+        guard let plugin = plugins.first(where: { $0.id == id }) else { return nil }
+        guard let counterpart = plugin.counterpart else { return plugin }
+        return plugins.first { $0.id == id || $0.id == counterpart }
+    }
+
+    /// The engine whose version the plugin asks for, by the rule in Engine versions ▸ Guidance, or nil.
+    public func missingEngine(of id: PluginID) -> EngineKind? {
+        guard let plugin = plugins.first(where: { $0.id == id }), let runtime = runtimes[plugin.kind] else { return nil }
+        return plugin.missingEngine(among: Set(runtime.engines.keys))
+    }
+
+    /// The engines for which the plugin's section in Settings offers Install <Engine> Version….
+    public func versionEngines(of id: PluginID) -> [EngineKind] {
+        guard let plugin = plugins.first(where: { $0.id == id }), let runtime = runtimes[plugin.kind] else { return [] }
+        return plugin.versionEngines(among: Set(runtime.engines.keys))
+    }
+
+    /// The types the open panel of Install <Engine> Version… accepts for the plugin's version for the engine.
+    public func packageTypes(forVersionOf id: PluginID, for engine: EngineKind) -> [UTType] {
+        guard let plugin = plugins.first(where: { $0.id == id }), let runtime = runtimes[plugin.kind] else { return [] }
+        return runtime.packageTypes(for: engine)
+    }
+
+    /// The pair that Join With… starts on for two plugins: each engine to the plugin whose current answer alone runs its package there, else to the one installed first unless it refuses the engine; and where that leaves a plugin without an engine, the other plugin takes the engine where its answer is best.
+    public func proposedJoin(of id: PluginID, with otherID: PluginID) -> PluginEngineVersions? {
+        guard id != otherID, let firstIndex = plugins.firstIndex(where: { $0.id == id || $0.id == otherID }),
+              let secondIndex = plugins.lastIndex(where: { $0.id == id || $0.id == otherID }), firstIndex != secondIndex else { return nil }
+        let (first, second) = (plugins[firstIndex], plugins[secondIndex])
+        var versions: [EngineKind: PluginID] = [:]
+        for engine in PluginEngineVersions.engines {
+            let secondAlone = second.engineChecks[engine] == true && first.engineChecks[engine] != true
+            versions[engine] = secondAlone || (first.engineChecks[engine] == false && second.engineChecks[engine] != false) ? second.id : first.id
+        }
+        if let only = Set(versions.values).first, Set(versions.values).count == 1 {
+            let taker = only == first.id ? second : first
+            let kept = only == first.id ? first : second
+            let score = { (engine: EngineKind) -> Int in
+                switch taker.engineChecks[engine] {
+                case true?: return kept.engineChecks[engine] == true ? 2 : 3
+                case nil: return 1
+                case false?: return 0
+                }
+            }
+            if let engine = PluginEngineVersions.engines.max(by: { score($0) < score($1) }), score(engine) > 0 { versions[engine] = taker.id }
+        }
+        return PluginEngineVersions(versions)
+    }
+
+    /// Makes the two plugins of `versions` one plugin with a version per engine, at the place of the version installed first, whose switch the pair takes. The join drops each record of the file that names one of its plugins, those it ignores among them. Throws `PluginError.invalidVersions` for a record that does not give each engine one of two plugins, a plugin that is not an installed web extension or is in a pair, and a version whose current answer refuses the engine the record gives it.
+    public func join(_ versions: PluginEngineVersions) throws {
+        guard versions.isComplete else { throw PluginError.invalidVersions("Each engine needs one of the two versions.") }
+        let members = try versions.plugins.map { id -> InstalledPlugin in
+            guard let plugin = plugins.first(where: { $0.id == id }), plugin.kind == .webExtension, plugin.packageURL != nil else {
+                throw PluginError.invalidVersions("Only installed web extensions can be versions of one plugin.")
+            }
+            guard plugin.counterpart == nil else { throw PluginError.invalidVersions("\u{201C}\(plugin.manifest.name)\u{201D} is already one of two versions.") }
+            return plugin
+        }
+        for (engine, id) in versions.versions {
+            guard let plugin = members.first(where: { $0.id == id }), plugin.engineChecks[engine] != false else {
+                throw PluginError.invalidVersions("\(engine.displayName) does not run \u{201C}\(members.first { $0.id == id }?.manifest.name ?? "")\u{201D}, so it cannot be the \(engine.displayName) version.")
+            }
+        }
+        guard let lead = plugins.first(where: { versions.plugins.contains($0.id) }) else { return }
+        dropRecords(naming: versions.plugins)
+        pairRecords.append(versions.fileRecord)
+        var next = plugins
+        var stopped: [PluginID] = []
+        for member in members where member.id != lead.id && member.isEnabled != lead.isEnabled {
+            guard let index = next.firstIndex(where: { $0.id == member.id }) else { continue }
+            recordChoice(lead.isEnabled, for: member.id)
+            next[index].isEnabled = lead.isEnabled
+            next[index].failure = nil
+            next[index].engineFailures = [:]
+            if !lead.isEnabled { stopped.append(member.id) }
+        }
+        saveList()
+        setPlugins(next)
+        for id in stopped {
+            badges[id] = nil
+            stop(id)
+        }
+    }
+
+    /// Makes the versions of the plugin's pair two plugins again, each on every engine its package runs on, with their switches as they were, and dismisses each one's note asking for a version for the engines the other runs on, since the user chose to keep them apart. Throws `PluginError.invalidVersions` for a pair whose versions share an engine identifier, since an engine loads one plugin per identifier.
+    public func separate(_ id: PluginID) throws {
+        guard let plugin = plugins.first(where: { $0.id == id }), let counterpart = plugins.first(where: { $0.id == plugin.counterpart }) else { return }
+        guard plugin.manifest.id != counterpart.manifest.id else {
+            throw PluginError.invalidVersions("Both versions of \u{201C}\(leadVersion(of: id)?.manifest.name ?? plugin.manifest.name)\u{201D} have one identifier, which each engine loads only once, so they stay one plugin. Remove a version instead.")
+        }
+        dropRecords(naming: [plugin.id, counterpart.id])
+        var next = plugins
+        dismiss(counterpart.enginesRunningPackage, notesOf: plugin.id, in: &next)
+        dismiss(plugin.enginesRunningPackage, notesOf: counterpart.id, in: &next)
+        saveList()
+        setPlugins(next)
+    }
+
+    /// Records that the user dismissed the note asking for the plugin's version for the engine, in `plugins.json` at once.
+    public func dismissVersionNote(of id: PluginID, for engine: EngineKind) {
+        var next = plugins
+        dismiss([engine], notesOf: id, in: &next)
+        guard next != plugins else { return }
+        saveList()
+        plugins = next
+    }
+
+    /// Adds the engines to the plugin's dismissed notes, in `plugins` and in its install entry, which keeps the names this build does not know.
+    private func dismiss(_ engines: Set<EngineKind>, notesOf id: PluginID, in plugins: inout [InstalledPlugin]) {
+        guard let index = plugins.firstIndex(where: { $0.id == id }), let entry = installs.firstIndex(where: { $0.id == id.rawValue }),
+              case var .readable(install) = installs[entry] else { return }
+        for engine in EngineKind.allCases where engines.contains(engine) && !plugins[index].dismissedVersionNotes.contains(engine) {
+            plugins[index].dismissedVersionNotes.insert(engine)
+            install.dismissedVersionNotes = (install.dismissedVersionNotes ?? []) + [engine.rawValue]
+        }
+        installs[entry] = .readable(install)
+    }
+
+    /// Drops the records of the file that name one of the plugins, those it ignores among them, so that no plugin is in two records.
+    private func dropRecords(naming ids: [PluginID]) {
+        let names = Set(ids.map(\.rawValue))
+        pairRecords.removeAll { !names.isDisjoint(with: $0.values) }
     }
 
     // MARK: Engines
@@ -347,7 +681,7 @@ public final class PluginManager: ObservableObject {
         plugin.engineChecks = Self.currentChecks(install.engineChecks, engines: runtime.engines)
         plugins[index] = plugin
         if plugin.isEnabled, runtime.engines.keys.allSatisfy({ plugin.engineChecks[$0] == false }), let reason = Self.refusal(in: checks) {
-            setEnabled(false, for: id, failure: reason)
+            setEnabled(false, for: [id], failure: reason)
         }
     }
 
@@ -370,10 +704,10 @@ public final class PluginManager: ObservableObject {
         plugin.engineFailures[engine] = reason
         plugins[index] = plugin
         guard plugin.engines.isEmpty else { return }
-        setEnabled(false, for: id, failure: EngineKind.allCases.compactMap { plugin.engineFailures[$0] }.joined(separator: "\n"))
+        setEnabled(false, for: [id], failure: EngineKind.allCases.compactMap { plugin.engineFailures[$0] }.joined(separator: "\n"))
     }
 
-    /// Deletes an installed plugin from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
+    /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
     public func remove(_ id: PluginID) throws {
         guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil
@@ -386,11 +720,22 @@ public final class PluginManager: ObservableObject {
         }
         runtimes[installed.kind]?.remove(installed)
         packages[id] = nil
+        let entryIndex = installs.firstIndex { $0.id == id.rawValue }
         installs.removeAll { $0.id == id.rawValue }
         choices.removeAll { $0.id == id.rawValue }
+        dropRecords(naming: [id])
+        var next = plugins
+        if let index = next.firstIndex(where: { $0.id == id }) {
+            next.remove(at: index)
+            // The other version takes the pair's place.
+            if let counterpart = installed.counterpart {
+                if let from = next.firstIndex(where: { $0.id == counterpart }), from > index { next.insert(next.remove(at: from), at: index) }
+                if let entryIndex, let from = installs.firstIndex(where: { $0.id == counterpart.rawValue }), from > entryIndex { installs.insert(installs.remove(at: from), at: entryIndex) }
+            }
+        }
         saveList()
         failures[id] = nil
-        plugins.removeAll { $0.id == id }
+        setPlugins(next)
     }
 
     // MARK: Deleting the Persona
@@ -399,6 +744,7 @@ public final class PluginManager: ObservableObject {
     public func close() {
         for id in Array(running.keys) { stop(id) }
         badges = [:]
+        engineVersions = []
         plugins = []
         storages.values.forEach { $0.discardChanges() }
         storages = [:]
@@ -573,7 +919,7 @@ public final class PluginManager: ObservableObject {
         let recent = (failures[id] ?? []).filter { now.timeIntervalSince($0) < Self.failureWindow } + [now]
         failures[id] = recent
         guard recent.count >= Self.failureLimit else { return }
-        setEnabled(false, for: id, failure: "Arch switched the plugin off after it failed three times within five minutes. \(reason)")
+        setEnabled(false, for: [id], failure: "Arch switched the plugin off after it failed three times within five minutes. \(reason)")
     }
 
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
@@ -614,9 +960,11 @@ struct PluginListFile: Codable {
         var installedAt: Date
         /// What each engine that checked the package found, by engine name as `EngineKind` writes it. Names stay text, so that the answers of engines this build does not know survive its writes. Absent from entries of builds before engine checks and of kinds that run alike on every engine.
         var engineChecks: [String: EngineCheck]?
+        /// The engines whose note asking for a version of the plugin the user dismissed, by engine name, including names this build does not know. Absent where the user dismissed none.
+        var dismissedVersionNotes: [String]?
 
         private enum CodingKeys: String, CodingKey {
-            case id, source, generated, grant, installedAt, engineChecks
+            case id, source, generated, grant, installedAt, engineChecks, dismissedVersionNotes
         }
 
         init(id: String, origin: PluginOrigin, grant: PluginGrant, installedAt: Date, engineChecks: [String: EngineCheck]?) {
@@ -638,6 +986,7 @@ struct PluginListFile: Codable {
             grant = try container.decode(PluginGrant.self, forKey: .grant)
             installedAt = try container.decode(Date.self, forKey: .installedAt)
             engineChecks = try container.decodeIfPresent([String: EngineCheck].self, forKey: .engineChecks)
+            dismissedVersionNotes = try container.decodeIfPresent([String].self, forKey: .dismissedVersionNotes)
         }
 
         func encode(to encoder: any Encoder) throws {
@@ -652,6 +1001,7 @@ struct PluginListFile: Codable {
             try container.encode(grant, forKey: .grant)
             try container.encode(installedAt, forKey: .installedAt)
             try container.encodeIfPresent(engineChecks, forKey: .engineChecks)
+            try container.encodeIfPresent(dismissedVersionNotes, forKey: .dismissedVersionNotes)
         }
     }
 
@@ -698,6 +1048,8 @@ struct PluginListFile: Codable {
     var choices: [Choice]
     /// Absent from files of builds before installed plugins.
     var installed: [InstallEntry]?
+    /// The pairs of engine versions in the order the user made them, each as an object from engine name to plugin identifier, including those this build ignores. Absent from files without pairs.
+    var engineVersions: [[String: String]]?
 }
 
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.

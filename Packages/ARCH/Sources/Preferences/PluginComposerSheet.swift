@@ -26,7 +26,7 @@ struct PluginComposerSheet: View {
     var body: some View {
         Group {
             if isReviewing, let draft {
-                PluginInstallSheet(plugins: plugins, package: draft) { isReviewing = false }
+                PluginInstallSheet(plugins: plugins, review: PluginReview(package: draft)) { isReviewing = false }
                     .id(draft.id)
             } else {
                 requestForm

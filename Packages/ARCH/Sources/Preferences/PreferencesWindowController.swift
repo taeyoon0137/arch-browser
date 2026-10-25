@@ -1,6 +1,7 @@
 // Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
 import AI
 import AppKit
+import ARCHEngine
 import Browsing
 import Plugins
 import SwiftUI
@@ -48,6 +49,8 @@ public final class PreferencesWindowController: NSWindowController {
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
     private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())
+    /// Settings ▸ Plugins, while the app shell has set `session`.
+    private var pluginsSection: NSTabViewItem?
 
     private init() {
         UserDefaults.standard.register(defaults: [Self.archiveAfterHoursKey: Self.defaultArchiveAfterHours])
@@ -65,7 +68,9 @@ public final class PreferencesWindowController: NSWindowController {
             sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection(store: session.sitePermissions)))
             // AI writes plugins only from Settings ▸ Plugins, so its feature joins Settings ▸ AI with the section.
             AIService.shared.register(.pluginComposer)
-            sections.addTabViewItem(Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session)))
+            let plugins = Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session))
+            pluginsSection = plugins
+            sections.addTabViewItem(plugins)
         }
         sections.addTabViewItem(aiSection)
         let window = NSWindow(contentViewController: sections)
@@ -102,6 +107,13 @@ public final class PreferencesWindowController: NSWindowController {
     /// Brings the Settings window to the front on the AI section. The tab view controller follows its tab view's selection.
     public func showAISection() {
         aiSection.tabView?.selectTabViewItem(aiSection)
+        show()
+    }
+
+    /// Brings the Settings window to the front on Plugins at the plugin in the Persona, with the open panel for the plugin's version for the engine, for Install <Engine> Version… in the site settings popover.
+    public func showPlugin(_ plugin: PluginID, in persona: Persona.ID, installingVersionFor engine: EngineKind) {
+        PluginVersionRequests.shared.pending = PluginVersionRequest(persona: persona, plugin: plugin, engine: engine)
+        if let pluginsSection { pluginsSection.tabView?.selectTabViewItem(pluginsSection) }
         show()
     }
 }

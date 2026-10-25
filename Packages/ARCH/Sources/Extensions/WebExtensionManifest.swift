@@ -1,4 +1,4 @@
-// `manifest.json`, the manifest of a Manifest V3 web extension, read into a `PluginManifest` without any engine, so that one install serves every engine that runs extensions. Arch reads what it shows and grants: the name, version, and description, localized from `_locales` where the manifest names a message, the permissions, the sites, and whether the extension has an action. The engines read the rest.
+// `manifest.json`, the manifest of a Manifest V3 web extension, read into a `PluginManifest` without any engine, so that one install serves every engine that runs extensions. Arch reads what it shows and grants: the name, version, and description, localized from `_locales` where the manifest names a message, the permissions, the sites, whether the extension has an action, and the developer fields by which two packages name one extension. The engines read the rest.
 import CryptoKit
 import Foundation
 import Plugins
@@ -33,8 +33,25 @@ struct WebExtensionManifest {
         manifest = PluginManifest(
             id: Self.pluginID(of: extensionID), name: name, version: version, summary: summary.isEmpty ? "A web extension." : summary,
             permissions: Set(requested.compactMap { Self.mappedPermissions[$0] }), sites: Self.sites(in: fields),
-            extensionPermissions: requested.filter { Self.mappedPermissions[$0] == nil }, contributions: PluginContributions(commands: commands)
+            extensionPermissions: requested.filter { Self.mappedPermissions[$0] == nil }, contributions: PluginContributions(commands: commands),
+            author: Self.author(in: fields), homepage: Self.homepage(in: fields)
         )
+    }
+
+    /// `author` as text or as the `email` of an author object, lowercased; nil without one.
+    private static func author(in fields: [String: Any]) -> String? {
+        let author = fields["author"] as? String ?? (fields["author"] as? [String: Any])?["email"] as? String
+        let text = author?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return text.isEmpty ? nil : text
+    }
+
+    /// `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ by their paths; nil without one.
+    private static func homepage(in fields: [String: Any]) -> String? {
+        var text = (fields["homepage_url"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let scheme = text.range(of: "://") { text = String(text[scheme.upperBound...]) }
+        if text.hasPrefix("www.") { text.removeFirst(4) }
+        if text.hasSuffix("/") { text.removeLast() }
+        return text.isEmpty ? nil : text
     }
 
     /// The sites the extension asks for at install, from `host_permissions` and its content scripts' `matches`, in order. Patterns for pages other than web pages, such as `file:///*`, and patterns with a port are left out, since Arch's grants cover web pages on every port only.

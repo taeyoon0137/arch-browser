@@ -92,7 +92,7 @@ final class RecordingHost: WebExtensionHost {
     }
 }
 
-/// An engine that records what the runtime checks, loads, unloads, and deletes, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`.
+/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab.
 final class RecordingEngine: EngineExtensions {
     weak var delegate: (any EngineExtensionsDelegate)?
     private(set) var loaded: [String: EngineExtension] = [:]
@@ -100,6 +100,8 @@ final class RecordingEngine: EngineExtensions {
     private(set) var loadCounts: [String: Int] = [:]
     private(set) var checkCount = 0
     private(set) var removedData: [String] = []
+    /// The identifiers whose actions ran, in order.
+    private(set) var performed: [String] = []
     var refusedNames: Set<String> = []
     var refused: Set<String> = []
 
@@ -127,7 +129,9 @@ final class RecordingEngine: EngineExtensions {
         loaded[id] == nil ? nil : EngineExtensionAction(label: "Action", icon: nil, badgeText: "", isEnabled: true)
     }
 
-    func performAction(of id: String, for tab: any EngineWebContents) {}
+    func performAction(of id: String, for tab: any EngineWebContents) {
+        performed.append(id)
+    }
 
     func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?) {}
 }

@@ -259,12 +259,12 @@ The `Extensions` module turns a web extension into a plugin of the `webExtension
 
 ### Engine versions
 
-Many developers ship a separate package for each engine, and some packages load in one engine's runtime only. Arch therefore records which engines run each web extension's package, shows two packages of one extension in a Persona as one plugin with a version per engine, lets the user add the other engine's version to any web extension plugin, and asks for it where a plugin does not run on an engine that runs extensions. Coverage, the first of the two steps at the end of this section, is built; Counterparts and Guidance, the second, are not. Every rule here treats the engines alike, and the tests stand a recording engine in for Chromium, so that VI.1 only supplies Chromium's extension runtime.
+Many developers ship a separate package for each engine, and some packages load in one engine's runtime only. Arch therefore records which engines run each web extension's package, shows two packages of one extension in a Persona as one plugin with a version per engine, lets the user add the other engine's version to any web extension plugin, and asks for it where a plugin does not run on an engine that runs extensions. Both steps at the end of this section are built: Coverage, then Counterparts and Guidance. Every rule here treats the engines alike, and the tests stand a recording engine in for Chromium, so that VI.1 only supplies Chromium's extension runtime.
 
 #### Coverage
 
 - Each web extension plugin records which engines run its package, as each engine's runtime finds when it checks the package: WebKit runs it when `WKWebExtension(resourceBaseURL:)` reads it, and Chromium when CEF's extension runtime accepts it, after VI.1 (needs verification). A check reads the package without running any of it, through `EngineExtensions.check(_:)`, and starts the Persona's profile in the engine as loading does. `WKWebExtension(resourceBaseURL:)` throws only for a missing or unreadable manifest and collects other problems in its `errors`, so WebKit runs nearly every package that Arch's manifest reader accepts, packages built for Chromium among them. Whether some of those `errors`, such as one about the background, should count as a refusal needs verification. A check therefore tells where a package can run, not which engine its developer built it for, and no rule below waits for an engine to refuse the other engine's package.
-- At staging, the kind's runtime checks the package in each engine that runs web extensions on this Mac, which is WebKit from macOS 15.4 until VI.1. It also checks the installed plugins that the package could update or join (see Counterparts), on or off, in each such engine that has no current answer for them, and the manager records those answers; so far this is the plugin with the package's identifier, which the package updates, and the second step adds the match it could join. A package that every engine that checks it refuses is refused with the first engine's reason, WebKit's before Chromium's, such as `WebKit cannot run this extension: …`. Without such an engine nothing is checked, and the package installs as an unavailable plugin, as now. The review sheet says where the package runs, such as "Runs on WebKit tabs.", and gives each engine's refusal, such as "Chromium cannot run this extension: …".
+- At staging, the kind's runtime checks the package in each engine that runs web extensions on this Mac, which is WebKit from macOS 15.4 until VI.1. It also checks the installed plugins that the package could update or join (see Counterparts), on or off, in each such engine that has no current answer for them, and the manager records those answers: the plugins with the package's identifier, which the package updates, and the match it could join. A package that every engine that checks it refuses is refused with the first engine's reason, WebKit's before Chromium's, such as `WebKit cannot run this extension: …`. Without such an engine nothing is checked, and the package installs as an unavailable plugin, as now. The review sheet says where the package runs, such as "Runs on WebKit tabs.", and gives each engine's refusal, such as "Chromium cannot run this extension: …".
 - Each answer records the version of the engine's extension runtime that gave it: WebKit's framework version, or the CEF version. An answer is current while the engine has that version. An engine without a current answer for an installed package checks it, whether the plugin is on or off: at the first launch of a build with this step for packages installed before it, for every package once Chromium runs extensions (VI.1), and whenever a macOS update or a newer CEF changes the engine's version. The runtime does so in each pass over the engines, before it starts an enabled plugin's package in any engine, and the manager records each answer; a switched-off plugin's package does not load. A pass starts the Persona's profiles only for an enabled plugin, so switched-off plugins alone start no engine, and their packages are checked once the profiles run, for an enabled plugin or a staging. An enabled plugin whose package no engine that runs extensions accepts any more is switched off with the first engine's reason. `plugins.json` keeps answers without reasons, so switching such a plugin on again has every engine check its package again, and the plugin goes off again with the reason.
 - `plugins.json` keeps the answers in each web extension's install entry as `engineChecks`, an object from engine name to the answer and the version that gave it: `"engineChecks": {"webKit": {"runs": true, "version": "22625.2.5.11.1"}}`. An engine missing from it has not checked the package. An engine name this build does not know stays in the file and counts as no check. An update records its own answers.
 - A package that passed an engine's check but fails to start there leaves that engine only: the runtime unloads it there, and the manager keeps the reason by engine in `InstalledPlugin.engineFailures` for the run, not in `plugins.json`. The plugin's row says it, such as "Arch could not start it on Chromium tabs: …", and its other engines keep their copies running. The engine counts as one the plugin does not run on until the user switches the plugin on again or it updates, so Guidance asks for that engine's version. The manager switches the plugin off only when it has failed on every engine it ran on, with each engine's reason; meanwhile Settings lists the failures under the plugin.
@@ -276,14 +276,14 @@ Many developers ship a separate package for each engine, and some packages load 
 #### Counterparts
 
 - Two web extension plugins of one Persona are counterparts, versions of one extension, when the Persona's `plugins.json` records them as a pair. Arch shows a pair as one plugin with a version per engine: one Settings section with a row for each version, one row in the site settings popover, and one palette command. The pair takes the name and the place in the list of the version installed first.
-- At staging, a package matches an installed web extension plugin that is not in a pair when they name one extension: they have the same identifier, from the same `key`, or the same `name` as Arch shows it, compared without case and spaces at either end, with at least one developer field that both manifests give and that matches, and no such field that differs. The developer fields are `author`, as text or as the `email` of an author object, compared without case, and `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, compared without case, so that two projects on one hosting site differ. Of several matching plugins, the one installed first is the match.
+- At staging, a package matches an installed web extension plugin that is not in a pair when they name one extension: they have the same identifier, from the same `key`, or the same `name` as Arch shows it, compared without case and spaces at either end, with at least one developer field that both manifests give and that matches, and no such field that differs. The developer fields are `author`, as text or as the `email` of an author object, compared without case, and `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, compared without case, so that two projects on one hosting site differ. While a plugin has the package's identifier, which the package would otherwise update, it is the only plugin the package can match, and only while it is the one plugin with that identifier and is not in a pair; otherwise, of several matching plugins, the one installed first is the match.
 - The package can join the match for each engine that runs the package while the match runs on another engine, by the answers at staging. The review then asks how to install it, for example "This may be the Chromium version of “Reader”, which runs on WebKit tabs. Arch can show the two as one plugin.", with Install as the Chromium Version, one such choice for each engine the package can join for, and Update “Reader” for a package with the match's identifier or Install as a Separate Plugin for another. The choice starts on the version when the two complement each other, each package running on an engine that refused the other. Otherwise it starts on Update or the separate plugin, since a package that runs where the match runs may be the match's next release or another extension, and the user can still choose the version, as for two packages with one `key` that both engines run. Without an engine to join for, as with WebKit alone before VI.1, a package with the match's identifier updates it and another installs as its own plugin, as now. A version installs on or off as the match is, so for it the review has one Install button instead of Install and Install and Enable.
 - Identifiers: a version that joins a plugin whose version has the same identifier gets the plugin identifier `extension.<identifier>.<engine>`, with `webkit` or `chromium` for the engine it joins for. A plugin identifier is its install entry's `id`, which names its folder, choice, storage, and Keychain items, and which `InstalledPlugin.id` gives, while `manifest.id` stays what the package names. The manager therefore lists an entry whose package names `extension.<identifier>` under that `id` or under it followed by `.webkit` or `.chromium`, and the runtime gives the engines a plugin's identifier without that ending. Both engines know both versions as `<identifier>`, since each loads only its own, so a native app's host manifest that lists the identifier serves both. The runtime finds a version by the calling engine and the identifier.
 - Updates: a package with an installed plugin's identifier updates it, as now, unless it joins it as above. Of two versions with that identifier, it updates the one installed from the same source, else the one whose answers the package's checks equal, else the one the user chooses in the review. `PluginPackage.updates` names it, and the review's title names the version, such as "Update the Chromium Version of “Reader”?". An update review that would take a plugin off an engine it runs on says so, such as "WebKit tabs lose “Reader”." An update that would leave a version of a pair on no engine cannot install while the pair lasts: its review says why, such as "WebKit cannot run this package, and the other version of “Reader” runs on Chromium tabs.", and offers Cancel only. An update keeps the plugin's pair and `dismissedVersionNotes`.
 - By hand: an unpaired web extension plugin's section in Settings ▸ Plugins has Join With…, which lists the Persona's other unpaired web extension plugins. Its sheet gives each engine to the version whose package runs there. Where both run, the user chooses, starting with the version installed first. A join that leaves a version without an engine is refused. The pair takes the switch of the version installed first. A pair's section has Separate Versions, which drops the record: both versions stay installed as two plugins, each on every engine its package runs on, with their switches as they were. A pair whose versions share an identifier has no Separate Versions, since an engine loads one plugin per identifier; Remove Version… takes a version out instead.
 - What a pair does:
   - Switching: the plugin's switch turns both versions on or off, and a version that joins takes the pair's switch, so both are on or both off. A version that the manager switched off after a failure says why in its row and comes back on with the switch; meanwhile its counterpart keeps running.
-  - Removal: Remove… removes both versions after one confirmation. Each version's row has Remove Version…, which removes that version alone. The other version stays installed in the pair's place with its grant, storage, and switch, and Guidance applies to it again. Removing a version unloads it and deletes its extension storage in every engine except one where its counterpart runs under the same engine identifier, by the counterpart's `engines` before the removal and whether or not the counterpart is on, so such a counterpart keeps running and keeps its storage.
+  - Removal: Remove… removes both versions after one confirmation. Each version's row has Remove Version…, which removes that version alone. The other version stays installed in the pair's place with its grant, storage, and switch, and Guidance applies to it again. Removing a version unloads it and deletes its extension storage in every engine except the one that the pair's record gives a counterpart with the same engine identifier, whether or not the counterpart is on, so such a counterpart keeps running and keeps its storage.
   - Updates: each version updates on its own (see Updates above), through the review sheet, with the permissions and sites it did not ask for before marked New.
   - Permissions: each version keeps its own grant. A version's review asks for its own permissions and sites. The sites that the other version asked for and the user left out start off, as in an update. Touch ID applies to each version's grant. Settings lists each version's access in its row. A request at run time names the version and grants only that version.
   - Storage: each version keeps its own `<plugin id>/` folder and its own extension storage in the engine it runs on. Nothing moves between versions, so the user sets up each version once, as with one package's copies on two engines.
@@ -296,75 +296,13 @@ Many developers ship a separate package for each engine, and some packages load 
 - A web extension plugin that is not in a pair asks for a version for an engine when that engine's runtime runs web extensions on this Mac (`PluginRuntime.engines`), the engine has a current answer for the plugin's package, the plugin runs on another engine but not on this one (`InstalledPlugin.engines`, so a failure to start there counts), and the user has not dismissed the note for that engine. Before VI.1, Chromium's runtime runs no extensions, so nothing asks for a Chromium version, and Chromium tabs keep the existing note that extensions run on WebKit tabs. After VI.1 the rule also runs the other way: a plugin that only Chromium runs asks for a WebKit version on a Mac where WebKit runs extensions. A pair asks for no version: a version that does not run on the engine its record gives it says why in its row, with Remove Version…, after which the other version asks as a plugin alone does.
 - Install <Engine> Version… does not wait for a refusal: the Settings section of every web extension plugin that is not in a pair has it for each engine that runs web extensions on this Mac while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. Only a plugin that asks for a version also shows the notes below.
 - The install sheet's last step: after Install or Install and Enable of a new plugin, not an update, that asks for a version, the sheet stays open instead of closing and says, for example, "“Reader” is installed. It runs on WebKit tabs. Its developer may offer a separate version for Chromium; install it to use “Reader” on Chromium tabs too." It offers Install Chromium Version…; Don't Ask Again, which dismisses the note for that engine; and Done, the default button, which leaves the note in Settings and on that engine's tabs.
-- Install <Engine> Version… opens the open panel over the sheet, or over the Settings window from a Settings row, with the engine's package types (`PluginRuntime.packageTypes(for:)`) and a message that names both, such as "Choose the Chromium version of “Reader”." For both engines these are a folder or a `.zip` archive. `.crx` files join Chromium's types once Arch reads them; whether WebKit's take app extension bundles, which `WKWebExtension(appExtensionBundle:)` reads, is open. The package's review takes the sheet's place, titled "Install the Chromium Version of “Reader”?". It installs the package as the plugin's version for that engine, on or off as the plugin is. A package that the engine refused cannot join: the review says why, such as "Chromium cannot run this package: …", and offers Cancel only. A package whose name or developer fields differ from the plugin's joins with the warning "Its name or developer differs from “Reader”. Join only if both come from the same developer." A package with the identifier of an installed plugin that is not a version of this one cannot join here; Join With… joins installed plugins.
+- Install <Engine> Version… opens the open panel over the sheet, or over the Settings window from a Settings row, with the engine's package types (`PluginRuntime.packageTypes(for:)`) and a message that names both, such as "Choose the Chromium version of “Reader”." For both engines these are a folder or a `.zip` archive. `.crx` files join Chromium's types once Arch reads them; whether WebKit's take app extension bundles, which `WKWebExtension(appExtensionBundle:)` reads, is open. The package's review takes the sheet's place, titled "Install the Chromium Version of “Reader”?". It installs the package as the plugin's version for that engine, on or off as the plugin is. A package that the engine refused cannot join: the review says why, such as "Chromium cannot run this extension: …", and offers Cancel only. A package whose name or developer fields differ from the plugin's joins with the warning "Its name or developer differs from “Reader”. Join only if both come from the same developer." A package with the identifier of an installed plugin that is not a version of this one cannot join here; Join With… joins installed plugins.
 - Settings ▸ Plugins: while a plugin asks for a version, its section's footer gives the last step's note with Install <Engine> Version… and Dismiss. Dismiss adds the engine to the plugin's `dismissedVersionNotes` in `plugins.json`; the footer then says only where the plugin runs, and the section keeps Install <Engine> Version…. The note goes once the plugin runs on both engines, and comes back when removing a version leaves an engine without one, unless the user dismissed it before. An update keeps the dismissals. Installing a package that could have joined as a separate plugin, and Separate Versions, dismiss each plugin's note for the engines the other runs on, since the user chose to keep the two apart.
 - Tabs: on a tab whose engine runs extensions but none of the plugin's versions, the plugin's row in the site settings popover is dimmed and says where it runs, such as "Runs on WebKit tabs.". While the plugin asks for a version for the tab's engine, the row adds "Its developer may offer a separate version for Chromium.", Install Chromium Version…, and Dismiss, which dismisses the note as Settings does. Install Chromium Version… closes the popover and opens Settings ▸ Plugins at the plugin, in the tab's Persona, with the open panel. It does so through a session callback that the app shell sets, `BrowserSession.installEngineVersion`, as it sets `showSettings`. The palette command beeps on such a tab, as now. On a tab whose engine runs no extensions, such as Chromium before VI.1, the section keeps its note "Extensions run on WebKit tabs. Switch this tab to WebKit to use them."
 
 #### Types and `plugins.json`
 
-Coverage's members are in the Swift API section and in `docs/engine-protocol.md`: `EngineExtensions.check(_:)`, `Engine.extensionRuntimeVersion`, `PluginEngineCheck`, `InstalledPlugin.engineChecks`, `engineFailures`, `engines`, and `enginesNote`, `PluginPackage.engineChecks` and `engineNotes`, `PluginRuntime.engines`, `check(packageAt:)`, `onCheck`, `onEngineFailure`, and `onEnginesChange`, and `run(_:)` with the installed plugins on or off, and `WebExtensionHost.extensionEngineVersions` and `extensionEngines(in:)` by engine. The members of the second step join the Swift API section as they are built.
-
-```swift
-// Plugins
-/// Two installed web extension plugins of one Persona that are versions of one extension, with the engine each runs on. `plugins.json` holds it as an object from engine name to plugin identifier.
-public struct PluginEngineVersions: Hashable, Sendable {
-    public var versions: [EngineKind: PluginID]
-}
-
-// InstalledPlugin
-/// The install entry's identifier, which replaces `manifest.id` as the plugin's identity: the manifest's, or, for a version that joined under its counterpart's identifier, that followed by `.webkit` or `.chromium`. A built-in plugin's is its manifest's.
-public let id: PluginID
-/// The other version of the plugin, in a pair.
-public var counterpart: PluginID?
-/// The engines whose note asking for a version the user dismissed.
-public var dismissedVersionNotes: Set<EngineKind>
-// `engines` also gives a version of a pair only the engine that the pair's record gives it.
-
-// PluginPackage
-/// The installed plugin that the package matches, by the rule in Counterparts, and the engines the package can join it for.
-public let counterpart: PluginID?
-public let joinableEngines: Set<EngineKind>
-/// The installed plugin that the package updates, by the rule in Counterparts, or nil for a new plugin. The review sets it to the version the user chooses where the rule leaves two.
-public var updates: PluginID?
-
-// PluginManifest
-/// A web extension's `author`, as text or the email of an author object, and its `homepage_url` without scheme, leading `www.`, and trailing `/`, lowercased. Nil for other kinds.
-public var author: String?
-public var homepage: String?
-
-// PluginRuntime
-/// The types the open panel accepts for a package of the kind for `engine`.
-func packageTypes(for engine: EngineKind) -> [UTType]
-
-// PluginManager
-@Published public private(set) var engineVersions: [PluginEngineVersions]
-/// With `asVersionOf` and `engine`, installs the package as that plugin's version for the engine, on or off as the plugin is; otherwise updates `package.updates` or installs a new plugin. Throws for an update that would leave a version of a pair on no engine.
-public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf plugin: PluginID? = nil, for engine: EngineKind? = nil) throws
-/// Throws for a pair that leaves a version without an engine. The pair takes the switch of the version installed first, and the join drops each ignored record that names one of its plugins.
-public func join(_ versions: PluginEngineVersions) throws
-/// Throws for a pair whose versions share an engine identifier.
-public func separate(_ id: PluginID) throws
-/// The engine whose version the plugin asks for (see Guidance), or nil.
-public func missingEngine(of id: PluginID) -> EngineKind?
-public func dismissVersionNote(of id: PluginID, for engine: EngineKind)
-// `setEnabled(_:for:)` with either version switches the pair; `remove(_:)` removes one version.
-
-// PluginListFile, as `plugins.json` holds it. Engine names stay text, so that the names this build does not know survive its writes, as they do in `Install.engineChecks: [String: EngineCheck]?`, whose `EngineCheck` holds `runs` and `version`.
-/// Each pair as an object from engine name to plugin identifier.
-var engineVersions: [[String: String]]?
-// PluginListFile.Install
-var dismissedVersionNotes: [String]?
-
-// WebExtensionActionItem, one for each plugin and one for a pair, whose `id` is the version installed first
-/// The engines the plugin's versions run on, for the note on another engine's tab.
-public let engines: Set<EngineKind>
-/// Whether the plugin asks for a version for the tab's engine.
-public let asksForVersion: Bool
-
-// Browsing, BrowserSession
-/// Opens Settings ▸ Plugins at the plugin in the Persona with the open panel for the engine's version.
-public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
-```
+The members of both steps are in the Swift API section and in `docs/engine-protocol.md`: `EngineExtensions.check(_:)`, `Engine.extensionRuntimeVersion`, `PluginEngineCheck`, `PluginEngineVersions`, `InstalledPlugin.engineChecks`, `engineFailures`, `engines`, `enginesNote`, `counterpart`, `pairEngine`, `dismissedVersionNotes`, `versionEngines(among:)`, and `missingEngine(among:)`, `PluginPackage.engineChecks`, `engineNotes`, `counterpart`, `joinableEngines`, `suggestedEngine`, `updates`, and `updateChoices`, `PluginManifest.author` and `homepage`, `PluginRuntime.engines`, `check(packageAt:)`, `onCheck`, `onEngineFailure`, `onEnginesChange`, `packageTypes(for:)`, and `run(_:)` with the installed plugins on or off, the `PluginManager` members for engine versions, `PluginError.invalidVersions`, `WebExtensionHost.extensionEngineVersions` and `extensionEngines(in:)` by engine, `WebExtensionActionItem.engines` and `asksForVersion`, and `BrowserSession.installEngineVersion`. `PluginListFile`, as `plugins.json` holds it, keeps engine names as text, so that the names this build does not know survive its writes: `Install.engineChecks: [String: EngineCheck]?`, whose `EngineCheck` holds `runs` and `version`, `Install.dismissedVersionNotes: [String]?`, and `engineVersions: [[String: String]]?`, each pair as an object from engine name to plugin identifier.
 
 `plugins.json` with a pair, whose WebKit version the user installed first and whose Chromium version both engines run, and a plugin whose note asking for a Chromium version the user dismissed:
 
@@ -396,15 +334,15 @@ public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
 #### Tests
 
 - Coverage (`EngineCoverageTests`, with a recording engine for each engine): staging records each engine's check, and installing writes `engineChecks` with each engine's version. A package that every engine refuses is refused with the first engine's reason, and its staged copy goes. An entry without `engineChecks`, or with an answer from another engine version, is checked again before the next load, only in the engines without a current answer, the answer is recorded, and the package loads where it runs. Staging checks the installed plugin that the package updates, switched off and never checked. A plugin that no engine accepts any more is switched off with the first engine's reason. A failure to start on one engine leaves the other engines running, stays out of `plugins.json`, is tried again when the plugin is switched on again, and switches the plugin off with each engine's reason only when every engine it ran on failed. The runtime loads each extension only into the engines it runs on, and recording an answer, or another change to the enabled plugins, does not load a running copy again. The kind is unavailable only without an engine, and Chromium alone makes it available. Once the engines run, switched-off plugins are checked where they have no current answer, and none of them loads. A plugin that every engine refused and that the user switches on again is checked again and goes off again with the reason. Only engines whose profiles start count: a listed engine whose profile does not start loses its answers for the run, so that the other engine's refusal or failure to start switches the plugin off, and with no profile started a package installs as unavailable. A plugin that is off after failing to start on every engine that runs it does not say "No engine on this Mac runs it." An engine name this build does not know in `engineChecks` survives reading and writing the file and leaves the entry readable. The review sheet's and Settings' sentences say where the package and the plugin run. WebKit's `check(_:)` passes the sample extension and refuses a package that `WKWebExtension` cannot read, and WebKit names its extension runtime's version (macOS 15.4 and later).
-- Pairing rule: staging checks an installed plugin that the package could join, switched off and never checked, before matching it. Packages match by identifier and by name with a matching `author` or `homepage_url`. They do not match by name alone, with a developer field that differs, with `homepage_url`s on one host with different paths, or with a plugin that is in a pair. Complementary checks start the review's choice on the version. Overlapping checks, such as two packages with one `key` that both engines run, start it on Update or the separate plugin, and installing the package as the other engine's version still works. Without an engine to join for, as with WebKit alone, a package with an installed identifier updates as now. Of two matches, the one installed first wins. A version that shares its counterpart's identifier gets `extension.<identifier>.<engine>`, stays listed and paired when a new manager reads `plugins.json`, is paired again from its identifier when a build before this step dropped its record, receives the updates meant for it, and each engine's delegate calls reach that engine's version. Of two versions with one identifier, an update goes to the one from the same source, then the one with the same answers, then the one the review chooses.
+- Pairing rule (`EngineVersionsTests`, with the pair, removal, and guidance tests): staging checks an installed plugin that the package could join, switched off and never checked, before matching it. Packages match by identifier and by name with a matching `author` or `homepage_url`. They do not match by name alone, with a developer field that differs, with `homepage_url`s on one host with different paths, or with a plugin that is in a pair. Complementary checks start the review's choice on the version. Overlapping checks, such as two packages with one `key` that both engines run, start it on Update or the separate plugin, and installing the package as the other engine's version still works. Without an engine to join for, as with WebKit alone, a package with an installed identifier updates as now. Of two matches, the one installed first wins. A version that shares its counterpart's identifier gets `extension.<identifier>.<engine>`, stays listed and paired when a new manager reads `plugins.json`, is paired again from its identifier when a build before this step dropped its record, receives the updates meant for it, and each engine's delegate calls reach that engine's version. Of two versions with one identifier, an update goes to the one from the same source, then the one with the same answers, then the one the review chooses.
 - Pairs: one switch turns both versions on or off, and a version that joins takes the pair's switch. One version's failure leaves the other running. The popover's actions and the palette list the pair once and run the version for the tab's engine. Join With… gives each engine one version and refuses a join that leaves a version without one, and a join drops an ignored record that names one of its plugins. Separate Versions keeps both installed, and a pair that shares an identifier cannot be separated. An update that would leave a version of a pair on no engine is refused.
 - Removal of one version: the other keeps its grant, storage, switch, and place, and the record goes. The removed version is unloaded and its engine storage deleted only in engines where no counterpart with the same identifier runs, on or off. Remove… removes both. A record whose versions are not both listed stays in the file and is ignored. An engine name this build does not know in `dismissedVersionNotes` or `engineVersions` survives reading and writing the file and leaves the entry readable.
-- Guidance conditions: a plugin asks for a Chromium version only while a Chromium engine runs extensions and has a current answer, the plugin runs on another engine but not on Chromium, and the note is not dismissed. A failure to start on Chromium makes the plugin ask for a Chromium version. Nothing asks with WebKit alone, as before VI.1, for a pair, or while Chromium has not checked the package. Install <Engine> Version… shows for every unpaired plugin that runs on another engine, whatever the checks found. Don't Ask Again, Dismiss in Settings, and Dismiss in the popover record a dismissal, and Done does not. A dismissal survives a new manager reading `plugins.json` and an update. Installing a package that could have joined as a separate plugin, and Separate Versions, dismiss each plugin's note for the other's engines. A Chromium-only plugin asks for a WebKit version. Removing a version brings the request back.
+- Guidance conditions: a plugin asks for a Chromium version only while a Chromium engine runs extensions and has a current answer, the plugin runs on another engine but not on Chromium, and the note is not dismissed. A failure to start on Chromium makes the plugin ask for a Chromium version. Nothing asks with WebKit alone, as before VI.1, for a pair, or while Chromium has not checked the package. Install <Engine> Version… shows for every unpaired plugin that runs on another engine, whatever the checks found. A dismissal, which Don't Ask Again and Dismiss in Settings and in the popover record and Done does not, survives a new manager reading `plugins.json` and an update. Installing a package that could have joined as a separate plugin, and Separate Versions, dismiss each plugin's note for the other's engines. A Chromium-only plugin asks for a WebKit version. Removing a version brings the request back.
 
 #### Build steps
 
 1. Coverage, built: `EngineExtensions.check(_:)` on WebKit, the host's engines by kind with their versions, only those whose application and the Persona's profile start, checks at staging, of the installed plugin a package updates, before loads without a current answer, of switched-off plugins once the engines run, and of a plugin switched on again after every engine refused it, `engineChecks` in `plugins.json` in the file's text-keyed types, failures to start per engine, loading per engine, the kind unavailable only without an engine, and the review sheet and Settings saying where a plugin runs, with the coverage tests.
-2. Counterparts and guidance: staging's check of the match a package could join, `engineVersions`, entry identifiers for versions that share an identifier, the pairing rule, the review's choice between the version, Update, and a separate plugin, update targets, Join With… and Separate Versions, the pair's switch, removal, actions, and contributions, Install <Engine> Version… in every unpaired plugin's section, the install sheet's last step, the Settings note, and the popover row's note, with the pairing, pair, removal, and guidance tests.
+2. Counterparts and guidance, built: staging's check of the match a package could join, `engineVersions`, entry identifiers for versions that share an identifier, the pairing rule, the review's choice between the version, Update, and a separate plugin, update targets, Join With… and Separate Versions, the pair's switch, removal, actions, and contributions, Install <Engine> Version… in every unpaired plugin's section, the install sheet's last step, the Settings note, and the popover row's note, with the pairing, pair, removal, and guidance tests.
 
 Both steps come before VI.1, which then adds Chromium's `EngineExtensions` with `check(_:)` and lists `extensions` among Chromium's capabilities. Arch then checks the installed packages on Chromium, on or off, once the Persona's profiles start, offers Install Chromium Version… in the section of every unpaired plugin that runs on WebKit, and asks for the Chromium versions that WebKit-only plugins lack.
 
@@ -476,6 +414,9 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     public var network: [String]
     public var events: Set<PluginEventKind>
     public var contributions: PluginContributions
+    /// A web extension's `author`, as text or the email of an author object, lowercased, and its `homepage_url` without scheme, leading `www.`, and trailing `/`, lowercased, by which a package matches an installed plugin as a version of one extension. Nil for other kinds.
+    public var author: String?
+    public var homepage: String?
 }
 
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
@@ -812,6 +753,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case quotaExceeded
     case unavailable(String)
     case timedOut
+    /// Two plugins cannot become, or stop being, versions of one plugin, for the reason the text gives.
+    case invalidVersions(String)
 }
 ```
 
@@ -819,7 +762,8 @@ public enum PluginError: Error, Hashable, Sendable {
 
 ```swift
 public struct InstalledPlugin: Identifiable, Hashable, Sendable {
-    public var id: PluginID { manifest.id }
+    /// The install entry's identifier, which names the plugin's folder, choice, storage, and Keychain items: the manifest's, or, for a version that joined a plugin whose version has the same identifier, that followed by `.webkit` or `.chromium`. A built-in plugin's is its manifest's.
+    public var id: PluginID { get }
     public var kind: PluginKind
     public var manifest: PluginManifest
     public var origin: PluginOrigin
@@ -837,10 +781,19 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var engineChecks: [EngineKind: Bool]
     /// Why the package failed to start in this run on engines whose check it passed, until the plugin is switched on again or updates.
     public var engineFailures: [EngineKind: String]
-    /// The engines a web extension runs on: those whose current answer runs it, less those where it failed to start.
+    /// The other version of the plugin, and the engine that the pair's record gives the plugin, in a pair.
+    public var counterpart: PluginID?
+    public var pairEngine: EngineKind?
+    /// The engines whose note asking for a version the user dismissed.
+    public var dismissedVersionNotes: Set<EngineKind>
+    /// The engines a web extension runs on: those whose current answer runs it, less those where it failed to start, and in a pair only the engine that the pair's record gives it.
     public var engines: Set<EngineKind> { get }
-    /// "Runs on WebKit tabs.", or "No engine on this Mac runs it." when every engine that checked the package refuses it, once an engine has checked the package; nil before, and while it starts on none of the engines that run it.
+    /// "Runs on WebKit tabs.", "Chromium does not run this version." for a version of a pair whose engine refuses its package, or "No engine on this Mac runs it." when every engine that checked the package refuses it, once an engine has checked the package; nil before, and while it starts on none of the engines that run it.
     public var enginesNote: String? { get }
+    /// The engines among `running`, those that run the kind on this Mac, for which Settings offers Install <Engine> Version…: each while the plugin runs on another engine. None in a pair.
+    public func versionEngines(among running: Set<EngineKind>) -> [EngineKind]
+    /// The engine whose version the plugin asks for, by the rule in Guidance, or nil.
+    public func missingEngine(among running: Set<EngineKind>) -> EngineKind?
     /// The grant's sentences, then a web extension's other API permissions.
     public var accessSummaries: [String] { get }
 }
@@ -850,6 +803,16 @@ public enum PluginEngineCheck: Hashable, Sendable {
     case runs
     /// With why, as a sentence that names the engine, such as `WebKit cannot run this extension: …`.
     case refused(String)
+}
+
+/// Two installed web extension plugins of one Persona that are versions of one extension, with the engine each runs on.
+public struct PluginEngineVersions: Hashable, Sendable {
+    /// WebKit and Chromium, which a pair divides between its versions.
+    public static let engines: [EngineKind]
+    public var versions: [EngineKind: PluginID]
+    public init(_ versions: [EngineKind: PluginID])
+    /// The versions in the order of `engines`.
+    public var plugins: [PluginID] { get }
 }
 
 /// A validated package, staged for the review sheet or installed.
@@ -863,8 +826,17 @@ public struct PluginPackage: Identifiable, Sendable {
     public let files: [String]
     /// The checks of the engines that run the kind on this Mac, made at staging.
     public internal(set) var engineChecks: [EngineKind: PluginEngineCheck]
+    /// The installed plugin that the package matches by the rule in Counterparts, the engines it can join it for, in the order of `EngineKind`, and the one of them that the review's choice starts on when the two complement each other.
+    public internal(set) var counterpart: PluginID?
+    public internal(set) var joinableEngines: [EngineKind]
+    public internal(set) var suggestedEngine: EngineKind?
+    /// The installed plugin that the package updates, by the rule in Counterparts, or nil for a new plugin. The review sets it to the version the user chooses from `updateChoices`, the two versions with the package's identifier where the rule leaves both.
+    public var updates: PluginID?
+    public internal(set) var updateChoices: [PluginID]
     /// The review's sentences: "Runs on WebKit tabs.", then each engine's refusal.
     public var engineNotes: [String] { get }
+    /// "Runs on WebKit tabs." or "Runs on WebKit and Chromium tabs."; nil for no engine.
+    public static func runsNote(on engines: Set<EngineKind>) -> String?
     /// A file's text, which the review of a plugin that AI wrote shows.
     public func text(of path: String) -> String?
 }
@@ -929,8 +901,10 @@ public protocol PluginRuntime: AnyObject, Sendable {
     /// The installed plugins of the kind, on or off, each time they change, so that the runtime runs what the enabled ones run without a command and has the others' packages checked; none while the kind is unavailable.
     func run(_ installed: [InstalledPlugin])
     func makePlugin(_ installed: InstalledPlugin) -> any Plugin
-    /// Deletes what the runtime keeps of a removed plugin.
+    /// Deletes what the runtime keeps of a removed plugin, except in an engine where the other version of its pair runs under the same engine identifier.
     func remove(_ installed: InstalledPlugin)
+    /// The types the open panel accepts for a package of the kind that `engine` runs: a folder or a `.zip` archive for both engines.
+    func packageTypes(for engine: EngineKind) -> [UTType]
 }
 
 /// What `Browsing` provides so that plugins can act on tabs without `Plugins` depending on `Browsing`.
@@ -949,8 +923,11 @@ public protocol PluginBrowserHost: AnyObject {
 /// The plugins of one Persona.
 @MainActor
 public final class PluginManager: ObservableObject {
+    /// In install order, where the remaining version of a pair takes the pair's place.
     @Published public private(set) var plugins: [InstalledPlugin]
     @Published public private(set) var contributions: PluginContributionIndex
+    /// The pairs whose versions are both listed, in the order the user made them.
+    @Published public private(set) var engineVersions: [PluginEngineVersions]
 
     /// `directory` is the app's Application Support folder; the Persona's plugins live in `Plugins/<persona id>/` inside it.
     public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type],
@@ -958,18 +935,39 @@ public final class PluginManager: ObservableObject {
 
     /// Reads `plugins.json` and registers built-in plugins. Starts no installed code.
     public func load() throws
-    /// Copies a folder or archive into staging and validates it; the engines that run its kind check it, and the installed plugin it updates where they have no current answer. Throws, with the first engine's reason, for a package that every engine refuses.
+    /// Copies a folder or archive into staging and validates it; the engines that run its kind check it, and the installed plugins it could update or join where they have no current answer, and the package names what the review offers. Throws, with the first engine's reason, for a package that every engine refuses.
     public func stage(_ url: URL) async throws -> PluginPackage
     /// Writes the files of a plugin that AI wrote, by package path, into staging and validates them.
     public func stage(_ files: [String: String], writtenBy composition: PluginComposition) async throws -> PluginPackage
     /// Deletes a staged package the user did not install.
     public func discard(_ package: PluginPackage)
-    /// Records the package's origin with the install.
-    public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool) throws
-    /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance.
+    /// Records the package's origin with the install. With `asVersionOf` and `engine`, installs the package as that plugin's version for the engine, on or off as the plugin is; otherwise updates `package.updates` or installs a new plugin, and a new plugin that could have joined its counterpart dismisses both plugins' notes for each other's engines. Throws for a version that cannot join and an update that would leave a version of a pair on no engine. Returns the plugin's identifier.
+    @discardableResult
+    public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf plugin: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID
+    /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance. Either version of a pair switches both.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID)
     public func setGrant(_ grant: PluginGrant, for id: PluginID) async throws
+    /// Removes one plugin, or one version of a pair, whose other version takes the pair's place and whose record goes.
     public func remove(_ id: PluginID) throws
+
+    // Engine versions.
+    /// Why the package cannot join `id` as its version for `engine`, or update a version of a pair, as the review states it; nil when it can.
+    public func versionRefusal(for package: PluginPackage, joining id: PluginID, for engine: EngineKind) -> String?
+    public func updateRefusal(for package: PluginPackage, updating id: PluginID? = nil) -> String?
+    /// The plugin, or for a version of a pair the version installed first, whose name and place the pair takes.
+    public func leadVersion(of id: PluginID) -> InstalledPlugin?
+    /// The engine whose version the plugin asks for (see Guidance), or nil, and the engines for which its section offers Install <Engine> Version….
+    public func missingEngine(of id: PluginID) -> EngineKind?
+    public func versionEngines(of id: PluginID) -> [EngineKind]
+    /// The open panel's types for the plugin's version for the engine, from its kind's runtime.
+    public func packageTypes(forVersionOf id: PluginID, for engine: EngineKind) -> [UTType]
+    /// The pair Join With… starts on: each engine to the plugin whose answer alone runs it there, else to the one installed first unless it refuses the engine.
+    public func proposedJoin(of id: PluginID, with other: PluginID) -> PluginEngineVersions?
+    /// Throws `PluginError.invalidVersions` for a pair that does not give each engine one of two unpaired installed web extensions, or that gives a version an engine that refuses it. The pair takes the switch of the version installed first, and the join drops each ignored record that names one of its plugins.
+    public func join(_ versions: PluginEngineVersions) throws
+    /// Throws `PluginError.invalidVersions` for a pair whose versions share an engine identifier. Dismisses each version's note for the engines the other runs on.
+    public func separate(_ id: PluginID) throws
+    public func dismissVersionNote(of id: PluginID, for engine: EngineKind)
 
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async
     /// Starts the plugin if needed and asks it for the item's panel. Nil, with a beep, when it offers none.
@@ -1023,18 +1021,26 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime, EngineE
     public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL)
     /// The Persona's windows and the focused one, each time they change.
     public func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?)
-    /// The actions of the enabled extensions that have one, for the site settings popover.
+    /// The actions of the enabled extensions that have one, for the site settings popover, a pair once.
     public func actions(for tab: any EngineWebContents) -> [WebExtensionActionItem]
-    /// False when no engine runs the extension for the tab.
+    /// Runs the action of the extension, or of the version of its pair that the tab's engine runs. False when no engine runs it for the tab.
     @discardableResult public func performAction(of id: PluginID, for tab: any EngineWebContents) -> Bool
 }
 
+/// One for each plugin, and one for a pair, whose identifier and name are its version installed first's.
 public struct WebExtensionActionItem: Identifiable {
     public let id: PluginID
     public let name: String
-    /// Nil while the tab's engine does not run the extension, as when it refused its package, or before it loaded.
+    /// The action of the version that the tab's engine runs. Nil while it runs none, as when it refused the package, or before it loaded.
     public let action: EngineExtensionAction?
+    /// The engines the plugin's enabled versions run on, for the note on another engine's tab, and whether the plugin asks for the tab's engine's version.
+    public let engines: Set<EngineKind>
+    public let asksForVersion: Bool
 }
+
+// Browsing, BrowserSession
+/// Set by the app shell: opens Settings ▸ Plugins at the plugin in the Persona with the open panel for the engine's version, for Install <Engine> Version… in the site settings popover.
+public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
 ```
 
 ### JavaScript API for script plugins
@@ -1111,7 +1117,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 2. Menus, shortcuts, sidebar items, panels for built-in plugins, and Settings ▸ Plugins in `Preferences`.
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
-5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, of which the first, coverage, is built; VI.1 adds Chromium; IV.13 follows both.
+5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 adds Chromium; IV.13 follows both.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
 
 ## Open decisions

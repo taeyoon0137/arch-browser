@@ -196,6 +196,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case unsupportedAPIVersion(Int)
     /// A script plugin's background script left its start, a command, or a page script value unanswered past the hang limit.
     case timedOut
+    /// Two plugins cannot become, or stop being, versions of one plugin, for the reason the text gives as a sentence.
+    case invalidVersions(String)
 }
 
 extension PluginError: LocalizedError {
@@ -211,6 +213,7 @@ extension PluginError: LocalizedError {
         case let .invalidPackage(reason): return reason
         case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
         case .timedOut: return "The plugin did not answer in time."
+        case let .invalidVersions(reason): return reason
         }
     }
 }

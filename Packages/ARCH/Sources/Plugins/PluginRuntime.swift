@@ -1,6 +1,7 @@
 // The runtimes the app supplies for installed plugins of kinds that the manager does not run itself, such as web extensions, which the `Extensions` module runs. The manager runs built-in and script plugins itself.
 import ARCHEngine
 import Foundation
+import UniformTypeIdentifiers
 
 /// What one engine's runtime found when it checked a package, without running any of it.
 public enum PluginEngineCheck: Hashable, Sendable {
@@ -35,6 +36,8 @@ public protocol PluginRuntime: AnyObject, Sendable {
     func run(_ installed: [InstalledPlugin])
     /// A new instance of an enabled plugin of the kind, which the manager starts at the plugin's first command.
     func makePlugin(_ installed: InstalledPlugin) -> any Plugin
-    /// Deletes what the runtime keeps of a plugin the user removes, such as a web extension's storage in the engines.
+    /// Deletes what the runtime keeps of a plugin the user removes, such as a web extension's storage in the engines, except in an engine where the other version of its pair runs under the same engine identifier.
     func remove(_ installed: InstalledPlugin)
+    /// The types the open panel accepts for a package of the kind that `engine` runs, for Install <Engine> Version….
+    func packageTypes(for engine: EngineKind) -> [UTType]
 }
