@@ -94,8 +94,9 @@ import Testing
         #expect(plan.favorites.allSatisfy { $0.personaID == persona.id })
         #expect(plan.counts == SidebarImport.Counts(personas: 1, spaces: 2, pinnedTabs: 3, favorites: 2))
 
+        // A space with nothing to pin is not made, as a folder is not.
         var favoritesOnly = Self.row
-        favoritesOnly.spaces = []
+        favoritesOnly.spaces = [SidebarImport.SourceSpace(origin: .space("empty"), name: "Empty", tint: nil, pinnedItems: [], folders: [])]
         let personal = Self.plan(favoritesOnly, to: .newPersona, in: Self.sidebar())
         #expect(personal.spaces.map(\.name) == ["Personal"])
         #expect(personal.spaces.map(\.personaID) == [personal.newPersona?.id])
@@ -125,6 +126,25 @@ import Testing
         let withoutRecord = Self.plan(in: sidebar)
         #expect(withoutRecord.spaces.map(\.name) == ["Work"])
         #expect(withoutRecord.pinnedTabs.map(\.url) == [Self.url("c.example"), Self.url("d.example")])
+    }
+
+    @Test func aRecordedSpaceTheUserDeletedDoesNotComeBackEmpty() throws {
+        var sidebar = Self.sidebar()
+        let first = Self.plan(in: sidebar)
+        sidebar.apply(first)
+        // As `BrowserSession.deleteSpace(_:)` does, the space's folder and tab move to the space before it.
+        let browser = try #require(first.spaces.first { $0.name == "Browser" })
+        let work = try #require(first.spaces.first { $0.name == "Work" })
+        sidebar.spaces.removeAll { $0.id == browser.id }
+        for index in sidebar.folders.indices where sidebar.folders[index].spaceID == browser.id { sidebar.folders[index].spaceID = work.id }
+        for index in sidebar.tabs.indices where sidebar.tabs[index].spaceID == browser.id { sidebar.tabs[index].spaceID = work.id }
+
+        let second = Self.plan(entry: first.entry, in: sidebar)
+        #expect(second.spaces.isEmpty)
+        #expect(second.folders.isEmpty)
+        #expect(second.pinnedTabs.isEmpty)
+        #expect(second.counts == SidebarImport.Counts(presentFavorites: 2))
+        #expect(second.entry.items(in: Persona.defaultID).bookmarksSpace == nil)
     }
 
     @Test func anUntitledSpaceMergesIntoTheSpaceItBecame() {
@@ -198,10 +218,21 @@ import Testing
         #expect(record.entries == [expected])
     }
 
-    @Test func anUndecodableRecordIsEmpty() throws {
+    @Test func anUndecodableRecordIsEmptyAndMovesAsideAtTheFirstWrite() throws {
         let folder = try TemporaryFolder()
+        let unreadable = folder.url.appendingPathComponent("imports.unreadable.json")
         try Data("{".utf8).write(to: folder.url.appendingPathComponent("imports.json"))
-        #expect(SidebarImport.Record(directory: folder.url).entries.isEmpty)
+        var record = SidebarImport.Record(directory: folder.url)
+        #expect(record.entries.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: unreadable.path))
+
+        record.update(SidebarImport.Record.Entry(profile: Self.profile, personaID: Persona.defaultID, personas: []))
+        record.write()
+        #expect(try Data(contentsOf: unreadable) == Data("{".utf8))
+        #expect(SidebarImport.Record(directory: folder.url).entries == record.entries)
+        // A later write leaves the moved file as it is.
+        record.write()
+        #expect(try Data(contentsOf: unreadable) == Data("{".utf8))
     }
 }
 

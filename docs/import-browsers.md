@@ -80,7 +80,7 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
 | Safari | History | The history store |
 
 - Each Chromium-family profile and each Arc profile has one row in the sheet with its own destination Persona. Safari has one row.
-- Only web addresses are imported, following `ImportedFile.webURL`. Titles fall back to the host, as in `ImportedItem`.
+- Only web addresses are imported, following `ImportedFile.webURL`. Titles fall back to the host.
 - A Chromium-family profile's bookmarks come from `Bookmarks`, then `AccountBookmarks`, each root of the second following the same root of the first; an address that appears in both comes once.
 - Favorites have no folders, so only bookmarks directly in the bars become favorites, in bar order; the bars' folders go to the space.
 - Arch's folders do not nest. Each source folder directly containing bookmarks becomes one pinned folder named by its path, joined with " / ". A path in a bar starts below the bar, such as "Work / Docs". A path in any other root starts with the root's name, such as "Other Bookmarks / Recipes", so folders of different roots stay apart; Safari's top level counts as a root named Bookmarks. Bookmarks directly under a root other than a bar go into a folder named after it: Other Bookmarks, Mobile Bookmarks, Bookmarks Menu, or Bookmarks. A folder without a name counts as Untitled Folder in paths. Empty folders are skipped.
@@ -90,6 +90,7 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
   - The default symbol is used because Arc's icon names and emoji have no SF Symbol counterpart.
   - The containers are found by their labels, not by position: in `containerIDs`, or in `newContainerIDs` when `containerIDs` names no pinned container. The pinned container's tabs become pinned tabs, and its folders pinned folders, in sidebar order. A tab's `title` becomes the tab's name (`customTitle`). Nested folders follow the path rule above, and a split view's tabs become separate pinned tabs.
   - The unpinned container is excluded. It holds the day's tabs, which Arc archives automatically.
+  - A space with no pinned tabs or folders to bring is not created (see Spaces under Duplicates).
 - Arc favorites: each profile reference's `topApps` container supplies that profile's favorites, titled with the item's `title` or `savedTitle` as a fallback.
 - A space or favorites container whose profile reference names a folder missing from `User Data`, such as a profile from another Mac through Arc's sync, gets its own row named after that folder. It supplies only sidebar items. Since Arch cannot tell this Mac's `machineID`, a reference from another Mac whose folder name matches a local profile folder joins that profile's row.
 - History, Chromium-family: the existing `HistoryDatabase`. Safari: one entry per `history_items` row with at least one visit that loaded (`load_successful = 1`) and did not redirect (`redirect_destination IS NULL`). It uses the item's `visit_count`, the latest such visit as the last visit, and that visit's non-empty title. History belongs to no Persona.
@@ -111,10 +112,10 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
 Importing the same source again adds only what is not there yet. Names and addresses alone cannot tell this: a pinned tab keeps no original address, since `Tab.url` follows its page; an untitled Arc space gets a new "Space <n>" name each time; and a source item's address changes as the user keeps using the other browser. The import therefore keeps a record.
 
 - The record, `imports.json` in the app's Application Support folder, keeps for each source profile (the source's identifier and the profile folder) the destination Persona last used and, for each destination Persona, the Arch IDs of what the import made from each source ID: spaces from Arc space `id`s, the bookmarks space from the profile, pinned folders from folder IDs, and favorites and pinned tabs from item IDs. A space or folder that an imported one merged into counts as made from it; a favorite or pinned tab skipped for its address does not. Folder and item IDs are Chromium's `guid`, Arc's item `id`, and Safari's `WebBookmarkUUID`. `session.json` gains nothing.
-- A recorded Arch item counts only while it exists in that Persona, so an item the user removed, or one the session did not save before Arch quit unexpectedly, imports again. Each import writes the record once, after applying, without entries whose items are gone.
-- Without an entry, as on a first import or after `imports.json` is deleted or stops decoding, names and addresses decide, as below.
+- A recorded Arch item counts only while it exists in that Persona, so an item the user removed, or one the session did not save before Arch quit unexpectedly, imports again. Each import writes the record once, after applying, without the IDs of items or Personas that are gone, and without entries left with neither their last Persona nor any IDs.
+- Without an entry, as on a first import or after `imports.json` is deleted or stops decoding, names and addresses decide, as below. A file that does not decode moves to `imports.unreadable.json` at the first write, as `site-search.json` does, so the IDs it holds are not overwritten.
 - Favorites: an item whose recorded favorite exists is skipped, and so is an address already among the destination Persona's favorites (`addFavorites(_:in:)`).
-- Spaces: an imported space merges into its recorded space, or else into a space with the same name in the destination Persona. The bookmarks space named after the browser merges the same way.
+- Spaces: an imported space merges into its recorded space, or else into a space with the same name in the destination Persona. The bookmarks space named after the browser merges the same way. As with folders, a space is created only when a pinned tab or folder goes into it, so a recorded space that the user deleted, whose tabs and folders moved to another space, does not come back empty.
 - Folders: an imported folder merges into its recorded folder, or else into a pinned folder with the same name in that space. A folder with nothing left to add is not created.
 - Pinned tabs: an item whose recorded tab exists is skipped, and so is an address already pinned in the space, inside or outside a folder.
 - Site search: a keyword already in use, compared as `SiteSearchStore.isKeywordInUse` does, is skipped, so the first profile's shortcut wins.
@@ -170,7 +171,7 @@ Only `BrowserSource.swift` names browser products in code, as `AGENTS.md` allows
   - New `BrowserImportSheet.swift`: the SwiftUI sheet and its model (detection state, choices).
   - `ImportController.swift`: `importFromBrowser(in:)` beside `chooseFiles(in:)`, sharing `isImporting`, `canImport(in:)`, and the removal of leftover copies, and the summary lines shared by both imports.
 - `Packages/ARCH/Sources/Browsing`:
-  - New `SidebarImport.swift`: what a row brings (favorites, spaces with pinned tabs and folders), the destination and its default, the record (`SidebarImport.Record`, which reads and writes `imports.json`), the sidebar values the plan reads, the `Plan`, and the counts it returns.
+  - New `SidebarImport.swift`: what a row brings (favorites, spaces with pinned tabs and folders), which the readers produce directly, the destination and its default, the record (`SidebarImport.Record`, which reads and writes `imports.json` and moves one that does not decode to `imports.unreadable.json`), the sidebar values the plan reads, the `Plan`, and the counts it returns.
   - `BrowserSession.swift`: `addImport(_:to:record:)`; `addFavorites(_:in:)` with a Persona parameter, which the file import calls with the current Persona; a Persona created with given spaces.
   - `SiteSearch.swift`: `add(_:)` adds shortcuts accepted by `canSave`, writes the file once, and returns the number added. When the store kept its defaults because its file did not decode, the first write moves that file to `site-search.unreadable.json`, as `session.json` does, so neither the import nor Settings overwrites it.
   - `SpaceTheme.swift`: `SpaceTint.nearest(red:green:blue:)`.
@@ -193,9 +194,9 @@ Every fixture is synthetic and built by the tests: JSON and property lists from 
   - Sidebar file: two spaces on two profile references with themes, `containerIDs` listing `unpinned` before `pinned`, folders, a nested folder, a split view, unpinned tabs, and non-web addresses; favorites per profile; a reference to a missing folder; an unknown item kind; a file without the container; a space labeled only in `newContainerIDs`; spaces without a pinned container, which make the file unreadable.
   - Detection: a data folder without the key file is not listed; a key file without read permission (mode 000) is reported unreadable for its permissions, not as needing a privacy setting.
 - `BrowsingTests`, with the plan's tests in a new `SidebarImportTests.swift`:
-  - Without a record entry, the plan merges spaces and folders by name, skips favorites and pinned addresses already present, gives a new Persona its imported spaces or Personal, and is empty for a second identical import.
-  - With the entry from the first import, a second import adds nothing after the recorded pinned tab moved to another address and the recorded space was renamed; an untitled space merges into the "Space <n>" it became; a recorded item that is gone imports again; the default destination is the recorded Persona.
-  - The record writes and reads back its entries, drops the IDs of gone items, gone Personas, and entries left with neither, and reads an undecodable `imports.json` as empty.
+  - Without a record entry, the plan merges spaces and folders by name, skips favorites and pinned addresses already present, gives a new Persona its imported spaces or, when they bring nothing to pin, Personal, and is empty for a second identical import.
+  - With the entry from the first import, a second import adds nothing after the recorded pinned tab moved to another address and the recorded space was renamed; an untitled space merges into the "Space <n>" it became; a recorded item that is gone imports again; a recorded space the user deleted, after its folder and tab moved to another space, does not come back empty; the default destination is the recorded Persona.
+  - The record writes and reads back its entries, drops the IDs of gone items, gone Personas, and entries left with neither, and reads an undecodable `imports.json` as empty and moves it to `imports.unreadable.json` at the first write.
   - `SiteSearchStore.add(_:)` skips keywords in use and shortcuts `canSave` rejects; an undecodable `site-search.json` moves to `site-search.unreadable.json` at the first write.
   - `SpaceTint.nearest`: each system tint's own color maps to it, and a color below 20% saturation maps to gray.
 
@@ -205,7 +206,7 @@ Each step builds, keeps the app working, passes `swift test`, and forms one comm
 
 1. Readers. The `Import` files above except the sheet and the controller, and the `ImportTests` target. Nothing calls the new readers yet; the file import keeps its behavior on the shared bookmark trees and copy step.
 2. Session entry point. `SidebarImport.swift` with the record, `addImport(_:to:record:)`, `addFavorites(_:in:)` (the file import passes the current Persona), `SiteSearchStore.add(_:)` and its handling of an unreadable file, `SpaceTint.nearest`, and their tests. Nothing in the interface calls `addImport` yet.
-3. Interface. `BrowserImportSheet.swift`, `importFromBrowser(in:)`, the menu item, and the shared summary; then the checks below from the bundle; then `docs/plan.md` (remove V.13, update Current State) and row 57.
+3. Interface. `BrowserImportSheet.swift`, `importFromBrowser(in:)`, the menu item, and the shared summary; then the checks below from the bundle; then `docs/plan.md` (remove V.13, update Current State, and add `imports.json` and `imports.unreadable.json` to the state files under Build Procedure) and row 57.
 
 ## Checks with the app
 

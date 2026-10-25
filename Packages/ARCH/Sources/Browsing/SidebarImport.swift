@@ -121,24 +121,37 @@ extension SidebarImport {
     public struct Record {
         private let fileURL: URL
         private(set) var entries: [Entry]
+        /// Set while the record is empty in place of a file that did not decode. The first write moves that file aside.
+        private var hasUnreadableFile = false
 
         /// Reads the record in the app's Application Support folder.
         public init() {
             self.init(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
         }
 
-        /// A missing file, or one that does not decode, gives an empty record, so names and addresses decide, as on a first import.
+        /// A missing file, or one that does not decode, gives an empty record, so names and addresses decide, as on a first import. A file that does not decode stays as it is until the first write moves it to `imports.unreadable.json`, as an unreadable `site-search.json` is moved, so that the import never overwrites the IDs it holds.
         init(directory: URL) {
             fileURL = directory.appendingPathComponent("imports.json")
-            entries = (try? Data(contentsOf: fileURL)).flatMap { try? JSONDecoder().decode(File.self, from: $0) }?.profiles ?? []
+            guard let data = try? Data(contentsOf: fileURL) else {
+                entries = []
+                return
+            }
+            let file = try? JSONDecoder().decode(File.self, from: data)
+            entries = file?.profiles ?? []
+            hasUnreadableFile = file == nil
         }
 
         /// Writes readable JSON, as the other stores do.
-        public func write() {
+        public mutating func write() {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             guard let data = try? encoder.encode(File(profiles: entries)) else { return }
-            try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let directory = fileURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if hasUnreadableFile {
+                _ = try? FileManager.default.replaceItemAt(directory.appendingPathComponent("imports.unreadable.json"), withItemAt: fileURL)
+                hasUnreadableFile = false
+            }
             try? data.write(to: fileURL, options: .atomic)
         }
 
@@ -258,7 +271,7 @@ extension SidebarImport {
         /// The Persona to add, for a new destination or for one deleted since the user picked it.
         let newPersona: Persona?
         let personaID: Persona.ID
-        /// The spaces to add, in order, last in the Persona's group. A new Persona without imported spaces gets one named Personal, as New Persona does, so that every Persona has a space.
+        /// The spaces to add, in order, last in the Persona's group. As with folders, a space is made only when a pinned tab or folder goes into it. A new Persona left without spaces gets one named Personal, as New Persona does, so that every Persona has a space.
         let spaces: [Space]
         /// The pinned folders to add after the folders already there. A folder with nothing left to add is not made.
         let folders: [TabFolder]
@@ -349,47 +362,54 @@ extension SidebarImport {
                 }
             }
 
-            /// Adds the space, or merges it into its recorded space or else one with its name, then its pinned tabs and folders.
+            /// Adds the space's pinned tabs and folders to its recorded space, or else to one of the Persona's with its name, or else to a new space. Like a folder, a new space is made only once a pinned tab or folder goes into it, so that a space with nothing left to add does not come back empty after the user deleted it and its tabs and folders moved to another space.
             mutating func add(_ source: SourceSpace) {
                 let recordedID: UUID?
                 switch source.origin {
                 case .space(let id): recordedID = made.spaces[id]
                 case .bookmarks: recordedID = made.bookmarksSpace
                 }
-                let space: Space
-                if let match = personaSpaces.first(where: { $0.id == recordedID }) ?? source.name.flatMap({ name in personaSpaces.first { $0.name == name } }) {
-                    space = match
-                } else {
-                    space = makeSpace(named: source.name, tint: source.tint)
-                    counts.spaces += 1
-                }
+                let space = personaSpaces.first { $0.id == recordedID } ?? source.name.flatMap { name in personaSpaces.first { $0.name == name } } ?? newSpace(for: source)
+                let items = itemsToPin(source.pinnedItems, in: space.id)
+                if !items.isEmpty { make(space) }
+                pin(items, in: space.id, folderID: nil)
+                source.folders.forEach { add($0, to: space) }
+                guard personaSpaces.contains(where: { $0.id == space.id }) else { return }
                 switch source.origin {
                 case .space(let id): made.spaces[id] = space.id
                 case .bookmarks: made.bookmarksSpace = space.id
                 }
-                pin(itemsToPin(source.pinnedItems, in: space.id), in: space.id, folderID: nil)
-                source.folders.forEach { add($0, to: space) }
             }
 
             mutating func addPersonalSpace() {
-                _ = makeSpace(named: BrowserSession.newPersonaSpaceName, tint: nil)
+                append(Space(name: BrowserSession.newPersonaSpaceName, tint: BrowserSession.newSpaceTint(among: allSpaces), personaID: personaID))
             }
 
-            /// A new space of the Persona, named and tinted as new spaces are when the source gives no name or tint.
-            private mutating func makeSpace(named name: String?, tint: SpaceTint?) -> Space {
-                let space = Space(name: name ?? BrowserSession.newSpaceName(among: allSpaces), tint: tint ?? BrowserSession.newSpaceTint(among: allSpaces), personaID: personaID)
+            /// A new space of the Persona for the source space, named and tinted as new spaces are when the source gives no name or tint. It joins the plan once `make(_:)` adds it.
+            private func newSpace(for source: SourceSpace) -> Space {
+                Space(name: source.name ?? BrowserSession.newSpaceName(among: allSpaces), tint: source.tint ?? BrowserSession.newSpaceTint(among: allSpaces), personaID: personaID)
+            }
+
+            /// Adds a new space from `newSpace(for:)` to the plan the first time something goes into it. A space of the Persona, including one added before, stays as it is.
+            private mutating func make(_ space: Space) {
+                guard !personaSpaces.contains(where: { $0.id == space.id }) else { return }
+                append(space)
+                counts.spaces += 1
+            }
+
+            private mutating func append(_ space: Space) {
                 allSpaces.append(space)
                 personaSpaces.append(space)
                 spaces.append(space)
-                return space
             }
 
-            /// Pins the folder's items in its recorded folder, wherever in the Persona the user moved it, or else in a pinned folder of the space with its name, or else in a new one when any are left to add.
+            /// Pins the folder's items in its recorded folder, wherever in the Persona the user moved it, or else in a pinned folder of the space with its name, or else in a new one when any are left to add, making the space for it if need be.
             private mutating func add(_ source: Folder, to space: Space) {
                 let recordedID = source.sourceID.flatMap { made.folders[$0] }
                 var folder = pinnedFolders.first { $0.id == recordedID } ?? pinnedFolders.first { $0.spaceID == space.id && $0.name == source.name }
                 let items = itemsToPin(source.items, in: folder?.spaceID ?? space.id)
                 if folder == nil, !items.isEmpty {
+                    make(space)
                     let created = TabFolder(spaceID: space.id, name: source.name, isPinned: true)
                     pinnedFolders.append(created)
                     folders.append(created)

@@ -1,33 +1,15 @@
 // Reads `StorableSidebar.json`, the sidebar file of a Chromium-format browser with spaces: each space with its pinned tabs and folders, and each profile's favorites, grouped by the profile folder they belong to. Only the file's `sidebar` key matches the sidebar the browser shows; the sync copies beside it list other spaces and items.
+import Browsing
 import Foundation
-
-/// A space read from the sidebar file.
-struct ImportedSpace: Equatable {
-    var sourceID: String
-    /// `nil` for a space the user did not name.
-    var name: String?
-    /// The middle tone of the space's theme, or `nil` for a space without one.
-    var color: Color?
-    /// The pinned tabs outside folders, in sidebar order.
-    var pinnedItems: [ImportedItem]
-    /// The pinned folders, named by their paths as `BookmarkTree.split()` names them.
-    var folders: [ImportedFolder]
-
-    /// A color's components in the color space the file names. They stay as they are, since only the hue picks a tint.
-    struct Color: Equatable {
-        var red: Double
-        var green: Double
-        var blue: Double
-    }
-}
 
 /// The sidebar file's spaces and favorites, by profile folder.
 struct SidebarFile: Equatable {
     struct Profile: Equatable {
         /// The profile's folder in the user data folder. A space synced from another Mac may name a folder that this Mac lacks.
         var folderName: String
-        var spaces: [ImportedSpace] = []
-        var favorites: [ImportedItem] = []
+        /// The spaces with their pinned tabs outside folders, and their pinned folders named by their paths as `BookmarkTree.split()` names them, in sidebar order.
+        var spaces: [SidebarImport.SourceSpace] = []
+        var favorites: [SidebarImport.Item] = []
     }
 
     /// In the order the file first names each folder, spaces before favorites.
@@ -67,14 +49,14 @@ struct SidebarFile: Equatable {
             // As a bar, the pinned container gives its own tabs back outside any folder, as the space's pinned tabs, and its folders' paths start below it.
             let pinned = BookmarkTree(roots: [BookmarkTree.Folder(name: "", kind: .bar, children: pinnedID.map { items.nodes(in: $0) } ?? [])]).split()
             let title = (space["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let imported = ImportedSpace(sourceID: id, name: title.isEmpty ? nil : title, color: Self.color(of: space), pinnedItems: pinned.barItems, folders: pinned.folders)
+            let imported = SidebarImport.SourceSpace(origin: .space(id), name: title.isEmpty ? nil : title, tint: Self.tint(of: space), pinnedItems: pinned.barItems, folders: pinned.folders)
             add(to: folderName) { $0.spaces.append(imported) }
         }
         // `topAppsContainerIDs` pairs each profile reference with the ID of that profile's favorites container.
         for pair in Self.pairs(container["topAppsContainerIDs"] as? [Any] ?? []) {
             guard let folderName = Self.profileFolder(pair.key), let containerID = pair.value as? String else { continue }
             // A favorite takes the name the user gave its tab, or else the page's title.
-            let favorites = items.nodes(in: containerID).compactMap { node -> ImportedItem? in
+            let favorites = items.nodes(in: containerID).compactMap { node -> SidebarImport.Item? in
                 guard case .item(var item) = node else { return nil }
                 item.title = item.customTitle ?? item.title
                 item.customTitle = nil
@@ -96,7 +78,7 @@ struct SidebarFile: Equatable {
             return childIDs.flatMap { childID -> [BookmarkTree.Node] in
                 guard let child = byID[childID], let data = child["data"] as? [String: Any] else { return [] }
                 if let tab = data["tab"] as? [String: Any] {
-                    let item = ImportedItem(sourceID: childID, address: tab["savedURL"] as? String ?? "", title: tab["savedTitle"] as? String, customTitle: child["title"] as? String)
+                    let item = SidebarImport.Item(sourceID: childID, address: tab["savedURL"] as? String ?? "", title: tab["savedTitle"] as? String, customTitle: child["title"] as? String)
                     return item.map { [.item($0)] } ?? []
                 }
                 if data["list"] != nil {
@@ -123,12 +105,12 @@ struct SidebarFile: Equatable {
         return pairs(space["newContainerIDs"] as? [Any] ?? []).first { ($0.key as? [String: Any])?["pinned"] != nil }?.value as? String
     }
 
-    /// The middle tone of the space's theme, `customInfo.windowTheme.primaryColorPalette.midTone`.
-    private static func color(of space: [String: Any]) -> ImportedSpace.Color? {
+    /// The tint nearest to the middle tone of the space's theme, `customInfo.windowTheme.primaryColorPalette.midTone`, or nil for a space without one.
+    private static func tint(of space: [String: Any]) -> SpaceTint? {
         let theme = (space["customInfo"] as? [String: Any])?["windowTheme"] as? [String: Any]
         guard let tone = (theme?["primaryColorPalette"] as? [String: Any])?["midTone"] as? [String: Any],
               let red = tone["red"] as? Double, let green = tone["green"] as? Double, let blue = tone["blue"] as? Double else { return nil }
-        return ImportedSpace.Color(red: red, green: green, blue: blue)
+        return SpaceTint.nearest(red: red, green: green, blue: blue)
     }
 
     /// The pairs of an array that alternates keys and values.

@@ -2,25 +2,13 @@
 import Browsing
 import Foundation
 
-/// A bookmark, favorite, or pinned tab read from another browser, with a web address.
-struct ImportedItem: Equatable {
-    /// The browser's identifier for the item, which the import record keys on. `nil` when the file gives none.
-    var sourceID: String?
-    var url: URL
-    /// The item's name, or its host when the name is empty.
-    var title: String
-    /// The name the user gave a tab, which the tab keeps as its own name. `nil` for bookmarks.
-    var customTitle: String?
-
-    /// Only web pages come in (`ImportedFile.webURL`), so this returns nil for any other address.
+extension SidebarImport.Item {
+    /// A bookmark, favorite, or pinned tab read from another browser. Only web pages come in (`ImportedFile.webURL`), so this returns nil for any other address. An empty name falls back to the host, and an empty name the user gave a tab to none.
     init?(sourceID: String? = nil, address: String, title: String?, customTitle: String? = nil) {
         guard let url = ImportedFile.webURL(address) else { return nil }
         let name = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let customName = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.sourceID = sourceID
-        self.url = url
-        self.title = name.isEmpty ? url.host ?? url.absoluteString : name
-        self.customTitle = customName.isEmpty ? nil : customName
+        self.init(sourceID: sourceID, url: url, title: name.isEmpty ? url.host ?? url.absoluteString : name, customTitle: customName.isEmpty ? nil : customName)
     }
 
     /// The item as the file import adds it to the favorites.
@@ -29,17 +17,10 @@ struct ImportedItem: Equatable {
     }
 }
 
-/// A folder as Arch keeps it: folders do not nest, so the name is the source folder's path.
-struct ImportedFolder: Equatable {
-    var sourceID: String?
-    var name: String
-    var items: [ImportedItem]
-}
-
 /// Bookmarks or a sidebar's pinned items as the source nests them.
 struct BookmarkTree: Equatable {
     enum Node: Equatable {
-        case item(ImportedItem)
+        case item(SidebarImport.Item)
         case folder(Folder)
     }
 
@@ -59,8 +40,8 @@ struct BookmarkTree: Equatable {
         var children: [Node] = []
 
         /// Every item in the folder and the folders below it, in order.
-        var allItems: [ImportedItem] {
-            children.flatMap { node -> [ImportedItem] in
+        var allItems: [SidebarImport.Item] {
+            children.flatMap { node -> [SidebarImport.Item] in
                 switch node {
                 case .item(let item): return [item]
                 case .folder(let folder): return folder.allItems
@@ -69,7 +50,7 @@ struct BookmarkTree: Equatable {
         }
 
         /// The folder without the items `isExcluded` matches, here or in the folders below it.
-        func removingItems(where isExcluded: (ImportedItem) -> Bool) -> Folder {
+        func removingItems(where isExcluded: (SidebarImport.Item) -> Bool) -> Folder {
             var folder = self
             folder.children = children.compactMap { node in
                 switch node {
@@ -84,14 +65,14 @@ struct BookmarkTree: Equatable {
     var roots: [Folder]
 
     /// Every item in file order, as the file import makes favorites of them.
-    var allItems: [ImportedItem] {
+    var allItems: [SidebarImport.Item] {
         roots.flatMap(\.allItems)
     }
 
     /// The bars' own items in bar order, and every other folder that directly holds items, in tree order with each folder before the ones below it. A folder's name is its path joined with " / ", such as "Work / Docs" below a bar and "Other Bookmarks / Recipes" below another root, so that folders of different roots stay apart. Empty folders are left out.
-    func split() -> (barItems: [ImportedItem], folders: [ImportedFolder]) {
-        var barItems: [ImportedItem] = []
-        var folders: [ImportedFolder] = []
+    func split() -> (barItems: [SidebarImport.Item], folders: [SidebarImport.Folder]) {
+        var barItems: [SidebarImport.Item] = []
+        var folders: [SidebarImport.Folder] = []
         func visit(_ folder: Folder, below parentPath: [String]) {
             let name = folder.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let path: [String]
@@ -100,14 +81,14 @@ struct BookmarkTree: Equatable {
             case .root: path = [name]
             case .folder: path = parentPath + [name.isEmpty ? "Untitled Folder" : name]
             }
-            let items = folder.children.compactMap { node -> ImportedItem? in
+            let items = folder.children.compactMap { node -> SidebarImport.Item? in
                 if case .item(let item) = node { return item }
                 return nil
             }
             if folder.kind == .bar {
                 barItems += items
             } else if !items.isEmpty {
-                folders.append(ImportedFolder(sourceID: folder.sourceID, name: path.joined(separator: " / "), items: items))
+                folders.append(SidebarImport.Folder(sourceID: folder.sourceID, name: path.joined(separator: " / "), items: items))
             }
             for case .folder(let child) in folder.children {
                 visit(child, below: path)
@@ -147,7 +128,7 @@ enum BookmarkFile {
                   let valueRange = (1...3).lazy.compactMap({ Range(reference.range(at: $0), in: attributes) }).first else { return nil }
             let name = String(text[nameRange])
             let plainName = tagPattern.stringByReplacingMatches(in: name, range: NSRange(name.startIndex..., in: name), withTemplate: "")
-            return ImportedItem(address: decodingEntities(String(attributes[valueRange])), title: decodingEntities(plainName))?.favorite
+            return SidebarImport.Item(address: decodingEntities(String(attributes[valueRange])), title: decodingEntities(plainName))?.favorite
         }
     }
 
@@ -163,7 +144,7 @@ enum BookmarkFile {
                 guard let child = child as? [String: Any] else { return nil }
                 switch child["type"] as? String {
                 case "url":
-                    return (child["url"] as? String).flatMap { ImportedItem(sourceID: child["guid"] as? String, address: $0, title: child["name"] as? String) }.map(BookmarkTree.Node.item)
+                    return (child["url"] as? String).flatMap { SidebarImport.Item(sourceID: child["guid"] as? String, address: $0, title: child["name"] as? String) }.map(BookmarkTree.Node.item)
                 case "folder":
                     return .folder(folder(child, name: child["name"] as? String ?? "", kind: .folder))
                 default:
@@ -189,7 +170,7 @@ enum BookmarkFile {
             switch entry["WebBookmarkType"] as? String ?? "" {
             case "WebBookmarkTypeLeaf":
                 let title = (entry["URIDictionary"] as? [String: Any])?["title"] as? String
-                return (entry["URLString"] as? String).flatMap { ImportedItem(sourceID: sourceID, address: $0, title: title) }.map(BookmarkTree.Node.item)
+                return (entry["URLString"] as? String).flatMap { SidebarImport.Item(sourceID: sourceID, address: $0, title: title) }.map(BookmarkTree.Node.item)
             case "WebBookmarkTypeList":
                 let title = entry["Title"] as? String ?? ""
                 let list: (name: String, kind: BookmarkTree.Folder.Kind)

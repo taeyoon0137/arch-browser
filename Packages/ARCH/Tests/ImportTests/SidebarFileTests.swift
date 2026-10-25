@@ -76,9 +76,9 @@ import Testing
 
         let home = try #require(profiles[0].spaces.first)
         #expect(profiles[0].spaces.count == 1)
-        #expect(home.sourceID == "home")
+        #expect(home.origin == .space("home"))
         #expect(home.name == "Home")
-        #expect(home.color == ImportedSpace.Color(red: 0.2, green: 0.4, blue: 0.9))
+        #expect(home.tint == .blue)
         #expect(home.pinnedItems.map(\.sourceID) == ["one", "four", "five"])
         #expect(home.pinnedItems.map(\.title) == ["One", "Four", "Five"])
         #expect(home.pinnedItems.map(\.customTitle) == ["My One", nil, nil])
@@ -90,7 +90,7 @@ import Testing
 
         let work = try #require(profiles[1].spaces.first)
         #expect(work.name == nil)
-        #expect(work.color == nil)
+        #expect(work.tint == nil)
         #expect(work.pinnedItems.map(\.title) == ["Seven"])
         #expect(profiles[1].favorites.map(\.sourceID) == ["work-favorite"])
 
