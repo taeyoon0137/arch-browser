@@ -17,7 +17,8 @@ public struct HistoryEntry: Hashable, Identifiable {
     }
 }
 
-public final class HistoryStore {
+/// Safe to use from any thread: outside `init` and `deinit`, only blocks on `queue` touch the database.
+public final class HistoryStore: @unchecked Sendable {
     /// The history store in the app's Application Support folder.
     public static let shared = HistoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
 
@@ -74,14 +75,16 @@ public final class HistoryStore {
         }
     }
 
-    /// Returns entries whose URL or title contains `query`, most visited first. Returns no entries for an empty query.
-    public func suggestions(for query: String, limit: Int) -> [HistoryEntry] {
+    /// Returns entries whose URL or title contains `query`, most visited first. Returns no entries for an empty query. The query scans every row and waits behind any import batch on the store's queue, so the caller suspends instead of blocking its thread.
+    public func suggestions(for query: String, limit: Int) async -> [HistoryEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         let escaped = trimmed.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
-        return queue.sync {
-            entries("SELECT url, title, visit_count, last_visit FROM visits WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\' ORDER BY visit_count DESC, last_visit DESC LIMIT ?2",
-                    bindings: [.text("%\(escaped)%"), .integer(limit)])
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self.entries("SELECT url, title, visit_count, last_visit FROM visits WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\' ORDER BY visit_count DESC, last_visit DESC LIMIT ?2",
+                                                            bindings: [.text("%\(escaped)%"), .integer(limit)]))
+            }
         }
     }
 

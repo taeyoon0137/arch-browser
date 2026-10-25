@@ -1,59 +1,7 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over the symbol of another space of its Persona moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over the symbol of another space of its Persona moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab rows is in `TabDragState.swift`.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
-
-/// What a drag in the sidebar lifts.
-enum SidebarDragItem: Equatable {
-    case tab(UUID)
-    case favorite(UUID)
-    case space(UUID)
-
-    var id: UUID {
-        switch self {
-        case .tab(let id), .favorite(let id), .space(let id): return id
-        }
-    }
-}
-
-extension TabDragState {
-    /// How long the lifted item's shadow and the slot's dimming take to appear and disappear, as for tab rows.
-    static let liftDuration = 0.4
-
-    /// The space whose symbol is at `point` in the window. Only symbols in the strip's visible part count.
-    func space(at point: CGPoint) -> UUID? {
-        // Some slack above and below makes the small symbols easier to hit.
-        guard spaceStripFrame.insetBy(dx: 0, dy: -6).contains(point) else { return nil }
-        return spaceSymbolFrames.first { $0.value.insetBy(dx: -1, dy: -6).contains(point) }?.key
-    }
-
-    /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there.
-    func settle(into slot: CGRect, ownedBy owner: UUID) {
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-            isSettling = true
-            frame = slot
-        }
-        withAnimation(.easeInOut(duration: Self.liftDuration)) { isLifted = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.liftDuration) { self.end(ownedBy: owner) }
-    }
-
-    /// A tab released over a space's symbol shrinks into it while the symbol's highlight fades.
-    func settle(intoSpace spaceID: UUID, ownedBy owner: UUID) {
-        settle(shrinkingInto: spaceSymbolFrames[spaceID] ?? frame, ownedBy: owner)
-    }
-
-    /// A tab released over a drop target, such as a folder's row, shrinks into the target's frame while its highlight fades.
-    func settle(shrinkingInto target: CGRect, ownedBy owner: UUID) {
-        withAnimation(.easeIn(duration: 0.25)) {
-            isSettling = true
-            isEntering = true
-            targetSpaceID = nil
-            targetFolderID = nil
-            frame.origin = CGPoint(x: target.midX - frame.width / 2, y: target.midY - frame.height / 2)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.end(ownedBy: owner) }
-    }
-}
 
 /// Each draggable favorite's or space symbol's frame in the window.
 struct SidebarItemFramesKey: PreferenceKey {

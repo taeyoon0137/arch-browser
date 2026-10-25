@@ -19,6 +19,8 @@ struct CommandPaletteView: View {
     @FocusState private var isFocused: Bool
     /// Set as the palette appears to animate its arrival as a state change.
     @State private var hasArrived = false
+    /// The pages from history for `text`, which `loadHistorySuggestions()` reads as the text changes. The palette redraws for many other changes, such as a loading page's title, and none of them queries the history store again.
+    @State private var historySuggestions: [HistoryEntry] = []
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
@@ -35,10 +37,12 @@ struct CommandPaletteView: View {
         }.prefix(5))
     }
 
-    /// Pages that share a title and host, such as the steps of a sign-in flow, appear once.
-    private var historySuggestions: [HistoryEntry] {
+    /// Pages that share a title and host, such as the steps of a sign-in flow, appear once. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
+    private func loadHistorySuggestions() async {
+        let entries = await HistoryStore.shared.suggestions(for: text, limit: 15)
+        guard !Task.isCancelled else { return }
         var seen = Set<String>()
-        return Array(HistoryStore.shared.suggestions(for: text, limit: 15).filter { seen.insert("\($0.title)\u{1F}\($0.url.host ?? "")").inserted }.prefix(5))
+        historySuggestions = Array(entries.filter { seen.insert("\($0.title)\u{1F}\($0.url.host ?? "")").inserted }.prefix(5))
     }
 
     private var actionLabel: String {
@@ -139,6 +143,7 @@ struct CommandPaletteView: View {
             }
             DispatchQueue.main.async { isFocused = true }
         }
+        .task(id: text) { await loadHistorySuggestions() }
     }
 }
 
@@ -241,6 +246,30 @@ struct CommandPaletteAppearance: ViewModifier {
             .offset(isHidden ? offset : .zero)
             .blur(radius: isHidden ? 10 : 0)
             .opacity(isHidden ? 0 : 1)
+    }
+}
+
+/// The palette's entry motion: where it starts and how far the address pill moves toward it.
+struct PaletteMotion {
+    var arrival = CommandPaletteAppearance.offset(from: .keyboard)
+    var pull = CGSize.zero
+    /// How far the palette travels into place from the pill, and the pill toward it.
+    static let distance: CGFloat = 40
+
+    init() {}
+
+    /// From the address pill, the palette moves along the line from the pill's center to the search field's center. The pill moves the same distance in the same direction as it fades out.
+    init(origin: CommandPaletteOrigin, pill: CGRect?, windowWidth: CGFloat) {
+        guard origin == .addressPill, let pill, windowWidth > 0 else {
+            arrival = CommandPaletteAppearance.offset(from: origin)
+            return
+        }
+        let dx = windowWidth / 2 - pill.midX
+        let dy = CommandPaletteView.top + CommandPaletteView.fieldHeight / 2 - pill.midY
+        let length = max((dx * dx + dy * dy).squareRoot(), 1)
+        let (ux, uy) = (dx / length, dy / length)
+        arrival = CGSize(width: -ux * Self.distance, height: -uy * Self.distance)
+        pull = CGSize(width: ux * Self.distance, height: uy * Self.distance)
     }
 }
 

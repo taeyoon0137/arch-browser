@@ -1,0 +1,159 @@
+// The sidebar's bottom bar: the library button and the strip of space symbols with the new space button, which scrolls and shrinks toward its ends when the symbols do not fit.
+import AppKit
+import SwiftUI
+
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab dragged over another space's symbol of its Persona lights it up.
+struct SidebarBottomBar: View {
+    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @EnvironmentObject private var tabDrag: TabDragState
+    @Environment(\.sidebarWidth) private var width
+    @Environment(\.sidebarIsFloating) private var isFloating
+    @Environment(\.spaceTheme) private var theme
+
+    /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
+    private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
+
+    /// Width shared by each symbol and the new space button, keeping the row visually grouped.
+    fileprivate static let itemWidth: CGFloat = 18
+    private static let stripSpace = "SpaceStrip"
+
+    /// Three items show at full size: the current space and its neighbors, or the three at the end nearest it. The others shrink with their distance from those three.
+    private func scale(at index: Int) -> CGFloat {
+        let count = session.spaces.count + 1
+        let current = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
+        let first = max(0, min(current - 1, count - 3))
+        let distance = index < first ? first - index : max(0, index - (first + 2))
+        return max(0.3, pow(0.7, CGFloat(distance)))
+    }
+
+    /// The symbols followed by the new space button, with a divider before each Persona's group but the first. When scrolling, items also shrink toward the strip's ends so none appears cut off; dividers keep their size.
+    private func strip(shrinksAtEdges: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(Array(session.spaces.enumerated()), id: \.element.id) { index, space in
+                if index > 0, session.spaces[index - 1].resolvedPersonaID != space.resolvedPersonaID {
+                    PersonaDivider()
+                }
+                let isCurrent = space.id == windowModel.currentSpaceID
+                let isTabTarget = tabDrag.targetSpaceID == space.id
+                // The release that ends a drag of the symbol does not also switch spaces.
+                Button(action: { if tabDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
+                    Image(systemName: space.symbol)
+                        .font(.system(size: isCurrent ? 12 : 9))
+                        .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
+                        .scaleEffect(scale(at: index) * (isTabTarget ? 1.4 : 1))
+                        .frame(width: Self.itemWidth, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
+                .modifier(SidebarItemDrag(item: .space(space.id), cornerRadius: 6) { reorder(space, at: $0) })
+                .contextMenu { SpaceMenuItems(session: session, space: space) }
+                .help(space.name)
+                .accessibilityLabel(space.name)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                .id(space.id)
+            }
+            NewSpaceButton(scale: scale(at: session.spaces.count), action: windowModel.addSpace)
+                .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
+        }
+        .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
+        .animation(.easeInOut(duration: 0.15), value: session.spaces.map(\.id))
+        // Let the first and last items scroll clear of the shrinking ends.
+        .padding(.horizontal, shrinksAtEdges ? EdgeShrink.distance : 0)
+    }
+
+    /// The symbol under the pointer makes room for the dragged space, with a light haptic at each new position, while it belongs to the same Persona. Only the strip animates the move; the space pages move at once, so the current page stays in view.
+    private func reorder(_ space: Space, at location: CGPoint) {
+        guard let id = tabDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }),
+              target.resolvedPersonaID == space.resolvedPersonaID else { return }
+        session.moveSpace(space.id, to: target)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    var body: some View {
+        ZStack {
+            HStack {
+                LibraryButton(session: session)
+                Spacer(minLength: 0)
+            }
+            // Center the symbols and new space button as one group, ignoring the library button. If they do not fit, scroll them together without covering the library button or widening the sidebar.
+            ViewThatFits(in: .horizontal) {
+                strip(shrinksAtEdges: false)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) { strip(shrinksAtEdges: true) }
+                        .coordinateSpace(name: Self.stripSpace)
+                        .onAppear { proxy.scrollTo(windowModel.currentSpaceID, anchor: .center) }
+                        .onChange(of: windowModel.currentSpaceID) { _, id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                }
+            }
+            .frame(maxWidth: groupWidth)
+            // Dragged spaces and tabs find a symbol only in the strip's visible part.
+            .background(GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+                Color.clear
+                    .onAppear { tabDrag.spaceStripFrame = frame }
+                    .onChange(of: frame) { tabDrag.spaceStripFrame = $1 }
+            })
+            .onPreferenceChange(SidebarItemFramesKey.self) { tabDrag.spaceSymbolFrames = $0 }
+            // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
+            .offset(x: isFloating ? 0 : 2)
+        }
+        .frame(height: 28)
+    }
+}
+
+/// Shrinks a scrolling item starting three items from either end of the strip, reaching zero at the end.
+private struct EdgeShrink: ViewModifier {
+    static let distance = 3 * (SidebarBottomBar.itemWidth + 2)
+
+    let isActive: Bool
+    let stripWidth: CGFloat
+    let coordinateSpace: String
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if isActive {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(coordinateSpace))
+                let nearest = min(frame.midX, stripWidth - frame.midX)
+                content.scaleEffect(max(0, min(1, nearest / Self.distance)))
+            }
+            .frame(width: SidebarBottomBar.itemWidth, height: 26)
+        } else {
+            content
+        }
+    }
+}
+
+/// Separates two Personas' groups of space symbols: a 1-point line with 6 points of extra space around it.
+private struct PersonaDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.15))
+            .frame(width: 1, height: 12)
+            .padding(.horizontal, 3)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A small, dim plus makes the new space button look like part of the symbols row rather than a toolbar button.
+private struct NewSpaceButton: View {
+    let scale: CGFloat
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.secondary.opacity(isHovering ? 1 : 0.6))
+                .scaleEffect(scale)
+                .frame(width: SidebarBottomBar.itemWidth, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("New Space")
+        .accessibilityLabel("New Space")
+    }
+}
