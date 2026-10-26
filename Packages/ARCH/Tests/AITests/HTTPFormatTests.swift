@@ -1,4 +1,4 @@
-// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, a server that refuses `max_tokens`, cut streams, keys kept out of error messages, `Retry-After` values, and the redirects the providers' session follows.
+// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, a server that refuses `max_tokens`, a reply that its limit cuts before any text, cut streams, keys kept out of error messages, `Retry-After` values, and the redirects the providers' session follows.
 import Foundation
 import Testing
 @testable import AI
@@ -130,6 +130,55 @@ private let maxTokensRefusal = badRequest(#"{"error":{"message":"Unsupported par
             return
         }
         #expect(StubURLProtocol.requests(to: other).count == 1)
+    }
+
+    /// `max_completion_tokens` also counts a reasoning model's thinking, so a small limit can run out before the reply starts. The service ends that reply with `replyTooLong`, not as an empty answer, and counts its tokens and the error; a reply cut after its first text still finishes at the length limit.
+    @MainActor
+    @Test func endsAReplyCutBeforeAnyTextWithReplyTooLong() async {
+        let thoughtOnly = StubURLProtocol.Reply(chunks: sse([
+            #"data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#,
+            #"data: {"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":256,"completion_tokens_details":{"reasoning_tokens":256}}}"#,
+            "data: [DONE]",
+        ]))
+        let cutAfterText = StubURLProtocol.Reply(chunks: sse([
+            #"data: {"choices":[{"index":0,"delta":{"content":"Seoul"},"finish_reason":"length"}]}"#,
+            "data: [DONE]",
+        ]))
+        let host = StubURLProtocol.host { sent in
+            if sent.json["max_tokens"] != nil { return maxTokensRefusal }
+            return sent.json["max_completion_tokens"] as? Int == 256 ? thoughtOnly : cutAfterText
+        }
+        let http = AIHTTPConfiguration(format: .chatCompletions, baseURL: URL(string: "https://\(host)/v1")!)
+        let refusals = MaxTokensRefusals()
+        let service = stubService(providers: [AIProviderConfiguration(name: "Stub", kind: .http(http), models: [AIModelConfiguration(name: "model-a")])]) { configuration in
+            var provider = HTTPProvider(configuration: configuration, http: http, key: nil, session: StubURLProtocol.session())
+            provider.maxTokensRefusals = refusals
+            return provider
+        }
+        service.register(userFeature)
+        func request(limit: Int) -> AIRequest {
+            AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.text("Name this tab.")])], maxOutputTokens: limit)
+        }
+
+        let empty = await collect(service.stream(request(limit: 256)))
+        guard case .replyTooLong = empty.error else {
+            Issue.record("Expected replyTooLong, got \(String(describing: empty.error))")
+            return
+        }
+        #expect(empty.events == ["started:model-a", "usage:40/256/0"])
+        #expect(StubURLProtocol.requests(to: host).map { $0.json["max_completion_tokens"] as? Int } == [nil, 256])
+        let total = service.usage.totals(monthsAgo: 0).first
+        #expect(total?.usage.outputTokens == 256)
+        #expect(total?.errors == 1)
+        guard case .failed(.replyTooLong) = service.activity.last?.result else {
+            Issue.record("Expected a failed activity entry, got \(String(describing: service.activity.last?.result))")
+            return
+        }
+
+        let cut = await collect(service.stream(request(limit: 512)))
+        #expect(cut.error == nil)
+        #expect(cut.events == ["started:model-a", "text:Seoul", "finished:lengthLimit"])
     }
 
     @Test func mapsStreamErrorEvents() async {

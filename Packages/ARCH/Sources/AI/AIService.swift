@@ -188,6 +188,8 @@ public final class AIService: ObservableObject, AIClient {
                 case .usage(let value):
                     reported = value
                 case .finished(let reason):
+                    // A model that spends the whole limit thinking, as `max_completion_tokens` lets a reasoning model do, stops at the limit before any text or tool call. That is no reply, though its tokens count.
+                    if reason == .lengthLimit, !attempt.hasDeliveredContent { throw AIError.replyTooLong }
                     finishReason = reason
                 case .text, .toolCall:
                     attempt.hasDeliveredContent = true

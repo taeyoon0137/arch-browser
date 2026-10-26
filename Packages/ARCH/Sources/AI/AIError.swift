@@ -12,7 +12,7 @@ public enum AIError: Error, Sendable {
     case invalidRequest(String)
     case refused(String)
     case malformedReply(String)
-    /// A `.json` reply that reached the request's output limit before its value was complete.
+    /// A reply that reached the request's output limit before any text or tool call, or a `.json` reply that reached it before its value was complete.
     case replyTooLong
     case toolRoundLimit
     case cancelled
