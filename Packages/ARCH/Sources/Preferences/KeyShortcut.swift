@@ -25,7 +25,7 @@ public struct KeyShortcut {
     }
 
     /// The pressed key. Function keys keep their `NSEvent` characters. Other keys read as the keyboard layout maps them with Command, as menus match them; layouts for other scripts map letters there.
-    init?(event: NSEvent) {
+    public init?(event: NSEvent) {
         let ignoringModifiers = event.charactersIgnoringModifiers ?? ""
         let key = Self.isFunctionKey(ignoringModifiers) ? ignoringModifiers : event.characters(byApplyingModifiers: .command) ?? ""
         guard key.count == 1 else { return nil }

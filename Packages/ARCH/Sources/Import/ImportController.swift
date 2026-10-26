@@ -52,24 +52,28 @@ public final class ImportController {
         }
     }
 
-    /// Adds the favorites and history pages the files held, the favorites to the Persona of the sidebar target's current space, then sums them up in a sheet on `window`.
+    /// Adds the favorites and history pages the files held, the favorites to the Persona of the sidebar target's current space, then, once the history store has taken the pages, sums them up in a sheet on `window`.
     private func add(_ results: [Result<ImportedFile, Error>], in window: NSWindow) {
         let personaID = session.sidebarTarget().personaID
         var summary = ImportSummary()
+        var pages: [HistoryEntry] = []
         for result in results {
             switch result {
             case .success(let file):
                 let addedCount = session.addFavorites(file.favorites, in: personaID)
                 summary.favorites += addedCount
                 summary.presentFavorites += file.favorites.count - addedCount
-                history.importEntries(file.history)
+                pages += file.history
                 summary.historyPages += file.history.count
             case .failure(let error):
                 summary.failures.append(error.localizedDescription)
             }
         }
         // Only files without bookmarks or pages get this line; bookmarks already in favorites have a line of their own.
-        show(summary, emptyLine: summary.lines.isEmpty && summary.failures.count < results.count ? "No bookmarks or history pages with web addresses were found." : nil, in: window)
+        let emptyLine = summary.lines.isEmpty && summary.failures.count < results.count ? "No bookmarks or history pages with web addresses were found." : nil
+        history.importEntries(pages) { [weak self] _ in
+            self?.show(summary, emptyLine: emptyLine, in: window)
+        }
     }
 
     // MARK: Import from Browser
@@ -155,13 +159,18 @@ public final class ImportController {
 
     // MARK: Summary
 
-    /// Sums up an import in a sheet on `window` and ends the import once the sheet closes. When nothing came in, the title says so, and `emptyLine`, if any, takes the place of the lines.
+    /// Sums up an import in a sheet on `window` and ends the import once the sheet closes. When nothing came in, the title says so, and `emptyLine`, if any, takes the place of the lines. The user can close `window` while the files are read or the pages go in; the summary then shows on the last main window, or in a window of its own when that has a sheet or no main window is open.
     private func show(_ summary: ImportSummary, emptyLine: String?, in window: NSWindow) {
         let lines = summary.hasAdditions ? summary.lines : emptyLine.map { [$0] } ?? summary.lines
         let alert = NSAlert()
         alert.messageText = summary.hasAdditions ? "Import Finished" : "Nothing Was Imported"
         alert.informativeText = (lines + summary.failures).joined(separator: "\n")
-        alert.beginSheetModal(for: window) { [weak self] _ in
+        guard let host = window.isVisible ? window : session.lastMainWindow?.nsWindow, host.attachedSheet == nil else {
+            alert.runModal()
+            isImporting = false
+            return
+        }
+        alert.beginSheetModal(for: host) { [weak self] _ in
             self?.isImporting = false
         }
     }

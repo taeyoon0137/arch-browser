@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
+    /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
+    private var undoItem: NSMenuItem?
+    private var closingItems: [NSMenuItem] = []
     private static let recentPageTag = 9_100
     /// The Window menu, which becomes `NSApp.windowsMenu` once the shortcut settings have listed the menu bar.
     private var windowMenu: NSMenu?
@@ -38,7 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
         // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app.
-        guard let session = try? BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self]) else { fatalError("No engine could start") }
+        let session: BrowserSession
+        do {
+            session = try BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self])
+        } catch {
+            fatalError("The browser session could not start: \(error)")
+        }
         self.session = session
         session.showSettings = { PreferencesWindowController.shared.show() }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
@@ -117,8 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session?.isQuitting = quitting
     }
 
+    /// Pages an import has not written yet and visits still on the history store's queue go in before the app quits.
     func applicationWillTerminate(_ notification: Notification) {
         session?.saveNow()
+        HistoryStore.shared.finishWrites()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.
@@ -147,13 +157,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(newTab), keyEquivalent: "t")
         fileMenu.addItem(withTitle: "New Window", action: #selector(newWindow), keyEquivalent: "n")
-        fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
+        let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
         let closeWindowItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
         closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
         let closeOthersItem = fileMenu.addItem(withTitle: "Close Other Tabs", action: #selector(closeOtherTabs), keyEquivalent: "w")
         closeOthersItem.keyEquivalentModifierMask = [.command, .option]
         let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
+        closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
@@ -166,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         mainMenu.addItem(submenu(fileMenu, title: "File"))
 
         let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        undoItem = editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
@@ -257,7 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         homeItem.keyEquivalentModifierMask = [.command, .shift]
         historyMenu.addItem(.separator())
         historyMenu.addItem(withTitle: "Show All History", action: #selector(showHistory), keyEquivalent: "y")
-        historyMenu.addItem(withTitle: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
+        historyMenu.addItem(withTitle: "Clear History\u{2026}", action: #selector(clearHistory), keyEquivalent: "")
         historyMenu.addItem(withTitle: "Clear Site Data\u{2026}", action: #selector(clearSiteData), keyEquivalent: "")
         historyMenu.delegate = self
         self.historyMenu = historyMenu
@@ -293,11 +304,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func newTab() { frontSidebarTarget().showCommandPalette(.newTab) }
     /// A new window shows no tab, so it opens with the new tab palette (open decision 8).
     @objc private func newWindow() { session.openWindow().showCommandPalette(.newTab) }
-    /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it.
+    /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it. While such a window shows a sheet, the item is disabled (`showsSheetOfOtherWindow`). A browser window's sheets and popovers leave ⌘W to its tab.
     @objc private func closeTab() {
         if let key = NSApp.keyWindow, session.window(for: key) == nil, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
         session.activeWindow?.closeSelectedTab()
     }
+
+    /// Whether the key window is a sheet, or a sheet on a sheet, of a window that is not a browser window, such as Settings' provider editor or History's Clear History…. The sheet ends through its own buttons, so ⌘W closes neither it, its window, nor a tab behind them.
+    private var showsSheetOfOtherWindow: Bool {
+        guard var window = NSApp.keyWindow, window.sheetParent != nil else { return false }
+        while let parent = window.sheetParent { window = parent }
+        return session?.window(for: window) == nil
+    }
+
     @objc private func closeOtherTabs() { session.activeWindow?.closeOtherTabs() }
     /// The tab reopens in the sidebar target, which comes forward from behind a small window.
     @objc private func reopenClosedTab() {
@@ -334,22 +353,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func goBack() { session.activeWindow?.goBack() }
     @objc private func goForward() { session.activeWindow?.goForward() }
     @objc private func goHome() { session.activeWindow?.goHome() }
-    @objc private func clearHistory() { HistoryStore.shared.clear() }
+    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does.
+    @objc private func clearHistory() { historyWindow.showClearHistory() }
     @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
-    /// Pages chosen in the History window open as new tabs in the sidebar target, which comes to the front.
-    @objc private func showHistory() {
+    @objc private func showHistory() { historyWindow.show() }
+
+    /// The History window, made on first use. Its pages open as new tabs in the sidebar target, which comes to the front.
+    private lazy var historyWindow: HistoryWindowController = {
         let history = HistoryWindowController.shared
         history.openURL = { [weak self] url in
             guard let session = self?.session else { return }
             session.openTab(url: url)
             session.sidebarTarget().nsWindow?.makeKeyAndOrderFront(nil)
         }
-        history.show()
-    }
+        return history
+    }()
 
-    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History.
-    func menuNeedsUpdate(_ menu: NSMenu) {
+    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. The list is made when the menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; the pages have no key equivalents.
+    func menuWillOpen(_ menu: NSMenu) {
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
         let activeWindow = session?.activeWindow
@@ -452,6 +474,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) {
             return session?.lastMainWindow?.selectedTab?.spaceID != nil
         }
+        if item.action == #selector(closeTab) {
+            return !showsSheetOfOtherWindow
+        }
         // A small window has no other tabs.
         if item.action == #selector(closeOtherTabs) {
             return activeWindow?.kind == .main && activeWindow?.selectedTab?.spaceID != nil
@@ -510,20 +535,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: Undo close
 
-    /// ⌘Z reopens the tabs the user just closed, newest first, until the user presses a different key or clicks in the page. It runs before the focused page can handle ⌘Z as its own undo.
+    /// Edit ▸ Undo's shortcut, ⌘Z unless Settings ▸ Shortcuts changed it, reopens the tabs the user just closed, newest first, until the user presses a different key or clicks in the page. It runs before the focused page can handle the shortcut as its own undo. The monitor reads each item's shortcut when a key is pressed, so it follows changes in Settings ▸ Shortcuts.
     private func installUndoCloseShortcut() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let session = self?.session else { return event }
-            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            let isUndo = modifiers == .command && Self.isKey(event, "z", keyCode: 6)
-            if isUndo, session.undoableCloseCount > 0 {
-                self?.reopenClosedTab()
+            guard let self, let session = self.session, session.undoableCloseCount > 0 else { return event }
+            let pressed = KeyShortcut(event: event)
+            if pressed != nil, pressed == self.undoItem.flatMap(KeyShortcut.init(menuItem:)) {
+                self.reopenClosedTab()
                 return nil
             }
-            // Closing and reopening tabs keep the count. Any other key, whether typing or a shortcut such as ⌘V, makes ⌘Z undo where the user works.
-            let closesOrReopens = (Self.isKey(event, "w", keyCode: 13) && (modifiers == .command || modifiers == [.command, .option]))
-                || (Self.isKey(event, "t", keyCode: 17) && modifiers == [.command, .shift])
-            if !isUndo, !closesOrReopens { session.forgetUndoableCloses() }
+            // Closing and reopening tabs keep the count. Any other key, whether typing or a shortcut such as ⌘V, makes the shortcut undo where the user works.
+            let closesOrReopens = pressed != nil && self.closingItems.contains { KeyShortcut(menuItem: $0) == pressed }
+            if !closesOrReopens { session.forgetUndoableCloses() }
             return event
         }
         // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
@@ -534,12 +557,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             return event
         }
-    }
-
-    /// Input sources without Latin letters report other characters, so use the key's position on an ANSI keyboard.
-    private static func isKey(_ event: NSEvent, _ letter: String, keyCode: UInt16) -> Bool {
-        guard let key = event.charactersIgnoringModifiers, key.unicodeScalars.allSatisfy(\.isASCII) else { return event.keyCode == keyCode }
-        return key.lowercased() == letter
     }
 
     // MARK: Tab switcher

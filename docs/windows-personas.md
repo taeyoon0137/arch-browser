@@ -576,7 +576,7 @@ AppKit
 Menus
 - File: New Tab (⌘T), New Window (⌘N), Close Tab (⌘W), Close Window (⇧⌘W, `performClose:` on the key window), and the existing items.
 - New Window opens a main window on the active window's current space with no tab selected and shows the New Tab palette in it (open decision 8).
-- ⌘W: another key window that is not a browser window closes, as today. In a small window, ⌘W closes the tab and with it the window. In a main window, it closes the internal page or the selected tab, as today; with no selected tab, it closes the window when another browser window is open.
+- ⌘W: another key window that is not a browser window closes, as today. While a sheet shows on such a window, Close Tab is disabled, so ⌘W closes neither the sheet, its window, nor a tab behind them. In a small window, ⌘W closes the tab and with it the window. In a main window, it closes the internal page or the selected tab, as today; with no selected tab, it closes the window when another browser window is open.
 - Window (new, set as `NSApp.windowsMenu`): Minimize (⌘M, `performMiniaturize:`), Zoom (`performZoom:`), a separator, Move to Main Window (⌥⌘N, step 11; enabled while the active window is small), a separator, and Bring All to Front (`arrangeInFront:`). AppKit appends the window list. `NSApp.windowsMenu` is set after `installShortcuts()`, so `ShortcutSettings` lists the app's items and none that AppKit adds.
 - Page commands use `activeWindow`: Reload, Back, Forward, Home, the History menu's pages, find, zoom, print, export, capture, share, the developer tools and their side, Clear Site Data, Close Tab, Close Other Tabs, and Open Location (⌘L edits a small window's address).
 - Sidebar commands use `sidebarTarget()`: New Tab, Reopen Last Closed Tab, the Tab menu, the Spaces menu, Toggle Sidebar, and Downloads. Add to Favorites adds the active window's tab. The global shortcut, History's Open, Import, and the default-browser prompt use the sidebar target's `nsWindow`.
@@ -584,7 +584,7 @@ Menus
 Monitors
 - Escape for page fullscreen: `session.window(for: event.window)` must have a `fullscreenTabID` and no region capture.
 - ⌃Tab: the key-down must come from a main window. `flagsChanged` commits the window whose switcher is visible. Clicks and losing active status cancel every switcher.
-- The ⌘Z click monitor forgets the undoable closes when the click lands in the page of the selected tab of `event.window`'s model. ⌘Z reopens into the sidebar target.
+- The ⌘Z click monitor forgets the undoable closes when the click lands in the page of the selected tab of `event.window`'s model. ⌘Z reopens into the sidebar target. The key monitor compares each key with the current shortcuts of Edit ▸ Undo, Close Tab, Close Other Tabs, and Reopen Last Closed Tab, which Settings ▸ Shortcuts can change.
 - `CommandKeyState` stays app-wide, so every window shows the ⌘-number badges.
 
 Engine and tab events

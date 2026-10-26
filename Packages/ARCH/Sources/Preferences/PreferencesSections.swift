@@ -11,7 +11,8 @@ let sectionWidth: CGFloat = 540
 struct GeneralSection: View {
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
     @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = BrowserSession.opensLinksInSmallWindowByDefault
-    @State private var defaultEngine = EngineRegistry.shared.defaultKind
+    /// The registry keeps the default engine here. The site settings popover can change it while the window is open, and the picker then shows the change (`defaultEngine`).
+    @AppStorage(EngineRegistry.defaultEngineKey) private var storedDefaultEngine: String?
     @AppStorage(SearchEngine.defaultsKey) private var searchEngine = SearchEngine.google
     @AppStorage(BrowserSession.downloadsFolderKey) private var downloadsFolderPath: String?
     @AppStorage(BrowserSession.asksWhereToSaveDownloadsKey) private var asksWhereToSaveDownloads = false
@@ -30,12 +31,11 @@ struct GeneralSection: View {
                     }
                 }
                 Toggle("Open links from other apps in a small window when Arch is in the background", isOn: $opensLinksInSmallWindow)
-                Picker("Default engine", selection: $defaultEngine) {
+                Picker("Default engine", selection: defaultEngine) {
                     ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
                         Text(kind.displayName)
                     }
                 }
-                .onChange(of: defaultEngine) { EngineRegistry.shared.defaultKind = $1 }
                 Picker("Search engine", selection: $searchEngine) {
                     ForEach(SearchEngine.allCases, id: \.self) { engine in
                         Text(engine.title)
@@ -61,6 +61,12 @@ struct GeneralSection: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             isDefaultBrowser = DefaultBrowser.isDefault
         }
+    }
+
+    /// The engine new tabs use, as the registry reads it from the stored value, falling back to another engine when the stored one did not register. Reading the stored value here makes the section redraw when it changes.
+    private var defaultEngine: Binding<EngineKind> {
+        _ = storedDefaultEngine
+        return Binding { EngineRegistry.shared.defaultKind } set: { EngineRegistry.shared.defaultKind = $0 }
     }
 
     /// The saved folder, or the user's Downloads folder when none is saved or the saved one is gone, as the session reads it.

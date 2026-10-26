@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Owns the single History window, which stays in memory when closed and reloads the store each time it becomes key.
+/// Owns the single History window, which stays in memory when closed and reloads the store each time it becomes key. The store answers off the main thread, so the list fills in once the read is done.
 public final class HistoryWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     public static let shared = HistoryWindowController()
 
@@ -38,11 +38,17 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         fatalError("HistoryWindowController is created through shared")
     }
 
-    /// Brings the History window to the front with the store's current entries. The window does not become key while the app is in the background, so it loads here too.
+    /// Brings the History window to the front with the store's current entries. Becoming key loads them; a window that is key already, or that does not become key while the app is in the background, loads here.
     public func show() {
-        model.reload()
+        if window?.isKeyWindow == true || !NSApp.isActive { model.reload() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Brings the History window to the front and asks for a time range to clear, unless it shows that sheet already.
+    public func showClearHistory() {
+        show()
+        if window?.attachedSheet == nil { chooseRangeToClear() }
     }
 
     // Pages visited in another window since the last look appear when the user returns here.
@@ -149,14 +155,21 @@ private final class HistoryModel: ObservableObject {
 
     private let store: HistoryStore
     private var entries: [HistoryEntry] = []
+    /// Counts reloads and deletions. A read's rows apply only while no later reload or deletion has come, so that an earlier read neither puts back rows a deletion removed nor replaces a later read's rows.
+    private var generation = 0
 
     init(store: HistoryStore) {
         self.store = store
     }
 
     func reload() {
-        entries = store.entries(since: .distantPast)
-        regroup()
+        generation += 1
+        let generation = generation
+        store.entries(since: .distantPast) { [weak self] entries in
+            guard let self, self.generation == generation else { return }
+            self.entries = entries
+            self.regroup()
+        }
     }
 
     /// Opens the pages newest first, so the oldest ends up selected.
@@ -174,13 +187,15 @@ private final class HistoryModel: ObservableObject {
         NSPasteboard.general.writeObjects([item])
     }
 
+    /// The rows leave the list at once; a read that started before the removal is dropped.
     func delete(_ urls: Set<URL>) {
-        urls.forEach(store.remove)
+        generation += 1
+        store.remove(urls)
         entries.removeAll { urls.contains($0.url) }
         regroup()
     }
 
-    /// The store runs its queries in order, so the reload already sees the removal.
+    /// The store runs its queries in order, so the reload sees the removal.
     func clear(_ range: HistoryClearRange) {
         if let start = range.start(now: Date(), calendar: .current) {
             store.removeEntries(since: start)

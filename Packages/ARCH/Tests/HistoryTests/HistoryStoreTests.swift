@@ -1,6 +1,6 @@
-// Address suggestions from a history store in a folder of its own: pages whose address or title holds the text, most visited first, with SQL wildcard characters taken literally, and none for empty text. The pages hold made-up addresses only.
+// A history store in a folder of its own: address suggestions are pages whose address or title holds the text, most visited first, with SQL wildcard characters taken literally, and none for empty text; an import lets reads in between its batches and finishes before the store says its writes are done; removing pages takes only those. The pages hold made-up addresses only.
 import Foundation
-import History
+@testable import History
 import Testing
 
 @Suite struct HistoryStoreTests {
@@ -37,6 +37,47 @@ import Testing
         store.record(try #require(URL(string: "https://a.example/")), title: "A")
         #expect(await store.suggestions(for: "", limit: 10).isEmpty)
         #expect(await store.suggestions(for: " \n", limit: 10).isEmpty)
+    }
+
+    /// Pages whose addresses all hold `page`, a batch at a time.
+    private static func pages(batches: Int) -> [HistoryEntry] {
+        (0..<batches * HistoryStore.importBatchSize).map { index in
+            HistoryEntry(url: URL(string: "https://page\(index).example/")!, title: "", visitCount: 1, lastVisit: Date(timeIntervalSince1970: 100))
+        }
+    }
+
+    @Test func readsRunBetweenImportBatches() async throws {
+        let folder = try TemporaryFolder()
+        let store = HistoryStore(directory: folder.url)
+        let batches = 10
+        store.importEntries(Self.pages(batches: batches))
+        // The read waits for the batch that runs when it arrives, not for the rest of the import. It would see every page only if the store ran all ten batches before taking a read that arrived first.
+        let seen = await store.suggestions(for: "page", limit: .max).count
+        #expect(seen % HistoryStore.importBatchSize == 0)
+        #expect(seen < batches * HistoryStore.importBatchSize)
+        store.finishWrites()
+        #expect(await store.suggestions(for: "page", limit: .max).count == batches * HistoryStore.importBatchSize)
+    }
+
+    @Test func finishingWritesWaitsForEveryImportBatch() async throws {
+        let folder = try TemporaryFolder()
+        let store = HistoryStore(directory: folder.url)
+        store.importEntries(Self.pages(batches: 3))
+        store.record(try #require(URL(string: "https://visit.example/")), title: "Visit")
+        store.finishWrites()
+        // A store opened on the file afterwards finds every page, as the app does at its next launch.
+        let reopened = HistoryStore(directory: folder.url)
+        #expect(await reopened.suggestions(for: "example", limit: .max).count == 3 * HistoryStore.importBatchSize + 1)
+    }
+
+    @Test func removingPagesTakesOnlyThose() async throws {
+        let folder = try TemporaryFolder()
+        let store = HistoryStore(directory: folder.url)
+        let urls = try ["https://a.example/", "https://b.example/", "https://c.example/"].map { try #require(URL(string: $0)) }
+        urls.forEach { store.record($0, title: "") }
+        store.remove(Set(urls.prefix(2)))
+        let remaining = await withCheckedContinuation { continuation in store.entries(since: .distantPast) { continuation.resume(returning: $0) } }
+        #expect(remaining.map(\.url) == [urls[2]])
     }
 }
 
