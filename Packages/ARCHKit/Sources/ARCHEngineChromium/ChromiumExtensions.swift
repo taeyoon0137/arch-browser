@@ -4,7 +4,7 @@ import ARCHEngine
 import CEFBridge
 import Foundation
 
-/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so once the app's first pass of loads has ended (`stopUnloadedExtensions()`), the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
+/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so once the app says so (`stopUnloadedExtensions()`), after its first pass of loads or as the profile starts while it loads none, the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
 final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable {
     weak var delegate: (any EngineExtensionsDelegate)?
     private unowned let context: ChromiumBrowserContext
@@ -15,7 +15,7 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     private var loading: Set<String> = []
     /// The extensions that loaded once in this run. A first load of a package installed before the engine started, which Chromium already runs from the same folder and version, keeps Chromium's copy, so that it does not reinstall on every launch; later loads and packages installed in this run, as after an update, reload the package, since Chromium read its copy when the profile started.
     private var loadedInRun: Set<String> = []
-    /// Set once the app's first pass of loads has ended, from which on the adapter switches off what the app has not loaded.
+    /// Set at the app's first `stopUnloadedExtensions()`, from which on the adapter switches off what the app has not loaded.
     private var stopsUnloaded = false
     /// The extensions' names, from Chromium's last list, for actions without a title.
     private var names: [String: String] = [:]
@@ -58,11 +58,8 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         loading.insert(id)
         requestContext.extensions { [weak self] installed in
             guard let self else { return completion(.failure(ChromiumExtensionError.notLoaded)) }
-            let current = installed.first { $0.identifier == id }
-            let startedAt = self.context.application?.startedAt
-            let installedBefore = `extension`.installedAt.flatMap { installedAt in startedAt.map { installedAt < $0 } } ?? false
-            let keepsCopy = !self.loadedInRun.contains(id) && installedBefore && current?.path == path
-                && current?.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
+            let copy = installed.first { $0.identifier == id }.map { (path: $0.path, version: $0.version) }
+            let keepsCopy = Self.keepsCopy(copy, of: `extension`, at: path, loadedInRun: self.loadedInRun.contains(id), engineStartedAt: self.context.application?.startedAt)
             let finish: (Result<Void, any Error>) -> Void = { result in
                 self.loading.remove(id)
                 if case .success = result {
@@ -87,8 +84,14 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         }
     }
 
+    /// Whether a load from the folder at `path` keeps the copy that Chromium runs (`copy`, with its folder and version) instead of loading the package again: only at the extension's first load in the run, for a package installed before the engine started, whose folder and version the copy has, as Chromium read it when the profile started.
+    static func keepsCopy(_ copy: (path: String, version: String)?, of extension: EngineExtension, at path: String, loadedInRun: Bool, engineStartedAt: Date?) -> Bool {
+        guard !loadedInRun, let copy, let installedAt = `extension`.installedAt, let engineStartedAt, installedAt < engineStartedAt else { return false }
+        return copy.path == path && copy.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
+    }
+
     /// Every site the manifest asks for when the grant has them all, or every web page; otherwise on a click.
-    private static func siteAccess(for extension: EngineExtension) -> ARCHCEFExtensionSiteAccess {
+    static func siteAccess(for extension: EngineExtension) -> ARCHCEFExtensionSiteAccess {
         let asked = ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []
         return `extension`.sites.contains("<all_urls>") || asked.isSubset(of: `extension`.sites) ? .onAllSites : .onClick
     }

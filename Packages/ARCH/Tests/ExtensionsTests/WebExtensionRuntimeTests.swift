@@ -1,4 +1,4 @@
-// The web extension runtime: what it loads into the engines and with which grant, how it follows switching extensions on and off, updates, removals, and engines that refuse an extension, the questions about access an extension asks while it runs, and, below macOS 15.4, that it runs nothing.
+// The web extension runtime: what it loads into the engines and with which grant, how it follows switching extensions on and off, updates, removals, and engines that refuse an extension, what a profile that starts while no extension is enabled stops, the questions about access an extension asks while it runs, and, below macOS 15.4, that it runs nothing.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -71,6 +71,19 @@ struct WebExtensionRuntimeTests {
         try manager.remove(installed.id)
         #expect(await eventually { engine.removedData == [sampleID] })
         #expect(engine.loaded.isEmpty)
+    }
+
+    @Test func stopsWhatAnEarlierLaunchRunsInAProfileThatStartsWhileNoExtensionIsEnabled() async throws {
+        let installed = try await manager.installEverything(from: sampleExtensionFolder, isEnabled: false)
+        let profile = RecordingEngine()
+        runtime.profileDidStart(with: profile)
+        #expect(profile.stopsWhileLoaded == [[]])
+        manager.setEnabled(true, for: installed.id)
+        #expect(await eventually { engine.loaded[sampleID] != nil })
+        // With an extension enabled, the pass that loads it stops the rest once its loads end.
+        let later = RecordingEngine()
+        runtime.profileDidStart(with: later)
+        #expect(later.stopsWhileLoaded.isEmpty)
     }
 
     @Test func switchesOffAnExtensionThatAnEngineRefuses() async throws {

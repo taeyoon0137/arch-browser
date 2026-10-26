@@ -114,6 +114,12 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         changeEngines { await $0.loadEnabledExtensions() }
     }
 
+    /// While no extension is enabled, stops what a profile of the Persona that has just started runs from an earlier launch. No pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
+    public func profileDidStart(with extensions: any EngineExtensions) {
+        guard !plugins.contains(where: \.isEnabled) else { return }
+        extensions.stopUnloadedExtensions()
+    }
+
     /// The enabled extensions, in the order the user installed them.
     private var enabled: [InstalledPlugin] {
         plugins.filter(\.isEnabled)

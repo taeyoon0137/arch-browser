@@ -403,7 +403,7 @@ public final class BrowserSession: ObservableObject {
         return runtime
     }
 
-    /// Creates the Persona's profile and browser in the engine and connects them to the session: their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
+    /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
     private func startRuntime(_ kind: EngineKind, in engines: PersonaEngines) -> EngineRuntime? {
         guard let application = application(for: kind), let persona = personas.first(where: { $0.id == engines.personaID }) else { return nil }
         // Both engines create a profile before `createBrowserContext` returns.
@@ -413,6 +413,7 @@ public final class BrowserSession: ObservableObject {
         let browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
+        if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions) } }
         context.downloads.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context)
@@ -1043,6 +1044,10 @@ public final class BrowserSession: ObservableObject {
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
         engines.plugins = plugins
         engines.webExtensions = webExtensions
+        // Profiles that started before the runtime, as the default Persona's in the primary engine at launch.
+        for runtime in engines.runtimes.values {
+            if let extensions = runtime.context.extensions { webExtensions.profileDidStart(with: extensions) }
+        }
         pluginPages.follow(plugins, of: personaID)
         return plugins
     }

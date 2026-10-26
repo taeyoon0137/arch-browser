@@ -164,7 +164,7 @@ public protocol EngineExtensions: AnyObject {
     func unload(_ id: String)
     /// Deletes the storage the extension keeps in the profile.
     func removeData(of id: String) async
-    /// Stops each extension that the profile runs from an earlier launch and that the app has not loaded in this run, now and whenever the engine lists another. The app calls it after each pass of loads, once every load of the pass has ended; until the first call such extensions keep running, so that one the app is about to load does not stop and start again. An engine that keeps no extension from one launch to the next does nothing.
+    /// Stops each extension that the profile runs from an earlier launch and that the app has not loaded in this run, now and whenever the engine lists another. The app calls it after each pass of loads, once every load of the pass has ended, and as the profile starts while the app loads no extension in it; until the first call such extensions keep running, so that one the app is about to load does not stop and start again. An engine that keeps no extension from one launch to the next does nothing.
     func stopUnloadedExtensions()
     /// The extension's action for the tab, or nil when it is not loaded or has no action.
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction?

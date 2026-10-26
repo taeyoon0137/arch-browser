@@ -85,7 +85,7 @@ public final class ChromiumEngine: Engine {
     }
 }
 
-private extension EngineApplicationConfiguration {
+extension EngineApplicationConfiguration {
     /// CEF's root cache path. The global profile is `Default` under it, and the profile of a context with a storage identifier is `Persona-<UUID>` beside it.
     var chromiumRootCache: URL { cacheDirectory.appendingPathComponent("Chromium") }
 
@@ -253,7 +253,8 @@ public final class ChromiumBrowser: EngineBrowser {
     public func removeSiteData(for origins: [URL], completion: @escaping () -> Void) {
         requestContext.clearStorage(forOrigins: origins.map(\.absoluteString), completion: completion)
     }
-    private static func engineCookie(_ cookie: ARCHCEFCookie) -> EngineCookie {
+    /// A cookie of CEF's store as the engines pass it.
+    static func engineCookie(_ cookie: ARCHCEFCookie) -> EngineCookie {
         let sameSite: EngineCookieSameSite = switch cookie.sameSite {
         case .unspecified: .unspecified
         case .noRestriction: .noRestriction
@@ -264,7 +265,8 @@ public final class ChromiumBrowser: EngineBrowser {
         return EngineCookie(name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, isSecure: cookie.secure,
                             isHTTPOnly: cookie.httpOnly, sameSite: sameSite)
     }
-    private static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
+    /// The cookie as CEF's store takes it.
+    static func bridgeCookie(_ cookie: EngineCookie) -> ARCHCEFCookie {
         let value = ARCHCEFCookie()
         value.name = cookie.name
         value.value = cookie.value
