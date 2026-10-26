@@ -18,6 +18,8 @@ extern NSString *gRootCachePath;
 extern NSHashTable *gBrowsers;
 // Every request context object, so that shutdown releases their references to CEF.
 extern NSHashTable *gRequestContexts;
+// The browsers that no view shows and that have not closed yet, which shutdown waits for: those of Chromium's own windows and those that clear site data. Each counts from `OnAfterCreated` until `OnBeforeClose`.
+extern int gUnshownBrowsers;
 
 inline NSString *ToNSString(const CefString &value) {
     std::string utf8 = value.ToString();

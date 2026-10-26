@@ -47,6 +47,11 @@ using namespace cef_bridge;
 #pragma clang diagnostic pop
 
 - (void)terminate:(id)sender {
+    // A key that a Chromium page or an extension popup leaves unhandled reaches the main menu inside CEF's work, where shutting CEF down could run none of the closes it waits for. Such a quit runs again from a timer once that work has returned; a timer, unlike a main queue block, leaves the main queue free to run the blocks that close browsers while shutdown waits for them.
+    if (ARCHCEFRuntime.isRunningWork) {
+        [self performSelector:@selector(terminate:) withObject:sender afterDelay:0];
+        return;
+    }
     // AppKit does not quit while a window shows a sheet with more than one button, and quits only once that sheet ends. Answer the sheets with Cancel first so that none holds the app open. Ending a sheet can show another one, so the loop repeats a bounded number of times.
     for (NSWindow *window in self.windows) {
         for (int attempt = 0; attempt < 32 && window.attachedSheet; attempt++) {
@@ -61,15 +66,17 @@ using namespace cef_bridge;
 #pragma mark - Message pump
 
 // Runs CEF work on the main run loop the way the CEF client sample does: immediately for a delay of zero or less,
-// otherwise on a one-shot timer no later than 33 ms, and again at once when a request arrives during a run.
+// otherwise on a one-shot timer no later than 33 ms in the run loop's common modes, so that the work goes on while a
+// menu tracks or an app-modal alert shows, and again at once when a request arrives during a run.
 @interface ARCHCEFPump : NSObject
 + (instancetype)shared;
+/// Whether the pump is running `CefDoMessageLoopWork()`.
+@property (nonatomic, readonly) BOOL isActive;
 - (void)scheduleWork:(int64_t)delayMilliseconds;
 @end
 
 @implementation ARCHCEFPump {
     NSTimer *_timer;
-    BOOL _isActive;
     BOOL _reentrancyDetected;
 }
 
@@ -94,8 +101,8 @@ static const int64_t kTimerDelayPlaceholder = INT64_MAX;
         return;
     }
     int64_t delay = MIN(delayMilliseconds, kMaxTimerDelayMilliseconds);
-    _timer = [NSTimer scheduledTimerWithTimeInterval:delay / 1000.0 target:self selector:@selector(timerFired:) userInfo:nil repeats:NO];
-    [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSEventTrackingRunLoopMode];
+    _timer = [NSTimer timerWithTimeInterval:delay / 1000.0 target:self selector:@selector(timerFired:) userInfo:nil repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSRunLoopCommonModes];
 }
 
 - (void)timerFired:(NSTimer *)timer {
@@ -129,9 +136,6 @@ static const int64_t kTimerDelayPlaceholder = INT64_MAX;
 #pragma mark - CefApp
 
 namespace {
-
-// The browsers of Chromium's own windows that have not closed yet, which shutdown waits for.
-int gUnshownBrowsers = 0;
 
 // The client of the browsers that Chromium's own interface opens in windows of its own, as `identity.launchWebAuthFlow` does. Arch shows none of them: each one is logged and closed once CEF has created it. Without a default client such a browser would get no callbacks and hold up shutdown until someone closed its window.
 class UnshownBrowserClient : public CefClient, public CefLifeSpanHandler {
@@ -197,6 +201,7 @@ bool gAccessibilityEnabled = false;
 NSString *gRootCachePath;
 NSHashTable *gBrowsers = [NSHashTable weakObjectsHashTable];
 NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
+int gUnshownBrowsers = 0;
 
 }  // namespace cef_bridge
 
@@ -251,6 +256,10 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     return gInitialized;
 }
 
++ (BOOL)isRunningWork {
+    return ARCHCEFPump.shared.isActive;
+}
+
 + (NSString *)cefVersion {
     return @CEF_VERSION;
 }
@@ -280,7 +289,7 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     CefShutdown();
 }
 
-/// Runs CEF's work while any browser passes `test` or a browser of Chromium's own windows has not closed, until `deadline`.
+/// Runs CEF's work while any browser passes `test` or a browser that no view shows has not closed, until `deadline`.
 + (void)runWorkUntil:(NSDate *)deadline whileAnyBrowser:(BOOL (^)(ARCHCEFBrowser *))test {
     while (deadline.timeIntervalSinceNow > 0) {
         BOOL passes = gUnshownBrowsers > 0;

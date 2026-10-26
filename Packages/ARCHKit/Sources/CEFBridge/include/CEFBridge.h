@@ -5,6 +5,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /// The application class required by CEF. Create it with `sharedApplication` before any other use of `NSApplication`.
+///
+/// `terminate:` called inside CEF's work, as ⌘Q is when a Chromium page leaves the key to the main menu, runs again once that work has returned, because CEF cannot close its browsers from inside it. A subclass that does work of its own before calling `super` checks `ARCHCEFRuntime.isRunningWork` first.
 @interface ARCHCEFApplication : NSApplication
 /// Receives each attribute an assistive app sets on the application, before AppKit handles it. Some assistive apps ask a browser to build its accessibility tree this way, through undocumented attributes.
 @property (nonatomic, copy, nullable) void (^accessibilityAttributeHandler)(NSString *attribute, id value);
@@ -77,7 +79,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 /// Deletes every stored cookie that `test` accepts, then calls `completion` once on the main thread after the store has applied the deletions. `test` runs on the main thread.
 - (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *cookie))test
                       completion:(void (^)(void))completion NS_SWIFT_NAME(deleteCookies(passingTest:completion:));
-/// Clears what each origin, such as `https://example.com`, stores besides cookies: local storage, IndexedDB, Cache Storage, service workers, and file systems. The DevTools protocol's `Storage.clearDataForOrigin` runs in a hidden browser of this context that closes afterwards, so no tab keeps a DevTools client. Calls `completion` once on the main thread.
+/// Clears what each origin, such as `https://example.com`, stores besides cookies: local storage, IndexedDB, Cache Storage, service workers, and file systems. The DevTools protocol's `Storage.clearDataForOrigin` runs in a hidden browser of this context that closes afterwards, so no tab keeps a DevTools client; a quit meanwhile waits for it as for the tabs. Calls `completion` once on the main thread.
 - (void)clearStorageForOrigins:(NSArray<NSString *> *)origins completion:(void (^)(void))completion NS_SWIFT_NAME(clearStorage(forOrigins:completion:));
 /// Sets the answer the profile keeps from Chromium's own permission prompt, which it gives without asking again, for `origin` and each of `permissions` that the prompt can ask for. Screen capture never reaches the prompt, so nothing is kept for it.
 - (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin;
@@ -380,6 +382,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
                          helperPath:(nullable NSString *)helperPath
                           cachePath:(NSString *)cachePath;
 + (BOOL)isInitialized;
+/// Whether the main thread is running CEF's work from the message pump, as when a key that a page leaves unhandled reaches the main menu.
+@property (class, nonatomic, readonly) BOOL isRunningWork;
 /// Closes every browser, runs CEF's work for up to two seconds while they close, and shuts CEF down. It runs by itself at `NSApplicationWillTerminateNotification`, once the quit is certain.
 + (void)shutdown;
 /// The version of the CEF distribution the bridge builds with, which the framework must match, such as `156.0.42-arch-8078.3687+g10ca70a+chromium-156.0.8078.48`.
@@ -405,7 +409,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 /// The view that the browser's view fills: the one given at creation or, for a popup, a container of its opener's size.
 @property (nonatomic, readonly) NSView *parentView;
 @property (nonatomic, readonly, nullable) NSView *browserView;
-/// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops such downloads when the browser closes, and only this browser can resume an interrupted one.
+/// Whether a download this browser started is still in progress or interrupted, and not cancelled by the app. CEF stops reporting such downloads when the browser closes, so the bridge then cancels them, and only this browser can resume an interrupted one.
 @property (nonatomic, readonly) BOOL hasDownloadsInProgress;
 @property (nonatomic, readonly) BOOL isLoading;
 @property (nonatomic, readonly) BOOL canGoBack;
@@ -449,7 +453,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)print;
 /// Renders the current page as PDF data on the system's default paper size. Passes `nil` if printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
-/// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page. Calls `completion` once on the main thread, with nil when the capture fails, the page's process quits, or the browser closes first.
+/// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page. Calls `completion` once on the main thread, with nil when the capture fails, the page's process quits, or the browser closes first. The first capture attaches a DevTools client that stays until the browser closes, so Chromium no longer times out the page's `beforeunload` handlers: once the page hangs, `tryCloseWithCompletion:` may never complete, and `close` still closes it.
 - (void)captureScreenshotBeyondViewport:(BOOL)beyondViewport
                              completion:(void (^)(NSData *_Nullable pngData))completion NS_SWIFT_NAME(captureScreenshot(beyondViewport:completion:));
 /// Opens Chromium's developer tools for this browser inside a view that the bridge makes and reports through `cefBrowserDevToolsDidOpenView:`, or focuses the open tools. Does nothing while the tools close, from when `hasDevTools` turns NO until `cefBrowserDevToolsDidClose`.

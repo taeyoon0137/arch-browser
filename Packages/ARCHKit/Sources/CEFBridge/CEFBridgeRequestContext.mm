@@ -173,7 +173,7 @@ class CookieDeleter : public CefCookieVisitor {
 const char kClearedStorageTypes[] =
     "file_systems,indexeddb,local_storage,websql,service_workers,cache_storage,interest_groups,shared_storage,storage_buckets";
 
-// Runs `Storage.clearDataForOrigin` for each origin in a hidden browser of its own, then closes that browser. A DevTools client stays attached to a browser until the browser closes, and an attached client keeps Chromium from timing out a hung page, so no tab makes the calls.
+// Runs `Storage.clearDataForOrigin` for each origin in a hidden browser of its own, then closes that browser. A DevTools client stays attached to a browser until the browser closes, and an attached client keeps Chromium from timing out a hung page, so no tab makes the calls. The browser counts in `gUnshownBrowsers`, so that a quit meanwhile waits for the answers and the close.
 class StorageClearingClient : public CefClient, public CefLifeSpanHandler, public CefDevToolsMessageObserver {
   public:
     StorageClearingClient(NSArray<NSString *> *origins, NSView *parentView, void (^completion)(void))
@@ -182,6 +182,7 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        gUnshownBrowsers++;
         browser_ = browser;
         CefRefPtr<CefBrowserHost> host = browser->GetHost();
         registration_ = host->AddDevToolsMessageObserver(this);
@@ -215,6 +216,7 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
     }
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        gUnshownBrowsers--;
         Finish();
         browser_ = nullptr;
         parentView_ = nil;

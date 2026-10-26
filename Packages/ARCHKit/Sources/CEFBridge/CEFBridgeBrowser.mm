@@ -1124,7 +1124,7 @@ private:
     extraInfo = [popup creationExtraInfo];
 }
 
-/// The view leaves its parent, so the browser closes. CEF stops downloads with their browser, so while the runtime runs, the page's own `window.close()`, or its opener's, leaves the view in place while a download needs the browser; the delegate learns on the next turn of the run loop, outside CEF's callback, that the page closed itself.
+/// The view leaves its parent, so the browser closes. A closing browser's downloads stop (see `handleBeforeClose`), so while the runtime runs, the page's own `window.close()`, or its opener's, leaves the view in place while a download needs the browser; the delegate learns on the next turn of the run loop, outside CEF's callback, that the page closed itself.
 - (void)handleDoClose {
     if (gInitialized && !_closeRequested && self.hasDownloadsInProgress) {
         __weak ARCHCEFBrowser *weakSelf = self;
@@ -1226,9 +1226,10 @@ private:
     _browserView = nil;
     // `+shutdown` clears `gInitialized` before it closes every browser at quit. Those closes are not reported, so the session keeps the tabs and saves them.
     if (gInitialized) {
-        // CEF stops the browser's downloads with it, as when a page closes itself with `window.close()` during one, and reports nothing more about them.
+        // CEF reports nothing more about the browser's downloads but lets them run on, so the bridge cancels the ones still in progress or interrupted, as when the app closes the browser during one. Cancelling an interrupted one also removes its partial file, which no other browser can resume.
         for (ARCHCEFDownload *download in _downloads.allValues) {
             if (download.state == ARCHCEFDownloadStateInProgress || download.state == ARCHCEFDownloadStateInterrupted) {
+                [download cancel];
                 download.state = ARCHCEFDownloadStateCanceled;
                 [_delegate cefBrowserDidUpdateDownload:download];
             }
