@@ -121,7 +121,7 @@ private final class CookieStore: EngineBrowser {
     func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { fatalError("Not used") }
     func takeOwnership(of webContents: any EngineWebContents) {}
     func closeWebContents(_ webContents: any EngineWebContents) {}
-    func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) { completion(true) }
+    func closeAllWebContents() {}
 
     func allCookies(completion: @escaping ([EngineCookie]) -> Void) { completion(cookies) }
     func setCookie(_ cookie: EngineCookie, for url: URL) { setCookies([cookie]) {} }

@@ -1,4 +1,5 @@
-// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one. Icons load without any profile's cookies or stored credentials.
+// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one. Icons load without any profile's cookies or stored credentials, only from web and data URLs, and only up to a size and a time limit.
+import AppKit
 @testable import ARCHEngine
 import Foundation
 import Testing
@@ -23,11 +24,29 @@ import Testing
         #expect(!FaviconLoader.keepsIcon(from: url("https://example.com/"), to: nil))
     }
 
-    @Test func iconsLoadWithoutCookiesOrCredentials() {
+    @Test func iconsLoadWithoutCookiesOrCredentialsWithinThirtySeconds() {
         let configuration = FaviconLoader.session.configuration
         #expect(configuration.httpCookieStorage == nil)
         #expect(!configuration.httpShouldSetCookies)
         #expect(configuration.httpCookieAcceptPolicy == .never)
         #expect(configuration.urlCredentialStorage == nil)
+        #expect(configuration.timeoutIntervalForResource == 30)
+    }
+
+    @MainActor @Test func iconsOfOtherSchemesLoadNothing() {
+        for string in ["file:///etc/hosts", "FILE:///dev/zero", "ftp://example.com/favicon.ico", "about:blank"] {
+            var answers: [NSImage?] = []
+            FaviconLoader.load(url(string)) { answers.append($0) }
+            #expect(answers == [nil], "\(string)")
+        }
+    }
+
+    @Test func aBodyPastTheLimitLoadsNothing() async {
+        let limit = FaviconLoader.maximumSize
+        let body = { (count: Int) in self.url("data:application/octet-stream;base64," + Data(repeating: 7, count: count).base64EncodedString()) }
+        #expect(await FaviconLoader.download(body(limit))?.count == limit)
+        #expect(await FaviconLoader.download(body(limit + 1)) == nil)
+        // An endless body without a stated length stops at the limit.
+        #expect(await FaviconLoader.download(URL(fileURLWithPath: "/dev/zero")) == nil)
     }
 }

@@ -1438,12 +1438,6 @@ private:
     }
 }
 
-- (void)executeJavaScript:(NSString *)script {
-    if (_browser) {
-        _browser->GetMainFrame()->ExecuteJavaScript(CefString(script.UTF8String), _browser->GetMainFrame()->GetURL(), 0);
-    }
-}
-
 - (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable))completion {
     [self requestScript:script world:nil completion:^(BOOL succeeded, NSString *_Nullable result) {
         completion(succeeded ? result : nil);

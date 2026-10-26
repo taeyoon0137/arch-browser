@@ -1,4 +1,4 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, and a page script's message reaches the page script delegate of that web contents. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, and a page script's message reaches the page script delegate of that web contents. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -36,6 +36,15 @@ import Testing
         #expect(recorder.messages.first?.world == "test")
         #expect(recorder.messages.first?.json == #"{"ready":true}"#)
         #expect(recorder.sender === tab)
+    }
+
+    @Test func closingAllWebContentsEndsEachPage() throws {
+        let tabs = try (0..<2).map { _ in try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents) }
+        browser.closeAllWebContents()
+        for tab in tabs {
+            #expect(tab.bridge == nil)
+            #expect(tab.webView.superview == nil)
+        }
     }
 
     private final class NoBrowserDelegate: EngineBrowserDelegate {}

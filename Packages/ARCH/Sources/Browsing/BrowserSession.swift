@@ -597,7 +597,7 @@ public final class BrowserSession: ObservableObject {
         // Its browsers close, and its plugins stop. Download items refer to their lists and profiles unowned, so its runtimes stay until quit.
         if let engines = personaEngines.removeValue(forKey: id) {
             MainActor.assumeIsolated { closePlugins(of: engines) }
-            engines.runtimes.values.forEach { $0.browser.tryToClose(skipBeforeUnloadHandlers: true) { _ in } }
+            engines.runtimes.values.forEach { $0.browser.closeAllWebContents() }
             retiredPersonaEngines.append(engines)
         }
         personaDataRemoval.removeAtNextLaunch(id)

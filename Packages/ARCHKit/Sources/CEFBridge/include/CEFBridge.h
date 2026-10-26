@@ -426,8 +426,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)stopLoading;
 - (void)goBack;
 - (void)goForward;
-- (void)executeJavaScript:(NSString *)script;
-/// Evaluates `script` in the main frame's page world and passes the string it evaluates to. `executeJavaScript:` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
+/// Evaluates `script` in the main frame's page world and passes the string it evaluates to. CEF's `ExecuteJavaScript` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
 - (void)evaluateScript:(NSString *)script completion:(void (^)(NSString *_Nullable result))completion;
 /// Replaces the page scripts, from each frame's next document on. The renderer processes of the browser's frames get them at once, and each frame created after the change gets them as well. In a renderer process that had none of the browser's frames, such as after a cross-site navigation, the first document may still run the scripts the browser was created with, because CEF does not order the message before it (needs verification).
 - (void)setPageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts;

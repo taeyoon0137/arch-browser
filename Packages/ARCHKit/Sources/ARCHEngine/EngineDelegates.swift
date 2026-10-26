@@ -96,7 +96,9 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidClose(_ webContents: any EngineWebContents)
     /// The page asks to be shown, with its tab, its window, and the app in front, as the return button of its picture-in-picture window does.
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents)
+    /// The page entered fullscreen, as through the Fullscreen API, and asks the app to fill the window with it. Only an engine that leaves the window's transition to the app sends this, as Chromium does; WebKit moves the element into a full-screen window of its own and sends nothing.
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents)
+    /// The page left the fullscreen that `webContentsDidRequestEnterFullscreen` reported. Only Chromium sends this.
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void)
     func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void)

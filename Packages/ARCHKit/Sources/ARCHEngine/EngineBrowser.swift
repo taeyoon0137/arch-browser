@@ -70,7 +70,8 @@ public protocol EngineBrowser: AnyObject {
     func takeOwnership(of webContents: any EngineWebContents)
     /// Releases a tab after the user interface closes it so the engine can tear it down.
     func closeWebContents(_ webContents: any EngineWebContents)
-    func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void)
+    /// Closes every web contents this browser owns as `closeWebContents` does, without asking their pages, as when the browser's profile goes.
+    func closeAllWebContents()
 
     func allCookies(completion: @escaping ([EngineCookie]) -> Void)
     func setCookie(_ cookie: EngineCookie, for url: URL)

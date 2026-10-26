@@ -49,7 +49,7 @@ public protocol EngineNavigationController: AnyObject {
     func go(to item: any EngineBackForwardListItem)
 }
 
-/// One tab: state, navigation, find, script and style injection, capture, and media.
+/// One tab: state, navigation, find, page scripts, capture, and media.
 public protocol EngineWebContents: AnyObject {
     var engineKind: EngineKind { get }
     var sessionID: String { get }
@@ -77,7 +77,6 @@ public protocol EngineWebContents: AnyObject {
 
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void)
     func stopFind()
-    func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void)
     /// Receives what the page scripts send.
     var pageScriptDelegate: (any EnginePageScriptDelegate)? { get set }
     /// Replaces the scripts that run in each new document, from the next document on. On WebKit, a web contents and those its pages open share one set, so replacing it in one replaces it in all.
@@ -88,14 +87,12 @@ public protocol EngineWebContents: AnyObject {
     func postPageScriptMessage(_ json: String, toWorld world: String)
     /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
-    /// CSS injection for site customizations. WebKit implements it with WKUserContentController.
-    func insertStylesheet(_ css: String, identifier: String)
-    func removeStylesheet(identifier: String)
     func captureViewport(completion: @escaping (NSImage?) -> Void)
     func captureFullPage(completion: @escaping (NSImage?) -> Void)
     /// Renders the page as a paginated PDF on the system's default paper with the page's print styles, for printing and export.
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void)
     func print()
+    /// Ends the page's fullscreen. WebKit ends the page's other media presentations with it, picture in picture included.
     func exitFullscreen()
     func discard()
     /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.

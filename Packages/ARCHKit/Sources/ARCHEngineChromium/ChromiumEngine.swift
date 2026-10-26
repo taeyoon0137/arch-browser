@@ -229,10 +229,9 @@ public final class ChromiumBrowser: EngineBrowser {
         guard let index = ownedWebContents.firstIndex(where: { $0 === (webContents as AnyObject) }) else { return }
         ownedWebContents.remove(at: index).discard()
     }
-    public func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) {
+    public func closeAllWebContents() {
         ownedWebContents.forEach { $0.discard() }
         ownedWebContents.removeAll()
-        completion(true)
     }
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
         requestContext.visitAllCookies { cookies in completion(cookies.map(Self.engineCookie)) }
@@ -408,11 +407,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         didSelectFirstMatch = false
         browser?.stopFinding()
     }
-    public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
-        browser?.executeJavaScript(script)
-        completion(.success(nil))
-    }
-    /// The helper's renderer runs the script in the page's world and replies with its result, which `executeJavaScript` cannot return and the DevTools protocol would return only by attaching a debugger. The page's scripts can change what the script sees there, which changes only the page's own text. Chromium's own pages, such as the error page it shows in place of a page that failed to load, are unreadable.
+    /// The helper's renderer runs the script in the page's world and replies with its result, which CEF's `ExecuteJavaScript` cannot return and the DevTools protocol would return only by attaching a debugger. The page's scripts can change what the script sees there, which changes only the page's own text. Chromium's own pages, such as the error page it shows in place of a page that failed to load, are unreadable.
     public func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {
         guard let browser else { return completion(.failure(EngineReadableContentError.unreadable)) }
         browser.evaluateScript("(\(EngineReadableContent.script))(\(limit))") { result in
@@ -427,7 +422,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         pageScripts = scripts
         browser?.setPageScripts(Self.bridgeScripts(scripts))
     }
-    /// The helper's renderer calls the function in the page's world, where every world's scripts run, and replies with its result, which `executeJavaScript` cannot return.
+    /// The helper's renderer calls the function in the page's world, where every world's scripts run, and replies with its result, which CEF's `ExecuteJavaScript` cannot return.
     public func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
         guard let browser else { return completion(.failure(ScriptError.failed)) }
         browser.callPageScriptFunction(script, inWorld: world) { succeeded, result in
@@ -439,13 +434,6 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     }
     private static func bridgeScripts(_ scripts: [EnginePageScript]) -> [ARCHCEFPageScript] {
         scripts.map { ARCHCEFPageScript(world: $0.world, source: $0.source, runsAtDocumentEnd: $0.injectionTime == .documentEnd, mainFrameOnly: $0.mainFrameOnly) }
-    }
-    public func insertStylesheet(_ css: String, identifier: String) {
-        let escaped = css.replacingOccurrences(of: "`", with: "\\`")
-        browser?.executeJavaScript("(function(){var s=document.getElementById('arch-style-\(identifier)');if(!s){s=document.createElement('style');s.id='arch-style-\(identifier)';document.documentElement.appendChild(s);}s.textContent=`\(escaped)`;})();")
-    }
-    public func removeStylesheet(identifier: String) {
-        browser?.executeJavaScript("document.getElementById('arch-style-\(identifier)')?.remove();")
     }
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         captureScreenshot(beyondViewport: false, completion: completion)

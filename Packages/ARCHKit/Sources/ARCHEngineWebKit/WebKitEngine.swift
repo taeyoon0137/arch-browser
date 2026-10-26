@@ -157,9 +157,8 @@ public final class WebKitBrowser: EngineBrowser {
         closing.discard()
         closing.webView.removeFromSuperview()
     }
-    public func tryToClose(skipBeforeUnloadHandlers: Bool, completion: @escaping (Bool) -> Void) {
-        ownedWebContents.removeAll()
-        completion(true)
+    public func closeAllWebContents() {
+        for webContents in ownedWebContents { closeWebContents(webContents) }
     }
 
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
@@ -435,21 +434,6 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             let position = numbers[1].intValue
             completion(numbers[0].intValue, position > 0 ? position : nil)
         }
-    }
-    public func executeJavaScript(_ script: String, completion: @escaping (Result<Any?, Error>) -> Void) {
-        webView.evaluateJavaScript(script) { value, error in
-            completion(error.map { .failure($0) } ?? .success(value))
-        }
-    }
-    /// Injects CSS for site customization by inserting a `<style>` element through `WKUserScript`.
-    public func insertStylesheet(_ css: String, identifier: String) {
-        let escaped = css.replacingOccurrences(of: "`", with: "\\`")
-        let source = "(function(){var s=document.getElementById('arch-style-\(identifier)');if(!s){s=document.createElement('style');s.id='arch-style-\(identifier)';document.documentElement.appendChild(s);}s.textContent=`\(escaped)`;})();"
-        webView.configuration.userContentController.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        webView.evaluateJavaScript(source)
-    }
-    public func removeStylesheet(identifier: String) {
-        webView.evaluateJavaScript("document.getElementById('arch-style-\(identifier)')?.remove();")
     }
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         webView.takeSnapshot(with: nil) { image, _ in completion(image) }
