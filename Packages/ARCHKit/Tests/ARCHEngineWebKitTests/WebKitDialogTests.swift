@@ -1,4 +1,4 @@
-// How a WebKit page dialog is answered: once, by the sheet or by a navigation the user starts, whichever comes first. A navigation gives a waiting dialog its safe answer, holds the page's further dialogs until the navigation loads, and tells the UI delegate that the dialog no longer applies. The tests use a private profile, which keeps nothing on disk, and load no page.
+// How a WebKit page dialog is answered: once, by the sheet or by a navigation the user starts, whichever comes first. A navigation gives a waiting dialog its safe answer, sets a hold on the page's further dialogs that ends when loading stops, and tells the UI delegate once that the dialog no longer applies. The tests use a private profile, which keeps nothing on disk, and load no page.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -39,6 +39,8 @@ import Testing
         #expect(recorder.cancellations == 1)
         tab.dismissDialogBeforeNavigation()
         #expect(recorder.cancellations == 1)
+        tab.loadingStateDidChange()
+        #expect(!tab.suppressesDialogs)
     }
 
     private final class DialogRecorder: EngineWebContentsUIDelegate {
