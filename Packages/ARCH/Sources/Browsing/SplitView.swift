@@ -8,8 +8,16 @@ struct PageAreaView: View {
     /// Receives the panes' frames, so that a tab dragged from the sidebar can open beside one; nil in a window without a sidebar. The page area itself does not change during a drag.
     let sidebarDrag: SidebarDragState?
     let margins: EdgeInsets
-    /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
-    @State private var enteredFullScreenForPage = false
+    /// How far the window has gone into full screen for a page, so that it leaves full screen again with the page.
+    @State private var pageFullScreen = PageFullScreen.none
+
+    /// The window's full screen that a page asked for.
+    private enum PageFullScreen {
+        case none
+        /// On the way in. A page that leaves fullscreen meanwhile takes the window out once it is in, not during the transition. Failing to enter ends it.
+        case entering
+        case entered
+    }
 
     var body: some View {
         let isPageFullscreen = windowModel.isPageFullscreen
@@ -21,18 +29,29 @@ struct PageAreaView: View {
             // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
             .onChange(of: isPageFullscreen) { _, isFullscreen in
                 guard let window = windowModel.nsWindow else { return }
-                let isWindowFullScreen = window.styleMask.contains(.fullScreen)
-                if isFullscreen, !isWindowFullScreen {
-                    enteredFullScreenForPage = true
+                if isFullscreen, pageFullScreen == .none, !window.styleMask.contains(.fullScreen) {
+                    pageFullScreen = .entering
                     window.toggleFullScreen(nil)
-                } else if !isFullscreen, enteredFullScreenForPage {
-                    enteredFullScreenForPage = false
-                    if isWindowFullScreen { window.toggleFullScreen(nil) }
+                } else if !isFullscreen, pageFullScreen == .entered {
+                    pageFullScreen = .none
+                    if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { notification in
+                guard let window = notification.object as? NSWindow, window === windowModel.nsWindow, pageFullScreen == .entering else { return }
+                if windowModel.isPageFullscreen {
+                    pageFullScreen = .entered
+                } else {
+                    pageFullScreen = .none
+                    window.toggleFullScreen(nil)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: BrowserWindowController.didFailToEnterFullScreenNotification)) { notification in
+                if notification.object as? NSWindow === windowModel.nsWindow { pageFullScreen = .none }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
                 guard notification.object as? NSWindow === windowModel.nsWindow else { return }
-                enteredFullScreenForPage = false
+                pageFullScreen = .none
                 if windowModel.isPageFullscreen { windowModel.exitPageFullscreen() }
             }
     }

@@ -9,6 +9,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     private var titleObserver: AnyCancellable?
     /// Set from the start of the transition into full screen until the window is back, while its frame is not the one to keep.
     private var isInFullScreen = false
+    /// Posted with the window when it cannot enter full screen, for which AppKit posts no notification of its own.
+    static let didFailToEnterFullScreenNotification = Notification.Name("ARCHWindowDidFailToEnterFullScreen")
 
     /// How far a saved frame must reach onto a screen's visible area, across and down, for the window to open there.
     private static let minimumVisibleLength: CGFloat = 100
@@ -148,10 +150,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         window?.toolbar?.isVisible = false
     }
 
-    // The window stays as it was when it cannot enter full screen.
+    // The window stays as it was when it cannot enter full screen, and the views that prepared for full screen hear of it.
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
         isInFullScreen = false
         window.toolbar?.isVisible = true
+        NotificationCenter.default.post(name: Self.didFailToEnterFullScreenNotification, object: window)
     }
 
     // AppKit restores the toolbar's full screen state while it exits, so the toolbar returns once the window is back.

@@ -50,13 +50,15 @@ final class WindowButtonsReaderView: NSView {
         })
         observers.append(center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in self?.measure() })
         observers.append(center.addObserver(forName: Self.buttonsDidSettleNotification, object: window, queue: .main) { [weak self] _ in self?.measure() })
-        // The app shows its toolbar again after leaving full screen, which moves the buttons, so the measurement waits for that layout.
-        observers.append(center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.window?.layoutIfNeeded()
-                self?.measure()
-            }
-        })
+        // The app shows its toolbar again after leaving full screen or failing to enter it, which moves the buttons, so the measurement waits for that layout.
+        for name in [NSWindow.didExitFullScreenNotification, BrowserWindowController.didFailToEnterFullScreenNotification] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.window?.layoutIfNeeded()
+                    self?.measure()
+                }
+            })
+        }
         measure()
     }
 

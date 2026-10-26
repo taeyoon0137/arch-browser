@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 public enum BrowserWindowKind {
     /// A window with the sidebar. `session.json` keeps the main windows.
     case main
-    /// A window without a sidebar for one link from another app, which `session.json` does not keep. Its tab stays out of its space's list until it moves to a main window, and the window closes with the tab.
+    /// A window without a sidebar for one tab, which `session.json` does not keep. It opens for a link from another app while Arch is in the background, for a page that a small window's page or preview opens, and for an extension's `windows.create`. Its tab stays out of its space's list until it moves to a main window, and the window closes with the tab.
     case small
 }
 
@@ -396,7 +396,8 @@ public final class BrowserWindowModel: ObservableObject {
         self.preview = nil
         let view = preview.webContents.view
         let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
-        if closingPage {
+        // A page that a tab took, as the preview's page does when it opens another, stays open with that tab, also when the panel closes before the next turn of the run loop removes it.
+        if closingPage, !session.allTabs.contains(where: { $0.webContents === preview.webContents }) {
             // The page stops reporting to the panel before it closes.
             preview.webContents.uiDelegate = nil
             session.retire(preview.webContents, of: preview.personaID)
@@ -1150,10 +1151,13 @@ public final class BrowserWindowModel: ObservableObject {
         openInSplitView(tab)
     }
 
-    /// Takes `tab` out of its split view and leaves the tab open. When it was the focused pane, the pane that takes its place is selected, so the rest of the split view stays on screen.
+    /// Takes `tab` out of its split view and leaves the tab open. When it was the focused pane, the pane that takes its place is selected, or else another of the split view's panes, so the rest of the split view stays on screen. A pane that another window shows stays there (window rule 3); with no other pane free, `tab` stays selected on its own.
     func closePane(_ tab: Tab) {
+        let panes = tab.spaceID.flatMap { session.splitTabIDs[$0] } ?? []
         let neighborID = session.leaveSplitView(tab)
-        if selectedTabID == tab.id, let neighborID { selectTab(neighborID) }
+        guard selectedTabID == tab.id else { return }
+        let candidates = ([neighborID].compactMap { $0 } + panes).filter { $0 != tab.id }.compactMap { id in session.tabs.first { $0.id == id } }
+        if let next = candidates.first(where: { !isShownInAnotherWindow($0) }) { selectTab(next.id) }
     }
 
     /// The panes `tab` joins, left to right: those on screen, which are a split view or the selected tab alone. The selected tab shown alone joins its space's split view instead or, without one, the tab selected before it. Empty when `tab` is in another space or has no tab to join.
