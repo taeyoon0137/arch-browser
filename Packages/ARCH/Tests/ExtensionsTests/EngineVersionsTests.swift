@@ -374,16 +374,37 @@ struct EngineVersionsTests {
     @Test func namesAPairsActionAfterItsVersionInstalledFirst() async throws {
         try await WebKitProfile.run { profile in
             let tab = profile.makeTab()
+            let tabID = UUID()
+            host.tabs[tabID] = tab
+            // The suite's host outlives the profile, so it lets the tab go for WebKit to delete the profile's store.
+            defer { host.tabs[tabID] = nil }
             let (manager, runtime) = launch()
             // Only the version installed second has an action, and the popover still lists the pair under the first one's identifier and name.
             webKit.refusedNames = ["Reader for Chromium"]
             chromium.refusedNames = ["Reader"]
             let first = try await manager.installEverything(from: package("reader", name: "Reader"))
+            #expect(manager.contributions.paletteCommands(matching: "Reader").isEmpty)
             let chromiumVersion = try await manager.stage(package("reader-chromium", name: "Reader for Chromium", action: true))
-            _ = try manager.install(chromiumVersion, grant: PluginGrant(requestedBy: chromiumVersion.manifest), isEnabled: true, asVersionOf: first.id, for: .chromium)
+            let id = try manager.install(chromiumVersion, grant: PluginGrant(requestedBy: chromiumVersion.manifest), isEnabled: true, asVersionOf: first.id, for: .chromium)
             await runtime.waitForEngines()
             let items = runtime.actions(for: tab)
             #expect(items.map(\.id) == [first.id] && items.first?.name == "Reader" && items.first?.action != nil)
+            // The palette lists the other version's action once, under the first one's identifier and name, and running it runs the action of the version for the tab's engine.
+            let commands = manager.contributions.paletteCommands(matching: "Reader")
+            #expect(commands.map(\.plugin) == [first.id] && commands.first?.pluginName == "Reader" && commands.first?.item.id == WebExtensionManifest.actionCommand)
+            let command = try #require(commands.first)
+            await manager.run(command.ref, PluginInvocation(tab: PluginTab(id: tabID, spaceID: nil, title: nil, url: nil, engine: .webKit, isPinned: false, isSelected: true)))
+            #expect(webKit.performed == [WebExtensionManifest.extensionID(of: first.id)] && chromium.performed.isEmpty)
+            // While the other version is off after failing to start, the pair has no action to list, and a run of the command does nothing.
+            chromium.refused = [WebExtensionManifest.extensionID(of: chromiumVersion.manifest.id)]
+            manager.setEnabled(false, for: first.id)
+            await runtime.waitForEngines()
+            manager.setEnabled(true, for: first.id)
+            await runtime.waitForEngines()
+            #expect(try plugin(first.id, in: manager).isEnabled && !plugin(id, in: manager).isEnabled)
+            #expect(manager.contributions.paletteCommands(matching: "Reader").isEmpty && runtime.actions(for: tab).isEmpty)
+            await manager.run(command.ref, PluginInvocation(tab: PluginTab(id: tabID, spaceID: nil, title: nil, url: nil, engine: .webKit, isPinned: false, isSelected: true)))
+            #expect(webKit.performed.count == 1)
             manager.close()
         }
     }

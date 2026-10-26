@@ -241,32 +241,34 @@ public struct PluginContributionIndex: Sendable {
         let entry: PluginMenuEntry
     }
 
-    /// The plugins that are enabled and that their runtimes can run contribute, a pair once: through its version installed first while that one contributes, otherwise through the other, whose runtime runs each command with the version for the invocation's tab. Menu items and sidebar items whose commands the manifest does not list are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
+    /// The plugins that are enabled and that their runtimes can run contribute, a pair once: through its version installed first while that one contributes, otherwise through the other, whose runtime runs each command with the version for the invocation's tab. The contributing version also brings the commands of the other version that its own lacks while the other is enabled (`InstalledPlugin.commands(among:)`), as an action that only the other has. Menu items and sidebar items whose commands the plugin does not contribute are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
     @MainActor
     init(_ plugins: [InstalledPlugin]) {
         var enabled: [InstalledPlugin] = []
         for plugin in plugins where plugin.isEnabled && plugin.unavailability == nil && !enabled.contains(where: { $0.id == plugin.counterpart }) {
             enabled.append(plugin)
         }
-        commands = enabled.flatMap { plugin in plugin.manifest.contributions.commands.map { plugin.attributed($0) } }
+        commands = enabled.flatMap { plugin in plugin.commands(among: plugins).map { plugin.attributed($0) } }
         menuItems = enabled.flatMap { plugin in
             let contributions = plugin.manifest.contributions
+            let commands = plugin.commands(among: plugins)
             var inPluginsMenu: Set<String> = []
             let listed = contributions.menuItems.compactMap { item -> LocatedEntry? in
-                guard let command = contributions.commands.first(where: { $0.id == item.command }) else { return nil }
+                guard let command = commands.first(where: { $0.id == item.command }) else { return nil }
                 let repeatsPluginsMenuItem = item.location == .pluginsMenu && !inPluginsMenu.insert(command.id).inserted
                 return LocatedEntry(location: item.location, entry: PluginMenuEntry(command: PluginCommandRef(plugin: plugin.id, command: command.id), title: item.title ?? command.title,
                                                                                     shortcut: repeatsPluginsMenuItem ? nil : command.shortcut))
             }
-            let forShortcuts = contributions.commands.filter { $0.shortcut != nil && !inPluginsMenu.contains($0.id) }.map { command in
+            let forShortcuts = commands.filter { $0.shortcut != nil && !inPluginsMenu.contains($0.id) }.map { command in
                 LocatedEntry(location: .pluginsMenu, entry: PluginMenuEntry(command: PluginCommandRef(plugin: plugin.id, command: command.id), title: command.title, shortcut: command.shortcut))
             }
             return (listed + forShortcuts).map { plugin.attributed($0) }
         }
         sidebarItems = enabled.flatMap { plugin in
-            plugin.manifest.contributions.sidebarItems.filter { item in
+            let commands = plugin.commands(among: plugins)
+            return plugin.manifest.contributions.sidebarItems.filter { item in
                 guard case let .command(id) = item.action else { return true }
-                return plugin.manifest.contributions.commands.contains { $0.id == id }
+                return commands.contains { $0.id == id }
             }.map { plugin.attributed($0) }
         }
         pageScripts = enabled.flatMap { plugin in
@@ -313,5 +315,12 @@ public struct PluginContributionIndex: Sendable {
 extension InstalledPlugin {
     func attributed<Item: Sendable>(_ item: Item) -> Attributed<Item> {
         Attributed(plugin: id, pluginName: manifest.name, item: item)
+    }
+
+    /// The commands that the plugin contributes and runs, with `plugins` the manager's list: its manifest's, then, in a pair, those of its other version whose identifiers its own lacks, while that version is enabled and its runtime can run it, so that a pair whose action only one version has lists it under either. A web extension plugin runs such a command with the version for the invocation's tab, as it runs its own.
+    func commands(among plugins: [InstalledPlugin]) -> [PluginCommand] {
+        let own = manifest.contributions.commands
+        guard let counterpart, let other = plugins.first(where: { $0.id == counterpart && $0.isEnabled && $0.unavailability == nil }) else { return own }
+        return own + other.manifest.contributions.commands.filter { command in !own.contains { $0.id == command.id } }
     }
 }

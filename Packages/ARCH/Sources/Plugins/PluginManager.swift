@@ -847,9 +847,9 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command of an enabled plugin, starting the plugin first if it has not started. The plugin receives the invocation's tab without what its grant does not cover. A command that fails, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. The plugin receives the invocation's tab without what its grant does not cover. A command that fails, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
-        guard let installed = enabledPlugin(command.plugin), installed.manifest.contributions.commands.contains(where: { $0.id == command.command }) else { return }
+        guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         var redacted = invocation
         redacted.tab = invocation.tab?.redacted(for: installed.grant)
         do {
