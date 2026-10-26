@@ -90,10 +90,18 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         return copy.path == path && copy.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
     }
 
-    /// Every site the manifest asks for when the grant has them all, or every web page; otherwise on a click.
+    /// Every site the manifest asks for when the grant has them all, or every web page; otherwise on a click. Patterns compare with their schemes and hosts in lowercase, as the app's grants write them and Chromium reads them. A pattern that the app's grants cannot hold keeps the click: one for `file:` pages until Arch's engine keeps extensions out of them (VI.4), and one with a port, which the install sheet never showed.
     static func siteAccess(for extension: EngineExtension) -> ARCHCEFExtensionSiteAccess {
-        let asked = ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []
+        let asked = Set((ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []).map(lowercasingSchemeAndHost))
         return `extension`.sites.contains("<all_urls>") || asked.isSubset(of: `extension`.sites) ? .onAllSites : .onClick
+    }
+
+    /// The match pattern with its scheme and host in lowercase; its path keeps its case.
+    static func lowercasingSchemeAndHost(_ pattern: String) -> String {
+        guard let separator = pattern.range(of: "://") else { return pattern }
+        let rest = pattern[separator.upperBound...]
+        let pathStart = rest.firstIndex(of: "/") ?? rest.endIndex
+        return pattern[..<separator.lowerBound].lowercased() + "://" + rest[..<pathStart].lowercased() + rest[pathStart...]
     }
 
     /// Switches the extension off, which keeps its storage and keeps it off at later launches.

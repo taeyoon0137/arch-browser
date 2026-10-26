@@ -369,6 +369,23 @@ struct EngineVersionsTests {
         }
     }
 
+    @Test func namesAPairsActionAfterItsVersionInstalledFirst() async throws {
+        try await WebKitProfile.run { profile in
+            let tab = profile.makeTab()
+            let (manager, runtime) = launch()
+            // Only the version installed second has an action, and the popover still lists the pair under the first one's identifier and name.
+            webKit.refusedNames = ["Reader for Chromium"]
+            chromium.refusedNames = ["Reader"]
+            let first = try await manager.installEverything(from: package("reader", name: "Reader"))
+            let chromiumVersion = try await manager.stage(package("reader-chromium", name: "Reader for Chromium", action: true))
+            _ = try manager.install(chromiumVersion, grant: PluginGrant(requestedBy: chromiumVersion.manifest), isEnabled: true, asVersionOf: first.id, for: .chromium)
+            await runtime.waitForEngines()
+            let items = runtime.actions(for: tab)
+            #expect(items.map(\.id) == [first.id] && items.first?.name == "Reader" && items.first?.action != nil)
+            manager.close()
+        }
+    }
+
     @Test func joinsByHandAndRefusesAJoinThatLeavesAVersionWithoutAnEngine() async throws {
         let (first, _) = launch()
         webKit.refusedNames = ["B"]

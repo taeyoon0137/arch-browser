@@ -154,10 +154,20 @@ struct EngineRequestsTests {
         var answer: Bool?
         runtime.extensions(chromium, extension: WebExtensionManifest.extensionID(of: messenger.id), asks: EngineExtensionPrompt(kind: .permissions(["Communicate with cooperating native applications"]), tab: nil)) { answer = $0 }
         #expect(answer == false && host.sheets.isEmpty)
-        let everywhere = WebExtensionManifest.optionalAccess(ofPackageAt: try folder.package("everywhere", [
+        // An entry with arguments, which Chromium reads, leaves the list's other names in sight.
+        let mixed = try await installLoaded("mixed", #"{"manifest_version": 3, "name": "X", "version": "1", "optional_permissions": ["nativeMessaging", {"usb": []}]}"#)
+        answer = nil
+        runtime.extensions(chromium, extension: WebExtensionManifest.extensionID(of: mixed.id), asks: EngineExtensionPrompt(kind: .permissions(["Communicate with cooperating native applications"]), tab: nil)) { answer = $0 }
+        #expect(answer == false && host.sheets.isEmpty)
+        let everywhere = try #require(WebExtensionManifest.optionalAccess(ofPackageAt: try folder.package("everywhere", [
             "manifest.json": #"{"manifest_version": 3, "name": "E", "version": "1", "optional_permissions": ["cookies"], "optional_host_permissions": ["<all_urls>"]}"#,
-        ]))
+        ])))
         #expect(everywhere.permissions == ["cookies"] && everywhere.grant.confirmationReason(for: "E") != nil)
+        // Optional lists that do not read leave nothing that a request could be checked against.
+        for (name, lists) in [("unread", #""optional_permissions": [1]"#), ("unread-hosts", #""optional_host_permissions": "<all_urls>""#)] {
+            let package = try folder.package(name, ["manifest.json": #"{"manifest_version": 3, "name": "U", "version": "1", "# + lists + "}"])
+            #expect(WebExtensionManifest.optionalAccess(ofPackageAt: package) == nil)
+        }
     }
 
     @Test func confirmsEveryWebsiteThatTheInstallLeftOut() async throws {
@@ -166,10 +176,10 @@ struct EngineRequestsTests {
         let withheld = try await manager.stage(folder.package("withheld", ["manifest.json": manifest]))
         try manager.install(withheld, grant: PluginGrant(permissions: [], sites: []), isEnabled: true)
         let leftOut = try #require(manager.plugins.first { $0.id == withheld.manifest.id })
-        #expect(WebExtensionManifest.runTimeAccess(of: leftOut).grant.confirmationReason(for: "W") != nil)
+        #expect(try #require(WebExtensionManifest.runTimeAccess(of: leftOut)).grant.confirmationReason(for: "W") != nil)
         // With every website granted at install, nothing is left to ask for.
         let granted = try await installLoaded("granted", manifest.replacingOccurrences(of: #""W""#, with: #""G""#))
-        #expect(WebExtensionManifest.runTimeAccess(of: granted).sites.isEmpty)
+        #expect(try #require(WebExtensionManifest.runTimeAccess(of: granted)).sites.isEmpty)
     }
 
     // MARK: Site access
@@ -177,14 +187,23 @@ struct EngineRequestsTests {
     @Test func allowsAnExtensionOnTheTabsSite() async throws {
         try await WebKitProfile.run { profile in
             host.engines = [.webKit: webKit]
-            webKit.actionsWantSiteAccess = true
             let tab = profile.makeTab()
             let installed = try await manager.installEverything(from: folder.package("waiter", [
                 "manifest.json": #"{"manifest_version": 3, "name": "Waiter", "version": "1", "action": {}}"#,
             ]))
-            #expect(await eventually { runtime.actions(for: tab).first?.wantsSiteAccess == true })
+            // An extension without an action shows only while the engine keeps it from the tab's site, as Chromium gives it an action then.
+            let quiet = try await manager.installEverything(from: folder.package("quiet", [
+                "manifest.json": #"{"manifest_version": 3, "name": "Quiet", "version": "1", "content_scripts": [{"matches": ["https://example.org/*"], "js": ["a.js"]}]}"#,
+                "a.js": "",
+            ]))
+            #expect(await eventually { webKit.loaded[WebExtensionManifest.extensionID(of: quiet.id)] != nil && webKit.loaded[WebExtensionManifest.extensionID(of: installed.id)] != nil })
+            #expect(runtime.actions(for: tab).map(\.id) == [installed.id])
+            webKit.actionsWantSiteAccess = true
+            let items = runtime.actions(for: tab)
+            #expect(items.map(\.id) == [installed.id, quiet.id] && items.allSatisfy(\.wantsSiteAccess))
             runtime.grantSiteAccess(of: installed.id, for: tab)
-            #expect(webKit.grantedSiteAccess == [WebExtensionManifest.extensionID(of: installed.id)])
+            runtime.grantSiteAccess(of: quiet.id, for: tab)
+            #expect(webKit.grantedSiteAccess == [WebExtensionManifest.extensionID(of: installed.id), WebExtensionManifest.extensionID(of: quiet.id)])
         }
     }
 

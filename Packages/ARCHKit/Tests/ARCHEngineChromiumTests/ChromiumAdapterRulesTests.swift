@@ -64,6 +64,16 @@ import Testing
             #expect(access(["https://example.org/*"]) == .onClick)
             #expect(access([]) == .onClick)
         }
+        // Schemes and hosts compare in lowercase, as the app's grants write them, while a `file:` pattern, which no grant holds, keeps the click (VI.4).
+        try withPackage(#"{"host_permissions": ["HTTPS://Mail.Example.com/Inbox*"], "content_scripts": [{"matches": ["https://example.org/*"]}]}"#) { package in
+            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://mail.example.com/Inbox*", "https://example.org/*"])) == .onAllSites)
+        }
+        try withPackage(#"{"content_scripts": [{"matches": ["https://example.org/*", "file:///*"]}]}"#) { package in
+            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://example.org/*"])) == .onClick)
+        }
+        #expect(ChromiumExtensions.lowercasingSchemeAndHost("HTTPS://Mail.Example.com/Inbox*") == "https://mail.example.com/Inbox*")
+        #expect(ChromiumExtensions.lowercasingSchemeAndHost("https://Example.org") == "https://example.org")
+        #expect(ChromiumExtensions.lowercasingSchemeAndHost("<all_urls>") == "<all_urls>")
     }
 
     @Test func aFirstLoadKeepsChromiumsCopyOnlyOfThePackageChromiumReadAtStart() throws {

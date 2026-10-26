@@ -23,7 +23,9 @@ struct WebExtensionManifest {
         let name = try messages.text(of: "name", in: fields, required: true)
         let version = try messages.text(of: "version", in: fields, required: true)
         let summary = try messages.text(of: "description", in: fields, required: false)
-        let requested = Self.unique(fields["permissions"] as? [String] ?? [])
+        let requested = Self.unique(try Self.permissionNames(of: "permissions", in: fields))
+        // Chromium refuses a manifest whose optional permissions do not read, and requests at run time read them.
+        _ = try Self.permissionNames(of: "optional_permissions", in: fields)
         let extensionID = try Self.extensionID(key: fields["key"], source: source)
         var commands: [PluginCommand] = []
         if let action = fields["action"] as? [String: Any] {
@@ -63,6 +65,18 @@ struct WebExtensionManifest {
             sites.append(site)
         }
         return sites
+    }
+
+    /// The permission names in the list at `key`, as Chromium reads them: each a name, or an object with one key, the name, whose value holds the permission's arguments. Nothing without the key. Throws for a value that is not such a list, which Chromium refuses to load, so that no entry it would grant goes unread.
+    static func permissionNames(of key: String, in fields: [String: Any]) throws -> [String] {
+        guard let value = fields[key] else { return [] }
+        let problem = invalidManifest("\(key) must be a list of permissions, each a name or an object with one key")
+        guard let list = value as? [Any] else { throw problem }
+        return try list.map { item in
+            if let name = item as? String { return name }
+            guard let object = item as? [String: Any], object.count == 1, let name = object.keys.first else { throw problem }
+            return name
+        }
     }
 
     private static func unique(_ names: [String]) -> [String] {
@@ -110,18 +124,18 @@ struct WebExtensionManifest {
         var grant: PluginGrant { PluginGrant(permissions: [], sites: sites) }
     }
 
-    /// Nothing for a manifest that does not read.
-    static func optionalAccess(ofPackageAt root: URL) -> OptionalAccess {
+    /// Nil for a manifest that does not read, or whose optional lists do not, so that Arch refuses the requests of an extension whose optional access it cannot tell.
+    static func optionalAccess(ofPackageAt root: URL) -> OptionalAccess? {
         guard let data = try? Data(contentsOf: root.appendingPathComponent(fileName)),
-              let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return OptionalAccess() }
-        let names = fields["optional_permissions"] as? [String] ?? []
-        let patterns = (fields["optional_host_permissions"] as? [String] ?? []) + names
-        return OptionalAccess(permissions: Set(names.filter { !$0.contains(":") && $0 != "<all_urls>" }), sites: patterns.compactMap { try? MatchPattern($0) })
+              let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let names = try? permissionNames(of: "optional_permissions", in: fields),
+              let hosts = (fields["optional_host_permissions"] ?? [String]()) as? [String] else { return nil }
+        return OptionalAccess(permissions: Set(names.filter { !$0.contains(":") && $0 != "<all_urls>" }), sites: (hosts + names).compactMap { try? MatchPattern($0) })
     }
 
-    /// What the installed extension may ask for at run time: its optional access, and the sites its manifest asks for that its grant leaves out, which Chromium withholds and lets `permissions.request()` ask for again.
-    static func runTimeAccess(of installed: InstalledPlugin) -> OptionalAccess {
-        var access = installed.packageURL.map(optionalAccess(ofPackageAt:)) ?? OptionalAccess()
+    /// What the installed extension may ask for at run time: its optional access, and the sites its manifest asks for that its grant leaves out, which Chromium withholds and lets `permissions.request()` ask for again. Nil when its package's optional access does not read.
+    static func runTimeAccess(of installed: InstalledPlugin) -> OptionalAccess? {
+        guard let packageURL = installed.packageURL, var access = optionalAccess(ofPackageAt: packageURL) else { return nil }
         access.sites += installed.manifest.sites.filter { !installed.grant.sites.contains($0) }
         return access
     }

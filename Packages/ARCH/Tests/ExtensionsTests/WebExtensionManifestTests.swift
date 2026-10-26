@@ -55,7 +55,14 @@ import Testing
         #expect(manifest.sites.map(\.description) == ["*://*/*", "https://example.org/*"])
     }
 
+    /// Chromium reads an object with one key as a permission with arguments, so such an entry neither hides the list nor goes unread.
+    @Test func readsPermissionsAsChromiumDoes() throws {
+        let manifest = try read(["manifest.json": manifest + #", "permissions": ["nativeMessaging", "cookies", "tabs", {"fileSystem": ["write"]}], "optional_permissions": [{"usb": []}]}"#])
+        #expect(manifest.permissions == [.nativeMessaging, .tabs] && manifest.extensionPermissions == ["cookies", "fileSystem"])
+    }
+
     @Test func refusesManifestsArchCannotInstall() throws {
+        let listProblem = { (key: String) in PluginError.invalidPackage("manifest.json: \(key) must be a list of permissions, each a name or an object with one key.") }
         let cases: [(String, [String: String], PluginError)] = [
             ("not JSON", ["manifest.json": "{"], .invalidPackage("manifest.json is not valid JSON.")),
             ("Manifest V2", ["manifest.json": #"{"manifest_version": 2, "name": "A", "version": "1"}"#],
@@ -65,6 +72,11 @@ import Testing
             ("missing message", ["manifest.json": #"{"manifest_version": 3, "name": "__MSG_gone__", "version": "1", "default_locale": "zz"}"#,
                                  "_locales/zz/messages.json": "{}"],
              .invalidPackage("manifest.json: name names the message “gone”, which _locales/zz/messages.json does not have.")),
+            // Chromium refuses these lists too.
+            ("number permission", ["manifest.json": manifest + #", "permissions": ["tabs", 1]}"#], listProblem("permissions")),
+            ("object of two keys", ["manifest.json": manifest + #", "permissions": [{"a": 1, "b": 2}]}"#], listProblem("permissions")),
+            ("permissions not a list", ["manifest.json": manifest + #", "permissions": "tabs"}"#], listProblem("permissions")),
+            ("optional number", ["manifest.json": manifest + #", "optional_permissions": ["nativeMessaging", 1]}"#], listProblem("optional_permissions")),
         ]
         for (name, files, expected) in cases {
             #expect(throws: expected, "\(name)") { try read(files, named: name) }
