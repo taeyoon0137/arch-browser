@@ -1,4 +1,4 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, and does for those engines what the app does for extensions: it shows their popups, asks the user about access they request while they run, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
+// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
 import AppKit
 import ARCHEngine
 import Plugins
@@ -16,8 +16,12 @@ public protocol WebExtensionHost: AnyObject {
     /// Selects the tab in a window, as a click on its row does.
     func activate(_ tab: any EngineWebContents)
     func close(_ tab: any EngineWebContents)
-    /// Shows an action's popover from the site settings button of the window that shows the tab, or of the front window for no tab. Returns false when no such window shows.
-    func present(_ popup: NSPopover, for tab: (any EngineWebContents)?) -> Bool
+    /// Shows an action's popup from the site settings button of the window that shows the tab, or of the front window for no tab. Returns false when no such window shows.
+    func present(_ popup: EngineExtensionPopup, for tab: (any EngineWebContents)?) -> Bool
+    /// Opens a tab of the Persona in `engine` that loads `url`, or the new tab page for nil, in the window `windowID`, as the host reports windows, or in the Persona's focused one, at `index` among that window's tabs of the engine, or after its active tab, and selects it when `active`. Completes once the window reports the tab, with its web contents, or with nil when it did not open.
+    func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void)
+    /// Opens a main window of the Persona with a tab in `engine` for each address, or with the new tab page for none, in front when `focused`. Completes once the window is reported, with its identity, or with nil.
+    func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
     /// Shows the alert as a sheet for the tab, or for the front window's tab for no tab, and answers with the button the user chose.
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
 }
@@ -32,6 +36,8 @@ public struct WebExtensionActionItem: Identifiable {
     public let engines: Set<EngineKind>
     /// Whether the plugin asks for a version for the tab's engine (see `InstalledPlugin.missingEngine(among:)`).
     public let asksForVersion: Bool
+    /// Whether the engine kept the extension from running on the tab's site, so that the user can allow it there (`grantSiteAccess(of:for:)`).
+    public var wantsSiteAccess: Bool { action?.wantsSiteAccess == true }
 }
 
 @MainActor
@@ -56,6 +62,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     /// The Persona's windows and the focused one, as the host last reported them, for engines that attach later.
     private var windows: [EngineExtensionWindow] = []
     private var focusedWindowID: UUID?
+    /// The installed extensions whose package has had its key written in this run, with the date of the install that wrote it, as an update brings a new package.
+    private var keyedPackages: [PluginID: Date] = [:]
 
     /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach.
     public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL) {
@@ -68,7 +76,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         try WebExtensionManifest(packageAt: root, source: source).manifest
     }
 
-    /// The engines that the host reports as running web extensions, with their runtimes' versions, less, once the runtime has attached them, those whose profile did not start for the Persona: WebKit from macOS 15.4; Chromium does not run them yet.
+    /// The engines that the host reports as running web extensions, with their runtimes' versions, less, once the runtime has attached them, those whose profile did not start for the Persona: WebKit from macOS 15.4, and Chromium.
     public var engines: [EngineKind: String] {
         let versions = host?.extensionRuntimeVersions ?? [:]
         guard let attached else { return versions }
@@ -115,9 +123,9 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         WebExtensionPlugin(runtime: self, id: installed.id)
     }
 
-    /// Both engines take a folder or a `.zip` archive. Whether WebKit's also take app extension bundles is open, and `.crx` files join Chromium's once Arch reads them.
+    /// Both engines take a folder or a `.zip` archive, and Chromium also a `.crx` file, the form its packages come in. Whether WebKit's also take app extension bundles is open.
     public func packageTypes(for engine: EngineKind) -> [UTType] {
-        [.folder, .zip]
+        engine == .chromium ? [.folder, .zip, PluginPackage.crxType] : [.folder, .zip]
     }
 
     /// Takes the extension out of the engines that loaded it and deletes its storage in every engine, except in one where another plugin with the same engine identifier keeps it: the engine that the pair's record gives the counterpart, whether or not the counterpart is on, or one that loaded the other plugin.
@@ -174,6 +182,10 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         let plugins = plugins
         guard plugins.contains(where: \.isEnabled) || attached != nil else { return }
         let engines = orderedEngines()
+        for installed in plugins where keyedPackages[installed.id] != installed.installedAt {
+            Self.writeKey(of: installed)
+            keyedPackages[installed.id] = installed.installedAt
+        }
         var extensions: [PluginID: (installed: InstalledPlugin, engineExtension: EngineExtension)] = [:]
         for installed in plugins where extensions[installed.id] == nil {
             extensions[installed.id] = Self.engineExtension(installed).map { (installed: installed, engineExtension: $0) }
@@ -222,6 +234,12 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     /// Whether the extension may run on the engine of `kind`: any engine outside a pair, and in a pair the one its record gives it.
     private static func mayRun(_ installed: InstalledPlugin, on kind: EngineKind) -> Bool {
         installed.pairEngine.map { $0 == kind } ?? true
+    }
+
+    /// Writes into the package of an extension installed from a file without a `key` in its manifest the key that gives each engine Arch's identifier for it, as `WebExtensionManifest.writeKey(packageAt:source:)` does. A package that cannot be written keeps its manifest, and Chromium then refuses to load it under another identifier.
+    private static func writeKey(of installed: InstalledPlugin) {
+        guard let packageURL = installed.packageURL, case let .file(source) = installed.origin else { return }
+        try? WebExtensionManifest.writeKey(packageAt: packageURL, source: source)
     }
 
     /// The extension as the engines load it: its package, the API permissions its grant covers with those that come with the install, and its granted sites. Every web page, which Arch's patterns write as `*://*/*`, goes as `<all_urls>`, which covers `*://*/*` and which extensions check for with `permissions.contains`; WebKit's `<all_urls>` reaches no file pages.
@@ -293,10 +311,21 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         return true
     }
 
+    /// Allows the extension, or the version of its pair that the tab's engine runs, on the tab's site, where the engine kept it from running.
+    public func grantSiteAccess(of id: PluginID, for tab: any EngineWebContents) {
+        guard let version = versionRunningAction(of: id, for: tab) else { return }
+        version.engine.grantSiteAccess(of: Self.extensionID(of: version.installed), for: tab)
+    }
+
     /// Runs the action of the extension on an open tab, for its command in the palette.
     fileprivate func performAction(of id: PluginID, onTab tabID: UUID) -> Bool {
         guard let tab = host?.webContents(ofTab: tabID) else { return false }
         return performAction(of: id, for: tab)
+    }
+
+    /// The engine whose extensions `extensions` are.
+    private func engineKind(of extensions: any EngineExtensions) -> EngineKind? {
+        attached?.first { $0.value === extensions }?.key
     }
 
     /// The extension with the engine identifier that the calling engine loaded, which for two versions with one identifier is the version for that engine, while its grant has `permission`.
@@ -321,8 +350,42 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         objectWillChange.send()
     }
 
-    public func extensions(_ extensions: any EngineExtensions, present popup: NSPopover, ofExtension id: String, for tab: (any EngineWebContents)?) -> Bool {
+    public func extensions(_ extensions: any EngineExtensions, present popup: EngineExtensionPopup, ofExtension id: String, for tab: (any EngineWebContents)?) -> Bool {
         host?.present(popup, for: tab) ?? false
+    }
+
+    /// The tab opens in the Persona with the calling engine, which lists it once the window reports it.
+    public func extensions(_ extensions: any EngineExtensions, openTabWith url: URL?, inWindow windowID: UUID?, active: Bool, index: Int?,
+                           completion: @escaping ((any EngineWebContents)?) -> Void) {
+        guard let host, let kind = engineKind(of: extensions) else { return completion(nil) }
+        host.openTab(url, in: kind, persona: persona, window: windowID, active: active, index: index, completion: completion)
+    }
+
+    public func extensions(_ extensions: any EngineExtensions, openWindowWith urls: [URL], focused: Bool, completion: @escaping (UUID?) -> Void) {
+        guard let host, let kind = engineKind(of: extensions) else { return completion(nil) }
+        host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
+    }
+
+    /// A store install is refused without a sheet, since the store is no install source. A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time includes every website, and an extension that may ask for native messaging at run time without the install's grant is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
+    public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
+        guard let host else { return completion(false) }
+        switch prompt.kind {
+        case .install:
+            completion(false)
+        case let .reload(names):
+            host.presentSheet(WebExtensionEnginePrompt.reloadAlert(names: names), for: prompt.tab) { completion($0 == .alertFirstButtonReturn) }
+        case let .permissions(messages):
+            guard let loaded = loadedExtension(id, in: extensions), let kind = engineKind(of: extensions) else { return completion(false) }
+            let installed = plugins.first { $0.id == loaded.id } ?? loaded
+            let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
+            let optional = installed.packageURL.map(WebExtensionManifest.optionalAccess(ofPackageAt:)) ?? WebExtensionManifest.OptionalAccess()
+            guard !optional.permissions.contains("nativeMessaging") || installed.grant.permissions.contains(.nativeMessaging) else { return completion(false) }
+            let alert = WebExtensionEnginePrompt.permissionsAlert(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind)
+            host.presentSheet(alert, for: prompt.tab) { response in
+                guard response == .alertFirstButtonReturn else { return completion(false) }
+                Task { completion(await WebExtensionEnginePrompt.confirm(optional.grant, extensionName: lead.manifest.name)) }
+            }
+        }
     }
 
     /// Asks with a sheet for the tab, which for a version of a pair names the pair and the calling engine's version, whose copy alone the answer reaches. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.

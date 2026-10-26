@@ -5,6 +5,7 @@ import PackageDescription
 // CEFBridge compiles its own files and the CEF C++ wrapper, which scripts/setup_cef.sh copies from Frameworks/cef; run it first (docs/plan.md, Build Procedure).
 let cefWrapperSources = [
     "CEFBridgeBrowser.mm",
+    "CEFBridgeExtensions.mm",
     "CEFBridgeHelper.mm",
     "CEFBridgeRequestContext.mm",
     "CEFBridgeRuntime.mm",

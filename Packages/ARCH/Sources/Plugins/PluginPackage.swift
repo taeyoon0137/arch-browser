@@ -1,4 +1,4 @@
-// Plugin packages: a folder with `plugin.json` at its top for a script plugin, or with the manifest file of a runtime's kind, such as a web extension's `manifest.json`, which the user chooses as the folder or as a `.zip` archive, or a script plugin's folder whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, has the engines that run the kind check it, and moves it into the Persona's plugin folder when the user installs it.
+// Plugin packages: a folder with `plugin.json` at its top for a script plugin, or with the manifest file of a runtime's kind, such as a web extension's `manifest.json`, which the user chooses as the folder, as a `.zip` archive, or, for a web extension, as a `.crx` file, or a script plugin's folder whose files AI writes. The manager copies it, or writes AI's files, into a staging folder, reads it there for the install sheet without running any of it, has the engines that run the kind check it, and moves it into the Persona's plugin folder when the user installs it.
 import ARCHEngine
 import Foundation
 
@@ -85,15 +85,28 @@ public struct PluginPackage: Identifiable, Sendable {
         [ScriptManifest.fileName] + runtimes.map(\.manifestFileName)
     }
 
-    /// Copies the folder at `source`, or extracts the `.zip` archive there, to `root`, which must not exist yet, and reads the package as `init(at:origin:runtimes:)` does. An archive's package is its top level or its only top folder, as an archive of a package folder has. A failure leaves nothing at `root`.
+    /// Copies the folder at `source`, or extracts the `.zip` archive or `.crx` file there, to `root`, which must not exist yet, and reads the package as `init(at:origin:runtimes:)` does. An archive's package is its top level or its only top folder, as an archive of a package folder has. A `.crx` file's key goes into its manifest when the manifest has none (`CRXArchive`). A failure leaves nothing at `root`.
     static func stage(_ source: URL, at root: URL, runtimes: [any PluginRuntime] = []) throws -> PluginPackage {
         try stage(at: root, origin: .file(source.absoluteURL), runtimes: runtimes) {
             if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                 try FileManager.default.copyItem(at: source, to: root)
+            } else if source.pathExtension.lowercased() == "crx" {
+                try extractCRX(source, to: root, runtimes: runtimes)
             } else {
                 try extractArchive(source, to: root, runtimes: runtimes)
             }
         }
+    }
+
+    /// Extracts the `.zip` archive after the file's header as `extractArchive(_:to:runtimes:)` does, then writes the header's key into the package's `manifest.json`.
+    private static func extractCRX(_ file: URL, to root: URL, runtimes: [any PluginRuntime]) throws {
+        let crx = try CRXArchive(Data(contentsOf: file), name: file.lastPathComponent)
+        let archive = root.appendingPathExtension("zip")
+        defer { try? FileManager.default.removeItem(at: archive) }
+        try crx.archive.write(to: archive)
+        try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
+        let manifest = root.appendingPathComponent("manifest.json")
+        if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest) }
     }
 
     /// Writes the text of each file at its package path in `root`, which must not exist yet, and reads the package. Throws `PluginError.invalidPackage` for a path that breaks the rules of `file(_:in:)`. A failure leaves nothing at `root`.
@@ -137,7 +150,7 @@ public struct PluginPackage: Identifiable, Sendable {
     }
 
     /// Extracts the archive with `ditto`, which keeps every entry inside the destination, then moves the package folder in it to `root`.
-    private static func extractArchive(_ archive: URL, to root: URL, runtimes: [any PluginRuntime]) throws {
+    private static func extractArchive(_ archive: URL, to root: URL, runtimes: [any PluginRuntime], failure: String? = nil) throws {
         let extracted = root.appendingPathExtension("archive")
         defer { try? FileManager.default.removeItem(at: extracted) }
         let ditto = Process()
@@ -147,7 +160,7 @@ public struct PluginPackage: Identifiable, Sendable {
         ditto.standardError = FileHandle.nullDevice
         try ditto.run()
         ditto.waitUntilExit()
-        guard ditto.terminationStatus == 0 else { throw PluginError.invalidPackage("\(archive.lastPathComponent) is not a folder or a .zip archive.") }
+        guard ditto.terminationStatus == 0 else { throw PluginError.invalidPackage(failure ?? "\(archive.lastPathComponent) is not a folder or a .zip archive.") }
         try FileManager.default.moveItem(at: packageFolder(in: extracted, runtimes: runtimes), to: root)
     }
 

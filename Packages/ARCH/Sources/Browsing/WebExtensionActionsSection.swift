@@ -1,4 +1,4 @@
-// The site settings popover's section for the web extensions of the tab's Persona: a row for each enabled extension with an action, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss.
+// The site settings popover's section for the web extensions of the tab's Persona: a row for each enabled extension with an action, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -41,7 +41,7 @@ struct WebExtensionActionsSection: View {
                         }
                     }
                     .frame(width: 16, height: 16)
-                    Text(item.action?.label ?? item.name)
+                    Text(item.action.flatMap { $0.label.isEmpty ? nil : $0.label } ?? item.name)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if let badge = item.action?.badgeText, !badge.isEmpty {
@@ -59,6 +59,14 @@ struct WebExtensionActionsSection: View {
             .buttonStyle(.plain)
             .disabled(item.action?.isEnabled != true)
             .help(item.name)
+            if item.wantsSiteAccess {
+                Button("Allow on This Site") {
+                    close()
+                    webExtensions.grantSiteAccess(of: item.id, for: tab.webContents)
+                }
+                .controlSize(.small)
+                .padding(.leading, 24)
+            }
             if engineRunsExtensions, !item.engines.contains(tab.engineKind), let note = PluginPackage.runsNote(on: item.engines) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(note)

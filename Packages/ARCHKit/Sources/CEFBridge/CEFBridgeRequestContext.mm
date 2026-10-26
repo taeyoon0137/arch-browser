@@ -345,6 +345,7 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
     _cookieManager = nullptr;
     _context = nullptr;
     [self runWaitingCalls];
+    [self detachExtensions];
 }
 
 - (void)runWaitingCalls {
@@ -355,7 +356,6 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
     }
 }
 
-/// Runs `call` at once, or after the calls that wait for Chromium to initialize the context.
 - (void)whenReady:(dispatch_block_t)call {
     if (_waitingCalls) {
         [_waitingCalls addObject:[call copy]];

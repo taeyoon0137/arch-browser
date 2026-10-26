@@ -91,6 +91,9 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         contexts[id]?.performAction(for: tab)
     }
 
+    /// WebKit asks for a site through the controller's prompts instead, so no action of it wants site access.
+    func grantSiteAccess(of id: String, for tab: any EngineWebContents) {}
+
     private func extensionTab(of webContents: any EngineWebContents) -> WebKitExtensionTab? {
         guard let webContents = webContents as? WebKitWebContents, webContents.context.webExtensions === self else { return nil }
         return webContents.extensionTab
@@ -170,6 +173,28 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         focusedWindow
     }
 
+    /// The app opens the tab in its window, which it then reports, and WebKit's options page opens the same way. The tab opens unpinned and unmuted whatever the configuration asks.
+    func webExtensionController(_ controller: WKWebExtensionController, openNewTabUsing configuration: WKWebExtension.TabConfiguration, for extensionContext: WKWebExtensionContext,
+                                completionHandler: @escaping ((any WKWebExtensionTab)?, (any Error)?) -> Void) {
+        guard let delegate else { return completionHandler(nil, WebKitExtensionError.tabNotOpened) }
+        let window = configuration.window as? WebKitExtensionWindow
+        let index = configuration.index < (window?.tabs.count ?? 0) ? configuration.index : nil
+        delegate.extensions(self, openTabWith: configuration.url, inWindow: window?.id, active: configuration.shouldBeActive, index: index) { [weak self] contents in
+            guard let tab = contents.flatMap({ self?.extensionTab(of: $0) }) else { return completionHandler(nil, WebKitExtensionError.tabNotOpened) }
+            completionHandler(tab, nil)
+        }
+    }
+
+    /// The app opens a window with the addresses as tabs. Tabs to move into it and its type, state, and frame are not followed.
+    func webExtensionController(_ controller: WKWebExtensionController, openNewWindowUsing configuration: WKWebExtension.WindowConfiguration, for extensionContext: WKWebExtensionContext,
+                                completionHandler: @escaping ((any WKWebExtensionWindow)?, (any Error)?) -> Void) {
+        guard let delegate, !configuration.shouldBePrivate else { return completionHandler(nil, WebKitExtensionError.windowNotOpened) }
+        delegate.extensions(self, openWindowWith: configuration.tabURLs, focused: configuration.shouldBeFocused) { [weak self] id in
+            guard let window = self?.windows.first(where: { $0.id == id }) else { return completionHandler(nil, WebKitExtensionError.windowNotOpened) }
+            completionHandler(window, nil)
+        }
+    }
+
     func webExtensionController(_ controller: WKWebExtensionController, promptForPermissions permissions: Set<WKWebExtension.Permission>, in tab: (any WKWebExtensionTab)?,
                                 for extensionContext: WKWebExtensionContext, completionHandler: @escaping (Set<WKWebExtension.Permission>, Date?) -> Void) {
         ask(Set(permissions.map { .permission($0.rawValue) }), in: tab, for: extensionContext) { allowed in
@@ -207,7 +232,7 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
     func webExtensionController(_ controller: WKWebExtensionController, presentActionPopup action: WKWebExtension.Action, for context: WKWebExtensionContext,
                                 completionHandler: @escaping ((any Error)?) -> Void) {
         let tab = (action.associatedTab as? WebKitExtensionTab)?.contents
-        guard let popover = action.popupPopover, delegate?.extensions(self, present: popover, ofExtension: context.uniqueIdentifier, for: tab) == true else {
+        guard let popover = action.popupPopover, delegate?.extensions(self, present: .popover(popover), ofExtension: context.uniqueIdentifier, for: tab) == true else {
             action.closePopup()
             return completionHandler(WebKitExtensionError.popupNotShown)
         }
@@ -255,6 +280,8 @@ enum WebKitExtensionError: LocalizedError {
     case notJSON
     case noNativeApp
     case tabClosed
+    case tabNotOpened
+    case windowNotOpened
 
     var errorDescription: String? {
         switch self {
@@ -262,6 +289,8 @@ enum WebKitExtensionError: LocalizedError {
         case .notJSON: return "The message is not JSON."
         case .noNativeApp: return "No native app can answer."
         case .tabClosed: return "The tab has closed."
+        case .tabNotOpened: return "Arch did not open the tab."
+        case .windowNotOpened: return "Arch did not open the window."
         }
     }
 }

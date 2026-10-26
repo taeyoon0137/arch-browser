@@ -1,4 +1,4 @@
-// The question that a web extension's request for more access asks, such as an optional permission or a site it requests with `permissions.request`: a sheet that names the extension, and for a version of a pair that version, states the access in the sentences of the install sheet, and Touch ID or the login password for access to every website, as at install. Native messaging is never granted here, since only the install grants it.
+// The question that a web extension's request for more access asks, such as an optional permission or a site it requests with `permissions.request`: a sheet that names the extension, and for a version of a pair that version, states the access in the sentences of the install sheet, and Touch ID or the login password for access to every website, as at install. Native messaging is never granted here, since only the install grants it. The engines' own questions, in their own sentences, ask with sheets of the same kind.
 import AppKit
 import ARCHEngine
 import LocalAuthentication
@@ -60,6 +60,38 @@ struct WebExtensionAccessPrompt {
 
     /// True at once for access that needs no confirmation.
     func confirm() async -> Bool {
+        await WebExtensionEnginePrompt.confirm(grant, extensionName: extensionName)
+    }
+}
+
+/// The questions that an engine's extension runtime asks in its own words: more access that Chromium describes in its sentences, which do not say which permissions or sites they stand for, and a reload of a tab so that the extensions it kept from running there run.
+enum WebExtensionEnginePrompt {
+    /// Allow, then Don't Allow, under a title that names the version of a pair that asks. The engine keeps what the user allows until the extension's storage goes, as Chromium keeps the permissions it grants at run time.
+    static func permissionsAlert(messages: [String], extensionName: String, version: EngineKind?, engine: EngineKind) -> NSAlert {
+        let alert = NSAlert()
+        let name = "\u{201C}\(extensionName)\u{201D}"
+        alert.messageText = "Allow \(version.map { "the \($0.displayName) version of \(name)" } ?? name) more access?"
+        let keeper = version.map { "Only the \($0.displayName) version gets this access." } ?? "The extension gets this access on \(engine.displayName) tabs."
+        alert.informativeText = (messages.isEmpty ? "" : messages.joined(separator: "\n") + "\n\n")
+            + "\(keeper) \(engine.displayName) keeps it until you remove the extension."
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Don\u{2019}t Allow")
+        return alert
+    }
+
+    /// Reload, then Cancel, naming the extensions that run on the page once it loads again.
+    static func reloadAlert(names: [String]) -> NSAlert {
+        let alert = NSAlert()
+        let list = names.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ")
+        alert.messageText = "Reload This Page?"
+        alert.informativeText = "\(list.isEmpty ? "The extension" : list) can run on this page once it loads again."
+        alert.addButton(withTitle: "Reload")
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    /// Touch ID or the login password for a grant whose rule needs it, true at once otherwise.
+    static func confirm(_ grant: PluginGrant, extensionName: String) async -> Bool {
         guard let reason = grant.confirmationReason(for: extensionName) else { return true }
         return (try? await LAContext().evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
     }

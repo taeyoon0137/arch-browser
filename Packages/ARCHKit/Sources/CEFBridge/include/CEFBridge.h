@@ -83,6 +83,128 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 - (void)setPermissionSetting:(ARCHCEFPermissionSetting)setting forPermissions:(ARCHCEFPermission)permissions origin:(NSString *)origin;
 @end
 
+#pragma mark - Extensions
+
+@class ARCHCEFBrowser;
+@class ARCHCEFExtensionWindow;
+@class ARCHCEFExtensionPopup;
+
+/// Where an extension's host permissions apply.
+typedef NS_ENUM(NSInteger, ARCHCEFExtensionSiteAccess) {
+    /// Chromium withholds them: the extension runs on a site only after the user runs its action there or allows it on the site.
+    ARCHCEFExtensionSiteAccessOnClick,
+    ARCHCEFExtensionSiteAccessOnAllSites,
+};
+
+/// What a prompt of the extension runtime asks.
+typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
+    /// More permissions, as `permissions.request()` asks; the messages are Chromium's sentences for them.
+    ARCHCEFExtensionPromptKindPermissions,
+    /// An install from the store; the messages are the permissions' sentences.
+    ARCHCEFExtensionPromptKindInstall,
+    /// A reload of the tab so that blocked actions run; the messages are the names of the waiting extensions.
+    ARCHCEFExtensionPromptKindReload,
+};
+
+/// An extension installed in a profile, as Chromium's extension runtime lists it.
+@interface ARCHCEFExtension : NSObject
+@property (nonatomic, readonly, copy) NSString *identifier;
+@property (nonatomic, readonly, copy) NSString *name;
+@property (nonatomic, readonly, copy) NSString *version;
+/// The folder it loads from.
+@property (nonatomic, readonly, copy) NSString *path;
+@property (nonatomic, readonly) BOOL isEnabled;
+@end
+
+/// An extension's action as it shows on one tab.
+@interface ARCHCEFExtensionAction : NSObject
+@property (nonatomic, readonly, copy) NSString *extensionIdentifier;
+@property (nonatomic, readonly, copy) NSString *title;
+@property (nonatomic, readonly, copy) NSString *badgeText;
+@property (nonatomic, readonly) BOOL isEnabled;
+/// Whether Chromium kept the extension from running on the tab's site, so that it waits for the user to allow it there.
+@property (nonatomic, readonly) BOOL wantsSiteAccess;
+/// Nil while the icon loads.
+@property (nonatomic, readonly, nullable) NSImage *icon;
+@end
+
+/// What the app does for the extensions of one request context. Every call comes on the main thread.
+@protocol ARCHCEFExtensionsDelegate <NSObject>
+/// An extension loaded, was enabled or disabled, unloaded, or was uninstalled.
+- (void)cefExtensionsDidChange;
+/// The action of the extension changed on `browser`, or on every tab for nil.
+- (void)cefExtensionActionDidChange:(NSString *)extensionIdentifier browser:(nullable ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionActionDidChange(_:browser:));
+/// Shows the popup of an action that ran on `browser`: put `popup.view` in a view of the app's at `popup.preferredSize` and return YES, or return NO to close the popup.
+- (BOOL)cefExtensionsShouldShowPopup:(ARCHCEFExtensionPopup *)popup forBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionsShouldShowPopup(_:for:));
+/// Asks for a new tab that loads `url`, or the app's new tab page for an empty one, in `window` or a window the app chooses for nil, at `index` among the window's tabs or where the app chooses for -1. Return YES and call `completion` with the tab's browser once a window lists it, or with nil when it did not open; return NO to refuse.
+- (BOOL)cefExtensionsOpenTabWithURL:(NSString *)url
+                           inWindow:(nullable ARCHCEFExtensionWindow *)window
+                             active:(BOOL)active
+                              index:(NSInteger)index
+                         completion:(void (^)(ARCHCEFBrowser *_Nullable browser))completion NS_SWIFT_NAME(cefExtensionsOpenTab(withURL:in:active:index:completion:));
+/// Asks to select the tab, as `tabs.update` with `active` does.
+- (void)cefExtensionsActivateBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionsActivate(_:));
+/// Asks to close the tab, as `tabs.remove` does.
+- (void)cefExtensionsCloseBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionsClose(_:));
+/// Asks for a new window with a tab for each address, or with the new tab page for none. Return YES and call `completion` with the window once it lists its tabs, or with nil; return NO to refuse.
+- (BOOL)cefExtensionsOpenWindowWithURLs:(NSArray<NSString *> *)urls focused:(BOOL)focused completion:(void (^)(ARCHCEFExtensionWindow *_Nullable window))completion NS_SWIFT_NAME(cefExtensionsOpenWindow(withURLs:focused:completion:));
+/// Asks the user a prompt for the extension, about `browser` or no tab. Return YES and call `completion` once with the answer, or return NO to refuse. An accepted reload prompt reloads the tab.
+- (BOOL)cefExtensionsShowPrompt:(ARCHCEFExtensionPromptKind)kind
+                      extension:(NSString *)extensionIdentifier
+                        browser:(nullable ARCHCEFBrowser *)browser
+                       messages:(NSArray<NSString *> *)messages
+                     completion:(void (^)(BOOL accepted))completion NS_SWIFT_NAME(cefExtensionsShowPrompt(_:extension:browser:messages:completion:));
+@end
+
+/// The Chromium-format extensions of a request context, through Arch's engine's extension runtime (an experimental CEF API, VI.1). Calls that change extensions, and the list, wait until Chromium has initialized the context and loaded its extensions; actions read now and are empty before then.
+@interface ARCHCEFRequestContext (Extensions)
+/// The app's side of the context's extensions. Setting it the first time starts the runtime with the bridge's handler, which keeps the delegate weakly.
+@property (nonatomic, weak, nullable) id<ARCHCEFExtensionsDelegate> extensionsDelegate;
+/// Loads the unpacked extension in the folder at `path`, or reloads it, and keeps loading it at later launches until it is removed. Calls `completion` once on the main thread with Chromium's identifier for it or an error.
+- (void)loadExtensionAtPath:(NSString *)path completion:(void (^)(NSString *_Nullable identifier, NSString *_Nullable error))completion NS_SWIFT_NAME(loadExtension(atPath:completion:));
+/// Uninstalls the extension and deletes its storage. Its files stay.
+- (void)removeExtension:(NSString *)identifier NS_SWIFT_NAME(removeExtension(_:));
+- (void)setExtension:(NSString *)identifier enabled:(BOOL)enabled NS_SWIFT_NAME(setExtension(_:enabled:));
+- (void)setExtension:(NSString *)identifier siteAccess:(ARCHCEFExtensionSiteAccess)siteAccess NS_SWIFT_NAME(setExtension(_:siteAccess:));
+/// Calls `completion` once on the main thread with the installed extensions, or none once the runtime cannot start.
+- (void)extensionsWithCompletion:(void (^)(NSArray<ARCHCEFExtension *> *extensions))completion NS_SWIFT_NAME(extensions(completion:));
+/// The actions that show on the browser's page, with icons at the window's backing scale.
+- (NSArray<ARCHCEFExtensionAction *> *)extensionActionsForBrowser:(ARCHCEFBrowser *)browser scale:(CGFloat)scale NS_SWIFT_NAME(extensionActions(for:scale:));
+/// Runs the extension's action on the browser's page, as a click on it does.
+- (void)runExtensionAction:(NSString *)identifier inBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(runExtensionAction(_:in:));
+/// Allows the extension on the browser's site, which runs what Chromium kept it from running there.
+- (void)grantExtensionSiteAccess:(NSString *)identifier inBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(grantExtensionSiteAccess(_:in:));
+/// A window that extensions see as `normal`, over the AppKit window that holds `contentView`, which must be in one. Its tabs and focus follow its calls; Chromium creates it once the runtime runs.
+- (ARCHCEFExtensionWindow *)makeExtensionWindowForView:(NSView *)contentView NS_SWIFT_NAME(makeExtensionWindow(for:));
+@end
+
+/// A window that extensions see, with its tabs in order. Chromium answers `windows.remove` with `performClose:` on the AppKit window, and its frame and state come from it.
+@interface ARCHCEFExtensionWindow : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+/// Lists the window's tabs in order, each a browser of the context, with the active one at `activeIndex`, or -1 for none. A browser that Chromium has not created yet joins once it has. A tab that leaves every window by the end of the current task counts as closed.
+- (void)setTabs:(NSArray<ARCHCEFBrowser *> *)tabs activeIndex:(NSInteger)activeIndex NS_SWIFT_NAME(setTabs(_:activeIndex:));
+/// Whether the window is the one extensions see as focused.
+- (void)setFocused:(BOOL)focused;
+/// Takes the window away from extensions. Calls after this do nothing.
+- (void)close;
+@end
+
+/// An action's popup page, which the app shows in a view of its own until it closes.
+@interface ARCHCEFExtensionPopup : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+@property (nonatomic, readonly, copy) NSString *extensionIdentifier;
+/// The page's view, or nil once the popup has closed.
+@property (nonatomic, readonly, nullable) NSView *view;
+/// The size the page asks for, in points, between 25 × 25 and 800 × 600.
+@property (nonatomic, readonly) NSSize preferredSize;
+/// Called when the page asks for another size.
+@property (nonatomic, copy, nullable) void (^sizeDidChange)(NSSize size);
+/// Called once when the popup closes for any reason, after which its view leaves the app's view.
+@property (nonatomic, copy, nullable) void (^didClose)(void);
+/// Closes the popup; `didClose` follows.
+- (void)close;
+@end
+
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;
@@ -260,6 +382,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 + (BOOL)isInitialized;
 /// Closes every browser, runs CEF's work for up to two seconds while they close, and shuts CEF down. It runs by itself at `NSApplicationWillTerminateNotification`, once the quit is certain.
 + (void)shutdown;
+/// The version of the CEF distribution the bridge builds with, which the framework must match, such as `156.0.42-arch-8078.3687+g10ca70a+chromium-156.0.8078.48`.
+@property (class, nonatomic, readonly, copy) NSString *cefVersion;
 /// Builds the accessibility tree of every browser, now and as browsers open, or stops building it. Assistive apps then read Chromium pages as they read WebKit ones; the tree costs memory and time on every page.
 + (void)setAccessibilityEnabled:(BOOL)enabled;
 /// Helper process entry point. Returns the process exit code.

@@ -95,6 +95,29 @@ struct WebExtensionManifest {
         let letters = Array("abcdefghijklmnop")
         return SHA256.hash(data: bytes).prefix(16).map { "\(letters[Int($0 >> 4)])\(letters[Int($0 & 0xF)])" }.joined()
     }
+
+    /// Writes a `key` whose bytes are the path of `source` into the manifest of the package at `root`, which the user installed from `source`, when the manifest has none. Chromium names an extension by the digest of its key's bytes, and otherwise by the folder it loads from, which for an installed package is Arch's copy; with this key it knows the extension by the identifier that `extensionID(key:source:)` gives, as WebKit and Arch do. Chromium reads a key as Base64 bytes without checking that they hold a public key (`ComputeExtensionID` in `extensions/common/extension.cc`).
+    static func writeKey(packageAt root: URL, source: URL) throws {
+        try PluginPackage.writeManifestKey(Data(source.standardizedFileURL.path.utf8), into: root.appendingPathComponent(fileName))
+    }
+
+    /// What an extension may ask for at run time with `permissions.request()`: its manifest's `optional_permissions` and `optional_host_permissions`, the sites as far as Arch's match patterns hold them.
+    struct OptionalAccess {
+        var permissions: Set<String> = []
+        var sites: [MatchPattern] = []
+
+        /// The sites as a grant, whose rule says whether the user confirms them.
+        var grant: PluginGrant { PluginGrant(permissions: [], sites: sites) }
+    }
+
+    /// Nothing for a manifest that does not read.
+    static func optionalAccess(ofPackageAt root: URL) -> OptionalAccess {
+        guard let data = try? Data(contentsOf: root.appendingPathComponent(fileName)),
+              let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return OptionalAccess() }
+        let names = fields["optional_permissions"] as? [String] ?? []
+        let patterns = (fields["optional_host_permissions"] as? [String] ?? []) + names
+        return OptionalAccess(permissions: Set(names.filter { !$0.contains(":") && $0 != "<all_urls>" }), sites: patterns.compactMap { try? MatchPattern($0) })
+    }
 }
 
 /// A manifest problem, stated as a clause, as a sentence that names the file.

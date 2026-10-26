@@ -175,10 +175,10 @@ public final class BrowserSession: ObservableObject {
         if windows.isEmpty { reopenWindows(windowsToReopen) }
     }
 
-    /// New Window: opens a main window on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
+    /// New Window: opens a main window on `spaceID`, or on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
     @discardableResult
-    public func openWindow() -> BrowserWindowModel {
-        let spaceID = activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+    public func openWindow(onSpace spaceID: UUID? = nil) -> BrowserWindowModel {
+        let spaceID = spaceID ?? activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         return window
@@ -942,6 +942,17 @@ public final class BrowserSession: ObservableObject {
     /// Pressing another key or clicking in the page makes ⌘Z undo there instead of reopening tabs.
     public func forgetUndoableCloses() {
         undoableCloseCount = 0
+    }
+
+    /// Moves a tab next to `neighbor`, before or after it, while both are open tabs of one space outside folders, as for a tab a web extension opens; otherwise the tab stays where it is.
+    func placeTab(_ tab: Tab, nextTo neighbor: Tab, after: Bool) {
+        guard tab.id != neighbor.id, neighbor.spaceID == tab.spaceID, !tab.isPinned, !neighbor.isPinned, tab.folderID == nil, neighbor.folderID == nil, neighbor.isListedInSidebar,
+              let from = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        var reordered = tabs
+        reordered.remove(at: from)
+        guard let to = reordered.firstIndex(where: { $0.id == neighbor.id }) else { return }
+        reordered.insert(tab, at: after ? to + 1 : to)
+        tabs = reordered
     }
 
     /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.

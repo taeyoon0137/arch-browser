@@ -6,9 +6,9 @@ import Foundation
 
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
-    public let capabilities: Set<EngineCapability> = [.devTools, .pictureInPicture, .cookies]
-    /// Chromium runs no web extensions until VI.1, which gives the CEF version here.
-    public let extensionRuntimeVersion: String? = nil
+    public let capabilities: Set<EngineCapability> = [.devTools, .pictureInPicture, .cookies, .extensions]
+    /// Arch's engine runs Chromium's own extension system in every Alloy style browser (VI.1), so the CEF version, which the bridge builds with, names it.
+    public var extensionRuntimeVersion: String? { ARCHCEFRuntime.cefVersion }
     let frameworkPath: String
     let helperPath: String?
     private let accessibility = MainActor.assumeIsolated { ChromiumAccessibility() }
@@ -29,6 +29,7 @@ public final class ChromiumEngine: Engine {
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
         // A removal that a quit cut short leaves a renamed profile, which goes here even when no list names its Persona any more, as after a session that did not load.
         Self.deleteRemovedProfiles(in: configuration.chromiumProfileRoots)
+        Self.linkNativeMessagingHosts(configuration)
         guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: configuration.chromiumRootCache.path) else {
             throw StartError.initializationFailed
         }
@@ -50,6 +51,14 @@ public final class ChromiumEngine: Engine {
             let leftovers = profiles + profiles.map { $0.appendingPathExtension(Self.removedProfileExtension) }
             completion(!leftovers.contains { FileManager.default.fileExists(atPath: $0.path) })
         }
+    }
+
+    /// Chromium reads the host manifests of the native apps that extensions reach from `NativeMessagingHosts` in its user data directory, the root cache path. A link there to the app's folder of the same name, from which the app answers WebKit's extensions, gives both engines one set of hosts. Something already at that path stays. Whether Chromium follows the link needs verification.
+    private static func linkNativeMessagingHosts(_ configuration: EngineApplicationConfiguration) {
+        let link = configuration.chromiumRootCache.appendingPathComponent("NativeMessagingHosts")
+        guard (try? FileManager.default.attributesOfItem(atPath: link.path)) == nil else { return }
+        try? FileManager.default.createDirectory(at: configuration.chromiumRootCache, withIntermediateDirectories: true)
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: configuration.userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
     }
 
     /// The profile of a context with a storage identifier is named by this prefix and the identifier. A removed one also has the extension until its deletion finishes.
@@ -119,6 +128,8 @@ public final class ChromiumApplication: EngineApplication {
         guard let requestContext else { return completion(.failure(ChromiumEngine.StartError.profileUnavailable)) }
         let context = ChromiumBrowserContext(attributes: attributes, requestContext: requestContext)
         context.application = self
+        // The extensions start with the profile, so that what Chromium kept from an earlier run follows the app from the start.
+        _ = context.extensions
         contexts[attributes.id] = context
         completion(.success(context))
     }
@@ -160,7 +171,8 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
     public var type: EngineBrowserContextType { attributes.type }
     public var userVisibleName: String { attributes.userVisibleName }
     public var downloads: any EngineDownloads { chromiumDownloads }
-    public var extensions: (any EngineExtensions)? { nil }
+    public var extensions: (any EngineExtensions)? { chromiumExtensions }
+    private lazy var chromiumExtensions = ChromiumExtensions(context: self)
 
     /// Chromium keeps every answer its own prompt gives, such as one for geolocation or notifications, and gives it without asking again, so the kept answers follow the app's.
     public func setRememberedPermission(_ allowed: Bool?, for type: EnginePermissionType, origin: URL) {
@@ -290,8 +302,9 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var isLoading = false
     public private(set) var canGoBack = false
     public private(set) var canGoForward = false
-    private var browser: ARCHCEFBrowser?
-    private weak var context: ChromiumBrowserContext?
+    private(set) var browser: ARCHCEFBrowser?
+    /// The profile, whose extensions see this web contents as a tab.
+    private(set) weak var context: ChromiumBrowserContext?
     /// The profile the page loads in. Popups load in the same one.
     private let requestContext: ARCHCEFRequestContext
     /// The icon URL that last gave each host's pages their icon in this tab, by lowercase host.

@@ -2,6 +2,8 @@
 #import "CEFBridge.h"
 
 #include "include/cef_app.h"
+#include "include/cef_browser.h"
+#include "include/cef_extension_runtime.h"
 #include "include/cef_request_context.h"
 
 namespace cef_bridge {
@@ -53,20 +55,56 @@ const char kPageScriptDelivery[] = "ARCHPageScriptDelivery";
 // The app of the helper's renderer processes, which `+[ARCHCEFRuntime runHelperWithArgc:argv:]` runs.
 CefRefPtr<CefApp> MakeHelperApp();
 
+// The extension runtime's side of the runtime and browsers. `CEFBridgeExtensions.mm` holds them.
+
+// Starts the extension runtime of the global context, which CEF reports initialized after `CefInitialize` returns.
+void GlobalContextDidInitialize();
+// Closes the extension windows and answers the requests that wait, so that the app holds no extension object of CEF's when it shuts down.
+void ReleaseExtensionObjects();
+// Sends again the tabs of the extension windows that list the browser, which CEF has just created.
+void ExtensionsBrowserDidCreate(ARCHCEFBrowser *browser);
+// Answers the requests that wait for the browser, which CEF is closing.
+void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser);
+
 }  // namespace cef_bridge
 
-@interface ARCHCEFRequestContext ()
+@interface ARCHCEFRequestContext () {
+    __weak id<ARCHCEFExtensionsDelegate> _extensionsDelegate;
+    /// The context's extension runtime with the bridge's handler, once Chromium has initialized the context; null before and when it cannot start.
+    CefRefPtr<CefExtensionRuntime> _extensionRuntime;
+    CefRefPtr<CefExtensionRuntimeHandler> _extensionHandler;
+    /// The calls that wait for the runtime, oldest first.
+    NSMutableArray *_extensionCalls;
+    BOOL _extensionsStarting;
+    /// Set once calls run at once, with a runtime or without.
+    BOOL _extensionsReady;
+}
 /// Gives the object CEF's context and that context's cookie manager.
 - (void)attachContext:(CefRefPtr<CefRequestContext>)context;
 /// Releases the CEF objects and runs the waiting calls. Calls after that change nothing.
 - (void)detachContext;
+/// Runs `call` at once, or after the calls that wait for Chromium to initialize the context.
+- (void)whenReady:(dispatch_block_t)call;
 /// The context for browsers of this profile, or null without one.
 - (CefRefPtr<CefRequestContext>)cefContext;
+@end
+
+@interface ARCHCEFRequestContext (ExtensionRuntime)
+/// Runs `call` with the context's extension runtime once Chromium has initialized the context, or with null once the runtime cannot start.
+- (void)whenExtensionsReady:(void (^)(CefRefPtr<CefExtensionRuntime> runtime))call;
+/// Gets the extension runtime if the context is ready for it and the runtime has not started.
+- (void)startExtensions;
+/// Releases the runtime and runs the calls that wait for it with null.
+- (void)detachExtensions;
+/// Runs the calls that waited for the runtime, which `_extensionRuntime` now holds or not.
+- (void)finishStartingExtensions;
 @end
 
 @interface ARCHCEFBrowser ()
 /// Has the open browser build its accessibility tree, or stop, as `gAccessibilityEnabled` says.
 - (void)applyAccessibilityState;
+/// CEF's browser, from `OnAfterCreated` until `OnBeforeClose`.
+- (CefRefPtr<CefBrowser>)cefBrowser;
 /// Whether CEF still has the browser, from its creation until `OnBeforeClose`.
 @property (nonatomic, readonly) BOOL isOpen;
 /// Whether the developer tools fill the browser's tools view, from `cefBrowserDevToolsDidOpenView:` until `cefBrowserDevToolsDidClose`.

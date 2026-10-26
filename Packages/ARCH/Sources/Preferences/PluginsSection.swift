@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder or `.zip` archive and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version….
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version….
 import AI
 import ARCHEngine
 import Browsing
@@ -74,7 +74,7 @@ private struct PluginList: View {
 
     var body: some View {
         Section {
-            LabeledContent("Install a plugin or a web extension from a folder or a .zip archive") {
+            LabeledContent("Install a plugin or a web extension from a folder, a .zip archive, or a .crx file") {
                 Button("Install Plugin…", action: choosePackage)
             }
             if AIService.shared.isAvailable(.pluginComposer) {
@@ -125,7 +125,7 @@ private struct PluginList: View {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
-        panel.allowedContentTypes = [.folder, .zip]
+        panel.allowedContentTypes = [.folder, .zip, PluginPackage.crxType]
         panel.prompt = "Review"
         let finish = { (response: NSApplication.ModalResponse) in
             guard response == .OK, let url = panel.url else { return }

@@ -7,6 +7,7 @@
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_command_line.h"
+#include "include/cef_version.h"
 #include "include/wrapper/cef_library_loader.h"
 
 using namespace cef_bridge;
@@ -131,6 +132,11 @@ class BridgeApp : public CefApp, public CefBrowserProcessHandler {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
+    // Runs on the UI thread, which is the main thread, once the global context's profile has initialized.
+    void OnContextInitialized() override {
+        dispatch_async(dispatch_get_main_queue(), ^{ GlobalContextDidInitialize(); });
+    }
+
     // CEF calls this from any thread, including the main thread from inside one of its own API calls such as `LoadURL`.
     // Running `CefDoMessageLoopWork()` there re-enters the message loop and hangs, so the work always waits for the next
     // pass of the main run loop, as the CEF client sample does.
@@ -216,6 +222,10 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     return gInitialized;
 }
 
++ (NSString *)cefVersion {
+    return @CEF_VERSION;
+}
+
 + (void)shutdown {
     if (!gInitialized) {
         return;
@@ -225,6 +235,7 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     for (ARCHCEFRequestContext *context in gRequestContexts.allObjects) {
         [context detachContext];
     }
+    ReleaseExtensionObjects();
     // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashed once Chrome-style developer tools had opened. The tools in a view close first: once their browser has closed, their contents close on their own, unreported, and CEF would shut down over them. The closes run CEF's work for at most two seconds in all.
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {

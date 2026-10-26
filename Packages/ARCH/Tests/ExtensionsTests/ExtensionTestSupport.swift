@@ -57,7 +57,7 @@ extension PluginManager {
     }
 }
 
-/// A browser that gives the runtime its engines and records the popups and sheets the runtime asks it to show. Sheets get the answer the test chose.
+/// A browser that gives the runtime its engines and records the popups and sheets the runtime asks it to show and the tabs and windows it asks it to open. Sheets get the answer the test chose; a tab opens as `openedTab`, and a window as `openedWindow`.
 @MainActor
 final class RecordingHost: WebExtensionHost {
     var engines: [EngineKind: any EngineExtensions] = [:]
@@ -66,9 +66,18 @@ final class RecordingHost: WebExtensionHost {
     /// Engines that the host lists but whose profiles do not start, as an engine that fails when the runtime first needs it.
     var enginesThatDoNotStart: Set<EngineKind> = []
     var tabs: [UUID: any EngineWebContents] = [:]
+    /// WebKit's popovers.
     private(set) var popups: [NSPopover] = []
+    /// The popup pages that a popover of the app's would show.
+    private(set) var popupPages: [any EngineExtensionPopupView] = []
     private(set) var sheets: [NSAlert] = []
     var sheetAnswer = NSApplication.ModalResponse.alertFirstButtonReturn
+    /// Each tab request: the address, engine, Persona, window, whether active, and the index.
+    private(set) var openedTabs: [(url: URL?, engine: EngineKind, persona: PersonaID, window: UUID?, active: Bool, index: Int?)] = []
+    var openedTab: (any EngineWebContents)?
+    /// Each window request: the addresses, engine, and whether focused.
+    private(set) var openedWindows: [(urls: [URL], engine: EngineKind, focused: Bool)] = []
+    var openedWindow: UUID?
 
     var extensionRuntimeVersions: [EngineKind: String] {
         Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
@@ -81,9 +90,22 @@ final class RecordingHost: WebExtensionHost {
     func activate(_ tab: any EngineWebContents) {}
     func close(_ tab: any EngineWebContents) {}
 
-    func present(_ popup: NSPopover, for tab: (any EngineWebContents)?) -> Bool {
-        popups.append(popup)
+    func present(_ popup: EngineExtensionPopup, for tab: (any EngineWebContents)?) -> Bool {
+        switch popup {
+        case let .popover(popover): popups.append(popover)
+        case let .view(page): popupPages.append(page)
+        }
         return true
+    }
+
+    func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void) {
+        openedTabs.append((url, engine, persona, windowID, active, index))
+        completion(openedTab)
+    }
+
+    func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void) {
+        openedWindows.append((urls, engine, focused))
+        completion(openedWindow)
     }
 
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
@@ -102,6 +124,10 @@ final class RecordingEngine: EngineExtensions {
     private(set) var removedData: [String] = []
     /// The identifiers whose actions ran, in order.
     private(set) var performed: [String] = []
+    /// The identifiers that the user allowed on a tab's site, in order.
+    private(set) var grantedSiteAccess: [String] = []
+    /// Whether the actions say that the engine kept the extension from the tab's site.
+    var actionsWantSiteAccess = false
     var refusedNames: Set<String> = []
     var refused: Set<String> = []
 
@@ -126,11 +152,15 @@ final class RecordingEngine: EngineExtensions {
     }
 
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction? {
-        loaded[id] == nil ? nil : EngineExtensionAction(label: "Action", icon: nil, badgeText: "", isEnabled: true)
+        loaded[id] == nil ? nil : EngineExtensionAction(label: "Action", icon: nil, badgeText: "", isEnabled: true, wantsSiteAccess: actionsWantSiteAccess)
     }
 
     func performAction(of id: String, for tab: any EngineWebContents) {
         performed.append(id)
+    }
+
+    func grantSiteAccess(of id: String, for tab: any EngineWebContents) {
+        grantedSiteAccess.append(id)
     }
 
     func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?) {}

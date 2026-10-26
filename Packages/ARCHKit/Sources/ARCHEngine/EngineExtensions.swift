@@ -1,4 +1,4 @@
-// Tier 2: web extensions. An engine that runs Manifest V3 extensions gives each browser context an `EngineExtensions`, which runs the extensions the app loads into that profile in the engine's own extension runtime: their background, their content scripts, their popups, and their storage. The app keeps the installed list, tells the engine its windows and tabs, and shows everything around an extension in its own interface: the actions, the popovers that popups show in, and the questions about access.
+// Tier 2: web extensions. An engine that runs Manifest V3 extensions gives each browser context an `EngineExtensions`, which runs the extensions the app loads into that profile in the engine's own extension runtime: their background, their content scripts, their popups, and their storage. The app keeps the installed list, tells the engine its windows and tabs, opens the tabs and windows that extensions ask for, and shows everything around an extension in its own interface: the actions, the popovers that popups show in, and the questions about access.
 import AppKit
 import Foundation
 
@@ -29,12 +29,57 @@ public struct EngineExtensionAction {
     /// Short text the extension shows with the action, such as a count; empty for none.
     public var badgeText: String
     public var isEnabled: Bool
+    /// Whether the engine kept the extension from running on the tab's site, as Chromium does for an extension whose sites wait for a click, so that the app offers to allow it there (`EngineExtensions.grantSiteAccess(of:for:)`).
+    public var wantsSiteAccess: Bool
 
-    public init(label: String, icon: NSImage?, badgeText: String, isEnabled: Bool) {
+    public init(label: String, icon: NSImage?, badgeText: String, isEnabled: Bool, wantsSiteAccess: Bool = false) {
         self.label = label
         self.icon = icon
         self.badgeText = badgeText
         self.isEnabled = isEnabled
+        self.wantsSiteAccess = wantsSiteAccess
+    }
+}
+
+/// An action's popup, as an engine hands it to the app to show from the site settings button.
+public enum EngineExtensionPopup {
+    /// A popover that the engine filled and that sizes itself to the popup and closes when the popup closes itself, as WebKit's `popupPopover`; the app chooses where it shows.
+    case popover(NSPopover)
+    /// The popup page's view, which the app shows in a popover of its own and sizes as the page asks.
+    case view(any EngineExtensionPopupView)
+}
+
+/// An action's popup page as a view, as Chromium's runtime gives it.
+public protocol EngineExtensionPopupView: AnyObject {
+    /// The page's view. It belongs in the app's popover while the popup is open.
+    var view: NSView { get }
+    /// The size the page asks for, in points.
+    var preferredSize: CGSize { get }
+    /// Called when the page asks for another size.
+    var sizeDidChange: ((CGSize) -> Void)? { get set }
+    /// Called once when the popup closes for any reason: the page closed itself, the user pressed Escape, its tab went, or `close()`.
+    var didClose: (() -> Void)? { get set }
+    func close()
+}
+
+/// A question that an engine's extension runtime needs the user to answer, beyond the access questions of `EngineExtensionAccess`.
+public struct EngineExtensionPrompt {
+    public enum Kind: Equatable {
+        /// More access that the extension asks for at run time, such as with `permissions.request()`, in the engine's own sentences, which do not say which permissions or sites they stand for. Chromium keeps what the user allows until the extension's storage goes.
+        case permissions([String])
+        /// A reload of the tab, so that the actions that the named extensions were kept from running there run.
+        case reload([String])
+        /// An install from a store, which Arch does not offer.
+        case install
+    }
+
+    public var kind: Kind
+    /// The tab the question belongs to, if any.
+    public var tab: (any EngineWebContents)?
+
+    public init(kind: Kind, tab: (any EngineWebContents)?) {
+        self.kind = kind
+        self.tab = tab
     }
 }
 
@@ -88,8 +133,15 @@ public protocol EngineExtensionsDelegate: AnyObject {
     func extensions(_ extensions: any EngineExtensions, close tab: any EngineWebContents)
     /// The extension changed its action, such as its badge or whether it is enabled.
     func extensions(_ extensions: any EngineExtensions, didUpdateActionOf id: String)
-    /// Shows the popover with the action's popup, which the engine filled, for `tab`. Returns false when the app cannot show it, as when no window shows the tab; the engine then closes the popup.
-    func extensions(_ extensions: any EngineExtensions, present popup: NSPopover, ofExtension id: String, for tab: (any EngineWebContents)?) -> Bool
+    /// Shows the action's popup for `tab`. Returns false when the app cannot show it, as when no window shows the tab; the engine then closes the popup.
+    func extensions(_ extensions: any EngineExtensions, present popup: EngineExtensionPopup, ofExtension id: String, for tab: (any EngineWebContents)?) -> Bool
+    /// Opens a tab of the engine that loads `url`, or the new tab page for nil, as `tabs.create` and an options page ask: in the window `windowID` as `setWindows` reported it, or in the focused window for nil, at `index` among that window's tabs of the engine, or where the app chooses for nil, and selects it when `active`. Completes with the tab's web contents once the app has reported it in its window, or with nil when it did not open.
+    func extensions(_ extensions: any EngineExtensions, openTabWith url: URL?, inWindow windowID: UUID?, active: Bool, index: Int?,
+                    completion: @escaping ((any EngineWebContents)?) -> Void)
+    /// Opens a window with a tab of the engine for each address, or with the new tab page for none, as `windows.create` asks, and brings it forward when `focused`. Completes with the identity of the window as `setWindows` reports it, or with nil when none opened.
+    func extensions(_ extensions: any EngineExtensions, openWindowWith urls: [URL], focused: Bool, completion: @escaping (UUID?) -> Void)
+    /// Asks the user the engine's question for the extension and answers whether the user accepted.
+    func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void)
     /// Asks the user about access the extension requests while it runs and answers with what the user allowed, until the extension unloads.
     func extensions(_ extensions: any EngineExtensions, extension id: String, requests access: Set<EngineExtensionAccess>, in tab: (any EngineWebContents)?,
                     completion: @escaping (Set<EngineExtensionAccess>) -> Void)
@@ -115,6 +167,8 @@ public protocol EngineExtensions: AnyObject {
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction?
     /// Runs the action for the tab, as a click on it does: the extension shows its popup or receives the click.
     func performAction(of id: String, for tab: any EngineWebContents)
+    /// Allows the extension on the tab's site, where the engine kept it from running (`EngineExtensionAction.wantsSiteAccess`), which runs what it was kept from running there.
+    func grantSiteAccess(of id: String, for tab: any EngineWebContents)
     /// The app's windows and the focused one, if extensions may see it, each time they change. The engine answers extensions' questions about windows and tabs from the last call and tells them what opened, closed, moved, and became active since the call before. A window whose identity an earlier window in the list has is left out.
     func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?)
 }

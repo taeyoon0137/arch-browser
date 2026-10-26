@@ -972,6 +972,7 @@ private:
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _browserView = view;
     [self applyAccessibilityState];
+    ExtensionsBrowserDidCreate(self);
     if (popup) {
         [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
     }
@@ -1216,6 +1217,7 @@ private:
 - (void)handleBeforeClose {
     [self finishContextMenu];
     [self finishScriptRequests];
+    ExtensionsBrowserWillClose(self);
     [self finishCaptures];
     _devToolsRegistration = nullptr;
     _devToolsObserver = nullptr;
@@ -1723,6 +1725,10 @@ private:
 
 - (BOOL)isOpen {
     return _browser != nullptr;
+}
+
+- (CefRefPtr<CefBrowser>)cefBrowser {
+    return _browser;
 }
 
 // Before CEF has created the browser, the request waits for `OnAfterCreated`.
