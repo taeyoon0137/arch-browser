@@ -101,6 +101,7 @@ final class ChromiumPictureInPicture: NSObject {
             end()
         case .active:
             phase = .stopping
+            keepSourceViewInWindow()
             controller?.stopPictureInPicture()
             scheduleStopDeadline()
         case .stopping:
@@ -124,6 +125,14 @@ final class ChromiumPictureInPicture: NSObject {
     private func startDidTimeOut() {
         guard phase == .waiting else { return }
         end()
+    }
+
+    /// Moves the source view, at its size, to the top left of the content view of the front visible window that can become key, below the window's content, when the page's view is in no window, as while another tab is selected. In the prototype a stop led to no delegate call while the layer's view was in no window, and releasing the content source ended only a stop whose layer was in a window (Risk 12). The windows count also while the app is inactive; AVKit's own panel cannot become key (prototype fact 25), and a hidden app has no visible window. AVKit's own stops keep the view in the page, where the return button shows it again.
+    private func keepSourceViewInWindow() {
+        guard sourceView.window == nil, let contentView = NSApp.orderedWindows.first(where: { $0.isVisible && $0.canBecomeKey })?.contentView else { return }
+        sourceView.frame = Self.sourceFrame(NSRect(origin: .zero, size: sourceView.frame.size), naturalSize: .zero, in: contentView.bounds, isFlipped: contentView.isFlipped)
+        sourceView.autoresizingMask = contentView.isFlipped ? [.maxXMargin, .maxYMargin] : [.maxXMargin, .minYMargin]
+        contentView.addSubview(sourceView, positioned: .below, relativeTo: nil)
     }
 
     /// The task keeps the session until the deadline, also after the web contents has gone, since a released controller leaves the system's window open.

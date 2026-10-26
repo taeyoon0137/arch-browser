@@ -545,7 +545,8 @@ public final class BrowserWindowModel: ObservableObject {
                 window.makeFirstResponder(nil)
                 return
             }
-            window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.first)
+            // An engine view that takes no focus holds the page as its topmost subview, above views the adapter keeps below the page, such as a Chromium video's picture-in-picture source view.
+            window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.last)
         }
     }
 
