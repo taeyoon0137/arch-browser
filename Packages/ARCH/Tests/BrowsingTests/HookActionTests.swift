@@ -71,7 +71,6 @@ import Testing
 
 /// A download the engine finished at `targetPath`.
 private final class FinishedDownload: EngineDownloadItem {
-    let id = "1"
     let sourceURL = URL(string: "https://example.org/files/a1b2.pdf")!
     let pageURL: URL? = URL(string: "https://example.org/files")
     let webContents: (any EngineWebContents)? = nil
@@ -79,7 +78,6 @@ private final class FinishedDownload: EngineDownloadItem {
     let state = EngineDownloadState.completed
     let completedBytes: Int64 = 3
     let totalBytes: Int64 = 3
-    let startTime = Date()
 
     init(targetPath: URL) {
         self.targetPath = targetPath

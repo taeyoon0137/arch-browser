@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 /// The cookie's `SameSite` attribute: whether requests from other sites carry it.
@@ -54,18 +53,8 @@ public struct EngineCookie: Hashable, Sendable {
     }
 }
 
-public protocol EngineBrowserDelegate: AnyObject {
-    func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool)
-    func browser(_ browser: any EngineBrowser, didChangeFullscreenState isFullscreen: Bool)
-}
-
 /// The web contents of one browser context in one engine. Creates web contents, which restore a page's state from their configuration. Manages cookies.
 public protocol EngineBrowser: AnyObject {
-    var sessionID: String { get }
-    var context: any EngineBrowserContext { get }
-    var window: NSWindow? { get set }
-    var delegate: (any EngineBrowserDelegate)? { get set }
-
     func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents
     func takeOwnership(of webContents: any EngineWebContents)
     /// Releases a tab after the user interface closes it so the engine can tear it down.
@@ -74,19 +63,12 @@ public protocol EngineBrowser: AnyObject {
     func closeAllWebContents()
 
     func allCookies(completion: @escaping ([EngineCookie]) -> Void)
-    func setCookie(_ cookie: EngineCookie, for url: URL)
     /// Stores the cookies, each for its own domain, and calls `completion` on the main thread once all are stored.
     func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void)
-    func removeCookie(named name: String, for url: URL)
     /// Deletes every cookie `shouldRemove` accepts and calls `completion` on the main thread once the store has applied the deletions.
     func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void)
     /// Removes what the engine stores for each origin besides cookies, such as local storage, IndexedDB, caches, and service workers, and calls `completion` on the main thread once it is gone. An engine that keeps this data by site removes it for each origin's whole site.
     func removeSiteData(for origins: [URL], completion: @escaping () -> Void)
     /// Called after the cookie store changes, when the engine can tell. The Chromium engine cannot.
     var cookiesDidChange: (() -> Void)? { get set }
-}
-
-public extension EngineBrowserDelegate {
-    func browser(_ browser: any EngineBrowser, didCreateNewWebContents webContents: any EngineWebContents, isActive: Bool) {}
-    func browser(_ browser: any EngineBrowser, didChangeFullscreenState isFullscreen: Bool) {}
 }

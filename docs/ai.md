@@ -573,7 +573,7 @@ func readableContent(limit: Int, completion: @escaping (Result<EngineReadableCon
 ```
 
 - The script walks the main frame's visible text. It skips `script`, `style`, `template`, hidden elements, `aria-hidden` subtrees, and the values of `input`, `textarea`, `select`, and editable regions, so drafts and passwords are never read. A selection inside a field or an editable region, or one that reaches an editable region, as Select All does on a page with a draft, also in an open shadow tree, counts as none. Link text is kept; link addresses are not. It stops at `limit` characters.
-- WebKit runs the script with `callAsyncJavaScript` in its own `WKContentWorld`. Chromium sends a process message to the page's renderer process. The renderer evaluates the script in the frame's context and replies with a JSON string, as it does for theme color. Chromium uses this route because `ExecuteJavaScript` returns no value and the DevTools protocol would attach a debugger. The page's scripts share that context and can change what the script sees. This changes only the page's own text.
+- WebKit runs the script with `callAsyncJavaScript` in its own `WKContentWorld`. Chromium sends a process message to the page's renderer process. The renderer evaluates the script in the frame's context and replies with a JSON string. Chromium uses this route because `ExecuteJavaScript` returns no value and the DevTools protocol would attach a debugger. The page's scripts share that context and can change what the script sees. This changes only the page's own text.
 - `selection` lets a feature read the page's selection; `EngineWebContents` has no other member for it.
 - `Browsing` wraps the member in `AIPageSource`:
 

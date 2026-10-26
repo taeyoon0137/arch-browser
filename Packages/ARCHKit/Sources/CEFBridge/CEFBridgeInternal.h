@@ -28,11 +28,7 @@ inline NSString *ToNSString(const CefString &value) {
 
 // The process messages and keys between the browser process and the helper's renderer processes. `CEFBridgeHelper.mm` holds the renderer's side.
 
-// CEF returns no value from `ExecuteJavaScript`, so the browser asks the page's renderer process for the theme color.
-const char kThemeColorRequest[] = "ARCHThemeColorRequest";
-const char kThemeColorReply[] = "ARCHThemeColorReply";
-
-// The browser sends other scripts whose result it needs the same way. A request carries its number, the script, and a page script world or null; with a world, the script is a function to call with that world's channel. The reply carries the number, whether the script ran, and the string it returned, or null.
+// CEF returns no value from `ExecuteJavaScript`, so the browser sends the scripts whose result it needs to the page's renderer process. A request carries its number, the script, and a page script world or null; with a world, the script is a function to call with that world's channel. The reply carries the number, whether the script ran, and the string it returned, or null.
 const char kScriptRequest[] = "ARCHScriptRequest";
 const char kScriptReply[] = "ARCHScriptReply";
 

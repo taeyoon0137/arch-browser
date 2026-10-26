@@ -50,7 +50,6 @@ public final class WebKitDownloads: EngineDownloads {
 
 /// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. Pause keeps WebKit's resume data; resume restarts from it, or from the start without it, on the originating web view, or on the list's own web view once that one has closed.
 final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate {
-    let id = UUID().uuidString
     let sourceURL: URL
     let pageURL: URL?
     private(set) weak var webContents: (any EngineWebContents)?
@@ -58,7 +57,6 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     private(set) var state: EngineDownloadState = .inProgress
     private(set) var completedBytes: Int64 = 0
     private(set) var totalBytes: Int64 = 0
-    let startTime = Date()
     private var download: WKDownload
     private weak var webView: WKWebView?
     private unowned let owner: WebKitDownloads

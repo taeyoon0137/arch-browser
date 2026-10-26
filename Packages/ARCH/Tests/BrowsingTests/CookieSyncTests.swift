@@ -1,5 +1,4 @@
 // What a copy between the engines writes and deletes: what the source changed since the stores last agreed, never a cookie that differs only in its SameSite policy, so the target keeps a policy the source store could not hold. A deletion travels like a change, a cookie only the target changed stays, a deletion leaves a cookie the target changed, and a write the target refused is not taken for agreement. The cookies hold made-up values only.
-import AppKit
 import ARCHEngine
 import Foundation
 import Testing
@@ -103,7 +102,7 @@ import Testing
     }
 }
 
-/// One engine's cookie store, which answers at once. Nothing else of the browser is used.
+/// One engine's cookie store, which answers at once, with a profile for its runtime. Nothing else of the browser is used.
 private final class CookieStore: EngineBrowser {
     var cookies: [EngineCookie]
     private(set) var writes = 0
@@ -112,10 +111,7 @@ private final class CookieStore: EngineBrowser {
         self.cookies = cookies
     }
 
-    let sessionID = "test"
     let context: any EngineBrowserContext = NoContext()
-    var window: NSWindow?
-    weak var delegate: (any EngineBrowserDelegate)?
     var cookiesDidChange: (() -> Void)?
 
     func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { fatalError("Not used") }
@@ -124,7 +120,6 @@ private final class CookieStore: EngineBrowser {
     func closeAllWebContents() {}
 
     func allCookies(completion: @escaping ([EngineCookie]) -> Void) { completion(cookies) }
-    func setCookie(_ cookie: EngineCookie, for url: URL) { setCookies([cookie]) {} }
     func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
         for cookie in cookies {
             self.cookies.removeAll { CookieSync.CookieKey($0) == CookieSync.CookieKey(cookie) }
@@ -133,7 +128,6 @@ private final class CookieStore: EngineBrowser {
         }
         completion()
     }
-    func removeCookie(named name: String, for url: URL) { cookies.removeAll { $0.name == name } }
     func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
         cookies.removeAll(where: shouldRemove)
         completion()
@@ -142,9 +136,6 @@ private final class CookieStore: EngineBrowser {
 }
 
 private final class NoContext: EngineBrowserContext {
-    let id = EngineBrowserContextID.default
-    let type = EngineBrowserContextType.regular
-    let userVisibleName = "Test"
     let downloads: any EngineDownloads = NoDownloads()
     var preferences = EnginePreferences()
     let extensions: (any EngineExtensions)? = nil

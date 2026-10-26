@@ -381,10 +381,9 @@ public final class BrowserSession: ObservableObject {
         return try? engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
     }
 
-    /// Runs an application with the session as its delegate and keeps it for the engine's runtimes.
+    /// Makes the session the application's delegate and keeps the application for the engine's runtimes.
     private func start(_ application: any EngineApplication) {
         application.delegate = self
-        application.run()
         applications[application.engineKind] = application
     }
 
@@ -424,9 +423,9 @@ public final class BrowserSession: ObservableObject {
         guard let application = application(for: kind), let persona = personas.first(where: { $0.id == engines.personaID }) else { return nil }
         // Both engines create a profile before `createBrowserContext` returns.
         var created: (any EngineBrowserContext)?
-        application.createBrowserContext(persona.contextAttributes) { created = try? $0.get() }
+        application.createBrowserContext(storageIdentifier: persona.storageIdentifier) { created = try? $0.get() }
         guard let context = created else { return nil }
-        let browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
+        let browser = application.createBrowser(context: context)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
         if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions) } }
@@ -1513,16 +1512,8 @@ public enum CommandPaletteOrigin {
 }
 
 extension BrowserSession: EngineApplicationDelegate {
-    public func applicationDidInitialize(_ application: any EngineApplication) {}
-    public func applicationDidQuitRunLoop(_ application: any EngineApplication) {}
-    public func application(_ application: any EngineApplication, didCreateBrowser browser: any EngineBrowser) {}
-    public func application(_ application: any EngineApplication, didCloseBrowser browser: any EngineBrowser) {}
-    public func application(_ application: any EngineApplication, didChangeBrowserContextAttributes attributes: [EngineBrowserContextAttributes]) {}
     public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
 }
-
-/// The protocol's defaults apply: popups reach the session through their opener's `Tab.openNewTab`, and no engine reports new web contents to the browser's delegate.
-extension BrowserSession: EngineBrowserDelegate {}
 
 // MARK: Downloads
 

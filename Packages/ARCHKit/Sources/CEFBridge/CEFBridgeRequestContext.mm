@@ -379,14 +379,6 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
     }];
 }
 
-- (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url {
-    [self whenReady:^{
-        if (self->_cookieManager) {
-            self->_cookieManager->SetCookie(CefString(url.UTF8String), MakeCefCookie(cookie), nullptr);
-        }
-    }];
-}
-
 - (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion {
     [self whenReady:^{
         NSUInteger count = MIN(cookies.count, urls.count);
@@ -400,14 +392,6 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
             if (!self->_cookieManager->SetCookie(CefString(urls[index].UTF8String), MakeCefCookie(cookies[index]), callback)) {
                 callback->Finish();
             }
-        }
-    }];
-}
-
-- (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name {
-    [self whenReady:^{
-        if (self->_cookieManager) {
-            self->_cookieManager->DeleteCookies(CefString(url.UTF8String), CefString(name.UTF8String), nullptr);
         }
     }];
 }

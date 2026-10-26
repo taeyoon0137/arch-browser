@@ -16,28 +16,19 @@ public enum EngineKind: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// Optional capabilities that differ per engine. An engine lists those its adapter implements. Feature code reads the list where it must know before an engine starts, as for web extensions, and tests an optional member such as `devTools` directly.
+/// Optional capabilities that feature code must know of before an engine starts. An engine lists those its adapter implements. Feature code tests an optional member, such as `devTools`, directly.
 public enum EngineCapability: String, CaseIterable, Codable, Sendable {
+    /// Manifest V3 web extensions through `EngineBrowserContext.extensions`, which the session asks about before it starts an engine for them.
     case extensions
-    case devTools
-    case pdfController
-    case pictureInPicture
-    /// The engine restores a page's back-forward list from `EngineWebContents.restorableState`.
-    case sessionRestore
-    case cookies
 }
 
 public struct EngineApplicationConfiguration: Sendable {
     public var userDataDirectory: URL
     public var cacheDirectory: URL
-    public var userAgentSuffix: String?
-    public var commandLineFlags: [String]
 
-    public init(userDataDirectory: URL, cacheDirectory: URL, userAgentSuffix: String? = nil, commandLineFlags: [String] = []) {
+    public init(userDataDirectory: URL, cacheDirectory: URL) {
         self.userDataDirectory = userDataDirectory
         self.cacheDirectory = cacheDirectory
-        self.userAgentSuffix = userAgentSuffix
-        self.commandLineFlags = commandLineFlags
     }
 }
 

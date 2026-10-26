@@ -6,7 +6,7 @@ import Foundation
 
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
-    public let capabilities: Set<EngineCapability> = [.devTools, .pictureInPicture, .cookies, .extensions]
+    public let capabilities: Set<EngineCapability> = [.extensions]
     /// Arch's engine runs Chromium's own extension system in every Alloy style browser (VI.1), so the CEF version, which the bridge builds with, names it.
     public var extensionRuntimeVersion: String? { ARCHCEFRuntime.cefVersion }
     let frameworkPath: String
@@ -107,7 +107,6 @@ public final class ChromiumApplication: EngineApplication {
     public let engineKind: EngineKind = .chromium
     public weak var delegate: (any EngineApplicationDelegate)?
     let configuration: EngineApplicationConfiguration
-    var contexts: [EngineBrowserContextID: ChromiumBrowserContext] = [:]
     /// When the engine started in this launch, as CEF had just initialized: an extension package installed before it is the one that Chromium read when it started a profile.
     let startedAt = Date()
 
@@ -115,24 +114,19 @@ public final class ChromiumApplication: EngineApplication {
         self.configuration = configuration
     }
 
-    public var version: String { "Chromium (CEF)" }
-    public func run() { delegate?.applicationDidInitialize(self) }
-    public func tryToTerminate(completion: @escaping (Bool) -> Void) { completion(true) }
-    public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
     /// A context without a storage identifier uses CEF's global request context; one with an identifier gets a request context of its own, which browsers can use at once.
-    public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+    public func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
         let requestContext: ARCHCEFRequestContext?
-        if let identifier = attributes.storageIdentifier {
-            requestContext = ARCHCEFRequestContext(cachePath: configuration.chromiumProfile(forStorage: identifier).path)
+        if let storageIdentifier {
+            requestContext = ARCHCEFRequestContext(cachePath: configuration.chromiumProfile(forStorage: storageIdentifier).path)
         } else {
             requestContext = .global
         }
         guard let requestContext else { return completion(.failure(ChromiumEngine.StartError.profileUnavailable)) }
-        let context = ChromiumBrowserContext(attributes: attributes, requestContext: requestContext)
+        let context = ChromiumBrowserContext(requestContext: requestContext)
         context.application = self
         // The extensions start with the profile, so that what Chromium kept from an earlier run follows the app from the start.
         _ = context.extensions
-        contexts[attributes.id] = context
         completion(.success(context))
     }
     private var rendererCrashCount = 0
@@ -141,37 +135,25 @@ public final class ChromiumApplication: EngineApplication {
         rendererCrashCount += 1
         delegate?.application(self, didReceiveRendererProcessCrash: rendererCrashCount)
     }
-    public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
-    public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
-    public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
-        let browser = ChromiumBrowser(sessionID: UUID().uuidString, context: Self.chromiumContext(context), delegate: delegate, window: window)
-        self.delegate?.application(self, didCreateBrowser: browser)
-        return browser
-    }
-    private static func chromiumContext(_ context: any EngineBrowserContext) -> ChromiumBrowserContext {
+    public func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser {
         guard let context = context as? ChromiumBrowserContext else {
             preconditionFailure("Chromium browsers require a Chromium browser context")
         }
-        return context
+        return ChromiumBrowser(context: context)
     }
 }
 
 /// One profile, whose request context keeps its cookies, site storage, caches, and permission answers for the app's lifetime.
 public final class ChromiumBrowserContext: EngineBrowserContext {
-    public let attributes: EngineBrowserContextAttributes
     public var preferences = EnginePreferences()
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
     let requestContext: ARCHCEFRequestContext
 
-    init(attributes: EngineBrowserContextAttributes, requestContext: ARCHCEFRequestContext) {
-        self.attributes = attributes
+    init(requestContext: ARCHCEFRequestContext) {
         self.requestContext = requestContext
     }
 
-    public var id: EngineBrowserContextID { attributes.id }
-    public var type: EngineBrowserContextType { attributes.type }
-    public var userVisibleName: String { attributes.userVisibleName }
     public var downloads: any EngineDownloads { chromiumDownloads }
     public var extensions: (any EngineExtensions)? { chromiumExtensions }
     private lazy var chromiumExtensions = ChromiumExtensions(context: self)
@@ -198,26 +180,19 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
 
 /// The tabs of one context. Cookies and site data go through the context's request context.
 public final class ChromiumBrowser: EngineBrowser {
-    public let sessionID: String
     let chromiumContext: ChromiumBrowserContext
-    public weak var window: NSWindow?
-    public weak var delegate: (any EngineBrowserDelegate)?
     private var ownedWebContents: [ChromiumWebContents] = []
     /// CEF does not report cookie changes, so this is never called.
     public var cookiesDidChange: (() -> Void)?
 
-    init(sessionID: String, context: ChromiumBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
-        self.sessionID = sessionID
+    init(context: ChromiumBrowserContext) {
         self.chromiumContext = context
-        self.delegate = delegate
-        self.window = window
     }
 
-    public var context: any EngineBrowserContext { chromiumContext }
     private var requestContext: ARCHCEFRequestContext { chromiumContext.requestContext }
 
     public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
-        let webContents = ChromiumWebContents(sessionID: UUID().uuidString, context: chromiumContext, requestContext: requestContext, configuration: configuration)
+        let webContents = ChromiumWebContents(context: chromiumContext, requestContext: requestContext, configuration: configuration)
         ownedWebContents.append(webContents)
         return webContents
     }
@@ -236,15 +211,9 @@ public final class ChromiumBrowser: EngineBrowser {
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
         requestContext.visitAllCookies { cookies in completion(cookies.map(Self.engineCookie)) }
     }
-    public func setCookie(_ cookie: EngineCookie, for url: URL) {
-        requestContext.setCookie(Self.bridgeCookie(cookie), forURL: url.absoluteString)
-    }
     public func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
         let addressed = cookies.compactMap { cookie in cookie.originURL.map { (Self.bridgeCookie(cookie), $0.absoluteString) } }
         requestContext.setCookies(addressed.map(\.0), forURLs: addressed.map(\.1), completion: completion)
-    }
-    public func removeCookie(named name: String, for url: URL) {
-        requestContext.deleteCookies(forURL: url.absoluteString, name: name)
     }
     public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
         requestContext.deleteCookies(passingTest: { shouldRemove(Self.engineCookie($0)) }, completion: completion)
@@ -290,7 +259,6 @@ public final class ChromiumBrowser: EngineBrowser {
 /// A single CEF browser embedded in a container view hosted by the user interface.
 public final class ChromiumWebContents: NSObject, EngineWebContents {
     public let engineKind: EngineKind = .chromium
-    public let sessionID: String
     public let view: NSView
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     public weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
@@ -330,8 +298,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var pictureInPicture: ChromiumPictureInPicture?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
-    init(sessionID: String, context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
-        self.sessionID = sessionID
+    init(context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
         self.context = context
         self.requestContext = requestContext
         self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -341,12 +308,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         super.init()
         browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", requestContext: requestContext,
                                  pageScripts: Self.bridgeScripts(pageScripts), delegate: self)
-        browser?.allowsDownloads = !configuration.disallowDownloads
     }
 
     /// Adopts a popup that a page of `opener` opened, which CEF created in the opener's browsing context and profile with the opener's page scripts. The popup may download, as a WebKit popup may.
     private init(popup: ARCHCEFBrowser, opener: ChromiumWebContents) {
-        self.sessionID = UUID().uuidString
         self.context = opener.context
         self.requestContext = opener.requestContext
         self.view = popup.parentView
@@ -368,12 +333,11 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     }
 
     public private(set) var favicon: NSImage?
-    public var loadProgress: Double { isLoading ? 0.5 : 1 }
-    public private(set) var themeColor: NSColor?
     /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
     public var restorableState: Data? { nil }
     public private(set) var isAudible = false
-    public private(set) var isFullscreen = false
+    /// Whether the page is in the fullscreen that it entered through the Fullscreen API.
+    private var isFullscreen = false
     public var mediaSession: any EngineMediaSession { chromiumMediaSession }
     /// Follows each frame's media as the helper's renderer script reports it.
     private lazy var chromiumMediaSession = ScriptMediaSession { [weak self] frame, action in
@@ -457,12 +421,11 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         guard let browser else { return completion(.failure(PDFError.exportFailed)) }
         browser.printToPDF { completion($0.map { .success($0) } ?? .failure(PDFError.exportFailed)) }
     }
-    public func print() { browser?.print() }
     public func exitFullscreen() {
         if isFullscreen { browser?.exitFullscreen(willResize: true) }
     }
     /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now. The engine ends the page's picture in picture as the browser closes, also unreported then, so the system's window closes now.
-    public func discard() {
+    func discard() {
         (devTools as? ChromiumDevTools)?.setView(nil)
         MainActor.assumeIsolated { pictureInPicture?.engineDidStop() }
         browser?.close()
@@ -764,24 +727,6 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
                                        reply: reply.send)
     }
 
-    public func cefBrowserDidChangeThemeColor(_ color: String) {
-        let themeColor = Self.color(fromCanvasStyle: color)
-        guard themeColor != self.themeColor else { return }
-        self.themeColor = themeColor
-        uiDelegate?.webContentsDidChangeThemeColor(self)
-    }
-
-    /// Reads `#rrggbb` or `rgba(r, g, b, a)`, the two forms a canvas writes. A transparent color counts as none.
-    static func color(fromCanvasStyle style: String) -> NSColor? {
-        if style.hasPrefix("#"), style.count == 7, let value = Int(style.dropFirst(), radix: 16) {
-            return NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255, blue: CGFloat(value & 0xFF) / 255, alpha: 1)
-        }
-        guard style.hasPrefix("rgba("), style.hasSuffix(")") else { return nil }
-        let parts = style.dropFirst(5).dropLast().split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4, parts[3] > 0 else { return nil }
-        return NSColor(srgbRed: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255, alpha: parts[3])
-    }
-
     /// Alloy style leaves the window's transition to the app, which the UI delegate makes.
     public func cefBrowserDidChangeFullscreen(_ isFullscreen: Bool) {
         self.isFullscreen = isFullscreen
@@ -872,26 +817,10 @@ final class ChromiumBackForwardList: EngineBackForwardList {
         self.webContents = webContents
     }
 
-    private var snapshot: (items: [ChromiumBackForwardListItem], current: Int) {
-        let (entries, current) = webContents.navigationEntries
-        return (entries.map { ChromiumBackForwardListItem($0, owner: webContents) }, current)
-    }
-
     var backList: [any EngineBackForwardListItem] {
-        let (items, current) = snapshot
-        guard current > 0, current <= items.count else { return [] }
-        return Array(items[..<current])
-    }
-
-    var forwardList: [any EngineBackForwardListItem] {
-        let (items, current) = snapshot
-        guard current >= 0, current + 1 < items.count else { return [] }
-        return Array(items[(current + 1)...])
-    }
-
-    var currentItem: (any EngineBackForwardListItem)? {
-        let (items, current) = snapshot
-        return items.indices.contains(current) ? items[current] : nil
+        let (entries, current) = webContents.navigationEntries
+        guard current > 0, current <= entries.count else { return [] }
+        return entries[..<current].map { ChromiumBackForwardListItem($0, owner: webContents) }
     }
 }
 

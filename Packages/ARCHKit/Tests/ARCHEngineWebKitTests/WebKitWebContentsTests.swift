@@ -5,23 +5,20 @@ import Foundation
 import Testing
 
 @MainActor @Suite struct WebKitWebContentsTests {
-    private let application: any EngineApplication
+    private let application: WebKitApplication
     private let context: WebKitBrowserContext
     private let browser: any EngineBrowser
-    private let browserDelegate = NoBrowserDelegate()
 
     init() throws {
         let folder = FileManager.default.temporaryDirectory
-        application = try WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder))
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "test"), userVisibleName: "Test", type: .incognito)) { created = try? $0.get() }
-        context = try #require(created as? WebKitBrowserContext)
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: browserDelegate, window: nil)
+        application = try #require(WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder)) as? WebKitApplication)
+        context = application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent())
+        browser = application.createBrowser(context: context)
     }
 
     @Test func eachWebViewKnowsItsWebContents() throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
-        let popup = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)
+        let popup = WebKitWebContents(parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)
         #expect((tab.webView as? WebKitWebView)?.contents === tab)
         #expect((popup.webView as? WebKitWebView)?.contents === popup)
     }
@@ -46,8 +43,6 @@ import Testing
             #expect(tab.webView.superview == nil)
         }
     }
-
-    private final class NoBrowserDelegate: EngineBrowserDelegate {}
 
     private final class PageScriptRecorder: EnginePageScriptDelegate {
         private(set) var messages: [EnginePageScriptMessage] = []

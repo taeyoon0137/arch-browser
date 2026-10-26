@@ -8,9 +8,8 @@ public final class WebKitEngine: Engine {
     public let kind: EngineKind = .webKit
     /// Web extensions need macOS 15.4.
     public var capabilities: Set<EngineCapability> {
-        let capabilities: Set<EngineCapability> = [.pdfController, .pictureInPicture, .sessionRestore, .cookies]
-        guard #available(macOS 15.4, *) else { return capabilities }
-        return capabilities.union([.extensions])
+        guard #available(macOS 15.4, *) else { return [] }
+        return [.extensions]
     }
 
     /// The WebKit framework's bundle version, such as `22625.2.5.11.1`, which a macOS update changes; the system's version if the framework names none.
@@ -43,7 +42,6 @@ public final class WebKitApplication: EngineApplication {
     public let engineKind: EngineKind = .webKit
     public weak var delegate: (any EngineApplicationDelegate)?
     let configuration: EngineApplicationConfiguration
-    var contexts: [EngineBrowserContextID: WebKitBrowserContext] = [:]
 
     init(configuration: EngineApplicationConfiguration) {
         self.configuration = configuration
@@ -51,28 +49,22 @@ public final class WebKitApplication: EngineApplication {
 
     private var rendererCrashCount = 0
 
-    public var version: String { "WebKit \(ProcessInfo.processInfo.operatingSystemVersionString)" }
-    public func run() { delegate?.applicationDidInitialize(self) }
-    public func tryToTerminate(completion: @escaping (Bool) -> Void) { completion(true) }
-    public var availableBrowserContextAttributes: [EngineBrowserContextAttributes] { contexts.values.map(\.attributes) }
-    public func createBrowserContext(_ attributes: EngineBrowserContextAttributes, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
-        let context = WebKitBrowserContext(attributes: attributes)
+    /// The default store without a storage identifier, otherwise the store of that identifier.
+    public func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+        let dataStore = storageIdentifier.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .default()
+        completion(.success(makeBrowserContext(storageIdentifier: storageIdentifier, dataStore: dataStore)))
+    }
+    /// A profile over `dataStore`. Besides `createBrowserContext`, the adapter's tests use it for a profile whose store, `.nonPersistent()`, keeps nothing on disk; the app's profiles all keep their data.
+    func makeBrowserContext(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore) -> WebKitBrowserContext {
+        let context = WebKitBrowserContext(storageIdentifier: storageIdentifier, dataStore: dataStore)
         context.application = self
-        contexts[attributes.id] = context
-        completion(.success(context))
+        return context
     }
-    public func browserContext(_ id: EngineBrowserContextID, type: EngineBrowserContextType) -> (any EngineBrowserContext)? { contexts[id] }
-    public func deleteBrowserContext(_ id: EngineBrowserContextID) throws { contexts[id] = nil }
-    public func createBrowser(_ params: EngineBrowserCreateParams, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> any EngineBrowser {
-        makeBrowser(sessionID: UUID().uuidString, context: context, delegate: delegate, window: window)
-    }
-    private func makeBrowser(sessionID: String, context: any EngineBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) -> WebKitBrowser {
+    public func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser {
         guard let context = context as? WebKitBrowserContext else {
             preconditionFailure("WebKit browsers require a WebKit browser context")
         }
-        let browser = WebKitBrowser(sessionID: sessionID, context: context, delegate: delegate, window: window)
-        self.delegate?.application(self, didCreateBrowser: browser)
-        return browser
+        return WebKitBrowser(context: context)
     }
     /// Counts web content process terminations across all tabs and reports the total.
     func rendererDidCrash() {
@@ -81,26 +73,20 @@ public final class WebKitApplication: EngineApplication {
     }
 }
 
-/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: a store that keeps nothing for incognito, otherwise the default store or, with a storage identifier, the store of that identifier.
+/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: the default store or, with a storage identifier, the store of that identifier.
 public final class WebKitBrowserContext: EngineBrowserContext {
-    public let attributes: EngineBrowserContextAttributes
+    /// The identifier of the profile's store, or nil for the default store or one that keeps nothing on disk.
+    let storageIdentifier: UUID?
     public var preferences = EnginePreferences()
     public let dataStore: WKWebsiteDataStore
     weak var application: WebKitApplication?
     lazy var webKitDownloads = WebKitDownloads(context: self)
 
-    init(attributes: EngineBrowserContextAttributes) {
-        self.attributes = attributes
-        self.dataStore = switch (attributes.type, attributes.storageIdentifier) {
-        case (.incognito, _): .nonPersistent()
-        case (.regular, nil): .default()
-        case let (.regular, identifier?): WKWebsiteDataStore(forIdentifier: identifier)
-        }
+    init(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore) {
+        self.storageIdentifier = storageIdentifier
+        self.dataStore = dataStore
     }
 
-    public var id: EngineBrowserContextID { attributes.id }
-    public var type: EngineBrowserContextType { attributes.type }
-    public var userVisibleName: String { attributes.userVisibleName }
     public var downloads: any EngineDownloads { webKitDownloads }
     /// From macOS 15.4, the profile's web extensions, whose controller every web view of the profile uses.
     public var extensions: (any EngineExtensions)? {
@@ -118,10 +104,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
 
 /// The tabs of one context. Cookies use the context's `WKHTTPCookieStore`.
 public final class WebKitBrowser: EngineBrowser {
-    public let sessionID: String
     public let webKitContext: WebKitBrowserContext
-    public weak var window: NSWindow?
-    public weak var delegate: (any EngineBrowserDelegate)?
     private var ownedWebContents: [WebKitWebContents] = []
     private let cookieObserver = CookieObserver()
     public var cookiesDidChange: (() -> Void)? {
@@ -129,11 +112,8 @@ public final class WebKitBrowser: EngineBrowser {
         set { cookieObserver.handler = newValue }
     }
 
-    init(sessionID: String, context: WebKitBrowserContext, delegate: any EngineBrowserDelegate, window: NSWindow?) {
-        self.sessionID = sessionID
+    init(context: WebKitBrowserContext) {
         self.webKitContext = context
-        self.delegate = delegate
-        self.window = window
         context.dataStore.httpCookieStore.add(cookieObserver)
     }
 
@@ -141,10 +121,8 @@ public final class WebKitBrowser: EngineBrowser {
         webKitContext.dataStore.httpCookieStore.remove(cookieObserver)
     }
 
-    public var context: any EngineBrowserContext { webKitContext }
-
     public func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
-        let webContents = WebKitWebContents(sessionID: UUID().uuidString, context: webKitContext, configuration: configuration)
+        let webContents = WebKitWebContents(context: webKitContext, configuration: configuration)
         ownedWebContents.append(webContents)
         return webContents
     }
@@ -164,10 +142,6 @@ public final class WebKitBrowser: EngineBrowser {
 
     public func allCookies(completion: @escaping ([EngineCookie]) -> Void) {
         webKitContext.dataStore.httpCookieStore.getAllCookies { cookies in completion(cookies.map(Self.engineCookie)) }
-    }
-    public func setCookie(_ cookie: EngineCookie, for url: URL) {
-        guard let httpCookie = Self.httpCookie(cookie, for: url) else { return }
-        webKitContext.dataStore.httpCookieStore.setCookie(httpCookie)
     }
     public func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) {
         let store = webKitContext.dataStore.httpCookieStore
@@ -200,18 +174,6 @@ public final class WebKitBrowser: EngineBrowser {
         case .noRestriction, .unspecified: break
         }
         return HTTPCookie(properties: properties)
-    }
-    public func removeCookie(named name: String, for url: URL) {
-        let store = webKitContext.dataStore.httpCookieStore
-        store.getAllCookies { cookies in
-            let host = url.host ?? ""
-            for cookie in cookies where cookie.name == name {
-                let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
-                if (host == domain || host.hasSuffix("." + domain)) && url.path.hasPrefix(cookie.path) {
-                    store.delete(cookie)
-                }
-            }
-        }
     }
     public func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) {
         let store = webKitContext.dataStore.httpCookieStore
@@ -269,7 +231,6 @@ final class PDFPrintJob: NSObject {
 /// One `WKWebView` per tab.
 public final class WebKitWebContents: NSObject, EngineWebContents {
     public let engineKind: EngineKind = .webKit
-    public let sessionID: String
     public let webView: WKWebView
     public let context: WebKitBrowserContext
     public weak var uiDelegate: (any EngineWebContentsUIDelegate)?
@@ -278,7 +239,6 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public lazy var navigationController: any EngineNavigationController = WebKitNavigationController(webView: webView, contents: self)
     /// The web view's content controller, which holds its page scripts.
     let userContent: WebKitUserContentController
-    let allowsDownloads: Bool
     /// The base URL of the web extension whose pages alone the web view loads, since WebKit loads an extension's pages only in a web view made for that extension; nil for a web view that loads other pages.
     let extensionBaseURL: URL?
     var bridge: WebKitDelegateBridge?
@@ -303,10 +263,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         return "Version/\(version.majorVersion).\(version.minorVersion) Safari/605.1.15"
     }()
 
-    public init(sessionID: String, context: WebKitBrowserContext, configuration: EngineWebContentsConfiguration) {
-        self.sessionID = sessionID
+    public init(context: WebKitBrowserContext, configuration: EngineWebContentsConfiguration) {
         self.context = context
-        self.allowsDownloads = !configuration.disallowDownloads
         let (webConfiguration, extensionBaseURL) = Self.baseConfiguration(loading: configuration.initialURL, in: context)
         self.extensionBaseURL = extensionBaseURL
         webConfiguration.websiteDataStore = context.dataStore
@@ -346,14 +304,12 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
 
     /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions, and loads the pages its opener loads: `extensionBaseURL` is the opener's.
-    init(sessionID: String, parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
+    init(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
         guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
             preconditionFailure("WebKit popups come from web views of WebKit web contents")
         }
-        self.sessionID = sessionID
         self.context = context
         self.userContent = userContent
-        self.allowsDownloads = true
         self.extensionBaseURL = extensionBaseURL
         let webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
         self.webView = webView
@@ -372,10 +328,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var title: String { webView.title ?? "" }
     public private(set) var favicon: NSImage?
     public var isLoading: Bool { webView.isLoading }
-    public var loadProgress: Double { webView.estimatedProgress }
     public var canGoBack: Bool { webView.canGoBack }
     public var canGoForward: Bool { webView.canGoForward }
-    public var themeColor: NSColor? { webView.themeColor }
     /// WebKit's interaction state holds the back-forward list and each page's position.
     public var restorableState: Data? { webView.interactionState as? Data }
     public var isAudible: Bool { !audibleDocuments.isEmpty }
@@ -383,7 +337,6 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }
     }
-    public var isFullscreen: Bool { webView.fullscreenState == .inFullscreen }
     public var mediaSession: any EngineMediaSession { webKitMediaSession }
 
     /// WebKit's find reports only whether a match exists. Once it selects the match, a script counts the matches in the page's visible text and places the selected one among them.
@@ -502,19 +455,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         operation.view?.frame = webView.bounds
         operation.runModal(for: window, delegate: job, didRun: #selector(PDFPrintJob.printOperationDidRun(_:success:contextInfo:)), contextInfo: Unmanaged.passRetained(job).toOpaque())
     }
-    /// Runs the system print panel. The operation's view has no initial size, so it takes the page's bounds first.
-    public func print() {
-        let operation = webView.printOperation(with: NSPrintInfo.shared)
-        operation.view?.frame = webView.bounds
-        if let window = webView.window {
-            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
-        } else {
-            operation.run()
-        }
-    }
     public func exitFullscreen() { webView.closeAllMediaPresentations(completionHandler: nil) }
     /// Ends the page. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates. The bridge goes first: its observations would report the blank page's address, which the load sets before it returns, to the tab and the profile's extensions.
-    public func discard() {
+    func discard() {
         webView.stopLoading()
         webView.closeAllMediaPresentations(completionHandler: nil)
         webView.pauseAllMediaPlayback(completionHandler: nil)
@@ -640,8 +583,6 @@ final class WebKitBackForwardList: EngineBackForwardList {
     }
 
     var backList: [any EngineBackForwardListItem] { webView.backForwardList.backList.map(WebKitBackForwardListItem.init) }
-    var forwardList: [any EngineBackForwardListItem] { webView.backForwardList.forwardList.map(WebKitBackForwardListItem.init) }
-    var currentItem: (any EngineBackForwardListItem)? { webView.backForwardList.currentItem.map(WebKitBackForwardListItem.init) }
 }
 
 /// Wraps a `WKBackForwardListItem` in the engine item protocol. `go(to:)` unwraps it.

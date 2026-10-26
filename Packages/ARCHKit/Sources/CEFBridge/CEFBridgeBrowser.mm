@@ -280,7 +280,6 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleResetDialogs;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
-- (void)handleThemeColor:(NSString *)color;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
 - (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
 - (void)handleScriptReply:(int)request succeeded:(BOOL)succeeded result:(nullable NSString *)result;
@@ -495,7 +494,7 @@ public:
     void OnResetDialogState(CefRefPtr<CefBrowser> browser) override { [owner_ handleResetDialogs]; }
 
     bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString &url, const CefString &request_method) override {
-        return owner_ != nil && owner_.allowsDownloads && [owner_ handleShouldDownload:ToNSString(url) hasDocument:browser->HasDocument()];
+        return owner_ != nil && [owner_ handleShouldDownload:ToNSString(url) hasDocument:browser->HasDocument()];
     }
 
     bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item, const CefString &suggested_name,
@@ -663,10 +662,6 @@ public:
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
-        if (message->GetName() == kThemeColorReply) {
-            [owner_ handleThemeColor:ToNSString(message->GetArgumentList()->GetString(0))];
-            return true;
-        }
         if (message->GetName() == kAudibleReport && frame) {
             [owner_ handleAudible:message->GetArgumentList()->GetBool(0) frame:ToNSString(frame->GetIdentifier())];
             return true;
@@ -696,9 +691,6 @@ public:
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
         if (!isLoading) {
             [owner_ handleMainFrameNavigationPending:NO];
-            if (CefRefPtr<CefFrame> frame = browser->GetMainFrame()) {
-                frame->SendProcessMessage(PID_RENDERER, CefProcessMessage::Create(kThemeColorRequest));
-            }
         }
         [owner_ handleLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
     }
@@ -914,7 +906,6 @@ private:
     _delegate = delegate;
     _currentURL = [url copy];
     _title = @"";
-    _allowsDownloads = YES;
     _downloads = [NSMutableDictionary dictionary];
     _audibleFrames = [NSMutableSet set];
     _scriptReplies = [NSMutableDictionary dictionary];
@@ -1000,10 +991,6 @@ private:
 
 - (void)handleFullscreen:(BOOL)isFullscreen {
     [_delegate cefBrowserDidChangeFullscreen:isFullscreen];
-}
-
-- (void)handleThemeColor:(NSString *)color {
-    [_delegate cefBrowserDidChangeThemeColor:color];
 }
 
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier {
@@ -1578,12 +1565,6 @@ private:
 - (void)stopFinding {
     if (_browser) {
         _browser->GetHost()->StopFinding(false);
-    }
-}
-
-- (void)print {
-    if (_browser) {
-        _browser->GetHost()->Print();
     }
 }
 

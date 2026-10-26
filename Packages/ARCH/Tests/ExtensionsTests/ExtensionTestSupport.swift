@@ -188,16 +188,14 @@ final class WebKitProfile {
     private static let configuration = EngineApplicationConfiguration(userDataDirectory: FileManager.default.temporaryDirectory, cacheDirectory: FileManager.default.temporaryDirectory)
     private let application: any EngineApplication
     private let browser: any EngineBrowser
-    private let browserDelegate = NoBrowserDelegate()
     let context: any EngineBrowserContext
 
     private init(storage: UUID) throws {
         application = try WebKitEngine().makeApplication(configuration: Self.configuration)
         var created: (any EngineBrowserContext)?
-        application.createBrowserContext(EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: storage.uuidString), userVisibleName: "Test", type: .regular,
-                                                                        storageIdentifier: storage)) { created = try? $0.get() }
+        application.createBrowserContext(storageIdentifier: storage) { created = try? $0.get() }
         context = try #require(created)
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: browserDelegate, window: nil)
+        browser = application.createBrowser(context: context)
     }
 
     func makeTab(at url: URL? = nil) -> WebKitWebContents {
@@ -232,8 +230,6 @@ final class WebKitProfile {
             WebKitEngine().removeStoredData(forStorage: storage, configuration: configuration) { continuation.resume(returning: $0) }
         }
     }
-
-    private final class NoBrowserDelegate: EngineBrowserDelegate {}
 }
 
 /// Waits up to `seconds` for `condition`, checking every tenth of a second, and reports whether it held.

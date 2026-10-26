@@ -70,12 +70,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 - (instancetype)init NS_UNAVAILABLE;
 /// Calls `completion` once on the main thread with every stored cookie, or with none when the store cannot be read.
 - (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *cookies))completion;
-/// Stores `cookie` as if `url` had set it. The URL must belong to the cookie's domain.
-- (void)setCookie:(ARCHCEFCookie *)cookie forURL:(NSString *)url;
 /// Stores each cookie as if the URL at the same index had set it, then calls `completion` once on the main thread.
 - (void)setCookies:(NSArray<ARCHCEFCookie *> *)cookies forURLs:(NSArray<NSString *> *)urls completion:(void (^)(void))completion;
-/// Deletes the cookies named `name` that `url` would send.
-- (void)deleteCookiesForURL:(NSString *)url name:(NSString *)name;
 /// Deletes every stored cookie that `test` accepts, then calls `completion` once on the main thread after the store has applied the deletions. `test` runs on the main thread.
 - (void)deleteCookiesPassingTest:(BOOL (^)(ARCHCEFCookie *cookie))test
                       completion:(void (^)(void))completion NS_SWIFT_NAME(deleteCookies(passingTest:completion:));
@@ -342,8 +338,6 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRenderProcessDidTerminate;
 /// Reports that the page entered or left fullscreen through the Fullscreen API. CEF has already sized the content; the app makes the window's transition and handles Escape.
 - (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
-/// Reports the page's theme color after each load: empty when the page declares none, otherwise `#rrggbb` or `rgba(r, g, b, a)` as a canvas writes the color.
-- (void)cefBrowserDidChangeThemeColor:(NSString *)color;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
 /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
@@ -422,8 +416,6 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly, copy) NSString *title;
 /// Chromium's zoom level: 0 is the default size; each level scales the page by 1.2.
 @property (nonatomic) double zoomLevel;
-/// Whether the page may start downloads. Defaults to `YES`.
-@property (nonatomic) BOOL allowsDownloads;
 - (void)loadURL:(NSString *)url;
 - (void)reload;
 - (void)reloadIgnoringCache;
@@ -449,8 +441,6 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the search and leaves the active match selected.
 - (void)stopFinding;
-/// Opens the current page's system print dialog.
-- (void)print;
 /// Renders the current page as PDF data on the system's default paper size. Passes `nil` if printing fails or no browser exists.
 - (void)printToPDFWithCompletion:(void (^)(NSData *_Nullable data))completion;
 /// Captures the page as PNG through the DevTools protocol. `beyondViewport` captures the whole scrollable page. Calls `completion` once on the main thread, with nil when the capture fails, the page's process quits, or the browser closes first. The first capture attaches a DevTools client that stays until the browser closes, so Chromium no longer times out the page's `beforeunload` handlers: once the page hangs, `tryCloseWithCompletion:` may never complete, and `close` still closes it.

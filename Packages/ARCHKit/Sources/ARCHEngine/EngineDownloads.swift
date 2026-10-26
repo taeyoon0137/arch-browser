@@ -9,7 +9,6 @@ public enum EngineDownloadState: String, Codable, Sendable {
 }
 
 public protocol EngineDownloadItem: AnyObject {
-    var id: String { get }
     var sourceURL: URL { get }
     /// The address of the page its web contents showed when the download started; nil when they showed none.
     var pageURL: URL? { get }
@@ -19,7 +18,6 @@ public protocol EngineDownloadItem: AnyObject {
     var state: EngineDownloadState { get }
     var completedBytes: Int64 { get }
     var totalBytes: Int64 { get }
-    var startTime: Date { get }
     func pause()
     func resume()
     func cancel()

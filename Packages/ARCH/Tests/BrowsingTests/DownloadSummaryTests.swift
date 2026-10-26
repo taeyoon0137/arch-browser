@@ -54,7 +54,6 @@ import Testing
 
 /// A download whose state and byte counts the test sets.
 private final class StubDownload: EngineDownloadItem {
-    let id = UUID().uuidString
     let sourceURL = URL(string: "https://example.org/file.zip")!
     let pageURL: URL? = nil
     let webContents: (any EngineWebContents)? = nil
@@ -62,7 +61,6 @@ private final class StubDownload: EngineDownloadItem {
     var state: EngineDownloadState
     var completedBytes: Int64
     var totalBytes: Int64
-    let startTime = Date()
 
     init(state: EngineDownloadState = .inProgress, completedBytes: Int64, totalBytes: Int64) {
         self.state = state

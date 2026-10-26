@@ -6,15 +6,11 @@ import Testing
 
 @MainActor @Suite struct WebKitReadableContentTests {
     private let browser: any EngineBrowser
-    private let browserDelegate = NoBrowserDelegate()
 
     init() throws {
         let folder = FileManager.default.temporaryDirectory
-        let application = try WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder))
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "test"), userVisibleName: "Test", type: .incognito)) { created = try? $0.get() }
-        let context = try #require(created as? WebKitBrowserContext)
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: browserDelegate, window: nil)
+        let application = try #require(WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder)) as? WebKitApplication)
+        browser = application.createBrowser(context: application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent()))
     }
 
     private static let page = """
@@ -68,6 +64,4 @@ import Testing
     }
 
     private enum TestPageError: Error { case notLoaded }
-
-    private final class NoBrowserDelegate: EngineBrowserDelegate {}
 }

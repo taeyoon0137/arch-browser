@@ -122,9 +122,6 @@ private final class SheetRecorder {
 
 /// A profile that keeps the last answer set for each type and origin, keyed by both.
 private final class RecordingContext: EngineBrowserContext {
-    let id = EngineBrowserContextID.default
-    let type = EngineBrowserContextType.regular
-    let userVisibleName = "Test"
     let downloads: any EngineDownloads = NoDownloads()
     var preferences = EnginePreferences()
     let extensions: (any EngineExtensions)? = nil

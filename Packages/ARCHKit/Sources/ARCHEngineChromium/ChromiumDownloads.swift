@@ -38,11 +38,9 @@ public final class ChromiumDownloads: EngineDownloads {
 
 /// One Chromium download. The item tracks its own pause requests because the bridge does not expose CEF's paused state.
 final class ChromiumDownloadItem: EngineDownloadItem {
-    let id: String
     let sourceURL: URL
     let pageURL: URL?
     private(set) weak var webContents: (any EngineWebContents)?
-    let startTime = Date()
     let download: ARCHCEFDownload
     private unowned let owner: ChromiumDownloads
     private var isPaused = false
@@ -56,7 +54,6 @@ final class ChromiumDownloadItem: EngineDownloadItem {
         self.webContents = webContents
         self.pageURL = pageURL
         self.owner = owner
-        id = String(download.identifier)
         sourceURL = URL(string: download.url) ?? URL(string: "about:blank")!
     }
 

@@ -4,21 +4,14 @@ import Foundation
 public struct EnginePreferences: Hashable, Codable, Sendable {
     public var downloadFilePath: URL?
     public var promptForDownloadPath: Bool
-    public var searchSuggestEnabled: Bool
-    public var notificationPermissionRequestsEnabled: Bool
-    public init(downloadFilePath: URL? = nil, promptForDownloadPath: Bool = false, searchSuggestEnabled: Bool = true, notificationPermissionRequestsEnabled: Bool = true) {
+    public init(downloadFilePath: URL? = nil, promptForDownloadPath: Bool = false) {
         self.downloadFilePath = downloadFilePath
         self.promptForDownloadPath = promptForDownloadPath
-        self.searchSuggestEnabled = searchSuggestEnabled
-        self.notificationPermissionRequestsEnabled = notificationPermissionRequestsEnabled
     }
 }
 
 /// A browser context (profile): downloads, preferences, web extensions, and the permission answers the engine keeps. Browsing history belongs to the `History` module, not to the engines.
 public protocol EngineBrowserContext: AnyObject {
-    var id: EngineBrowserContextID { get }
-    var type: EngineBrowserContextType { get }
-    var userVisibleName: String { get }
     var downloads: any EngineDownloads { get }
     var preferences: EnginePreferences { get set }
     /// Tier 2 capability. nil when the engine does not support it.

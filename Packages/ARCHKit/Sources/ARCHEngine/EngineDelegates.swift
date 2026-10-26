@@ -14,12 +14,10 @@ public struct EngineNavigationAction: Sendable {
     public var url: URL
     public var disposition: EngineNavigationDisposition
     public var isUserInitiated: Bool
-    public var referrer: URL?
-    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, referrer: URL? = nil) {
+    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool) {
         self.url = url
         self.disposition = disposition
         self.isUserInitiated = isUserInitiated
-        self.referrer = referrer
     }
 }
 
@@ -89,7 +87,6 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     /// The main frame finished loading a document, whose frames may still be loading. Navigations within the document report nothing.
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents)
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
-    func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents)
     /// `isAudible` changed.
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
@@ -124,7 +121,6 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {}
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
-    func webContentsDidChangeThemeColor(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}

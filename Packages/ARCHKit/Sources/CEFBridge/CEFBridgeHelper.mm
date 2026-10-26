@@ -15,16 +15,6 @@ using namespace cef_bridge;
 
 namespace {
 
-// The first theme color whose media query matches, as a canvas normalizes it, or an empty string. A transparent color stands for an invalid one.
-const char kThemeColorScript[] = R"JS((() => {
-  const meta = [...document.querySelectorAll('meta[name="theme-color" i]')].find((m) => m.content && (!m.media || matchMedia(m.media).matches));
-  if (!meta) return "";
-  const context = document.createElement("canvas").getContext("2d");
-  context.fillStyle = "rgba(0, 0, 0, 0)";
-  context.fillStyle = meta.content;
-  return context.fillStyle;
-})())JS";
-
 // Reports whether the document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in the page's world before the page's scripts, so it records the page's action handlers as the page sets them and runs them for the media keys. Keep it in step with WebKitAudibleScript in the WebKit adapter.
 const char kAudibleScript[] = R"JS((() => {
   const report = __archReportAudible, reportMedia = __archReportMedia, stringify = JSON.stringify, apply = Reflect.apply;
@@ -282,12 +272,6 @@ public:
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
         CefRefPtr<CefListValue> arguments = message->GetArgumentList();
-        if (message->GetName() == kThemeColorRequest) {
-            CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create(kThemeColorReply);
-            reply->GetArgumentList()->SetString(0, EvaluateString(frame, kThemeColorScript).value_or(CefString()));
-            frame->SendProcessMessage(PID_BROWSER, reply);
-            return true;
-        }
         if (message->GetName() == kScriptRequest) {
             // A request with a world calls a function with that world's channel; one without evaluates a script, for which a value other than a string counts as a failure.
             std::optional<CefString> result;

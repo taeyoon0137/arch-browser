@@ -150,8 +150,8 @@ public struct Persona: Identifiable, Codable, Hashable {
     public static let defaultID = UUID(uuidString: "D59DAF4B-E372-4AF9-890E-455B8B3860F3")!
     public var isDefault: Bool { id == Self.defaultID }
 
-    /// The default Persona keeps the `default` context and the engines' default storage. Any other Persona names its context, and from step 5 its storage, by its UUID.
-    var contextAttributes: EngineBrowserContextAttributes { get }
+    /// The storage of the Persona's profile in each engine: nil, the engines' default storage, for the default Persona, and the Persona's UUID for any other.
+    var storageIdentifier: UUID? { get }
 }
 ```
 
@@ -410,8 +410,8 @@ public static let opensLinksInSmallWindowByDefault: Bool
 - Every existing app-wide mutator keeps its name. `openTab(url:in:pinned:select:engine:state:)` keeps its signature, so parallel tasks compile: a nil space means the sidebar target's current space, and `select: true` selects the tab in the sidebar target. The tab takes the space's Persona. Views and menus use `BrowserWindowModel.openTab` instead.
 - `addFavorites(_:in:)` adds to the given Persona: the file import (`ImportController`) passes the Persona of the sidebar target's current space, and the browser import passes the destination Persona. `addFavorite(_ tab:)` uses the tab's Persona. Duplicate addresses are checked within one Persona.
 - The Persona mutators stay internal: the app reaches them through the window's sheets, and Sync (V.9) makes public what it needs. The only public path for creating a Persona and its spaces is the browser import's `addImport(_:to:record:)` (`docs/import-browsers.md`). A page's tab joins a space of the page's Persona through one helper that `adopt` and `openSmallWindow` share: the given space while it belongs to that Persona, else `preferredSpace(in:)`.
-- Engine section: `applications: [EngineKind: any EngineApplication]`, each started once (`makeApplication`, `delegate = self`, `run()`); `personaEngines: [Persona.ID: PersonaEngines]`; `retiredPersonaEngines: [PersonaEngines]` for deleted Personas, kept until quit; `runtime(for kind:, in persona:) -> EngineRuntime`, which creates the context from `contextAttributes` and its browser on first use and falls back to the primary engine within the same Persona; `runtime(of tab:) -> EngineRuntime?`; and `allRuntimes`.
-- The session's implementation of `EngineBrowserDelegate.browser(_:didCreateNewWebContents:isActive:)` is deleted, and the protocol's default applies, because no adapter calls it.
+- Engine section: `applications: [EngineKind: any EngineApplication]`, each started once (`makeApplication`, `delegate = self`); `personaEngines: [Persona.ID: PersonaEngines]`; `retiredPersonaEngines: [PersonaEngines]` for deleted Personas, kept until quit; `runtime(for kind:, in persona:) -> EngineRuntime`, which creates the context for the Persona's `storageIdentifier` and its browser on first use and falls back to the primary engine within the same Persona; `runtime(of tab:) -> EngineRuntime?`; and `allRuntimes`.
+- The session implements no browser delegate: popups reach it through their opener's `Tab.openNewTab`.
 - `validateMenuItem` and other checks read `lastMainWindow` and never create a window.
 
 `SmallWindowView` (new, internal, step 11, `SmallWindowView.swift`): `init(session: BrowserSession, window: BrowserWindowModel)`; its layout is under Small window.
@@ -430,16 +430,10 @@ public static let opensLinksInSmallWindowByDefault: Bool
 ### ARCHEngine
 
 ```swift
-public extension EngineBrowserContextID {
-    /// The engine's default profile, which keeps the data of builds before Personas: WebKit's default data store and CEF's global request context.
-    static let `default` = EngineBrowserContextID(rawValue: "default")
-}
-
-public struct EngineBrowserContextAttributes {
-    // id, userVisibleName, type: unchanged
-    /// Where a regular context keeps its data. nil: the engine's default storage. A UUID: storage of its own, `WKWebsiteDataStore(forIdentifier:)` or a CEF request context whose profile is the `Persona-<UUID>` directory under the root cache path.
-    public var storageIdentifier: UUID?
-    public init(id: EngineBrowserContextID, userVisibleName: String, type: EngineBrowserContextType, storageIdentifier: UUID? = nil)
+public protocol EngineApplication: AnyObject {
+    // other members
+    /// Makes a profile whose data lives in the storage `storageIdentifier` names. nil: the engine's default storage, which keeps the data of builds before Personas, WebKit's default data store and CEF's global request context. A UUID: storage of its own, `WKWebsiteDataStore(forIdentifier:)` or a CEF request context whose profile is the `Persona-<UUID>` directory under the root cache path.
+    func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void)
 }
 
 public protocol Engine: AnyObject {
@@ -449,16 +443,16 @@ public protocol Engine: AnyObject {
 }
 ```
 
-- The ID names the context within its application, and `storageIdentifier` picks the storage, so no adapter parses an ID string as a UUID. Existing callers compile unchanged because the new parameter has a default.
-- `EngineBrowser`'s comment changes from "A container for one window" to "The web contents of one browser context in one engine." The session keeps one per Persona and engine with `window: nil`, because tabs move between windows. `EngineBrowser.window` and `deleteBrowserContext` stay as they are, unused.
+- The storage identifier alone names a profile's storage, so no adapter parses a string as a UUID. `Persona.storageIdentifier` is nil for the default Persona and the Persona's UUID for any other.
+- `EngineBrowser` is the web contents of one browser context in one engine. The session keeps one per Persona and engine, tied to no window, because tabs move between windows.
 - `createBrowserContext` keeps completing synchronously, because `startEngine` and `openTab` rely on it.
 
 ### WebKit adapter
 
-- `WebKitBrowserContext.init(attributes:)` picks the store: `.nonPersistent()` for incognito; `.default()` without a storage identifier; `WKWebsiteDataStore(forIdentifier:)` with one. Each context keeps its store object for the app's lifetime.
+- `WebKitApplication.createBrowserContext(storageIdentifier:)` picks the store: `.default()` without a storage identifier and `WKWebsiteDataStore(forIdentifier:)` with one. The adapter's tests make a profile over `.nonPersistent()` through the internal `makeBrowserContext(storageIdentifier:dataStore:)`. Each context keeps its store object for the app's lifetime.
 - Tabs, popups, the downloads' hidden web view, and the cookie observer already use the context's store and need no change.
 - `WebKitEngine.removeStoredData` calls `+removeDataStoreForIdentifier:completionHandler:` and reports success when the error is nil. It does not start the WebKit application.
-- Web extensions: one `WKWebExtensionController` per context, and thus per Persona. Its configuration follows the store: `.nonPersistent()` for incognito, `.default()` without a storage identifier because the default Persona keeps WebKit's default store, and `configurationWithIdentifier:` with one. Its `defaultWebsiteDataStore` is the context's store.
+- Web extensions: one `WKWebExtensionController` per context, and thus per Persona. Its configuration follows the store: `.nonPersistent()` for a store that keeps nothing on disk, as in the adapter's tests, `.default()` without a storage identifier because the default Persona keeps WebKit's default store, and `configurationWithIdentifier:` with one. Its `defaultWebsiteDataStore` is the context's store.
 
 ### Chromium adapter
 

@@ -10,15 +10,12 @@ import WebKit
 struct WebKitExtensionWindowsTests {
     private let context: WebKitBrowserContext
     private let browser: any EngineBrowser
-    private let browserDelegate = NoBrowserDelegate()
 
     init() throws {
         let folder = FileManager.default.temporaryDirectory
-        let application = try WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder))
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "windows"), userVisibleName: "Windows", type: .incognito)) { created = try? $0.get() }
-        context = try #require(created as? WebKitBrowserContext)
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: browserDelegate, window: nil)
+        let application = try #require(WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder)) as? WebKitApplication)
+        context = application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent())
+        browser = application.createBrowser(context: context)
     }
 
     /// As Move to Main Window moves a small window's tab into a main window and closes the small window.
@@ -65,8 +62,6 @@ struct WebKitExtensionWindowsTests {
     private func makeTab() throws -> WebKitWebContents {
         try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
     }
-
-    private final class NoBrowserDelegate: EngineBrowserDelegate {}
 
     /// Records each call as a line that names the tabs and windows.
     @available(macOS 15.4, *)

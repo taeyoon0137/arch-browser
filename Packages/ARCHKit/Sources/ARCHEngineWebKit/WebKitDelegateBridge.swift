@@ -35,7 +35,6 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
                 owner?.loadingStateDidChange()
             },
             webView.observe(\.estimatedProgress) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
-            webView.observe(\.themeColor) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeThemeColor($0) } },
         ]
     }
 
@@ -63,8 +62,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
         let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
-                                            isUserInitiated: navigationAction.navigationType == .linkActivated,
-                                            referrer: (navigationAction.value(forKey: "sourceFrame") as? WKFrameInfo)?.request.url)
+                                            isUserInitiated: navigationAction.navigationType == .linkActivated)
         decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? allowed : .cancel)
     }
 
@@ -88,7 +86,6 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// A web view that has not committed a navigation has never shown a page.
     private func mayDownload(_ url: URL?, in webView: WKWebView) -> Bool {
-        guard owner.allowsDownloads else { return false }
         guard let url, let delegate = owner.uiDelegate else { return true }
         return delegate.webContents(owner, shouldDownload: url, hasPage: webView.backForwardList.currentItem != nil)
     }
@@ -137,12 +134,12 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         // WebKit loads no web page in a web view made for an extension, so a web page that an extension's page opens loads in a web contents of its own, without an opener. A window that a web page opens for an extension's page gets its opener's configuration, and WebKit refuses the page there.
         if let url = navigationAction.request.url, owner.extensionBaseURL != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-            let child = WebKitWebContents(sessionID: UUID().uuidString, context: owner.context,
+            let child = WebKitWebContents(context: owner.context,
                                           configuration: EngineWebContentsConfiguration(initialURL: url, pageScripts: owner.userContent.pageScripts))
             delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: .newForegroundTab)
             return nil
         }
-        let child = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context)
+        let child = WebKitWebContents(parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context)
         delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: .newForegroundTab)
         return child.webView
     }

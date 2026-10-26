@@ -6,14 +6,11 @@ import Testing
 
 @MainActor @Suite struct WebKitCookieTests {
     private let browser: any EngineBrowser
-    private let browserDelegate = NoBrowserDelegate()
 
     init() throws {
         let folder = FileManager.default.temporaryDirectory
-        let application = try WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder))
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(EngineBrowserContextAttributes(id: EngineBrowserContextID(rawValue: "cookies"), userVisibleName: "Cookies", type: .incognito)) { created = try? $0.get() }
-        browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: try #require(created), delegate: browserDelegate, window: nil)
+        let application = try #require(WebKitEngine().makeApplication(configuration: EngineApplicationConfiguration(userDataDirectory: folder, cacheDirectory: folder)) as? WebKitApplication)
+        browser = application.createBrowser(context: application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent()))
     }
 
     /// WebKit keeps a lax or strict policy, and sends a cookie without one, also one that names none, with requests from other sites.
@@ -41,6 +38,4 @@ import Testing
             #expect(readBack.hasSameContents(as: cookie))
         }
     }
-
-    private final class NoBrowserDelegate: EngineBrowserDelegate {}
 }

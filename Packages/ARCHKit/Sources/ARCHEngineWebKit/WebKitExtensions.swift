@@ -15,9 +15,9 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
     /// Where `setWindows(_:focusedWindowID:)` reports what changed: the controller, or a test's recorder.
     lazy var windowEvents: any WebKitExtensionWindowEvents = controller
 
-    /// Keeps the extensions' data as the profile keeps its website data: nothing for incognito, the default location for the default store, and otherwise under the store's identifier. Extensions reach cookies in the profile's store.
+    /// Keeps the extensions' data as the profile keeps its website data: nothing for a store that keeps nothing on disk, the default location for the default store, and otherwise under the store's identifier. Extensions reach cookies in the profile's store.
     init(context: WebKitBrowserContext) {
-        let configuration = Self.configuration(forStorage: context.attributes.storageIdentifier, isPersistent: context.attributes.type == .regular)
+        let configuration = Self.configuration(forStorage: context.storageIdentifier, isPersistent: context.dataStore.isPersistent)
         configuration.defaultWebsiteDataStore = context.dataStore
         controller = WKWebExtensionController(configuration: configuration)
         super.init()
