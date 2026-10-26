@@ -1,4 +1,4 @@
-// How a cookie's SameSite policy passes through a WebKit profile's cookie store, which the session copies cookies into and out of for the other engine. The tests use a private profile, which keeps nothing on disk.
+// How a cookie's SameSite policy and its other contents pass through a WebKit profile's cookie store, which the session copies cookies into and out of for the other engine. The tests use a private profile, which keeps nothing on disk.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -26,6 +26,20 @@ import Testing
         let stored = await withCheckedContinuation { continuation in browser.allCookies { continuation.resume(returning: $0) } }
         let storedPolicies = Dictionary(stored.map { ($0.name, $0.sameSite) }, uniquingKeysWith: { first, _ in first })
         #expect(storedPolicies == ["lax": .lax, "strict": .strict, "none": .noRestriction, "unnamed": .noRestriction])
+    }
+
+    /// A cookie that Chromium holds without a policy reads back from WebKit as `SameSite=None` but with the same contents otherwise, so the session's copy back to Chromium leaves Chromium's cookie and its policy as they were.
+    @Test func aCookieReadsBackWithTheSameContents() async throws {
+        let hostOnly = EngineCookie(name: "sid", value: "a1", domain: "example.com", path: "/account", expires: Date(timeIntervalSinceNow: 86_400.375),
+                                    isSecure: true, isHTTPOnly: true)
+        let domainWide = EngineCookie(name: "pref", value: "b2", domain: ".example.com", isSecure: true)
+        await withCheckedContinuation { continuation in browser.setCookies([hostOnly, domainWide]) { continuation.resume() } }
+        let stored = await withCheckedContinuation { continuation in browser.allCookies { continuation.resume(returning: $0) } }
+        for cookie in [hostOnly, domainWide] {
+            let readBack = try #require(stored.first { $0.name == cookie.name })
+            #expect(readBack.sameSite == .noRestriction)
+            #expect(readBack.hasSameContents(as: cookie))
+        }
     }
 
     private final class NoBrowserDelegate: EngineBrowserDelegate {}

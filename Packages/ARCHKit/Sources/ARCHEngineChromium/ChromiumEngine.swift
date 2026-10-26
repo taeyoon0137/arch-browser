@@ -294,6 +294,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private let requestContext: ARCHCEFRequestContext
     /// The icon URL that last gave each host's pages their icon in this tab, by lowercase host.
     private var iconURLsByHost: [String: URL] = [:]
+    /// Advances with each icon load and each move to another host, so that only the latest load shows its icon.
+    private var iconGeneration = 0
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool, forward: Bool)?
     private var lastActiveMatchOrdinal = 0
@@ -491,6 +493,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.url = URL(string: url)
         uiDelegate?.webContentsDidChangeURL(self)
         guard !FaviconLoader.keepsIcon(from: previousURL, to: self.url) else { return }
+        iconGeneration += 1
         if favicon != nil {
             favicon = nil
             uiDelegate?.webContentsDidChangeFavicon(self)
@@ -509,12 +512,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
         loadFavicon(iconURL)
     }
-    /// Shows the icon at `iconURL` and remembers it for the page's host, unless the tab moves to another host while it loads; a page that changes its address with `history.replaceState` meanwhile keeps it.
+    /// Shows the icon at `iconURL` and remembers it for the page's host, unless another icon load starts or the tab moves to another host while it loads, so that an earlier page's icon never replaces a later one's; a page that changes its address on the same host meanwhile, as with `history.pushState`, keeps it.
     private func loadFavicon(_ iconURL: URL) {
-        let pageURL = url
+        iconGeneration += 1
+        let generation = iconGeneration
+        let host = url?.host?.lowercased()
         FaviconLoader.load(iconURL) { [weak self] image in
-            guard let self, let image, FaviconLoader.keepsIcon(from: pageURL, to: self.url) else { return }
-            if let host = pageURL?.host?.lowercased() { self.iconURLsByHost[host] = iconURL }
+            guard let self, let image, generation == self.iconGeneration else { return }
+            if let host { self.iconURLsByHost[host] = iconURL }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }

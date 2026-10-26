@@ -29,6 +29,8 @@ public final class HistoryStore: @unchecked Sendable {
     private var database: OpaquePointer?
     /// Entered for each import until its last batch is in, so that `finishWrites()` can wait for the batches it has not queued yet.
     private let imports = DispatchGroup()
+    /// The imports with batches still to write, used only on `queue`.
+    private var runningImports: [PendingImport] = []
 
     /// Opens or creates `history.sqlite` in `directory`. All store operations are no-ops if the file cannot be opened.
     public init(directory: URL) {
@@ -57,37 +59,40 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
-    /// Adds pages read from another app's history. A page already in the store keeps its title unless that is empty, and takes the later last visit and the larger visit count, so importing the same file again changes nothing. The pages go in by batches of `importBatchSize`, each committed on its own and queued once the one before has committed, so that visits, suggestions, and the History window's reads that arrive meanwhile wait for one batch at most. A batch that fails rolls back and ends the import. `completion`, when given, runs on the main queue after the last batch with the number of pages the committed batches added or changed, counting each address once.
+    /// Adds pages read from another app's history. A page already in the store keeps its title unless that is empty, and takes the later last visit and the larger visit count, so importing the same file again changes nothing. The pages go in by batches of `importBatchSize`, each committed on its own and queued once the one before has committed, so that visits, suggestions, and the History window's reads that arrive meanwhile wait for one batch at most. A batch that fails rolls back and ends the import. A removal asked for during the import also holds for its later batches, which leave out the pages it removed, as if it had run after the import. `completion`, when given, runs on the main queue after the last batch with the number of pages the committed batches added or changed, counting each address once.
     public func importEntries(_ entries: [HistoryEntry], completion: ((Int) -> Void)? = nil) {
         imports.enter()
         let pending = PendingImport(entries: entries, completion: completion)
-        queue.async { self.importNextBatch(of: pending) }
+        queue.async {
+            self.runningImports.append(pending)
+            self.importNextBatch(of: pending)
+        }
     }
 
-    /// One import's pages and the addresses its batches have added or changed, used only on `queue`.
+    /// One import's pages not written yet and the addresses its batches have added or changed, used only on `queue`.
     private final class PendingImport {
-        let entries: [HistoryEntry]
+        var remaining: ArraySlice<HistoryEntry>
         let completion: ((Int) -> Void)?
-        var nextIndex = 0
         var changedURLs: Set<URL> = []
 
         init(entries: [HistoryEntry], completion: ((Int) -> Void)?) {
-            self.entries = entries
+            remaining = entries[...]
             self.completion = completion
         }
     }
 
     /// Runs on `queue`: commits the next batch of `pending`, then queues the one after it behind whatever arrived meanwhile, or ends the import after the last batch or a failed one.
     private func importNextBatch(of pending: PendingImport) {
-        let end = min(pending.nextIndex + Self.importBatchSize, pending.entries.count)
-        if let changedURLs = commit(pending.entries[pending.nextIndex..<end]) {
+        let batch = pending.remaining.prefix(Self.importBatchSize)
+        if let changedURLs = commit(batch) {
             pending.changedURLs.formUnion(changedURLs)
-            pending.nextIndex = end
-            if end < pending.entries.count {
+            pending.remaining = pending.remaining.dropFirst(batch.count)
+            if !pending.remaining.isEmpty {
                 queue.async { self.importNextBatch(of: pending) }
                 return
             }
         }
+        runningImports.removeAll { $0 === pending }
         let count = pending.changedURLs.count
         imports.leave()
         if let completion = pending.completion { DispatchQueue.main.async { completion(count) } }
@@ -142,27 +147,38 @@ public final class HistoryStore: @unchecked Sendable {
 
     /// Removes the pages at `urls` in one transaction.
     public func remove(_ urls: some Sequence<URL>) {
-        let addresses = urls.map(\.absoluteString)
+        let addresses = Set(urls.map(\.absoluteString))
         queue.async {
             guard self.execute("BEGIN") != nil else { return }
             for address in addresses {
                 guard self.execute("DELETE FROM visits WHERE url = ?1", bindings: [.text(address)]) != nil else { return self.rollBack() }
             }
-            if self.execute("COMMIT") == nil { self.rollBack() }
+            guard self.execute("COMMIT") != nil else { return self.rollBack() }
+            self.removeFromRunningImports { addresses.contains($0.url.absoluteString) }
         }
     }
 
     /// Removes the entries last visited at or after `date`, including their earlier visits.
     public func removeEntries(since date: Date) {
         queue.async {
-            self.execute("DELETE FROM visits WHERE last_visit >= ?1", bindings: [.double(date.timeIntervalSince1970)])
+            let bindings: [Binding] = [.double(date.timeIntervalSince1970)]
+            // A running import's later batches leave out the pages removed now, also their visits from before `date`.
+            let removed = self.runningImports.isEmpty ? [] : Set(self.entries("SELECT url, title, visit_count, last_visit FROM visits WHERE last_visit >= ?1", bindings: bindings).map(\.url.absoluteString))
+            guard self.execute("DELETE FROM visits WHERE last_visit >= ?1", bindings: bindings) != nil else { return }
+            self.removeFromRunningImports { $0.lastVisit >= date || removed.contains($0.url.absoluteString) }
         }
     }
 
     public func clear() {
         queue.async {
-            self.execute("DELETE FROM visits")
+            guard self.execute("DELETE FROM visits") != nil else { return }
+            self.removeFromRunningImports { _ in true }
         }
+    }
+
+    /// Runs on `queue` after a removal: takes the pages `shouldRemove` accepts out of the batches that running imports have not written yet.
+    private func removeFromRunningImports(where shouldRemove: (HistoryEntry) -> Bool) {
+        for pending in runningImports { pending.remaining.removeAll(where: shouldRemove) }
     }
 
     // MARK: SQLite

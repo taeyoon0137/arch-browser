@@ -1487,7 +1487,7 @@ private:
     }
 }
 
-/// A frame created after the scripts changed may be the first of the browser in its renderer process, which then has only the scripts of the browser's extra info. CEF queues the message until the frame attaches and does not order it before the frame's first document, so that document may still run the extra info's scripts.
+/// A frame created after the scripts changed may be the first of the browser in its renderer process, which then has only the scripts of the browser's extra info. CEF queues the message until the frame attaches and does not order it before the frame's first document, so that document may still run the extra info's scripts (needs verification).
 - (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame {
     if (_pageScriptsChanged) {
         [self sendPageScriptsToFrame:frame];

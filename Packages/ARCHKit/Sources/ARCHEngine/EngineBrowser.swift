@@ -41,6 +41,17 @@ public struct EngineCookie: Hashable, Sendable {
         components.path = path.isEmpty ? "/" : path
         return components.url
     }
+
+    /// Whether `other` is this cookie with the same contents, whatever the `SameSite` policy of each: the same name, domain, path, value, and flags, and an expiry within a second of this one's, since the stores keep dates with different precision.
+    public func hasSameContents(as other: EngineCookie) -> Bool {
+        guard name == other.name, value == other.value, domain.lowercased() == other.domain.lowercased(), path == other.path,
+              isSecure == other.isSecure, isHTTPOnly == other.isHTTPOnly else { return false }
+        switch (expires, other.expires) {
+        case (nil, nil): return true
+        case let (date?, otherDate?): return abs(date.timeIntervalSince(otherDate)) < 1
+        default: return false
+        }
+    }
 }
 
 public protocol EngineBrowserDelegate: AnyObject {

@@ -15,23 +15,31 @@ final class CookieSync {
     /// Work waiting for its turn, oldest first: removals, and the copies asked for after them.
     private var queue: [(isRemoval: Bool, start: () -> Void)] = []
 
-    /// Copies every cookie of `source` into `target`, then calls `completion` once they are stored.
+    /// Copies the cookies of `source` that `target` lacks or holds with other contents into `target`, then calls `completion` once they are stored.
     func copy(from source: EngineRuntime, to target: EngineRuntime, completion: @escaping () -> Void) {
         enqueue(isRemoval: false) { [weak self] in
             guard let self else { return completion() }
             self.runningCopies += 1
             source.browser.allCookies { [weak self] cookies in
-                guard let self else { return completion() }
-                self.writingEngines.insert(target.kind)
-                target.browser.setCookies(cookies) { [weak self] in
-                    // The store reports its own writes shortly after they finish.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.writingEngines.remove(target.kind) }
-                    completion()
-                    self?.runningCopies -= 1
-                    self?.startQueued()
+                target.browser.allCookies { [weak self] held in
+                    guard let self else { return completion() }
+                    self.writingEngines.insert(target.kind)
+                    target.browser.setCookies(Self.cookies(cookies, changedFrom: held)) { [weak self] in
+                        // The store reports its own writes shortly after they finish.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.writingEngines.remove(target.kind) }
+                        completion()
+                        self?.runningCopies -= 1
+                        self?.startQueued()
+                    }
                 }
             }
         }
+    }
+
+    /// The cookies of `source` that `target` lacks or holds with other contents. A cookie the target holds already keeps the target's `SameSite` policy, which the source store may not have kept: WebKit reads a Chromium cookie without a policy as `SameSite=None`, and writing it back would widen it.
+    static func cookies(_ source: [EngineCookie], changedFrom target: [EngineCookie]) -> [EngineCookie] {
+        let held = Dictionary(grouping: target, by: \.name)
+        return source.filter { cookie in !(held[cookie.name] ?? []).contains { $0.hasSameContents(as: cookie) } }
     }
 
     /// Copies the cookies of `source` to every other running engine once its changes settle.

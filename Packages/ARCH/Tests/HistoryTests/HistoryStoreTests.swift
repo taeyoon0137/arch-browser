@@ -1,4 +1,4 @@
-// A history store in a folder of its own: address suggestions are pages whose address or title holds the text, most visited first, with SQL wildcard characters taken literally, and none for empty text; an import lets reads in between its batches and finishes before the store says its writes are done; removing pages takes only those. The pages hold made-up addresses only.
+// A history store in a folder of its own: address suggestions are pages whose address or title holds the text, most visited first, with SQL wildcard characters taken literally, and none for empty text; an import lets reads in between its batches and finishes before the store says its writes are done; removing pages takes only those, and a removal during an import holds for the import's later batches. The pages hold made-up addresses only.
 import Foundation
 @testable import History
 import Testing
@@ -78,6 +78,38 @@ import Testing
         store.remove(Set(urls.prefix(2)))
         let remaining = await withCheckedContinuation { continuation in store.entries(since: .distantPast) { continuation.resume(returning: $0) } }
         #expect(remaining.map(\.url) == [urls[2]])
+    }
+
+    @Test func clearingHistoryDuringAnImportLeavesNoPages() async throws {
+        let folder = try TemporaryFolder()
+        let store = HistoryStore(directory: folder.url)
+        // The clear arrives while the import writes its first batches, and the batches it has not written then leave out every page.
+        store.importEntries(Self.pages(batches: 10))
+        store.clear()
+        store.finishWrites()
+        #expect(await store.suggestions(for: "page", limit: .max).isEmpty)
+    }
+
+    @Test func removalsDuringAnImportHoldForItsLaterBatches() async throws {
+        let folder = try TemporaryFolder()
+        let store = HistoryStore(directory: folder.url)
+        let batches = 4
+        // Every other page was last visited after the range's start.
+        var pages = Self.pages(batches: batches).enumerated().map { index, page in
+            index.isMultiple(of: 2) ? page : HistoryEntry(url: page.url, title: page.title, visitCount: page.visitCount, lastVisit: Date(timeIntervalSince1970: 300))
+        }
+        // A page of a later batch that the user visited too, so the range takes its earlier visit from the import as well.
+        let visited = pages[2 * HistoryStore.importBatchSize].url
+        store.record(visited, title: "")
+        let removed = pages[3 * HistoryStore.importBatchSize + 2].url
+        store.importEntries(pages)
+        store.removeEntries(since: Date(timeIntervalSince1970: 200))
+        store.remove([removed])
+        store.finishWrites()
+        pages.removeAll { $0.lastVisit >= Date(timeIntervalSince1970: 200) || $0.url == visited || $0.url == removed }
+        let remaining = await withCheckedContinuation { continuation in store.entries(since: .distantPast) { continuation.resume(returning: $0) } }
+        #expect(Set(remaining.map(\.url)) == Set(pages.map(\.url)))
+        #expect(remaining.count == batches * HistoryStore.importBatchSize / 2 - 2)
     }
 }
 
