@@ -464,7 +464,7 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
+    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. A new plugin takes nothing from an install entry or a pair record with its identifier that the list leaves out, as a removal whose write failed leaves them: its entry goes after the others without the old dismissed notes, and the records go, so that it joins a pair only as the user chooses. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
     @discardableResult
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {
         guard !isClosed else { throw PluginError.closed }
@@ -489,10 +489,12 @@ public final class PluginManager: ObservableObject {
         let checks = Self.fileChecks(package.engineChecks, engines: runtime?.engines ?? [:])
         var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
                                              engineChecks: checks.isEmpty ? nil : checks)
-        if let index = installs.firstIndex(where: { $0.id == install.id }) {
+        if !isNew, let index = installs.firstIndex(where: { $0.id == install.id }) {
             if case let .readable(old) = installs[index] { install.dismissedVersionNotes = old.dismissedVersionNotes }
             installs[index] = .readable(install)
         } else {
+            // An entry that the list leaves out, as one that a removal whose write failed leaves, gives a new plugin neither its place nor its dismissed notes.
+            installs.removeAll { $0.id == install.id }
             installs.append(.readable(install))
         }
         recordChoice(isEnabled, for: id)
@@ -506,10 +508,14 @@ public final class PluginManager: ObservableObject {
         if let pair {
             dropRecords(naming: pair.plugins)
             pairRecords.append(pair.fileRecord)
-        } else if isNew, !package.joinableEngines.isEmpty, let counterpart = package.counterpart, let match = next.first(where: { $0.id == counterpart }) {
-            // The user chose to keep the two apart.
-            dismiss(match.enginesRunningPackage, notesOf: id, in: &next)
-            dismiss(plugin.enginesRunningPackage, notesOf: counterpart, in: &next)
+        } else if isNew {
+            // A record that names the identifier, as one that a removal whose write failed leaves, would pair the new plugin without the user's choice.
+            dropRecords(naming: [id])
+            if !package.joinableEngines.isEmpty, let counterpart = package.counterpart, let match = next.first(where: { $0.id == counterpart }) {
+                // The user chose to keep the two apart.
+                dismiss(match.enginesRunningPackage, notesOf: id, in: &next)
+                dismiss(plugin.enginesRunningPackage, notesOf: counterpart, in: &next)
+            }
         }
         do {
             try writeList()
@@ -774,7 +780,7 @@ public final class PluginManager: ObservableObject {
         setEnabled(false, for: [id], failure: EngineKind.allCases.compactMap { plugin.engineFailures[$0] }.joined(separator: "\n"))
     }
 
-    /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed. A write of `plugins.json` that fails does not throw but sets `listWriteFailure`: the file keeps the plugin's entry, which the next launch leaves out of the list, since its package is gone.
+    /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed. A write of `plugins.json` that fails does not throw but sets `listWriteFailure`: the file keeps the plugin's entry, which the next launch leaves out of the list, since its package is gone, and its pair's record, which the next launch ignores, and an install with the identifier takes neither.
     public func remove(_ id: PluginID) throws {
         guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil

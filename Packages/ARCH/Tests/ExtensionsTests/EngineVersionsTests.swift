@@ -1,4 +1,4 @@
-// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, records the build ignores, and when a plugin asks for another engine's version. A recording engine stands in for Chromium.
+// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, and when a plugin asks for another engine's version. A recording engine stands in for Chromium.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -553,6 +553,40 @@ struct EngineVersionsTests {
         await thirdRuntime.waitForEngines()
         let remaining = try plugin(version, in: third)
         #expect(remaining.isEnabled && chromium.removedData.isEmpty && chromium.loaded[keyID]?.packageURL == remaining.packageURL)
+    }
+
+    @Test func installsAVersionAgainAsANewPluginAfterARemovalThatThePluginListMissed() async throws {
+        let (first, firstRuntime) = launch()
+        webKit.refusedNames = ["B"]
+        let a = try await first.installEverything(from: package("a", name: "A"))
+        let b = try await first.installEverything(from: package("b", name: "B"))
+        let c = try await first.installEverything(from: package("c", name: "C"))
+        first.dismissVersionNote(of: b.id, for: .webKit)
+        try first.join(PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
+        // A folder at the file's path makes each write fail, as a full disk does.
+        let savedList = folder.url.appendingPathComponent("plugins.saved.json")
+        try FileManager.default.moveItem(at: listURL, to: savedList)
+        try FileManager.default.createDirectory(at: listURL, withIntermediateDirectories: false)
+        try first.remove(b.id)
+        await firstRuntime.waitForEngines()
+        #expect(first.listWriteFailure != nil && first.engineVersions.isEmpty)
+        first.close()
+        try FileManager.default.removeItem(at: listURL)
+        try FileManager.default.moveItem(at: savedList, to: listURL)
+
+        // The file keeps B's entry and the pair's record, which the next launch ignores, since B's package is gone.
+        let (manager, _) = launch()
+        #expect(manager.plugins.map(\.id) == [a.id, c.id] && manager.engineVersions.isEmpty)
+        #expect(try list()["engineVersions"] as? [[String: String]] == [["webKit": a.id.rawValue, "chromium": b.id.rawValue]])
+        // Installed again, switched off, without a join to offer, since the names differ, B is a new plugin: it pairs with nothing and takes neither the old entry's place nor its dismissed note.
+        let again = try await manager.installEverything(from: package("b", name: "B"), isEnabled: false)
+        #expect(again.id == b.id && again.counterpart == nil && again.dismissedVersionNotes.isEmpty && manager.missingEngine(of: b.id) == .webKit)
+        #expect(try manager.engineVersions.isEmpty && manager.plugins.map(\.id) == [a.id, c.id, b.id] && list()["engineVersions"] == nil)
+        #expect(try (list()["installed"] as? [[String: Any]])?.compactMap { $0["id"] as? String } == [a.id, c.id, b.id].map(\.rawValue))
+        manager.close()
+        let (later, _) = launch()
+        #expect(later.plugins.map(\.id) == [a.id, c.id, b.id] && later.engineVersions.isEmpty)
+        #expect(try plugin(a.id, in: later).isEnabled && !plugin(b.id, in: later).isEnabled)
     }
 
     @Test func keepsRecordsAndEngineNamesThisBuildIgnores() async throws {
