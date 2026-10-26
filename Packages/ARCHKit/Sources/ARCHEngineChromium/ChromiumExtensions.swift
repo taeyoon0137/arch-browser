@@ -45,7 +45,7 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         try ChromiumPackageCheck.check(packageURL)
     }
 
-    /// Loads the package unpacked from its folder, whose manifest's `key` gives the extension the app's identifier, then switches it on and sets where its host permissions apply: on every site its manifest asks for when the user granted them all, or else on a click, which leaves the user to allow it on a site. Chromium grants the API permissions the manifest asks for, which are those the app's install grants.
+    /// Loads the package unpacked from its folder, whose manifest's `key` gives the extension the app's identifier, then switches it on and sets where its host permissions apply (`siteGrant(for:)`): on every site its manifest asks for when the user granted them all, or else on the granted sites, while the others wait for a click, which leaves the user to allow the extension there. Chromium grants the API permissions the manifest asks for, which are those the app's install grants.
     func load(_ extension: EngineExtension) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             DispatchQueue.main.async { self.startLoading(`extension`) { continuation.resume(with: $0) } }
@@ -66,7 +66,8 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
                     self.loadedInRun.insert(id)
                     self.loaded[id] = `extension`
                     self.requestContext.setExtension(id, enabled: true)
-                    self.requestContext.setExtension(id, siteAccess: Self.siteAccess(for: `extension`))
+                    let grant = Self.siteGrant(for: `extension`)
+                    self.requestContext.setExtension(id, siteAccess: grant.access, sites: grant.sites)
                     self.actionCache.removeAll()
                 }
                 completion(result)
@@ -94,6 +95,13 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     static func siteAccess(for extension: EngineExtension) -> ARCHCEFExtensionSiteAccess {
         let asked = Set((ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []).map(lowercasingSchemeAndHost).filter(countsForSiteAccess))
         return `extension`.sites.contains("<all_urls>") || asked.isSubset(of: `extension`.sites) ? .onAllSites : .onClick
+    }
+
+    /// Where the extension's host permissions apply (`siteAccess(for:)`), with the sites on which Chromium runs it without a click while the others wait for one: the grant's patterns with their schemes and hosts in lowercase, sorted, less those for `file:` and `ftp:` pages. Chromium grants only the manifest's sites that these cover. They never cover a pattern for another scheme, such as `wss:`, which therefore still waits for a click, and cover a pattern with a port only where one of them covers its host, as a pattern covers every port of its host. With every site, no sites go, since Chromium grants them all.
+    static func siteGrant(for extension: EngineExtension) -> (access: ARCHCEFExtensionSiteAccess, sites: [String]) {
+        let access = siteAccess(for: `extension`)
+        guard access == .onClick else { return (access, []) }
+        return (access, Set(`extension`.sites.map(lowercasingSchemeAndHost).filter(countsForSiteAccess)).sorted())
     }
 
     /// Whether the pattern, with its scheme in lowercase, counts toward the sites an extension needs: every pattern but those for `file:` and `ftp:` pages, which no extension reaches on Arch's engine.

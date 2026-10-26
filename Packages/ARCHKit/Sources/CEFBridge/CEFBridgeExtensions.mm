@@ -484,11 +484,16 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     }];
 }
 
-- (void)setExtension:(NSString *)identifier siteAccess:(ARCHCEFExtensionSiteAccess)siteAccess {
+- (void)setExtension:(NSString *)identifier siteAccess:(ARCHCEFExtensionSiteAccess)siteAccess sites:(NSArray<NSString *> *)sites {
+    std::vector<CefString> patterns;
+    for (NSString *site in sites) {
+        patterns.push_back(CefString(site.UTF8String));
+    }
     [self whenExtensionsReady:^(CefRefPtr<CefExtensionRuntime> runtime) {
         if (runtime) {
-            runtime->SetSiteAccess(CefString(identifier.UTF8String), siteAccess == ARCHCEFExtensionSiteAccessOnAllSites ? CEF_EXTENSION_SITE_ACCESS_ON_ALL_SITES
-                                                                                                                       : CEF_EXTENSION_SITE_ACCESS_ON_CLICK);
+            runtime->SetSiteAccess(CefString(identifier.UTF8String),
+                                   siteAccess == ARCHCEFExtensionSiteAccessOnAllSites ? CEF_EXTENSION_SITE_ACCESS_ON_ALL_SITES : CEF_EXTENSION_SITE_ACCESS_ON_CLICK,
+                                   patterns);
         }
     }];
 }

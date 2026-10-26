@@ -89,7 +89,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 
 /// Where an extension's host permissions apply.
 typedef NS_ENUM(NSInteger, ARCHCEFExtensionSiteAccess) {
-    /// Chromium withholds them: the extension runs on a site only after the user runs its action there or allows it on the site.
+    /// Chromium withholds them outside the sites given with it: elsewhere, the extension runs on a site only after the user runs its action there or allows it on the site.
     ARCHCEFExtensionSiteAccessOnClick,
     ARCHCEFExtensionSiteAccessOnAllSites,
 };
@@ -163,14 +163,15 @@ typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
 /// Uninstalls the extension and deletes its storage. Its files stay.
 - (void)removeExtension:(NSString *)identifier NS_SWIFT_NAME(removeExtension(_:));
 - (void)setExtension:(NSString *)identifier enabled:(BOOL)enabled NS_SWIFT_NAME(setExtension(_:enabled:));
-- (void)setExtension:(NSString *)identifier siteAccess:(ARCHCEFExtensionSiteAccess)siteAccess NS_SWIFT_NAME(setExtension(_:siteAccess:));
+/// Sets where the extension's host permissions, the sites that its manifest's `host_permissions` and content scripts' `matches` ask for, apply. On all sites, Chromium grants them all and does not use `sites`. On a click, it grants those that `sites`, match patterns such as `https://*.example.com/*`, cover, as runtime host permissions that the profile keeps across reloads and launches, and withholds the rest. Each such call replaces the sites that the previous one granted; the sites allowed on a tab or through `permissions.request()` stay, unless they cover every site or the call follows all sites, which revokes them all. A call that repeats the previous one changes nothing and tells the extension of no change.
+- (void)setExtension:(NSString *)identifier siteAccess:(ARCHCEFExtensionSiteAccess)siteAccess sites:(NSArray<NSString *> *)sites NS_SWIFT_NAME(setExtension(_:siteAccess:sites:));
 /// Calls `completion` once on the main thread with the installed extensions, or none once the runtime cannot start.
 - (void)extensionsWithCompletion:(void (^)(NSArray<ARCHCEFExtension *> *extensions))completion NS_SWIFT_NAME(extensions(completion:));
 /// The actions that show on the browser's page, with icons at the window's backing scale.
 - (NSArray<ARCHCEFExtensionAction *> *)extensionActionsForBrowser:(ARCHCEFBrowser *)browser scale:(CGFloat)scale NS_SWIFT_NAME(extensionActions(for:scale:));
 /// Runs the extension's action on the browser's page, as a click on it does.
 - (void)runExtensionAction:(NSString *)identifier inBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(runExtensionAction(_:in:));
-/// Allows the extension on the browser's site, which runs what Chromium kept it from running there.
+/// Allows the extension on the origin of the browser's page, which the profile keeps next to the sites that `setExtension(_:siteAccess:sites:)` granted, and runs what Chromium kept it from running there, or asks with a reload prompt where that needs a reload.
 - (void)grantExtensionSiteAccess:(NSString *)identifier inBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(grantExtensionSiteAccess(_:in:));
 /// A window that extensions see as `normal`, over the AppKit window that holds `contentView`, which must be in one. Its tabs and focus follow its calls; Chromium creates it once the runtime runs.
 - (ARCHCEFExtensionWindow *)makeExtensionWindowForView:(NSView *)contentView NS_SWIFT_NAME(makeExtensionWindow(for:));

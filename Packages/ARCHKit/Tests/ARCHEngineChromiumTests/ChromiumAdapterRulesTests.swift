@@ -1,4 +1,4 @@
-// The Chromium adapter's rules that need no engine: how cookies cross into CEF's store and back, where Chromium keeps a profile's caches, where an extension's grant lets it run, and when a load keeps the copy Chromium runs. Cookie stores and extensions in a profile need the engine and the app.
+// The Chromium adapter's rules that need no engine: how cookies cross into CEF's store and back, where Chromium keeps a profile's caches, where an extension's grant lets it run and which granted sites go with a click, and when a load keeps the copy Chromium runs. Cookie stores and extensions in a profile need the engine and the app.
 import ARCHEngine
 import CEFBridge
 import Foundation
@@ -103,6 +103,27 @@ import Testing
         #expect(ChromiumExtensions.countsForSiteAccess("uuid-in-package:*"))
         #expect(!ChromiumExtensions.countsForSiteAccess("file:///*"))
         #expect(!ChromiumExtensions.countsForSiteAccess("ftp://example.org/*"))
+    }
+
+    /// Without a grant of every site, the grant's sites go with the click, so that Chromium runs the extension there and waits for a click on the others.
+    @Test func anExtensionWaitsForAClickOnlyOutsideTheSitesOfItsGrant() throws {
+        try withPackage(#"{"host_permissions": ["https://example.org/*", "wss://*/*"], "content_scripts": [{"matches": ["https://example.com/*", "http://example.net/*"]}]}"#) { package in
+            let grant = { (sites: Set<String>) in ChromiumExtensions.siteGrant(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: sites)) }
+            // Schemes and hosts go in lowercase and the patterns in order, without those for `file:` and `ftp:` pages.
+            let some = grant(["https://example.org/*", "HTTPS://Example.com/Path*", "https://example.com/Path*", "file:///*", "ftp://example.org/*"])
+            #expect(some.access == .onClick && some.sites == ["https://example.com/Path*", "https://example.org/*"])
+            let none = grant([])
+            #expect(none.access == .onClick && none.sites.isEmpty)
+            // The WebSocket pattern, which no grant holds, keeps the click with every site the install sheet listed, which go with it.
+            let listed = grant(["https://example.org/*", "https://example.com/*", "http://example.net/*"])
+            #expect(listed.access == .onClick && listed.sites == ["http://example.net/*", "https://example.com/*", "https://example.org/*"])
+            let all = grant(["<all_urls>"])
+            #expect(all.access == .onAllSites && all.sites.isEmpty)
+        }
+        try withPackage(#"{"host_permissions": ["https://example.org/*"]}"#) { package in
+            let all = ChromiumExtensions.siteGrant(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://example.org/*"]))
+            #expect(all.access == .onAllSites && all.sites.isEmpty)
+        }
     }
 
     @Test func aFirstLoadKeepsChromiumsCopyOnlyOfThePackageChromiumReadAtStart() throws {
