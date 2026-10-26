@@ -350,15 +350,19 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
                 return completion(EngineFindResult(activeMatchOrdinal: 0, numberOfMatches: 0))
             }
             self.countMatches(of: text, matchCase: matchCase) { count, position in
-                // WebKit found a match the script may not see, such as one in a frame, so the count is at least one.
-                let count = max(count, 1)
-                let isSameSearch = self.findQuery == text
-                let ordinal = position ?? (isSameSearch ? (forward ? self.findOrdinal % count + 1 : (self.findOrdinal + count - 2) % count + 1) : (forward ? 1 : count))
+                let result = Self.findResult(countedMatches: count, selectedMatch: position, previousOrdinal: self.findQuery == text ? self.findOrdinal : nil, forward: forward)
                 self.findQuery = text
-                self.findOrdinal = min(ordinal, count)
-                completion(EngineFindResult(activeMatchOrdinal: self.findOrdinal, numberOfMatches: count))
+                self.findOrdinal = result.activeMatchOrdinal
+                completion(result)
             }
         }
+    }
+
+    /// The result of a search WebKit found a match for, from the script's count and its position of the selected match. WebKit found a match the script may not see, such as one in a frame, so the count is at least one. Without the script's position, the active match moves one step from `previousOrdinal`, the position of the same search's last match, wrapping around at either end; a new search starts at the first match forward and the last backward.
+    static func findResult(countedMatches: Int, selectedMatch: Int?, previousOrdinal: Int?, forward: Bool) -> EngineFindResult {
+        let count = max(countedMatches, 1)
+        let ordinal = selectedMatch ?? previousOrdinal.map { forward ? $0 % count + 1 : ($0 + count - 2) % count + 1 } ?? (forward ? 1 : count)
+        return EngineFindResult(activeMatchOrdinal: min(ordinal, count), numberOfMatches: count)
     }
 
     public func stopFind() {

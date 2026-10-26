@@ -58,27 +58,12 @@ extension WebKitWebContents {
 
     /// Keeps WebKit's editing and spelling items, which WebKit runs itself, and lets the UI delegate build the rest. The menu is changed in place, because WebKit tracks the one it passed in.
     func prepareContextMenu(_ menu: NSMenu, for element: EngineContextMenuElement) {
-        // WebKit's tags are WebCore's menu actions; on macOS they equal the deprecated WebMenuItemTag values in the SDK's WebUIDelegate.h.
-        let roles: [Int: NSUserInterfaceItemIdentifier] = [
-            8: EngineContextMenuItem.copy, 13: EngineContextMenuItem.cut, 14: EngineContextMenuItem.paste,
-            15: EngineContextMenuItem.spellingSuggestion, 16: EngineContextMenuItem.noSpellingSuggestions,
-        ]
-        // Compared only, never called.
-        let forward = Selector(("forwardContextMenuAction:"))
-        // A menu a page element provides, such as the playback speed and subtitles menu of video controls, uses WebCore's custom tags and stays as it is.
-        func hasProvidedItems(_ menu: NSMenu) -> Bool {
-            menu.items.contains { ($0.action == forward && (5000...5999).contains($0.tag)) || ($0.submenu.map(hasProvidedItems) ?? false) }
-        }
-        guard let uiDelegate, menu.items.contains(where: { $0.action == forward }), !hasProvidedItems(menu) else { return }
-        // WebKit's Copy Link (3) and Copy Image (6) items show what its own hit test found. When the script could not see the element, as inside a closed shadow root, WebKit's menu stays rather than a menu that misses it.
-        let tags = Set(menu.items.map(\.tag))
-        if (tags.contains(3) && element.linkURL == nil) || (tags.contains(6) && element.imageURL == nil) { return }
+        guard let uiDelegate, let kept = Self.keptContextMenuItems(of: menu, for: element) else { return }
         // No Services items, which the Chromium engine's menu cannot show.
         menu.allowsContextMenuPlugIns = false
-        let kept = menu.items.filter { $0.action == forward && roles[$0.tag] != nil }
         menu.removeAllItems()
         for item in kept {
-            item.identifier = roles[item.tag]
+            item.identifier = Self.contextMenuRoles[item.tag]
             item.image = nil
             menu.addItem(item)
         }
@@ -93,5 +78,26 @@ extension WebKitWebContents {
             menu.addItem(item)
         }
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
+    }
+
+    /// The roles of the items WebKit runs itself, by tag. WebKit's tags are WebCore's menu actions; on macOS they equal the deprecated WebMenuItemTag values in the SDK's WebUIDelegate.h.
+    static let contextMenuRoles: [Int: NSUserInterfaceItemIdentifier] = [
+        8: EngineContextMenuItem.copy, 13: EngineContextMenuItem.cut, 14: EngineContextMenuItem.paste,
+        15: EngineContextMenuItem.spellingSuggestion, 16: EngineContextMenuItem.noSpellingSuggestions,
+    ]
+
+    /// The items of WebKit's menu that the app's menu keeps: WebKit's own items with a role, in WebKit's order. Nil when WebKit's menu stays as it is: a menu without WebKit's own items, one with items a page element provides, and one whose element the script could not see.
+    static func keptContextMenuItems(of menu: NSMenu, for element: EngineContextMenuElement) -> [NSMenuItem]? {
+        // Compared only, never called.
+        let forward = Selector(("forwardContextMenuAction:"))
+        // A menu a page element provides, such as the playback speed and subtitles menu of video controls, uses WebCore's custom tags.
+        func hasProvidedItems(_ menu: NSMenu) -> Bool {
+            menu.items.contains { ($0.action == forward && (5000...5999).contains($0.tag)) || ($0.submenu.map(hasProvidedItems) ?? false) }
+        }
+        guard menu.items.contains(where: { $0.action == forward }), !hasProvidedItems(menu) else { return nil }
+        // WebKit's Copy Link (3) and Copy Image (6) items show what its own hit test found. When the script could not see the element, as inside a closed shadow root, WebKit's menu stays rather than a menu that misses it.
+        let tags = Set(menu.items.map(\.tag))
+        if (tags.contains(3) && element.linkURL == nil) || (tags.contains(6) && element.imageURL == nil) { return nil }
+        return menu.items.filter { $0.action == forward && contextMenuRoles[$0.tag] != nil }
     }
 }
