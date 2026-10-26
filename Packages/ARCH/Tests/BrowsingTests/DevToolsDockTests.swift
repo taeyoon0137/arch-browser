@@ -187,9 +187,9 @@ private final class FakeDevTools: EngineDevTools {
     func openNetworkView() { open() }
 }
 
-/// Dock settings in defaults of their own for one test, named after the test and emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so each test reuses its name on every run.
+/// Dock settings in defaults of their own for one test, named after the checkout and the test and emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so each test reuses its name on every run in a checkout.
 private final class TemporaryDefaults {
-    private let name = "test.arch.devtools-dock.\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
+    private let name = "test.arch.devtools-dock.\(checkoutID).\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
     let settings: DevToolsDockSettings
 
     init() {
@@ -202,3 +202,6 @@ private final class TemporaryDefaults {
         UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
     }
 }
+
+/// A part of the defaults names that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)

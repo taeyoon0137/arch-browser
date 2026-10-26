@@ -6,8 +6,8 @@ import Testing
 
 @Suite struct BundleIdentifierMigrationTests {
     @Test func preferencesMoveAndThoseOfTheCurrentIdentifierWin() throws {
-        // macOS keeps an empty file for a removed domain, so this test reuses its names on every run.
-        let fixture = try Fixture(name: "test.arch.migration")
+        // macOS keeps an empty file for a removed domain, so this test reuses its names on every run in a checkout.
+        let fixture = try Fixture(name: "test.arch.migration.\(checkoutID)")
         defer { fixture.remove() }
         let previous = try #require(UserDefaults(suiteName: fixture.migration.previousIdentifier))
         previous.set("bing", forKey: "ARCHSearchEngine")
@@ -146,3 +146,6 @@ private struct Fixture {
         migration.defaults.removePersistentDomain(forName: migration.identifier)
     }
 }
+
+/// A part of the defaults names that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)

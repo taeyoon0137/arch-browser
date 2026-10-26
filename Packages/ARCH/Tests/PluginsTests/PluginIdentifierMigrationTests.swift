@@ -5,9 +5,9 @@ import Testing
 
 @MainActor
 @Suite struct PluginIdentifierMigrationTests {
-    /// macOS keeps an empty file for a removed domain, so the tests reuse these names on every run. Tests run in parallel, so each test that writes preferences has a suite of its own.
-    nonisolated private static let suiteName = "test.arch.plugin-migration"
-    nonisolated private static let secretsSuiteName = "test.arch.plugin-migration.secrets"
+    /// macOS keeps an empty file for a removed domain, so the tests reuse these names on every run in a checkout. Tests run in parallel, so each test that writes preferences has a suite of its own.
+    nonisolated private static let suiteName = "test.arch.plugin-migration.\(checkoutID)"
+    nonisolated private static let secretsSuiteName = "test.arch.plugin-migration.\(checkoutID).secrets"
 
     private let folder = TemporaryFolder()
     private let persona = UUID()
@@ -181,3 +181,6 @@ import Testing
         try Data(text.utf8).write(to: url)
     }
 }
+
+/// A part of the defaults names that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)

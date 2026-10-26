@@ -113,10 +113,10 @@ final class SessionWebExtensionHost: WebExtensionHost {
         session?.allTabs.first { $0.id == id }?.webContents
     }
 
-    /// The window that shows the tab selects it again; otherwise a window selects it as for a tab no window shows: a main window that shows the tab's space, which the extensions see as the tab's window, or for a favorite's tab a window of its Persona.
+    /// The window that shows the tab selects it again, or else the front main window that shows the tab's space, which the extensions see as the tab's window, so that another window keeps its space; otherwise a window selects it as for a tab no window shows, which takes a favorite's tab to a window of its Persona.
     func activate(_ tab: any EngineWebContents) {
         guard let session, let tab = self.tab(tab) else { return }
-        if let window = session.window(showing: tab) {
+        if let window = session.window(showing: tab) ?? session.windows.first(where: { $0.kind == .main && $0.currentSpaceID == tab.spaceID }) {
             window.selectTab(tab.id)
         } else {
             session.selectUnshownTab(tab)

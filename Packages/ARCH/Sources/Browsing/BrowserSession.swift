@@ -223,6 +223,8 @@ public final class BrowserSession: ObservableObject {
 
     /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
     @MainActor func windowWillClose(_ window: BrowserWindowModel) {
+        // The tabs the window showed were in view until now, as the archive timer and the saved session count the tabs of open windows, also when closing the last main window quits.
+        window.paneTabs.forEach { $0.lastActivatedAt = Date() }
         window.prepareToClose()
         if window.kind == .main { windowsToReopen = [window.record] }
         windows.removeAll { $0 === window }
@@ -831,12 +833,9 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
-    /// Selects a tab that no window shows. A space's tab goes to the front main window that shows its space, or else to the sidebar target, which then shows the tab's space, so a window on another space, perhaps of another Persona, keeps its space while one shows the tab's. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
+    /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        if let spaceID = tab.spaceID {
-            let window = windows.first { $0.kind == .main && $0.currentSpaceID == spaceID } ?? sidebarTarget()
-            return window.selectTab(tab.id)
-        }
+        guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
         let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
         if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
         window.selectTab(tab.id)

@@ -4,8 +4,8 @@ import Foundation
 import Testing
 
 @MainActor @Suite struct PrivateAPIFlagsTests {
-    /// macOS keeps an empty file for a removed domain, so each test reuses a domain named after it on every run, emptied as it starts.
-    private let suiteName = "test.arch.private-api-flags.\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
+    /// macOS keeps an empty file for a removed domain, so each test reuses a domain named after the checkout and the test on every run in a checkout, emptied as it starts.
+    private let suiteName = "test.arch.private-api-flags.\(checkoutID).\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
     private let defaults: UserDefaults
 
     init() throws {
@@ -74,3 +74,6 @@ import Testing
         return condition()
     }
 }
+
+/// A part of the defaults names that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)
