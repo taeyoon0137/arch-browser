@@ -57,13 +57,21 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         // Downloads a link marked for download instead of navigating, if the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
-        guard let url = navigationAction.request.url, let delegate = owner.navigationDelegate else {
-            decisionHandler(allowed)
+        var policy = allowed
+        if let url = navigationAction.request.url, let delegate = owner.navigationDelegate {
+            let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
+                                                isUserInitiated: navigationAction.navigationType == .linkActivated)
+            if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
+        }
+        guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
+        // WebKit loads a web extension's pages only in a web view made for that extension and no other page there, so a main frame navigation across that line, from a link, a script, `tabs.update`, or the address field, loads in a replacement. Any other navigation that goes ahead here ends a wait for an extension.
+        if owner.needsReplacement(toLoad: url) {
+            decisionHandler(.cancel)
+            owner.scheduleReplacement(loading: url)
             return
         }
-        let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
-                                            isUserInitiated: navigationAction.navigationType == .linkActivated)
-        decisionHandler(delegate.webContents(owner, decidePolicyFor: action) == .allow ? allowed : .cancel)
+        owner.stopWaitingForExtension()
+        decisionHandler(policy)
     }
 
     /// A link clicked with Shift and without Command asks for a new window, as Chromium reads the click, so both engines report it alike. A link marked for download is not one. Other navigations open in place or, without a target frame, in a new tab.

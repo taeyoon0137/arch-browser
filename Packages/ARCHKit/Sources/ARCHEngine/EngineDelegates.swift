@@ -90,6 +90,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     /// `isAudible` changed.
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
+    /// The engine cannot load a main frame navigation in this web contents and made `replacement`, in the same browser context and with the same page scripts, which loads it instead with a back-forward list of its own, as WebKit does for a navigation into or out of a web extension's pages. The delegate puts `replacement` in this web contents' place, hands it to its browser with `takeOwnership(of:)`, and closes this one, which keeps its page until then. Without a delegate, or with one that drops `replacement`, the navigation loads nothing.
+    func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents)
     func webContentsDidClose(_ webContents: any EngineWebContents)
     /// The page asks to be shown, with its tab, its window, and the app in front, as the return button of its picture-in-picture window does.
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents)
@@ -123,6 +125,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
+    func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}

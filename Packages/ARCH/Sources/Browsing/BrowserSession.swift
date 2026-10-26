@@ -750,6 +750,12 @@ public final class BrowserSession: ObservableObject {
             opened.opener = tab.webContents
             opened.isUnread = true
         }
+        // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
+        tab.takeReplacement = { [weak self, weak tab] replacement in
+            guard let self, let tab, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
+            self.runtime(for: replacement.engineKind, in: personaID).browser.takeOwnership(of: replacement)
+            self.replaceWebContents(of: tab, with: replacement)
+        }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
         tab.didClose = { [weak self, weak tab] in
             guard let self, let tab, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
@@ -850,17 +856,20 @@ public final class BrowserSession: ObservableObject {
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
             guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
-            let old = tab.webContents
-            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID)
-            // Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
-            self.sheets.cancel(for: tab)
-            let window = self.windows.first { $0.selectedTabID == tab.id }
-            if window?.isFindBarVisible == true { window?.hideFindBar() }
-            tab.replaceWebContents(with: replacement)
-            window?.devToolsDock.track(tab)
-            self.retire(old, of: tab.personaID)
-            self.scheduleSave()
+            self.replaceWebContents(of: tab, with: self.makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID))
         }
+    }
+
+    /// Puts `replacement`, which the Persona's runtime for its engine owns, in place of the tab's web contents and closes the old one. Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
+    private func replaceWebContents(of tab: Tab, with replacement: any EngineWebContents) {
+        let old = tab.webContents
+        sheets.cancel(for: tab)
+        let window = windows.first { $0.selectedTabID == tab.id }
+        if window?.isFindBarVisible == true { window?.hideFindBar() }
+        tab.replaceWebContents(with: replacement)
+        window?.devToolsDock.track(tab)
+        retire(old, of: tab.personaID)
+        scheduleSave()
     }
 
     /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.

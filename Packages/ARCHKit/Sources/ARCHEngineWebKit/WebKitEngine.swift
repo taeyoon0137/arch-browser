@@ -256,6 +256,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     private(set) var suppressesDialogs = false
     /// What the profile's web extensions see of the web contents.
     lazy var extensionTab = WebKitExtensionTab(contents: self)
+    /// The page of an extension that the profile had not loaded when the web contents opened at it, as a restored tab does, with its saved state. The web view loads nothing meanwhile, and the web contents reports the page's address and state, until the extension loads and a replacement loads the page, or until another navigation goes ahead.
+    var waitingPage: (url: URL, state: Data?)?
+    /// The page that a replacement loads on the next turn of the run loop, with its saved state.
+    var pendingReplacement: (url: URL, state: Data?)?
 
     /// Version and engine tokens a full browser on this system adds to its user agent. `WKWebView` omits them, so some sites send pages for old browsers. The system's WebKit uses the system's version number.
     static let applicationNameForUserAgent: String = {
@@ -285,6 +289,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         installAudibleScript()
         allowInspection()
         userContent.setPageScripts(configuration.pageScripts)
+        if let url = configuration.initialURL, waitsForExtension(ofPageAt: url) {
+            waitingPage = (url, configuration.restorableState)
+            return
+        }
         // Restoring loads the current entry; a state WebKit cannot read leaves the list empty, and the page loads its address instead.
         if let state = configuration.restorableState {
             webView.interactionState = state
@@ -324,14 +332,17 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
 
     /// The web view inside a view that also holds the Web Inspector once it attaches.
     public let view: NSView
-    public var url: URL? { webView.url }
+    public var url: URL? { webView.url ?? waitingPage?.url }
     public var title: String { webView.title ?? "" }
     public private(set) var favicon: NSImage?
     public var isLoading: Bool { webView.isLoading }
     public var canGoBack: Bool { webView.canGoBack }
     public var canGoForward: Bool { webView.canGoForward }
-    /// WebKit's interaction state holds the back-forward list and each page's position.
-    public var restorableState: Data? { webView.interactionState as? Data }
+    /// WebKit's interaction state holds the back-forward list and each page's position. A page that waits for its extension keeps the state it opened with.
+    public var restorableState: Data? {
+        if let waitingPage { return waitingPage.state }
+        return webView.interactionState as? Data
+    }
     public var isAudible: Bool { !audibleDocuments.isEmpty }
     public var zoomFactor: Double {
         get { webView.pageZoom }
@@ -460,8 +471,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         operation.runModal(for: window, delegate: job, didRun: #selector(PDFPrintJob.printOperationDidRun(_:success:contextInfo:)), contextInfo: Unmanaged.passRetained(job).toOpaque())
     }
     public func exitFullscreen() { webView.closeAllMediaPresentations(completionHandler: nil) }
-    /// Ends the page. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates. The bridge goes first: its observations would report the blank page's address, which the load sets before it returns, to the tab and the profile's extensions.
+    /// Ends the page, with any replacement that waits to load and any wait for an extension. A web view keeps its page, with the page's media and scripts, for as long as anything holds it, so the page leaves its media presentations, pauses its media, and moves to a blank page without its delegates. The bridge goes first: its observations would report the blank page's address, which the load sets before it returns, to the tab and the profile's extensions.
     func discard() {
+        pendingReplacement = nil
+        stopWaitingForExtension()
         webView.stopLoading()
         webView.closeAllMediaPresentations(completionHandler: nil)
         webView.pauseAllMediaPlayback(completionHandler: nil)

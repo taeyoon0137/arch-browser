@@ -1,4 +1,4 @@
-// What a profile's web extensions hear when the app reports its windows: a window that closes while its tab moves to another window closes after the tab has moved there, a window that closes with its tabs closes after them, the active tab and focus follow, and a window with the identity of a window before it in the report is left out. The tests use a private profile, which keeps nothing on disk, and load no page.
+// What a profile's web extensions hear when the app reports its windows: a window that closes while its tab moves to another window closes after the tab has moved there, a window that closes with its tabs closes after them, the active tab and focus follow, a tab that takes the place of the one whose web contents made it replaces that tab, and a window with the identity of a window before it in the report is left out. The tests use a private profile, which keeps nothing on disk, and load no page.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -59,6 +59,29 @@ struct WebKitExtensionWindowsTests {
         #expect(recorder.events.isEmpty)
     }
 
+    /// As a web page's tab whose page an extension's `tabs.update` takes to one of its own pages, which a web contents made for the extension loads in the tab's place: the tab that takes the place replaces the other, which neither closes nor gives way to an opened and activated tab.
+    @Test func aReplacementReplacesTheTabWhosePlaceItTakes() throws {
+        guard #available(macOS 15.4, *) else { return }
+        let extensions = try #require(context.webExtensions)
+        let recorder = WindowEventRecorder()
+        extensions.windowEvents = recorder
+        let other = try makeTab(), replaced = try makeTab(), replacement = try makeTab()
+        let window = UUID()
+        recorder.tabNames = [ObjectIdentifier(other.extensionTab): "other", ObjectIdentifier(replaced.extensionTab): "replaced", ObjectIdentifier(replacement.extensionTab): "replacement"]
+        recorder.windowNames = [window: "space"]
+        extensions.setWindows([EngineExtensionWindow(id: window, tabs: [other, replaced], activeTab: replaced, window: nil)], focusedWindowID: window)
+        recorder.events.removeAll()
+
+        replacement.extensionTab.replacedTab = replaced.extensionTab
+        extensions.setWindows([EngineExtensionWindow(id: window, tabs: [other, replacement], activeTab: replacement, window: nil)], focusedWindowID: window)
+        #expect(recorder.events == ["replace replaced with replacement"])
+        recorder.events.removeAll()
+
+        // Once listed, the replacement is a tab like any other.
+        extensions.setWindows([EngineExtensionWindow(id: window, tabs: [other], activeTab: other, window: nil)], focusedWindowID: window)
+        #expect(recorder.events == ["close replacement", "activate other after replacement"])
+    }
+
     private func makeTab() throws -> WebKitWebContents {
         try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
     }
@@ -90,6 +113,9 @@ struct WebKitExtensionWindowsTests {
         }
         func didMoveTab(_ movedTab: any WKWebExtensionTab, from index: Int, in oldWindow: (any WKWebExtensionWindow)?) {
             events.append("move \(name(movedTab)) from \(index) in \(name(oldWindow))")
+        }
+        func didReplaceTab(_ oldTab: any WKWebExtensionTab, with newTab: any WKWebExtensionTab) {
+            events.append("replace \(name(oldTab)) with \(name(newTab))")
         }
     }
 }

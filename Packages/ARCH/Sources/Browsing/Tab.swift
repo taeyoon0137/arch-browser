@@ -40,6 +40,8 @@ public final class Tab: ObservableObject, Identifiable {
     public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
+    /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
+    var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
     weak var opener: (any EngineWebContents)?
     /// Removes the tab when its page closes itself with `window.close()`. Set by the session.
@@ -159,6 +161,10 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
     }
+    public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
+        guard webContents === self.webContents else { return }
+        takeReplacement?(replacement)
+    }
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
@@ -177,7 +183,7 @@ extension Tab: EngineWebContentsUIDelegate {
         hasCrashed = true
     }
 
-    /// Swaps in a web contents from another engine. The old one stops reporting to the tab before the session closes it, and the tab keeps its title, address, and icon until the new page reports its own.
+    /// Swaps in another web contents: one from another engine, or one that the engine made to load a page the old one cannot. The old one stops reporting to the tab before the session closes it, and the tab keeps its title and icon until the new page reports its own, and its address unless the new web contents already has one, which it may have set before it reported to the tab.
     func replaceWebContents(with replacement: any EngineWebContents) {
         webContents.uiDelegate = nil
         webContents.navigationDelegate = nil
@@ -186,6 +192,7 @@ extension Tab: EngineWebContentsUIDelegate {
         replacement.uiDelegate = self
         replacement.navigationDelegate = self
         replacement.pageScriptDelegate = self
+        if replacement.url != nil { webContentsDidChangeURL(replacement) }
         isLoading = replacement.isLoading
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward

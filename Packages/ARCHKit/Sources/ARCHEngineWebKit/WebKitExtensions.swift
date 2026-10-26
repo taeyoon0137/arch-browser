@@ -14,6 +14,8 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
     private var focusedWindow: WebKitExtensionWindow?
     /// Where `setWindows(_:focusedWindowID:)` reports what changed: the controller, or a test's recorder.
     lazy var windowEvents: any WebKitExtensionWindowEvents = controller
+    /// The web contents that opened at a page of an extension the profile has not loaded, as restored tabs do before the app loads the extensions, until the extension loads or they navigate elsewhere.
+    private let waitingPages = NSHashTable<WebKitWebContents>.weakObjects()
 
     /// Keeps the extensions' data as the profile keeps its website data: nothing for a store that keeps nothing on disk, the default location for the default store, and otherwise under the store's identifier. Extensions reach cookies in the profile's store.
     init(context: WebKitBrowserContext) {
@@ -66,12 +68,28 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         }
         try controller.load(context)
         contexts[`extension`.id] = context
+        // The pages that waited for the extension, as restored tabs at its options page, load now in web views made for it.
+        for contents in waitingPages.allObjects where contents.waitingPage.flatMap({ extensionContext(ofPageAt: $0.url) }) != nil {
+            waitingPages.remove(contents)
+            contents.extensionDidLoad()
+        }
     }
 
     /// The context of the loaded extension whose page `url` is.
     func extensionContext(ofPageAt url: URL) -> WKWebExtensionContext? {
         guard url.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme else { return nil }
         return controller.extensionContext(for: url)
+    }
+
+    /// Keeps `contents` until the extension of the page at `url` loads, when `url` is a page of an extension that is not loaded, and says whether it does.
+    func wait(for contents: WebKitWebContents, toLoadPageAt url: URL) -> Bool {
+        guard url.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme, extensionContext(ofPageAt: url) == nil else { return false }
+        waitingPages.add(contents)
+        return true
+    }
+
+    func stopWaiting(for contents: WebKitWebContents) {
+        waitingPages.remove(contents)
     }
 
     func unload(_ id: String) {
@@ -117,7 +135,7 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         windows.first { window in window.tabs.contains { $0 === tab } }
     }
 
-    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed, in this order: windows that opened, tabs that closed, opened, and moved to another window, windows that closed with the tabs that closed with them, the active tab of each window, and the focused window. Tabs that only changed their place in a window are not reported; extensions read their index when they need it. A window with the identity of a window before it in the report is left out, so that each identity names one window.
+    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed, in this order: windows that opened, tabs that closed, opened or replaced another, and moved to another window, windows that closed with the tabs that closed with them, the active tab of each window, and the focused window. A tab that a web contents made to load a page in its place (`replacedTab`) replaces that tab when the report lists it and no longer lists the other, without either closing, opening, or becoming active. Tabs that only changed their place in a window are not reported; extensions read their index when they need it. A window with the identity of a window before it in the report is left out, so that each identity names one window.
     func setWindows(_ reported: [EngineExtensionWindow], focusedWindowID: UUID?) {
         let previousWindows = windows
         let previousFocus = focusedWindow
@@ -133,26 +151,38 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         }
         focusedWindow = windows.first { $0.id == focusedWindowID }
         let places = Self.places(in: windows)
+        // The tab each new tab replaces, by the new tab.
+        var replacedTabs: [ObjectIdentifier: WebKitExtensionTab] = [:]
+        for (key, place) in places where previousPlaces[key] == nil {
+            guard let replaced = place.tab.replacedTab, previousPlaces[ObjectIdentifier(replaced)] != nil, places[ObjectIdentifier(replaced)] == nil else { continue }
+            replacedTabs[key] = replaced
+        }
+        let isReplaced = { (tab: WebKitExtensionTab) in replacedTabs.values.contains { $0 === tab } }
         for window in windows where !previousWindows.contains(where: { $0 === window }) {
             windowEvents.didOpenWindow(window)
         }
-        for (key, place) in previousPlaces where places[key] == nil && windows.contains(where: { $0 === place.window }) {
+        for (key, place) in previousPlaces where places[key] == nil && windows.contains(where: { $0 === place.window }) && !isReplaced(place.tab) {
             windowEvents.didCloseTab(place.tab, windowIsClosing: false)
         }
         for (key, place) in places {
             guard let previous = previousPlaces[key] else {
-                windowEvents.didOpenTab(place.tab)
+                if let replaced = replacedTabs[key] {
+                    windowEvents.didReplaceTab(replaced, with: place.tab)
+                } else {
+                    windowEvents.didOpenTab(place.tab)
+                }
                 continue
             }
             if previous.window !== place.window { windowEvents.didMoveTab(place.tab, from: previous.index, in: previous.window) }
         }
         // A window closes after its tabs that moved to another window have left it.
         for window in previousWindows where !windows.contains(where: { $0 === window }) {
-            for tab in window.tabs where places[ObjectIdentifier(tab)] == nil { windowEvents.didCloseTab(tab, windowIsClosing: true) }
+            for tab in window.tabs where places[ObjectIdentifier(tab)] == nil && !isReplaced(tab) { windowEvents.didCloseTab(tab, windowIsClosing: true) }
             windowEvents.didCloseWindow(window)
         }
         for window in windows {
-            guard let active = window.activeTab, let previous = previousActiveTabs[window.id], previous !== active else { continue }
+            guard let active = window.activeTab, let previous = previousActiveTabs[window.id], previous !== active,
+                  replacedTabs[ObjectIdentifier(active)] !== previous else { continue }
             windowEvents.didActivateTab(active, previousActiveTab: previous)
         }
         if focusedWindow !== previousFocus { windowEvents.didFocusWindow(focusedWindow) }
@@ -289,6 +319,7 @@ protocol WebKitExtensionWindowEvents: AnyObject {
     func didCloseTab(_ closedTab: any WKWebExtensionTab, windowIsClosing: Bool)
     func didActivateTab(_ activatedTab: any WKWebExtensionTab, previousActiveTab previousTab: (any WKWebExtensionTab)?)
     func didMoveTab(_ movedTab: any WKWebExtensionTab, from index: Int, in oldWindow: (any WKWebExtensionWindow)?)
+    func didReplaceTab(_ oldTab: any WKWebExtensionTab, with newTab: any WKWebExtensionTab)
 }
 
 @available(macOS 15.4, *)
@@ -357,6 +388,8 @@ final class WebKitExtensionWindow: NSObject, WKWebExtensionWindow {
 /// What the profile's extensions see of a web contents, which it keeps for its lifetime, as WebKit tells tabs apart by their objects. It answers from its page, and from the windows the app last reported for its window, place, and selection; activating and closing it go to the app.
 final class WebKitExtensionTab: NSObject {
     private(set) weak var contents: WebKitWebContents?
+    /// The tab of the web contents that made this one's to load a page in its place. The windows of the last report hold it until the report that lists this tab instead.
+    weak var replacedTab: WebKitExtensionTab?
 
     init(contents: WebKitWebContents) {
         self.contents = contents
@@ -379,7 +412,7 @@ extension WebKitExtensionTab: WKWebExtensionTab {
 
     func title(for context: WKWebExtensionContext) -> String? { contents?.webView.title }
 
-    func url(for context: WKWebExtensionContext) -> URL? { contents?.webView.url }
+    func url(for context: WKWebExtensionContext) -> URL? { contents?.url }
 
     func isLoadingComplete(for context: WKWebExtensionContext) -> Bool { contents?.webView.isLoading == false }
 
@@ -467,5 +500,56 @@ extension WebKitWebContents {
         case .loading: .loading
         }
         extensions.tabDidChange(extensionTab, properties)
+    }
+}
+
+// MARK: Pages of web extensions
+
+extension WebKitWebContents {
+    /// Whether a main frame navigation to `url` needs a web view of another kind than this one: WebKit loads a loaded extension's page only in a web view made for that extension, and no web page there. A page of an extension the profile has not loaded needs none, since no web view loads it.
+    func needsReplacement(toLoad url: URL) -> Bool {
+        guard #available(macOS 15.4, *), let extensions = context.webExtensions else { return false }
+        switch url.scheme?.lowercased() {
+        case WebKitDelegateBridge.extensionScheme: return extensions.extensionContext(ofPageAt: url).map { $0.baseURL != extensionBaseURL } ?? false
+        case "http", "https": return extensionBaseURL != nil
+        default: return false
+        }
+    }
+
+    /// Loads `url` in a replacement on the next turn of the run loop, once WebKit's callback has returned, since the UI delegate closes this web contents. Of several such navigations in one turn, the last one loads.
+    func scheduleReplacement(loading url: URL, restorableState: Data? = nil) {
+        let isScheduled = pendingReplacement != nil
+        pendingReplacement = (url, restorableState)
+        guard !isScheduled else { return }
+        DispatchQueue.main.async { [weak self] in self?.handOverReplacement() }
+    }
+
+    /// Hands the UI delegate a web contents of the same profile that loads the pending page, from the configuration the page needs and with this web contents' page scripts. The replacement's extension tab names this one's, so that the extensions hear of a replacement once the app reports it in this one's place.
+    private func handOverReplacement() {
+        guard let page = pendingReplacement else { return }
+        pendingReplacement = nil
+        guard let uiDelegate else { return }
+        let replacement = WebKitWebContents(context: context, configuration: EngineWebContentsConfiguration(initialURL: page.url, restorableState: page.state, pageScripts: userContent.pageScripts))
+        replacement.extensionTab.replacedTab = extensionTab
+        uiDelegate.webContents(self, didCreateReplacement: replacement)
+    }
+
+    /// Whether the web contents waits for the extension of the page at `url` to load, which it does when `url` is a page of an extension that the profile has not loaded. The profile's extensions keep it until then.
+    func waitsForExtension(ofPageAt url: URL) -> Bool {
+        guard #available(macOS 15.4, *), let extensions = context.webExtensions else { return false }
+        return extensions.wait(for: self, toLoadPageAt: url)
+    }
+
+    /// The extension of the waiting page loaded: a replacement made for it loads the page with its saved state.
+    func extensionDidLoad() {
+        guard let waitingPage else { return }
+        scheduleReplacement(loading: waitingPage.url, restorableState: waitingPage.state)
+    }
+
+    /// Ends the wait for an extension, as another navigation goes ahead in the web view.
+    func stopWaitingForExtension() {
+        guard waitingPage != nil else { return }
+        waitingPage = nil
+        if #available(macOS 15.4, *) { context.webExtensions?.stopWaiting(for: self) }
     }
 }
