@@ -6,7 +6,7 @@ struct SessionSnapshot: Codable {
     /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, and version 12 each open tab's suggested title. Files without a version are version 1.
     static let currentVersion = 12
 
-    struct TabRecord: Codable {
+    struct TabRecord: Codable, Equatable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
         var id: UUID?
         var spaceID: UUID
@@ -176,6 +176,14 @@ struct SessionSnapshot: Codable {
             }
             return record
         }
+    }
+}
+
+extension SessionSnapshot.TabRecord {
+    /// An open tab as `session.json` keeps it, in the space `spaceID` and active last at `lastActivatedAt`. A tab without its page writes what its stand-in keeps of its saved record (`UnloadedWebContents`).
+    init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
+        self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
+                  engine: tab.engineKind, state: tab.webContents.restorableState, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle)
     }
 }
 

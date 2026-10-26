@@ -729,7 +729,7 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }?.resolvedPersonaID == personaID ? id : preferredSpace(in: personaID).id
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
@@ -840,6 +840,11 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
+    /// Creates the page of a tab that has none, as a window does before it first shows the tab: a web contents of the tab's Persona at the address, in the engine, and with the page state that its stand-in keeps (`UnloadedWebContents`). A tab that has its page keeps it.
+    func loadPage(of tab: Tab) {
+        tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID) }
+    }
+
     /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
         guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
@@ -848,9 +853,9 @@ public final class BrowserSession: ObservableObject {
         window.selectTab(tab.id)
     }
 
-    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start.
+    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: only a tab that no window has shown since launch lacks one, and the site settings popover offers the switch for a shown tab only.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
-        guard tab.engineKind != kind, allTabs.contains(where: { $0.id == tab.id }), let source = runtime(of: tab) else { return }
+        guard tab.engineKind != kind, tab.isLoaded, allTabs.contains(where: { $0.id == tab.id }), let source = runtime(of: tab) else { return }
         let target = runtime(for: kind, in: tab.personaID)
         guard target.kind == kind else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
@@ -925,9 +930,9 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish.
+    /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
     func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
-        guard let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
+        guard !(webContents is UnloadedWebContents), let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
         if webContents.closingStopsDownloads {
             // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers. Its developer tools close with its tab.
             webContents.uiDelegate = nil
@@ -1426,7 +1431,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Persistence
 
-    /// Reopens the saved tabs and their split views.
+    /// Reopens the saved tabs and their split views. A tab gets its page as a window first shows it (`loadPage(of:)`), so launching starts no page for a tab that no window shows; until then its stand-in keeps the record's address, title, engine, and page state, which saving writes back unchanged.
     private func restoreTabs(_ snapshot: SessionSnapshot) {
         // Archive stale unpinned records before they have web contents.
         let cutoff = Self.archiveCutoff(now: Date())
@@ -1439,7 +1444,9 @@ public final class BrowserSession: ObservableObject {
                 continue
             }
             let personaID = personaID(ofSpace: record.spaceID)
-            let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: record.state, in: personaID), id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
+            let page = UnloadedWebContents(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
+            page.loadSiteIcon()
+            let tab = adopt(page, id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
             tab.lastActivatedAt = record.lastActivatedAt ?? Date()
             tab.customTitle = record.customTitle
             tab.suggestedTitle = record.suggestedTitle
@@ -1501,7 +1508,7 @@ public final class BrowserSession: ObservableObject {
         let now = Date()
         let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
         return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
-                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID, suggestedTitle: $0.suggestedTitle) },
+                               tabs: tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt) },
                                folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
                                splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }

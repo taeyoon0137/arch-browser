@@ -67,7 +67,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
     /// One of the Persona's windows as its extensions see it: its identity, the space its tabs belong to, its tabs in order, its active tab, and the window that shows it.
     private typealias ExtensionWindow = (id: UUID, space: Space, tabs: [Tab], active: Tab?, showing: BrowserWindowModel?)
 
-    /// Each space of the Persona, with the first main window that shows it, and then each small window of the Persona, with its one tab, as its extensions' windows. A space's identity is its window's.
+    /// Each space of the Persona, with the first main window that shows it, and then each small window of the Persona, with its one tab, as its extensions' windows. A space's identity is its window's. A restored tab that no window has shown has no page for the engines to list, so it joins its window once its page loads, and an index among a window's tabs counts only the tabs that have pages.
     private func extensionWindows(of personaID: Persona.ID, in session: BrowserSession) -> [ExtensionWindow] {
         let spaces = session.spaces.filter { $0.resolvedPersonaID == personaID }
         // A favorite's tab belongs to no space: it is in the Persona's space where a window shows it, or else in the Persona's first space.
@@ -77,7 +77,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
         }
         let spaceWindows = spaces.map { space -> ExtensionWindow in
             let showing = session.windows.filter { $0.kind == .main && $0.currentSpaceID == space.id }
-            let tabs = (favoriteTabs[space.id] ?? []) + session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
+            let tabs = ((favoriteTabs[space.id] ?? []) + session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)).filter(\.isLoaded)
             let active = showing.lazy.compactMap(\.selectedTab).first { tab in tabs.contains { $0 === tab } } ?? tabs.max { $0.lastActivatedAt < $1.lastActivatedAt }
             return (space.id, space, tabs, active, showing.first)
         }

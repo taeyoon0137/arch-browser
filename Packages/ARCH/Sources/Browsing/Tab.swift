@@ -7,7 +7,7 @@ import Foundation
 public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
     public let id: UUID
-    /// Replaced when the tab switches engines.
+    /// Replaced when the tab switches engines, and when a tab restored without its page gets it (`isLoaded`).
     @Published public private(set) var webContents: any EngineWebContents
     /// The space whose list shows the tab, or `nil` for a favorite's tab, which its favorite shows in every space of its Persona. A small window's tab joins this space's list when it moves to a main window. The session moves a tab only to a space of its Persona.
     @Published public internal(set) var spaceID: UUID?
@@ -107,6 +107,15 @@ public final class Tab: ObservableObject, Identifiable {
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
 
+    /// Whether the tab has its engine's page. A tab restored from `session.json` has an `UnloadedWebContents` in its place until a window first shows it (`BrowserSession.loadPage(of:)`).
+    var isLoaded: Bool { !(webContents is UnloadedWebContents) }
+
+    /// Puts the engine's page in place of the stand-in of a tab without one: `make` creates it at the address, in the engine, and with the page state that the stand-in keeps. A tab that has its page keeps it.
+    func loadPage(_ make: (_ url: URL?, _ engine: EngineKind, _ state: Data?) -> any EngineWebContents) {
+        guard let unloaded = webContents as? UnloadedWebContents else { return }
+        replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
+    }
+
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
@@ -183,7 +192,7 @@ extension Tab: EngineWebContentsUIDelegate {
         hasCrashed = true
     }
 
-    /// Swaps in another web contents: one from another engine, or one that the engine made to load a page the old one cannot. The old one stops reporting to the tab before the session closes it, and the tab keeps its title and icon until the new page reports its own, and its address unless the new web contents already has one, which it may have set before it reported to the tab.
+    /// Swaps in another web contents: one from another engine, one that the engine made to load a page the old one cannot, or the page of a tab that had none. The old one stops reporting to the tab before the session closes it, and the tab keeps its title and icon until the new page reports its own, and its address unless the new web contents already has one, which it may have set before it reported to the tab.
     func replaceWebContents(with replacement: any EngineWebContents) {
         webContents.uiDelegate = nil
         webContents.navigationDelegate = nil
