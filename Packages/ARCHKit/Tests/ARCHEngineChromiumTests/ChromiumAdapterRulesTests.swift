@@ -64,16 +64,36 @@ import Testing
             #expect(access(["https://example.org/*"]) == .onClick)
             #expect(access([]) == .onClick)
         }
-        // Schemes and hosts compare in lowercase, as the app's grants write them, while a `file:` pattern, which no grant holds, keeps the click (VI.4).
+        // Schemes and hosts compare in lowercase, as the app's grants write them.
         try withPackage(#"{"host_permissions": ["HTTPS://Mail.Example.com/Inbox*"], "content_scripts": [{"matches": ["https://example.org/*"]}]}"#) { package in
             #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://mail.example.com/Inbox*", "https://example.org/*"])) == .onAllSites)
-        }
-        try withPackage(#"{"content_scripts": [{"matches": ["https://example.org/*", "file:///*"]}]}"#) { package in
-            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://example.org/*"])) == .onClick)
         }
         #expect(ChromiumExtensions.lowercasingSchemeAndHost("HTTPS://Mail.Example.com/Inbox*") == "https://mail.example.com/Inbox*")
         #expect(ChromiumExtensions.lowercasingSchemeAndHost("https://Example.org") == "https://example.org")
         #expect(ChromiumExtensions.lowercasingSchemeAndHost("<all_urls>") == "<all_urls>")
+    }
+
+    /// The install sheet lists only `http`, `https`, and `*` patterns without a port, and Arch's engine keeps extensions out of `file:` pages, so a grant of every site the sheet listed runs everywhere it asked, while a pattern with a port keeps the click.
+    @Test func aGrantOfEverySiteTheInstallSheetListedRunsOnThemAllWithoutAClick() throws {
+        try withPackage(#"{"content_scripts": [{"matches": ["http://*/*", "https://*/*", "FILE:///*"]}], "host_permissions": ["ftp://example.org/*", "urn:*"]}"#) { package in
+            let access = { (sites: Set<String>) in ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: sites)) }
+            #expect(access(["http://*/*", "https://*/*"]) == .onAllSites)
+            #expect(access(["https://*/*"]) == .onClick)
+        }
+        try withPackage(#"{"host_permissions": ["*://example.org/*", "https://example.org:8080/*"]}"#) { package in
+            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["*://example.org/*"])) == .onClick)
+        }
+        try withPackage(#"{"host_permissions": ["<all_urls>", "file:///*"]}"#) { package in
+            let access = { (sites: Set<String>) in ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: sites)) }
+            #expect(access(["<all_urls>"]) == .onAllSites)
+            #expect(access(["https://example.org/*"]) == .onClick)
+        }
+        #expect(ChromiumExtensions.isWebPattern("<all_urls>"))
+        #expect(ChromiumExtensions.isWebPattern("*://*/*"))
+        #expect(ChromiumExtensions.isWebPattern("http://example.org/*"))
+        #expect(!ChromiumExtensions.isWebPattern("file:///*"))
+        #expect(!ChromiumExtensions.isWebPattern("chrome-extension://abc/*"))
+        #expect(!ChromiumExtensions.isWebPattern("example.org"))
     }
 
     @Test func aFirstLoadKeepsChromiumsCopyOnlyOfThePackageChromiumReadAtStart() throws {
