@@ -401,15 +401,19 @@ std::optional<PendingPopup> TakePendingPopup(ARCHCEFBrowser *popup) {
 // The browser objects whose browser CEF is creating through `CreateBrowser`, or closing because the app asked. CEF does both on later tasks and adds its view to the parent view through a handle that does not retain that view, so each object, with the client CEF calls and the parent view, stays here from `CreateBrowser` until `OnAfterCreated`, and from `close` or `tryCloseWithCompletion:` until `OnBeforeClose` or until the user chooses to stay, even after the app has released it. Popups wait in `gPendingPopups` until CEF creates them.
 NSMutableSet<ARCHCEFBrowser *> *gBrowsersInTransition = [NSMutableSet set];
 
-// Takes a closing browser's view out of its parent. CEF ends the browser only once the view is released. A focused page view can stay held by the window's text input context, so the page gives up the focus first, and it is muted so that it is not heard while anything still holds the view.
+// Takes a closing browser's view out of its parent. CEF ends the browser only once the view is released. AppKit can hold a view that had the window's focus, as through the window's text input context, until it next updates its windows, which it does after each event. A page that closes itself while it has the focus, as a popup that its small window focused, would then stay open until the app's next event, such as another window becoming key. So the page gives up the focus and the windows update at once, as Chromium's own page view does when it goes (`-[RenderWidgetHostViewCocoa dealloc]`). The page is muted so that it is not heard while anything still holds the view.
 void DetachBrowserView(CefRefPtr<CefBrowser> browser) {
     NSView *view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
     NSWindow *window = view.window;
-    if ([window.firstResponder isKindOfClass:NSView.class] && [(NSView *)window.firstResponder isDescendantOf:view]) {
+    BOOL hadFocus = [window.firstResponder isKindOfClass:NSView.class] && [(NSView *)window.firstResponder isDescendantOf:view];
+    if (hadFocus) {
         [window makeFirstResponder:nil];
     }
     browser->GetHost()->SetAudioMuted(true);
     [view removeFromSuperview];
+    if (hadFocus) {
+        [NSApp updateWindows];
+    }
 }
 
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.

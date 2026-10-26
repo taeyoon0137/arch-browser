@@ -547,9 +547,14 @@ public final class BrowserWindowModel: ObservableObject {
                 window.makeFirstResponder(nil)
                 return
             }
-            // An engine view that takes no focus holds the page as its topmost subview, above views the adapter keeps below the page, such as a Chromium video's picture-in-picture source view.
-            window.makeFirstResponder(view.acceptsFirstResponder ? view : view.subviews.last)
+            window.makeFirstResponder(Self.viewTakingFocus(in: view))
         }
+    }
+
+    /// The view that takes the keys of a page whose engine view is `view`: the engine view when it takes focus, as WebKit's page view does, which passes it to its web view, or else the topmost view inside it that does. On Chromium that is Chromium's own page view within CEF's view, the one CEF focuses, because CEF's view takes no focus: keys sent to it reach no view, and while it has the window's focus AppKit can hold it, though CEF closes the browser only once that view is released (`DetachBrowserView` in the bridge). Topmost first, because the page lies above views the adapter keeps below it, such as a Chromium video's picture-in-picture source view. `nil`, which leaves the focus to the window, while no view takes it, as before the engine has made the page's view.
+    static func viewTakingFocus(in view: NSView) -> NSView? {
+        if view.acceptsFirstResponder { return view }
+        return view.subviews.reversed().lazy.compactMap { viewTakingFocus(in: $0) }.first
     }
 
     /// Moves keyboard focus to the selected tab's page from another pane of the split view on screen, which stays in the window and would keep the keys. Checks after the event that changed the selection, so a pane that a click selected has taken focus itself by then and keeps the element focused in it.
