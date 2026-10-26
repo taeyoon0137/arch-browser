@@ -24,8 +24,6 @@ public protocol PluginRuntime: AnyObject, Sendable {
     var engines: [EngineKind: String] { get }
     /// Checks the package folder at `root` in each engine of `engines`, without running any of it. The manager calls it at staging, for the package and for the installed plugin it could update.
     func check(packageAt root: URL) async -> [EngineKind: PluginEngineCheck]
-    /// Set by the manager: tells it that an enabled plugin cannot run, with why as a sentence, so that it switches the plugin off and Settings shows why.
-    var onFailure: ((PluginID, String) -> Void)? { get set }
     /// Set by the manager, which records each answer with the engine's version: engines checked an installed plugin's package, on or off, where it had no current answer, or an enabled plugin's that no engine ran by its current answers.
     var onCheck: ((PluginID, [EngineKind: PluginEngineCheck]) -> Void)? { get set }
     /// Set by the manager: a plugin's package that the engine's check passed failed to start there, with why as a sentence. The manager keeps the failure for the run and switches the plugin off once it has failed on every engine it ran on.
@@ -34,7 +32,7 @@ public protocol PluginRuntime: AnyObject, Sendable {
     var onEnginesChange: (() -> Void)? { get set }
     /// The installed plugins of the kind, on or off, each time they change; none while `unavailability` says why the kind cannot run. The runtime runs the enabled ones.
     func run(_ installed: [InstalledPlugin])
-    /// A new instance of an enabled plugin of the kind, which the manager starts at the plugin's first command.
+    /// A new instance of an enabled plugin of the kind, which the manager starts at the plugin's first command, panel, or page script value.
     func makePlugin(_ installed: InstalledPlugin) -> any Plugin
     /// Deletes what the runtime keeps of a plugin the user removes, such as a web extension's storage in the engines, except in an engine where the other version of its pair runs under the same engine identifier.
     func remove(_ installed: InstalledPlugin)

@@ -1,4 +1,4 @@
-// Plugin secrets in the login keychain: one generic password item per key, with the service `xyz.taeyoon.arch.plugin.<plugin id>` and the account `<persona id>/<key>`, so that each Persona keeps its own secrets for a plugin. Secret settings and the secrets a plugin keeps itself share the items.
+// Plugin secrets in the login keychain: one generic password item per key, with the service `xyz.taeyoon.arch.plugin.<plugin id>` and the account `<persona id>/<key>`, so that each Persona keeps its own secrets for a plugin, up to 64 of at most 16 KB each. Secret settings and the secrets a plugin keeps itself share the items.
 import Foundation
 import Security
 
@@ -9,6 +9,8 @@ protocol PluginSecretStore: AnyObject {
     func setSecret(_ secret: String?, service: String, account: String) throws
     /// Whether the item exists. It does not read the secret, which can make macOS ask for the keychain password.
     func containsSecret(service: String, account: String) throws -> Bool
+    /// How many of the service's items have accounts that start with `accountPrefix`. It reads only the items' attributes.
+    func secretCount(service: String, accountPrefix: String) throws -> Int
     /// Deletes the items whose accounts start with `accountPrefix`: the service's, or for nil those of every plugin. It reads only the items' attributes.
     func removeSecrets(service: String?, accountPrefix: String) throws
 }
@@ -66,6 +68,17 @@ final class PluginKeychain: PluginSecretStore {
         }
     }
 
+    func secretCount(service: String, accountPrefix: String) throws -> Int {
+        var query = Self.query(service: service, account: nil)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status != errSecItemNotFound else { return 0 }
+        guard status == errSecSuccess else { throw PluginKeychainError(status: status) }
+        return (result as? [[String: Any]] ?? []).filter { ($0[kSecAttrAccount as String] as? String)?.hasPrefix(accountPrefix) == true }.count
+    }
+
     /// Items under `previousServicePrefix` that the migration has not moved yet, as when the user refused the keychain prompt, count by the service they move to, so that they go with their plugin or Persona rather than come back under the new service at a later launch.
     func removeSecrets(service: String?, accountPrefix: String) throws {
         for item in try items(withServicePrefix: "") where item.account.hasPrefix(accountPrefix) {
@@ -108,9 +121,14 @@ final class PluginKeychain: PluginSecretStore {
     }
 }
 
-/// One plugin's secrets in one Persona. Those of a plugin instance's context only read once the instance stops, and writes throw `PluginError.stopped`.
+/// One plugin's secrets in one Persona, within limits that keep a plugin from filling the login keychain. Those of a plugin instance's context only read once the instance stops, and writes throw `PluginError.stopped`.
 @MainActor
 final class ScopedPluginSecrets: PluginSecrets {
+    /// The most secrets a plugin keeps in one Persona, its secret settings among them.
+    static let countLimit = 64
+    /// The most UTF-8 bytes of one secret: 16 KB.
+    static let sizeLimit = 16_384
+
     private let store: any PluginSecretStore
     private let service: String
     private let personaID: PersonaID
@@ -131,8 +149,15 @@ final class ScopedPluginSecrets: PluginSecrets {
         try store.secret(service: service, account: account(key))
     }
 
+    /// Throws `PluginError.quotaExceeded` for a secret longer than `sizeLimit`, and for a new key once the plugin keeps `countLimit` secrets in the Persona.
     func setSecret(_ secret: String?, forKey key: String) throws {
         guard !hasEnded else { throw PluginError.stopped }
+        if let secret {
+            guard secret.utf8.count <= Self.sizeLimit else { throw PluginError.quotaExceeded }
+            if try !containsSecret(forKey: key), try store.secretCount(service: service, accountPrefix: Self.accountPrefix(of: personaID)) >= Self.countLimit {
+                throw PluginError.quotaExceeded
+            }
+        }
         try store.setSecret(secret, service: service, account: account(key))
     }
 

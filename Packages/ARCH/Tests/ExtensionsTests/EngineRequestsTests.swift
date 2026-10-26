@@ -73,6 +73,17 @@ struct EngineRequestsTests {
         #expect(manifest["key"] as? String == publicKey.base64EncodedString())
         manager.discard(staged)
         #expect(runtime.packageTypes(for: .chromium).contains(PluginPackage.crxType) && !runtime.packageTypes(for: .webKit).contains(PluginPackage.crxType))
+        // The header's key replaces another key in the manifest, as Chromium writes it.
+        let keyedPackage = try folder.package("keyed crx", ["manifest.json": #"{"manifest_version": 3, "name": "Keyed", "version": "2", "key": "b3RoZXIga2V5"}"#])
+        let keyedArchive = folder.url.appendingPathComponent("keyed.zip")
+        try zip(keyedPackage, to: keyedArchive)
+        let keyedCRX = folder.url.appendingPathComponent("Keyed.crx")
+        try CRXFile.data(publicKey: publicKey, archive: Data(contentsOf: keyedArchive)).write(to: keyedCRX)
+        let keyed = try await manager.stage(keyedCRX)
+        #expect(keyed.manifest.id == staged.manifest.id && keyed.manifest.name == "Keyed")
+        let keyedManifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: keyed.rootURL.appendingPathComponent("manifest.json"))) as? [String: Any])
+        #expect(keyedManifest["key"] as? String == publicKey.base64EncodedString() && keyedManifest.count == 4)
+        manager.discard(keyed)
         // Chromium no longer installs the format before version 3.
         var old = try Data(contentsOf: crx)
         old[4] = 2

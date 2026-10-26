@@ -17,7 +17,7 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var isEnabled: Bool
     /// When the user installed the plugin; nil for a built-in plugin.
     public var installedAt: Date?
-    /// Why the manager switched the plugin off after repeated failures in this run, which Settings shows until the plugin is switched on again.
+    /// Why the manager switched the plugin off in this run: after repeated failures of its background script, because it failed to start on every engine it ran on, or because every engine of its kind's runtime refuses its package. Settings shows it until the plugin is switched on again.
     public var failure: String?
     /// Why the plugin's runtime cannot run it on this Mac, which Settings shows; its contributions stay out meanwhile.
     public var unavailability: String?
@@ -73,6 +73,8 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
 
 @MainActor
 public final class PluginManager: ObservableObject {
+    /// The start of the identifiers of Arch's own plugins: those built into it and, under `PluginComposer.identifierPrefix`, those that AI writes.
+    nonisolated static let archIdentifierPrefix = "xyz.taeyoon.arch."
     /// A script plugin whose background script fails this often within `failureWindow` is switched off.
     private static let failureLimit = 3
     private static let failureWindow: TimeInterval = 5 * 60
@@ -111,6 +113,8 @@ public final class PluginManager: ObservableObject {
     private var storages: [PluginID: PluginStorageFile] = [:]
     /// When each script plugin's background script failed in the last `failureWindow`.
     private var failures: [PluginID: [Date]] = [:]
+    /// Whether the session closed the manager as it deleted the Persona, after which it stages, installs, and stores nothing.
+    private var isClosed = false
 
     /// A started plugin, its context, and its activation, which its commands, panels, and page script values wait for.
     private struct RunningPlugin {
@@ -168,7 +172,6 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
         for runtime in self.runtimes.values {
-            runtime.onFailure = { [weak self] id, reason in self?.setEnabled(false, for: [id], failure: reason) }
             runtime.onCheck = { [weak self] id, checks in self?.record(checks, for: id) }
             runtime.onEngineFailure = { [weak self] id, engine, reason in self?.recordEngineFailure(reason, of: id, on: engine) }
             runtime.onEnginesChange = { [weak self, kind = runtime.kind] in self?.readEngineChecks(of: kind) }
@@ -342,8 +345,9 @@ public final class PluginManager: ObservableObject {
         try await stage { root in try PluginPackage.stage(files, at: root, origin: .generated(composition)) }
     }
 
-    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:of:)` accepts its identifier and, for a kind that engines check, while an engine runs it.
+    /// The package that `make` puts in a new folder of the staging folder, off the main thread, kept only while `checkInstallable(_:of:)` accepts its identifier and, for a kind that engines check, while an engine runs it. Throws `PluginError.closed` once the manager is closed.
     private func stage(_ make: @escaping @Sendable (URL) throws -> PluginPackage) async throws -> PluginPackage {
+        guard !isClosed else { throw PluginError.closed }
         let root = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         var package = try await Task.detached { try make(root) }.value
         do {
@@ -413,9 +417,12 @@ public final class PluginManager: ObservableObject {
         return (versions[0].id, versions.map(\.id))
     }
 
-    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, the install entry's identifier of a version that joined under its counterpart's identifier, such as `extension.<identifier>.chromium`, which an install would otherwise replace although its package names another identifier, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one under `archIdentifierPrefix` but outside `PluginComposer.identifierPrefix`, which a later build's built-in plugin could take, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, the install entry's identifier of a version that joined under its counterpart's identifier, such as `extension.<identifier>.chromium`, which an install would otherwise replace although its package names another identifier, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
     private func checkInstallable(_ id: PluginID, of kind: PluginKind) throws {
         guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
+        if id.rawValue.hasPrefix(Self.archIdentifierPrefix), !id.rawValue.hasPrefix(PluginComposer.identifierPrefix) {
+            throw PluginError.invalidPackage("Arch keeps identifiers that start with \(Self.archIdentifierPrefix) for the plugins built into it, so no plugin can have \(id.rawValue) as its identifier.")
+        }
         if let renamed = PluginIdentifierMigration.renamed(id.rawValue) {
             throw PluginError.invalidPackage("Arch renames the identifier \(id.rawValue) to \(renamed) at launch, so no plugin can have it as its identifier.")
         }
@@ -437,9 +444,10 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`).
+    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), and `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID.
     @discardableResult
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {
+        guard !isClosed else { throw PluginError.closed }
         try checkInstallable(package.manifest.id, of: package.kind)
         let id: PluginID
         var isEnabled = isEnabled
@@ -779,8 +787,9 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Deleting the Persona
 
-    /// Stops the plugins for good as the session deletes the Persona: they leave the list, so their contributions go and nothing starts them again, their running instances stop, and the storage changes that have not reached the files are dropped, since the Persona's folder goes at the next launch.
+    /// Stops the plugins for good as the session deletes the Persona: they leave the list, so their contributions go and nothing starts them again, their running instances stop, and the storage changes that have not reached the files are dropped, since the Persona's folder goes at the next launch. From then on the manager stages, installs, and stores nothing.
     public func close() {
+        isClosed = true
         for id in Array(running.keys) { stop(id) }
         badges = [:]
         engineVersions = []
@@ -881,8 +890,9 @@ public final class PluginManager: ObservableObject {
         return stored
     }
 
-    /// nil restores the default. Throws as `PluginStorage.setValue(_:forKey:)` does, since setting values share the plugin's storage.
+    /// nil restores the default. Throws as `PluginStorage.setValue(_:forKey:)` does, since setting values share the plugin's storage, and `PluginError.closed` once the manager is closed.
     public func setValue(_ value: PluginValue?, of setting: PluginSetting, for id: PluginID) throws {
+        guard !isClosed else { throw PluginError.closed }
         objectWillChange.send()
         try storage(for: id).setSettingValue(value, forKey: setting.key)
     }
@@ -892,8 +902,9 @@ public final class PluginManager: ObservableObject {
         try secrets(for: id).containsSecret(forKey: setting.key)
     }
 
-    /// nil deletes the Keychain item.
+    /// nil deletes the Keychain item. Throws as `PluginSecrets.setSecret(_:forKey:)` does, and `PluginError.closed` once the manager is closed.
     public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) throws {
+        guard !isClosed else { throw PluginError.closed }
         objectWillChange.send()
         try secrets(for: id).setSecret(secret, forKey: setting.key)
     }

@@ -1,4 +1,4 @@
-// A `.crx` file, the form in which Chromium packs an extension: a header with the developer's public key and signatures (format version 3), then a `.zip` archive of the package. Arch installs the package in the archive and writes the header's key into a manifest without one, so that the extension keeps the identifier that its developer's key gives it on both engines. Arch does not check the signatures; the review sheet shows the files, as for any package.
+// A `.crx` file, the form in which Chromium packs an extension: a header with the developer's public key and signatures (format version 3), then a `.zip` archive of the package. Arch installs the package in the archive and writes the header's key into its manifest, over a `key` the manifest has, as Chromium does, so that the extension keeps the identifier that its developer's key gives it on both engines. Arch does not check the signatures; the review sheet shows the files, as for any package.
 import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
@@ -82,13 +82,20 @@ extension PluginPackage {
     /// The type of a `.crx` file, which the open panel takes for a Chromium package.
     public static let crxType = UTType(filenameExtension: "crx") ?? .data
 
-    /// Writes `key`, as Base64, into the web extension manifest at `file` when it is a JSON object without a `key`, as Chromium names an extension by its key's digest. The key goes in right after the opening brace, so the rest of the file stays as it was.
-    public static func writeManifestKey(_ key: Data, into file: URL) throws {
+    /// Writes `key`, as Base64, into the web extension manifest at `file` when it is a JSON object without a `key`, as Chromium names an extension by its key's digest. The key goes in right after the opening brace, so the rest of the file stays as it was. With `replacingKey`, as for a `.crx` file's header key, which Chromium writes over the manifest's, a manifest with another `key` takes this one, and the file is written again from its fields.
+    public static func writeManifestKey(_ key: Data, into file: URL, replacingKey: Bool = false) throws {
         let data = try Data(contentsOf: file)
-        guard let fields = try JSONSerialization.jsonObject(with: data) as? [String: Any], fields["key"] == nil, !fields.isEmpty,
-              let brace = data.firstIndex(of: UInt8(ascii: "{")) else { return }
+        guard var fields = try JSONSerialization.jsonObject(with: data) as? [String: Any], !fields.isEmpty else { return }
+        let encoded = key.base64EncodedString()
+        if let existing = fields["key"] {
+            guard replacingKey, existing as? String != encoded else { return }
+            fields["key"] = encoded
+            try JSONSerialization.data(withJSONObject: fields, options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: file, options: .atomic)
+            return
+        }
+        guard let brace = data.firstIndex(of: UInt8(ascii: "{")) else { return }
         var written = data
-        written.insert(contentsOf: Data("\"key\": \"\(key.base64EncodedString())\", ".utf8), at: brace + 1)
+        written.insert(contentsOf: Data("\"key\": \"\(encoded)\", ".utf8), at: brace + 1)
         try written.write(to: file, options: .atomic)
     }
 }

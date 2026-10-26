@@ -275,6 +275,16 @@ import Testing
         #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "a") == .bool(true))
     }
 
+    @Test func writesWhileChangesKeepComing() async throws {
+        let storage = PluginStorageFile(fileURL: fileURL, saveDelay: 0.3, longestSaveDelay: 0.5)
+        // Each change comes before the one before it settles, so only the longest delay writes the file.
+        for count in 0..<12 {
+            try storage.setValue(.number(Double(count)), forKey: "count")
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "count") != nil)
+    }
+
     @Test func refusesWritesPastTheQuota() throws {
         let storage = PluginStorageFile(fileURL: fileURL)
         // The key's byte and the value's quotes and characters fill the quota exactly.
@@ -316,6 +326,21 @@ import Testing
             #expect(try Data(contentsOf: copyURL) == Data(text.utf8))
             #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "a") == .number(1))
         }
+    }
+
+    @Test func movesAFileThatDoesNotReadAside() throws {
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        try Data(#"{"a": 1}"#.utf8).write(to: fileURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
+        let storage = PluginStorageFile(fileURL: fileURL)
+        #expect(storage.allKeys().isEmpty)
+        // The first change writes a new file and leaves the old one as it was.
+        try storage.setValue(.number(2), forKey: "a")
+        storage.saveChanges()
+        let copyURL = folder.url.appendingPathComponent("storage.unreadable.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copyURL.path)
+        #expect(try Data(contentsOf: copyURL) == Data(#"{"a": 1}"#.utf8))
+        #expect(PluginStorageFile(fileURL: fileURL).value(forKey: "a") == .number(2))
     }
 }
 
@@ -598,6 +623,24 @@ import Testing
         #expect(try JSONDecoder().decode([String: PluginValue].self, from: Data(contentsOf: file)) == ["text": .number(1), "arch.setting:text": .string("b")])
     }
 
+    @Test func limitsTheSecretsOfAPlugin() throws {
+        let persona = UUID()
+        let manager = manager(persona: persona, [SettingsPlugin.self])
+        let secrets = try context(for: SettingsPlugin.self, in: manager).secrets
+        for index in 0..<ScopedPluginSecrets.countLimit {
+            try secrets.setSecret("token", forKey: "key\(index)")
+        }
+        #expect(throws: PluginError.quotaExceeded) { try secrets.setSecret("token", forKey: "one more") }
+        // A secret of another Persona does not count, a key the plugin keeps takes a new value, and a deleted one makes room.
+        try self.manager([SettingsPlugin.self]).setSecret("token", of: try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret }), for: SettingsPlugin.manifest.id)
+        try secrets.setSecret("new", forKey: "key0")
+        try secrets.setSecret(nil, forKey: "key1")
+        try secrets.setSecret("token", forKey: "one more")
+        #expect(throws: PluginError.quotaExceeded) { try secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit + 1), forKey: "key0") }
+        try secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit), forKey: "key0")
+        #expect(self.secrets.items.count == ScopedPluginSecrets.countLimit + 1)
+    }
+
     @Test func keepsSecretsInTheKeychainOfEachPersona() throws {
         let persona = UUID()
         let manager = manager(persona: persona, [SettingsPlugin.self])
@@ -807,6 +850,10 @@ final class MemorySecretStore: PluginSecretStore {
 
     func containsSecret(service: String, account: String) throws -> Bool {
         items[service + " " + account] != nil
+    }
+
+    func secretCount(service: String, accountPrefix: String) throws -> Int {
+        items.keys.filter { $0.hasPrefix(service + " " + accountPrefix) }.count
     }
 
     func removeSecrets(service: String?, accountPrefix: String) throws {

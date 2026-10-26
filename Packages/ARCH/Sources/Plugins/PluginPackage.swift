@@ -98,7 +98,7 @@ public struct PluginPackage: Identifiable, Sendable {
         }
     }
 
-    /// Extracts the `.zip` archive after the file's header as `extractArchive(_:to:runtimes:)` does, then writes the header's key into the package's `manifest.json`.
+    /// Extracts the `.zip` archive after the file's header as `extractArchive(_:to:runtimes:)` does, then writes the header's key into the package's `manifest.json`, over the manifest's own, as Chromium does.
     private static func extractCRX(_ file: URL, to root: URL, runtimes: [any PluginRuntime]) throws {
         let crx = try CRXArchive(Data(contentsOf: file), name: file.lastPathComponent)
         let archive = root.appendingPathExtension("zip")
@@ -106,7 +106,7 @@ public struct PluginPackage: Identifiable, Sendable {
         try crx.archive.write(to: archive)
         try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
         let manifest = root.appendingPathComponent("manifest.json")
-        if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest) }
+        if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
     }
 
     /// Writes the text of each file at its package path in `root`, which must not exist yet, and reads the package. Throws `PluginError.invalidPackage` for a path that breaks the rules of `file(_:in:)`. A failure leaves nothing at `root`.

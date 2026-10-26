@@ -143,6 +143,7 @@ private extension PluginError {
         case .unsupportedAPIVersion: return "unsupportedAPIVersion"
         case .timedOut: return "timedOut"
         case .invalidVersions: return "invalidVersions"
+        case .closed: return "closed"
         }
     }
 }

@@ -38,6 +38,7 @@ final class NoSecrets: PluginSecretStore {
     func secret(service: String, account: String) throws -> String? { nil }
     func setSecret(_ secret: String?, service: String, account: String) throws {}
     func containsSecret(service: String, account: String) throws -> Bool { false }
+    func secretCount(service: String, accountPrefix: String) throws -> Int { 0 }
     func removeSecrets(service: String?, accountPrefix: String) throws {}
 }
 

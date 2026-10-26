@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -76,6 +76,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
              .invalidPackage("plugin.json: contributes.settings[0].default does not suit a number setting.")),
             ("built-in identifier", ["plugin.json": #"{"id": "xyz.taeyoon.arch.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
              .invalidPackage("A plugin built into Arch has the identifier xyz.taeyoon.arch.page-address.")),
+            ("Arch's identifier", ["plugin.json": #"{"id": "xyz.taeyoon.arch.reader", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
+             .invalidPackage("Arch keeps identifiers that start with xyz.taeyoon.arch. for the plugins built into it, so no plugin can have xyz.taeyoon.arch.reader as its identifier.")),
             ("previous built-in identifier", ["plugin.json": #"{"id": "local.arch.browser.page-address", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
              .invalidPackage("Arch renames the identifier local.arch.browser.page-address to xyz.taeyoon.arch.page-address at launch, so no plugin can have it as its identifier.")),
             ("previous generated identifier", ["plugin.json": #"{"id": "local.arch.generated.test", "name": "A", "version": "1", "apiVersion": 1, "summary": "A."}"#],
@@ -314,6 +316,19 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         try await Task.sleep(for: .milliseconds(700))
         #expect(!FileManager.default.fileExists(atPath: pluginFolder.path))
         #expect(self.manager().plugins.isEmpty)
+    }
+
+    @Test func installsNothingOnceClosed() async throws {
+        let manager = manager()
+        let package = try await manager.stage(sampleFolder)
+        // The user deletes the Persona while the review waits for Touch ID.
+        manager.close()
+        #expect(throws: PluginError.closed) { try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true) }
+        await #expect(throws: PluginError.closed) { try await manager.stage(sampleFolder) }
+        let setting = try #require(package.manifest.contributions.settings.first)
+        #expect(throws: PluginError.closed) { try manager.setValue(.string("A"), of: setting, for: sampleID) }
+        #expect(manager.plugins.isEmpty && self.manager().plugins.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/plugins.json").path))
     }
 
     @Test func installsAPluginThatAIWroteWithItsOrigin() async throws {

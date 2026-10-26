@@ -5,7 +5,7 @@ import ARCHEngine
 /// A running plugin in one Persona.
 @MainActor
 public protocol Plugin: AnyObject {
-    /// Called once, before the plugin's first command runs. The context acts for this instance until it stops: when the user switches the plugin off, updates it, removes it, or deletes its Persona, when the activation throws, and for a script plugin also when its background script stops for being idle, hung, or ended.
+    /// Called once, before the instance's first command, panel, or page script value, whichever comes first, reaches it. The context acts for this instance until it stops: when the user switches the plugin off, updates it, removes it, or deletes its Persona, when the activation throws, and for a script plugin also when its background script stops for being idle, hung, or ended.
     func activate(in context: any PluginContext) async throws
     /// Called when the instance stops, once its activation has ended, after which the manager drops the instance. Its context has stopped acting by then. The plugin's next use starts a new instance.
     func deactivate() async
@@ -171,7 +171,7 @@ public protocol PluginStorage: AnyObject {
 @MainActor
 public protocol PluginSecrets: AnyObject {
     func secret(forKey key: String) throws -> String?
-    /// nil deletes the Keychain item.
+    /// nil deletes the Keychain item. Throws `PluginError.quotaExceeded` for a secret of more than 16 KB, and for a new key once the plugin keeps 64 secrets in the Persona, its secret settings among them.
     func setSecret(_ secret: String?, forKey key: String) throws
 }
 
@@ -188,7 +188,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidShortcut(String)
     /// The storage key starts with the prefix that the plugin's settings use.
     case reservedKey(String)
-    /// A write would take the plugin's storage past its limit.
+    /// A write would take the plugin's storage, or its secrets, past their limits.
     case quotaExceeded
     /// The folder or archive is not a package Arch can install, for the reason the text gives as a sentence.
     case invalidPackage(String)
@@ -198,6 +198,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case timedOut
     /// Two plugins cannot become, or stop being, versions of one plugin, for the reason the text gives as a sentence.
     case invalidVersions(String)
+    /// The manager's Persona was deleted, so it stages, installs, and stores nothing.
+    case closed
 }
 
 extension PluginError: LocalizedError {
@@ -209,11 +211,12 @@ extension PluginError: LocalizedError {
         case let .invalidMatchPattern(text): return "“\(text)” is not a site pattern."
         case let .invalidShortcut(text): return "“\(text)” is not a shortcut."
         case let .reservedKey(key): return "The storage key “\(key)” belongs to the plugin's settings."
-        case .quotaExceeded: return "The plugin's storage is full."
+        case .quotaExceeded: return "The plugin has no room left for the value."
         case let .invalidPackage(reason): return reason
         case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
         case .timedOut: return "The plugin did not answer in time."
         case let .invalidVersions(reason): return reason
+        case .closed: return "The plugin's Persona was deleted."
         }
     }
 }

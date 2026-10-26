@@ -5,7 +5,7 @@ import Foundation
 public struct PluginIdentifierMigration {
     /// Each previous identifier prefix with the prefix that replaces it.
     static let renamedPrefixes: [(previous: String, current: String)] = [
-        ("local.arch.browser.", "xyz.taeyoon.arch."),
+        ("local.arch.browser.", PluginManager.archIdentifierPrefix),
         ("local.arch.generated.", PluginComposer.identifierPrefix),
     ]
     /// The preference under which `ShortcutSettings` keeps the user's shortcuts, by command identifiers such as `runCommand:#<plugin id>/<command>` for an item of the Plugins menu.

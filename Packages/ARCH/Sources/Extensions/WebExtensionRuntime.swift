@@ -44,7 +44,6 @@ public struct WebExtensionActionItem: Identifiable {
 public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     public nonisolated let kind = PluginKind.webExtension
     public nonisolated let manifestFileName = WebExtensionManifest.fileName
-    public var onFailure: ((PluginID, String) -> Void)?
     public var onCheck: ((PluginID, [EngineKind: PluginEngineCheck]) -> Void)?
     public var onEngineFailure: ((PluginID, EngineKind, String) -> Void)?
     public var onEnginesChange: (() -> Void)?

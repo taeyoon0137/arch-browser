@@ -1,4 +1,4 @@
-// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, and at quit. Each instance of the plugin reaches it through a view of its own that stops writing when the instance stops.
+// A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, or while they keep coming, and at quit. Each instance of the plugin reaches it through a view of its own that stops writing when the instance stops.
 import AppKit
 
 @MainActor
@@ -14,7 +14,12 @@ final class PluginStorageFile: PluginStorage {
     private var entries: [String: Entry] = [:]
     /// The sum of the entries' sizes.
     private var size = 0
+    /// How long a change waits for more before the file is written, and the longest a change waits while more keep coming, so that a stream of changes still reaches the file before a crash could lose it. The tests give their own.
+    private let saveDelay: TimeInterval
+    private let longestSaveDelay: TimeInterval
     private var pendingSave: DispatchWorkItem?
+    /// When the first change that has not reached the file was made.
+    private var firstUnsavedChange: DispatchTime?
 
     private struct Entry {
         var value: PluginValue
@@ -22,18 +27,22 @@ final class PluginStorageFile: PluginStorage {
         var size: Int
     }
 
-    init(fileURL: URL) {
+    init(fileURL: URL, saveDelay: TimeInterval = 0.5, longestSaveDelay: TimeInterval = 5) {
         self.fileURL = fileURL
+        self.saveDelay = saveDelay
+        self.longestSaveDelay = longestSaveDelay
         for (key, value) in PluginFile.read([String: PluginValue].self, at: fileURL) ?? [:] {
             // Values read from the file always encode again.
             let entry = Entry(value: value, size: (try? Self.size(of: value, forKey: key)) ?? 0)
             entries[key] = entry
             size += entry.size
         }
-        // A change made just before quitting still reaches the file.
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveChanges() }
-        }
+        // A change made just before quitting still reaches the file. NotificationCenter drops the observer when the storage goes.
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationWillTerminate), name: NSApplication.willTerminateNotification, object: nil)
+    }
+
+    @objc private func applicationWillTerminate() {
+        saveChanges()
     }
 
     func value(forKey key: String) -> PluginValue? {
@@ -64,6 +73,7 @@ final class PluginStorageFile: PluginStorage {
         guard let pendingSave else { return }
         pendingSave.cancel()
         self.pendingSave = nil
+        firstUnsavedChange = nil
         // Every entry encodes, since `size(of:forKey:)` checked each value where the file holds it.
         guard let data = try? Self.encoder.encode(entries.mapValues(\.value)) else { return }
         PluginFile.write(data, to: fileURL)
@@ -73,6 +83,7 @@ final class PluginStorageFile: PluginStorage {
     func discardChanges() {
         pendingSave?.cancel()
         pendingSave = nil
+        firstUnsavedChange = nil
     }
 
     /// Only a write that grows the storage can exceed the quota.
@@ -85,14 +96,17 @@ final class PluginStorageFile: PluginStorage {
         scheduleSave()
     }
 
-    /// Combines rapid changes into one file write, like the app's other stores.
+    /// Combines rapid changes into one file write, like the app's other stores: `saveDelay` after the last change, but no later than `longestSaveDelay` after the first one that has not reached the file.
     private func scheduleSave() {
         pendingSave?.cancel()
+        let now = DispatchTime.now()
+        let first = firstUnsavedChange ?? now
+        firstUnsavedChange = first
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.saveChanges() }
         }
         pendingSave = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: min(now + saveDelay, first + longestSaveDelay), execute: work)
     }
 
     private static func isReserved(_ key: String) -> Bool {
