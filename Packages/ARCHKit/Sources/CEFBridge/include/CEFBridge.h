@@ -225,7 +225,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
 /// Reports the view that the developer tools fill once they open. The view stays the same until `cefBrowserDevToolsDidClose`; the app may move it between superviews and windows.
 - (void)cefBrowserDevToolsDidOpenView:(NSView *)view;
-/// Reports that the developer tools closed and left their view.
+/// Reports that the developer tools closed. When they close on their own, their front-end has already left the view that `cefBrowserDevToolsDidOpenView:` reported; when the browser closes first, CEF takes it out right after this call. Do not reuse the view: new tools open in a new one.
 - (void)cefBrowserDevToolsDidClose;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host

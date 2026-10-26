@@ -103,6 +103,16 @@ public final class DevToolsDock: ObservableObject {
         }
     }
 
+    /// The floating tools whose window is `window`, or nil for any other window, such as a browser window. While their window is key, the Developer menu acts on them, whichever tab the active window shows.
+    public static func floatingDevTools(in window: NSWindow?) -> (any EngineDevTools)? {
+        DevToolsUndockedWindows.shared.devTools(in: window)
+    }
+
+    /// Gives floating tools' view back to the page area and closes their window. They show beside their tab's page while a window selects the tab.
+    public static func dock(_ devTools: any EngineDevTools) {
+        DevToolsUndockedWindows.shared.dock(devTools)
+    }
+
     /// The tab's title as it changes. The tab announces a change before it makes it, so the title is read on the next turn of the run loop.
     private static func titles(of tab: Tab) -> AnyPublisher<String, Never> {
         tab.objectWillChange
@@ -143,6 +153,11 @@ final class DevToolsUndockedWindows: NSObject, NSWindowDelegate {
     /// The window of the tools while they float.
     func window(of devTools: any EngineDevTools) -> DevToolsWindow? {
         windows.first { $0.devTools === devTools }
+    }
+
+    /// The tools that `window` shows while they float, or nil for any other window.
+    func devTools(in window: NSWindow?) -> (any EngineDevTools)? {
+        windows.first { $0 === window }?.devTools
     }
 
     /// Moves the tools' view into their window, named after their tab. A new window comes forward at the saved frame, cascaded from the last tools window.

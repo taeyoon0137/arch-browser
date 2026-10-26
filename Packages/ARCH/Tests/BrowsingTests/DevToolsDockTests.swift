@@ -91,6 +91,31 @@ import Testing
         #expect(windows.window(of: tools) == nil)
     }
 
+    @Test func floatingToolsAreFoundByTheirWindowAndDockFromItWhileTheirTabIsHidden() throws {
+        settings.side = .floating
+        let dock = makeDock()
+        let tools = FakeDevTools()
+        let other = FakeDevTools()
+        dock.track(tools, titles: titles)
+        tools.open()
+        let window = try #require(windows.window(of: tools))
+        dock.track(other, titles: titles)
+        // The Developer menu finds the tools by their key window, not by the tab the dock follows.
+        #expect(windows.devTools(in: window) === tools)
+        #expect(windows.devTools(in: NSWindow()) == nil)
+        #expect(windows.devTools(in: nil) == nil)
+        // A side change alone leaves the tools of a hidden tab in their window. Chosen from that window, it docks them.
+        settings.side = .right
+        #expect(windows.window(of: tools) === window)
+        windows.dock(tools)
+        #expect(windows.devTools(in: window) == nil)
+        #expect(tools.view?.superview == nil)
+        #expect(tools.isOpen)
+        dock.track(tools, titles: titles)
+        #expect(dock.view === tools.view)
+        #expect(dock.dockedSide == .right)
+    }
+
     @Test func dockedToolsOfATabLeftBehindLeaveThePageAreaUntilItReturns() {
         let dock = makeDock()
         let tools = FakeDevTools()

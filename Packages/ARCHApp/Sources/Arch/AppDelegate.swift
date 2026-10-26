@@ -337,11 +337,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
     @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
     @objc private func toggleSidebar() { frontSidebarTarget().toggleSidebar() }
-    @objc private func toggleDeveloperTools() { session.activeWindow?.toggleDeveloperTools() }
-    /// Every window's tools follow the side.
+    /// While the window of floating tools is key, ⌥⌘I closes those tools, whichever tab the active window shows.
+    @objc private func toggleDeveloperTools() {
+        if let devTools = DevToolsDock.floatingDevTools(in: NSApp.keyWindow) { return devTools.close() }
+        session.activeWindow?.toggleDeveloperTools()
+    }
+    /// Every window's tools follow the side. So do floating tools whose window is key, also while no window shows their tab: docked, they show once a window selects it.
     @objc private func chooseDevToolsSide(_ sender: NSMenuItem) {
         guard let side = (sender.representedObject as? String).flatMap(DevToolsSide.init(rawValue:)) else { return }
+        let floatingDevTools = DevToolsDock.floatingDevTools(in: NSApp.keyWindow)
         DevToolsDockSettings.shared.side = side
+        if side != .floating, let floatingDevTools { DevToolsDock.dock(floatingDevTools) }
     }
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
@@ -439,7 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
@@ -459,11 +465,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(chooseDevToolsSide(_:)) {
             item.state = (item.representedObject as? String) == DevToolsDockSettings.shared.side.rawValue ? .on : .off
-            return activeWindow?.canChooseDevToolsSide == true
+            return DevToolsDock.floatingDevTools(in: NSApp.keyWindow) != nil || activeWindow?.canChooseDevToolsSide == true
         }
         if item.action == #selector(toggleDeveloperTools) {
-            item.title = activeWindow?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
-            return activeWindow?.canShowDeveloperTools == true
+            let actsOnFloatingTools = DevToolsDock.floatingDevTools(in: NSApp.keyWindow) != nil
+            item.title = actsOnFloatingTools || activeWindow?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
+            return actsOnFloatingTools || activeWindow?.canShowDeveloperTools == true
         }
         if item.action == #selector(sharePage) {
             return activeWindow?.canShareSelectedPage == true
