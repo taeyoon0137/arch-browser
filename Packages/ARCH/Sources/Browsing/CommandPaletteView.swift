@@ -39,7 +39,7 @@ struct CommandPaletteView: View {
 
     /// Pages that share a title and host, such as the steps of a sign-in flow, appear once. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
     private func loadHistorySuggestions() async {
-        let entries = await HistoryStore.shared.suggestions(for: text, limit: 15)
+        let entries = await session.history.suggestions(for: text, limit: 15)
         guard !Task.isCancelled else { return }
         var seen = Set<String>()
         historySuggestions = Array(entries.filter { seen.insert("\($0.title)\u{1F}\($0.url.host ?? "")").inserted }.prefix(5))
@@ -50,7 +50,7 @@ struct CommandPaletteView: View {
         guard !trimmed.isEmpty else { return mode == .newTab ? "Open a new tab" : "Enter an address or search" }
         if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
         // The session reads the untrimmed text the same way, so a keyword and a space are enough, and searches the web for a keyword whose template makes no web address.
-        if let search = SiteSearchStore.shared.match(text), search.shortcut.resultsURL(for: search.query) != nil {
+        if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil {
             return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \"\(search.query)\""
         }
         if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(url.host ?? trimmed)" }

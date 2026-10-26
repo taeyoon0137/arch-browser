@@ -9,9 +9,6 @@ public final class SitePermissionStore: ObservableObject {
         case deny
     }
 
-    /// The store in the app's Application Support folder.
-    public static let shared = SitePermissionStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
-
     /// Each origin's answers, keyed by origins such as `https://example.com`.
     @Published public private(set) var decisions: [String: [EnginePermissionType: Decision]] = [:]
     /// Sends the origin and the types whose answers changed, after the change.

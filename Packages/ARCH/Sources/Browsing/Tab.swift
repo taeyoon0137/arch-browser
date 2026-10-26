@@ -3,7 +3,6 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
-import History
 
 public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
@@ -37,7 +36,7 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
-    /// How many times this tab's page process quit, kept for the tab close log (III.8).
+    /// How many times this tab's page process quit, kept for the tab close log.
     public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs.
     var openNewTab: ((any EngineWebContents) -> Void)?
@@ -75,6 +74,8 @@ public final class Tab: ObservableObject, Identifiable {
     private var declinedExternalAppSite: String?
     /// The last page recorded in history, so it counts only once until the tab moves to another page. Restored tabs use their saved page as the initial value.
     var recordedURL: URL?
+    /// The session sets this callback to record a visit to a page, with its title, in its history store.
+    var recordVisit: ((URL, String) -> Void)?
     /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens.
     var isRestored = false
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
@@ -148,7 +149,7 @@ extension Tab: EngineWebContentsUIDelegate {
         // Record a page when it finishes loading, when its title is usually known.
         if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
-            HistoryStore.shared.record(url, title: webContents.title)
+            recordVisit?(url, webContents.title)
         }
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }

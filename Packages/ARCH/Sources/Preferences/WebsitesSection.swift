@@ -5,7 +5,8 @@ import SwiftUI
 
 /// One group per website with its remembered answers, each with a menu to change it and a button to remove it. A website asks again for a permission whose answer is removed.
 struct WebsitesSection: View {
-    @ObservedObject private var store = SitePermissionStore.shared
+    /// The session's remembered answers.
+    @ObservedObject var store: SitePermissionStore
 
     var body: some View {
         let origins = store.decisions.keys.sorted { Self.siteTitle(for: $0).localizedStandardCompare(Self.siteTitle(for: $1)) == .orderedAscending }

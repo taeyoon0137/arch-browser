@@ -2,9 +2,8 @@
 import AppKit
 import SwiftUI
 
-/// Owns the single History window, which stays in memory when closed and reloads the store each time it becomes key. The store answers off the main thread, so the list fills in once the read is done.
+/// Owns the History window of one store, which stays in memory when closed and reloads the store each time it becomes key. The store answers off the main thread, so the list fills in once the read is done. The app makes one for the session's store.
 public final class HistoryWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
-    public static let shared = HistoryWindowController()
 
     /// Opens a page from the window in a new browser tab.
     public var openURL: ((URL) -> Void)? {
@@ -16,8 +15,8 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
     private static let clearItem = NSToolbarItem.Identifier("ARCHHistoryClear")
     private static let searchItem = NSToolbarItem.Identifier("ARCHHistorySearch")
 
-    private init() {
-        let model = HistoryModel(store: .shared)
+    public init(store: HistoryStore) {
+        let model = HistoryModel(store: store)
         self.model = model
         let window = NSWindow(contentViewController: NSHostingController(rootView: HistoryList(model: model)))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -35,7 +34,7 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("HistoryWindowController is created through shared")
+        fatalError("HistoryWindowController is created in code")
     }
 
     /// Brings the History window to the front with the store's current entries. Becoming key loads them; a window that is key already, or that does not become key while the app is in the background, loads here.

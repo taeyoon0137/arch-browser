@@ -370,7 +370,7 @@ public final class BrowserWindowModel: ObservableObject {
         // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
         preview.requestPermission = { [weak self] request, completion in
             completion(false)
-            DispatchQueue.main.async { self?.session.applyRememberedPermissions(for: request, to: runtime.context) }
+            DispatchQueue.main.async { self?.session.permissionAnswers.restoreRememberedAnswers(for: request, in: runtime.context) }
         }
         preview.didClose = { [weak self] in self?.closePreview() }
         self.preview = preview
@@ -485,7 +485,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Loads a URL when the text parses as one, otherwise runs a web search.
     public func navigate(to input: String) {
-        guard let url = BrowserSession.destination(forInput: input) else { return }
+        guard let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         if let tab = selectedTab {
             tab.forgetExternalAppDecline()
             tab.webContents.navigationController.load(URLRequest(url: url))
@@ -512,7 +512,7 @@ public final class BrowserWindowModel: ObservableObject {
             focusPage()
         }
         if let page = InternalPage(address: input) { return internalPage = page }
-        guard let mode = commandPaletteMode, let url = BrowserSession.destination(forInput: input) else { return }
+        guard let mode = commandPaletteMode, let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         internalPage = nil
         switch mode {
         case .editCurrent where selectedTab != nil: navigate(to: input)

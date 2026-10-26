@@ -43,7 +43,7 @@ public final class PreferencesWindowController: NSWindowController {
     public static let defaultArchiveAfterHours = 12
     /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
     public static var openTerminal: (() -> Void)?
-    /// The session whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens.
+    /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
     public static var session: BrowserSession?
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
@@ -53,13 +53,16 @@ public final class PreferencesWindowController: NSWindowController {
         UserDefaults.standard.register(defaults: [Self.archiveAfterHoursKey: Self.defaultArchiveAfterHours])
         let sections = NSTabViewController()
         sections.tabStyle = .toolbar
+        let session = Self.session
         sections.addTabViewItem(Self.section("General", symbol: "gearshape", GeneralSection()))
-        sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection()))
+        if let session {
+            sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection(store: session.siteSearch)))
+        }
         sections.addTabViewItem(Self.section("Sidebar", symbol: "sidebar.left", SidebarSection()))
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
         sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
-        sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection()))
-        if let session = Self.session {
+        if let session {
+            sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection(store: session.sitePermissions)))
             // AI writes plugins only from Settings ▸ Plugins, so its feature joins Settings ▸ AI with the section.
             AIService.shared.register(.pluginComposer)
             sections.addTabViewItem(Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session)))

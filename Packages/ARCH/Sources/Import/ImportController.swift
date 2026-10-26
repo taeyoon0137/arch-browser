@@ -16,10 +16,11 @@ public final class ImportController {
     /// Reads the browsers that the user went to grant access to again when Arch becomes active, while the browser import sheet is open.
     private var activationObserver: NSObjectProtocol?
 
-    public init(session: BrowserSession, history: HistoryStore = .shared, siteSearch: SiteSearchStore = .shared) {
+    /// Imports into the session and its history and site search stores.
+    public init(session: BrowserSession) {
         self.session = session
-        self.history = history
-        self.siteSearch = siteSearch
+        history = session.history
+        siteSearch = session.siteSearch
     }
 
     /// Whether an import can start on `window`: none is running and the window shows no sheet.
@@ -83,7 +84,7 @@ public final class ImportController {
         guard canImport(in: window) else { return }
         isImporting = true
         window.makeKeyAndOrderFront(nil)
-        let model = BrowserImportModel(personas: session.$personas, currentPersonaID: session.sidebarTarget().personaID, record: SidebarImport.Record())
+        let model = BrowserImportModel(personas: session.$personas, currentPersonaID: session.sidebarTarget().personaID, record: SidebarImport.Record(directory: session.userDataDirectory))
         let controller = NSHostingController(rootView: BrowserImportSheet(model: model, actions: BrowserImportSheet.Actions(
             importSelection: { [weak self] in
                 self?.closeBrowserSheet(on: window)

@@ -1,9 +1,10 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, and site search. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
 import Extensions
 import Foundation
+import History
 import Plugins
 
 /// One engine's running pieces for one Persona: the engine's application, the Persona's profile in it, and the browser that owns the web contents of the Persona's tabs in that engine.
@@ -25,7 +26,14 @@ final class EngineRuntime {
 
 public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
-    private let userDataDirectory: URL
+    /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
+    public let userDataDirectory: URL
+    /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.
+    public let history: HistoryStore
+    /// The remembered answers to websites' permission requests in every Persona, which Settings ▸ Websites changes.
+    public let sitePermissions: SitePermissionStore
+    /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
+    public let siteSearch: SiteSearchStore
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
     /// Each Persona's runtimes, from the Persona's first tab until quit, and its plugins.
@@ -69,7 +77,7 @@ public final class BrowserSession: ObservableObject {
     private var tabObservers: [UUID: AnyCancellable] = [:]
     /// Each engine's running total of page process crashes.
     private var crashCounts: [EngineKind: Int] = [:]
-    /// The engines' total of page process crashes, kept for the tab close log (III.8).
+    /// The engines' total of page process crashes, kept for the tab close log.
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. Each closes once the engine creates the download its page started.
     private var downloadOnlyTabIDs: Set<UUID> = []
@@ -86,12 +94,16 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Loads the saved session, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships.
+    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships.
     public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type]) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
         store = SessionStore(directory: userDataDirectory)
+        history = HistoryStore(directory: userDataDirectory)
+        sitePermissions = SitePermissionStore(directory: userDataDirectory)
+        siteSearch = SiteSearchStore(directory: userDataDirectory)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
@@ -396,7 +408,7 @@ public final class BrowserSession: ObservableObject {
         engines.runtimes[kind] = runtime
         context.downloads.delegate = self
         followDownloadSettings(of: context)
-        followSitePermissions(of: context)
+        permissionAnswers.follow(context)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
         browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
         // An engine that starts after another in the Persona has none of the Persona's cookies yet.
@@ -755,8 +767,11 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.decidePermission(request, for: tab, completion: completion)
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
+                self.enqueueSheet(alert, for: tab, completion: response)
+            }, completion: completion)
         }
+        tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
             guard let self, let tab else { return }
@@ -970,7 +985,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, such as a keyword whose template makes no web address, or `nil` for empty text.
-    static func destination(forInput input: String, siteSearch: SiteSearchStore = .shared) -> URL? {
+    static func destination(forInput input: String, siteSearch: SiteSearchStore) -> URL? {
         if let search = siteSearch.match(input), let url = search.shortcut.resultsURL(for: search.query) { return url }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
@@ -1035,78 +1050,8 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site permissions
 
-    /// The answers waiting for each permission sheet, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same sheet's answer.
-    private var permissionWaiters: [String: [(Bool) -> Void]] = [:]
-
-    /// Answers a site's request from the remembered answers, or asks with a sheet and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks.
-    private func decidePermission(_ request: EnginePermissionRequest, for tab: Tab, completion: @escaping (Bool) -> Void) {
-        let store = SitePermissionStore.shared
-        let context = runtime(of: tab)?.context
-        // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
-        let answer = { [weak self] (granted: Bool) in
-            completion(granted)
-            guard let context else { return }
-            DispatchQueue.main.async { self?.applyRememberedPermissions(for: request, to: context) }
-        }
-        let isRemembered = !request.types.isEmpty && request.types.allSatisfy(SitePermissionStore.remembers)
-        let origin = isRemembered ? SitePermissionStore.origin(of: request.origin) : nil
-        if let origin {
-            let decisions = request.types.map { store.decision(for: $0, origin: origin) }
-            if decisions.contains(.deny) { return answer(false) }
-            if decisions.allSatisfy({ $0 == .allow }) { return answer(true) }
-        }
-        let key = "\(tab.id) \(request.origin.absoluteString) \(request.types.map(\.rawValue).sorted())"
-        guard permissionWaiters[key] == nil else {
-            permissionWaiters[key]?.append(answer)
-            return
-        }
-        permissionWaiters[key] = [answer]
-        enqueueSheet(Self.permissionAlert(for: request, remembersAnswer: origin != nil), for: tab) { [weak self] response in
-            let waiters = self?.permissionWaiters.removeValue(forKey: key) ?? [answer]
-            let granted = response == .alertFirstButtonReturn
-            waiters.forEach { $0(granted) }
-            // A sheet that closed without an answer, as when its tab closed, leaves nothing to remember.
-            if let origin, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn {
-                store.set(granted ? .allow : .deny, for: request.types, origin: origin)
-            }
-        }
-    }
-
-    /// Gives a profile's own kept answers for the request's types the remembered answers, or none.
-    func applyRememberedPermissions(for request: EnginePermissionRequest, to context: any EngineBrowserContext) {
-        let origin = SitePermissionStore.origin(of: request.origin)
-        for type in request.types {
-            let decision = origin.flatMap { SitePermissionStore.shared.decision(for: type, origin: $0) }
-            context.setRememberedPermission(decision.map { $0 == .allow }, for: type, origin: request.origin)
-        }
-    }
-
-    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings.
-    private func followSitePermissions(of context: any EngineBrowserContext) {
-        let store = SitePermissionStore.shared
-        let apply = { (origin: String, types: [EnginePermissionType]) in
-            guard let url = URL(string: origin) else { return }
-            for type in types {
-                context.setRememberedPermission(store.decision(for: type, origin: origin).map { $0 == .allow }, for: type, origin: url)
-            }
-        }
-        for (origin, answers) in store.decisions { apply(origin, Array(answers.keys)) }
-        store.didChange
-            .sink { apply($0.origin, $0.types) }
-            .store(in: &cancellables)
-    }
-
-    /// Asks with a sheet on the window that shows the page, once a window shows it. The engine calls this from inside its own message loop, so the sheet never blocks. The answer reaches the engine once.
-    private static func permissionAlert(for request: EnginePermissionRequest, remembersAnswer: Bool) -> NSAlert {
-        let alert = NSAlert()
-        alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(permissionDescription(for: request.types))?"
-        if remembersAnswer {
-            alert.informativeText = "Arch remembers your answer for this website. You can change it in Settings > Websites."
-        }
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Don\u{2019}t Allow")
-        return alert
-    }
+    /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
+    let permissionAnswers: SitePermissionAnswers
 
     // MARK: Sheets
 
@@ -1114,21 +1059,6 @@ public final class BrowserSession: ObservableObject {
     func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
         sheets.enqueue(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
-    }
-
-    private static func permissionDescription(for types: [EnginePermissionType]) -> String {
-        let phrases = types.map { type -> String in
-            switch type {
-            case .camera: return "use the camera"
-            case .microphone: return "use the microphone"
-            case .screenCapture: return "record the screen"
-            case .geolocation: return "see your location"
-            case .notifications: return "send notifications"
-            case .clipboard: return "read the clipboard"
-            case .midi: return "use MIDI devices"
-            }
-        }
-        return ListFormatter.localizedString(byJoining: phrases)
     }
 
     // MARK: Zoom

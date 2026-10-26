@@ -21,9 +21,8 @@ public struct PluginIdentifierMigration {
     /// The defaults that hold the user's shortcuts and `secretsMovedKey`.
     var defaults: UserDefaults
 
-    /// The app calls it after `BundleIdentifierMigration`, which moves the preferences it reads, and before any `PluginManager` exists.
-    public static func runAtLaunch() {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
+    /// The app calls it with its Application Support folder after `BundleIdentifierMigration`, which moves the preferences it reads, and before any `PluginManager` exists.
+    public static func runAtLaunch(in directory: URL) {
         let migration = PluginIdentifierMigration(directory: directory, previousServicePrefix: PluginKeychain.previousServicePrefix, servicePrefix: PluginKeychain.servicePrefix,
                                                   defaults: .standard)
         migration.moveFiles()

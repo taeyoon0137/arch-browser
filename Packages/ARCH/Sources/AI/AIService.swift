@@ -24,7 +24,7 @@ public struct AIActivityEntry: Identifiable, Sendable {
 
 @MainActor
 public final class AIService: ObservableObject, AIClient {
-    /// Reads `ai.json` and `ai-usage.json` from the app's Application Support folder. Nothing goes to a provider until the user connects one and uses a feature.
+    /// Reads `ai.json` and `ai-usage.json` from the app's Application Support folder, the folder the app shell gives the browser session. Nothing goes to a provider until the user connects one and uses a feature.
     public static let shared = AIService(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
 
     public static let activityLimit = 50

@@ -67,7 +67,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 
 After a change, run the applicable checks:
 
-- For source changes, run `swift build` and `swift test`. `swift test --filter <Module>Tests` runs one module's tests; the Build row of `docs/plan.md` Current State says what each test target checks.
+- For source changes, run `swift build` and `swift test`. `swift test --filter <Module>Tests` runs one module's tests; the Build section of `docs/plan.md` Current State says what each test target checks.
 - For README or hero changes, run `./scripts/readme_update.sh`, then check the output.
 - Run `git diff --check` and `git status --short`.
 - When relevant, check the symbolic link with `ls -l CLAUDE.md`.

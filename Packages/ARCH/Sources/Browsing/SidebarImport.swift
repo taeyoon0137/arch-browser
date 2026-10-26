@@ -124,13 +124,8 @@ extension SidebarImport {
         /// Set while the record is empty in place of a file that did not decode. The first write moves that file aside.
         private var hasUnreadableFile = false
 
-        /// Reads the record in the app's Application Support folder.
-        public init() {
-            self.init(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
-        }
-
-        /// A missing file, or one that does not decode, gives an empty record, so names and addresses decide, as on a first import. A file that does not decode stays as it is until the first write moves it to `imports.unreadable.json`, as an unreadable `site-search.json` is moved, so that the import never overwrites the IDs it holds.
-        init(directory: URL) {
+        /// Reads the record in `directory`, the session's folder (`BrowserSession.userDataDirectory`). A missing file, or one that does not decode, gives an empty record, so names and addresses decide, as on a first import. A file that does not decode stays as it is until the first write moves it to `imports.unreadable.json`, as an unreadable `site-search.json` is moved, so that the import never overwrites the IDs it holds.
+        public init(directory: URL) {
             fileURL = directory.appendingPathComponent("imports.json")
             guard let data = try? Data(contentsOf: fileURL) else {
                 entries = []

@@ -20,9 +20,6 @@ public struct HistoryEntry: Hashable, Identifiable {
 
 /// Safe to use from any thread: outside `init` and `deinit`, only blocks on `queue` touch the database.
 public final class HistoryStore: @unchecked Sendable {
-    /// The history store in the app's Application Support folder.
-    public static let shared = HistoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
-
     /// The pages an import writes in one transaction.
     static let importBatchSize = 1_000
     /// Statements that fail go to the system log, since the store's callers go on without their results.

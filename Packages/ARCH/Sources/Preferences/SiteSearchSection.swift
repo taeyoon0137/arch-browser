@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Lists the shortcuts by name, address, and keyword. Many shortcuts scroll within the section instead of making the window taller.
 struct SiteSearchSection: View {
-    @ObservedObject private var store = SiteSearchStore.shared
+    /// The session's shortcuts.
+    @ObservedObject var store: SiteSearchStore
     /// The shortcut the sheet edits: one from the list, or a new one the list does not have yet.
     @State private var editing: SiteSearchShortcut?
 
@@ -47,20 +48,21 @@ struct SiteSearchSection: View {
         .frame(width: sectionWidth)
         .frame(maxHeight: 520)
         .sheet(item: $editing) { shortcut in
-            SiteSearchEditor(shortcut: shortcut, isNew: !store.shortcuts.contains { $0.id == shortcut.id })
+            SiteSearchEditor(store: store, shortcut: shortcut, isNew: !store.shortcuts.contains { $0.id == shortcut.id })
         }
     }
 }
 
 /// Edits one shortcut. Saving needs a name, a one-word keyword that no other shortcut uses, and an address with `%s` where the search text goes.
 private struct SiteSearchEditor: View {
-    @ObservedObject private var store = SiteSearchStore.shared
+    @ObservedObject private var store: SiteSearchStore
     @Environment(\.dismiss) private var dismiss
     @State private var shortcut: SiteSearchShortcut
     /// Kept from when the sheet opened, so its buttons stay the same while it closes after Add.
     @State private var isNew: Bool
 
-    init(shortcut: SiteSearchShortcut, isNew: Bool) {
+    init(store: SiteSearchStore, shortcut: SiteSearchShortcut, isNew: Bool) {
+        _store = ObservedObject(wrappedValue: store)
         _shortcut = State(initialValue: shortcut)
         _isNew = State(initialValue: isNew)
     }

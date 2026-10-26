@@ -31,15 +31,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The app's Application Support folder, which the session keeps its files and stores in (`BrowserSession.userDataDirectory`). Only `AIService.shared`, which views of several modules read, names it as well.
+        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
         // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
-        PluginIdentifierMigration.runAtLaunch()
+        PluginIdentifierMigration.runAtLaunch(in: supportDirectory)
         let registry = EngineRegistry.shared
         registry.register(WebKitEngine())
         if let chromium = ChromiumEngine(frameworkPath: Self.cefFrameworkPath, helperPath: Self.cefHelperPath) {
             registry.register(chromium)
         }
-        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
         // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app.
         let session: BrowserSession
         do {
@@ -128,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Pages an import has not written yet and visits still on the history store's queue go in before the app quits.
     func applicationWillTerminate(_ notification: Notification) {
         session?.saveNow()
-        HistoryStore.shared.finishWrites()
+        session?.history.finishWrites()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.
@@ -361,7 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// The History window, made on first use. Its pages open as new tabs in the sidebar target, which comes to the front.
     private lazy var historyWindow: HistoryWindowController = {
-        let history = HistoryWindowController.shared
+        let history = HistoryWindowController(store: session.history)
         history.openURL = { [weak self] url in
             guard let session = self?.session else { return }
             session.openTab(url: url)

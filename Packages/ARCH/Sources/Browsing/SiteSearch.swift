@@ -35,9 +35,6 @@ public struct SiteSearchShortcut: Codable, Hashable, Identifiable {
 
 /// Loads the shortcuts once and saves the file after each change. Until a file exists, the store writes a few defaults to it.
 public final class SiteSearchStore: ObservableObject {
-    /// The shortcuts in the app's Application Support folder.
-    public static let shared = SiteSearchStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch"))
-
     @Published public private(set) var shortcuts: [SiteSearchShortcut]
     private let fileURL: URL
     /// Set while the store keeps its defaults in place of a file that did not decode. The first write moves that file aside.
