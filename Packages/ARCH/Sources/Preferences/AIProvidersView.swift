@@ -128,6 +128,11 @@ struct AIProviderDraft: Identifiable {
         limits = provider.limits
     }
 
+    /// The typed key without the spaces and line breaks a copy can carry. Refresh sends it and Save stores it, so both use the same key.
+    var enteredKey: String {
+        newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The base URL, if requests may go to it.
     var validBaseURL: URL? {
         URL(string: baseURL.trimmingCharacters(in: .whitespaces)).flatMap { AIHTTPConfiguration.isAllowedBaseURL($0) ? $0 : nil }
@@ -250,7 +255,7 @@ private struct AIProviderEditor: View {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let names = try await service.listModels(of: configuration, key: draft.newKey)
+            let names = try await service.listModels(of: configuration, key: draft.enteredKey)
             let added = names.filter { name in !draft.models.contains(where: { $0.name == name }) }
             draft.models += added.map { AIModelConfiguration(name: $0) }
             message = added.isEmpty ? "No new models." : "Added \(added.count) of \(names.count) models."
@@ -263,7 +268,7 @@ private struct AIProviderEditor: View {
 
     private func save() async {
         guard let configuration = draft.configuration else { return }
-        let key = draft.newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = draft.enteredKey
         if draft.hasKey && (draft.removesKey || !key.isEmpty) {
             guard await Self.authorize("change the API key for \(configuration.name)") else {
                 message = "The key was not changed."

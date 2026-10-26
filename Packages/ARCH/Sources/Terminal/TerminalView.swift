@@ -108,6 +108,14 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
             background.setFill()
             cellRect(column: column, top: top, width: cell.width).fill()
         }
+        // A scrollback line keeps no blank cells at its end, so the selection covers the rest of the row by itself.
+        if let selected, line.cells.count < screen.size.columns {
+            let start = max(selected.lowerBound, line.cells.count), end = min(selected.upperBound, screen.size.columns)
+            if start < end {
+                NSColor.selectedTextBackgroundColor.setFill()
+                cellRect(column: start, top: top, width: end - start).fill()
+            }
+        }
         var run = ""
         var runStart = 0
         var runStyle = TerminalStyle()
@@ -217,14 +225,18 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
         needsDisplay = true
     }
 
-    /// Line breaks become carriage returns, as Return types. Bracketed paste marks the text, so a program can tell it from typing and does not run it line by line.
     @objc func paste(_ sender: Any?) {
-        guard var text = NSPasteboard.general.string(forType: .string) else { return }
-        text = text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
-        if screen.usesBracketedPaste {
-            text = "\u{1B}[200~" + text.replacingOccurrences(of: "\u{1B}[201~", with: "") + "\u{1B}[201~"
-        }
-        send(text)
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        send(Self.pastedText(text, bracketed: screen.usesBracketedPaste))
+    }
+
+    /// What a paste sends. Line breaks become carriage returns, as Return types. Bracketed paste marks the text, so a program can tell it from typing and does not run it line by line; inside the marks the text keeps tabs and carriage returns but no other control character, so no escape character in copied text can end the paste early and run what follows.
+    static func pastedText(_ text: String, bracketed: Bool) -> String {
+        let text = text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
+        guard bracketed else { return text }
+        var kept = String.UnicodeScalarView()
+        kept.append(contentsOf: text.unicodeScalars.filter { $0 == "\t" || $0 == "\r" || !(0x00...0x1F ~= $0.value || 0x7F...0x9F ~= $0.value) })
+        return "\u{1B}[200~" + String(kept) + "\u{1B}[201~"
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {

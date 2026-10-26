@@ -82,9 +82,11 @@ final class TerminalScreen {
     /// The scrollback is trimmed in batches, so scrolling does not move the whole scrollback for each line.
     private static let scrollbackTrimBatch = 1_000
     private static let tabWidth = 8
+    /// The most scalars one cell holds, so a flood of combining marks cannot grow one cell's text, which each redraw lays out, without bound. Real graphemes, such as emoji sequences, have far fewer.
+    private static let maximumCellScalars = 32
 
     private(set) var size: TerminalSize
-    /// Lines that scrolled off the top of the main screen, oldest first. They keep the width they had.
+    /// Lines that scrolled off the top of the main screen, oldest first. They keep the width they had, less the blank cells at the end of a line that did not wrap.
     private(set) var scrollback: [TerminalLine] = []
     /// Lines removed from the scrollback's start because of its limit or a clear.
     private(set) var droppedLineCount = 0
@@ -239,7 +241,7 @@ final class TerminalScreen {
     private func combine(_ scalar: Unicode.Scalar) {
         var column = cursor.pendingWrap ? cursor.column : cursor.column - 1
         while column > 0, lines[cursor.row].cells[column].width == 0 { column -= 1 }
-        guard column >= 0 else { return }
+        guard column >= 0, lines[cursor.row].cells[column].text.unicodeScalars.count < Self.maximumCellScalars else { return }
         lines[cursor.row].cells[column].text.unicodeScalars.append(scalar)
     }
 
@@ -404,7 +406,14 @@ final class TerminalScreen {
         }
     }
 
+    /// A line that did not wrap loses its blank cells at the end, which hold nothing to draw or copy, so the scrollback does not keep a full row of cells for each short line. A wrapped line keeps them, since they are part of the text it continues.
     private func appendToScrollback(_ line: TerminalLine) {
+        var line = line
+        if !line.isWrapped {
+            let kept = (line.cells.lastIndex { $0 != .blank() } ?? -1) + 1
+            // A new array, since removing elements keeps the old storage.
+            if kept < line.cells.count { line.cells = Array(line.cells[..<kept]) }
+        }
         scrollback.append(line)
         guard scrollback.count >= Self.scrollbackLimit + Self.scrollbackTrimBatch else { return }
         let excess = scrollback.count - Self.scrollbackLimit

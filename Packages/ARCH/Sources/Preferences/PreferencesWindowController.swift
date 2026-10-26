@@ -40,8 +40,6 @@ public enum AppearanceSetting: String, CaseIterable {
 /// Owns the single Settings window, which stays in memory when closed. Its toolbar switches between sections, and the window takes each section's title and size.
 public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
-    public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
-    public static let defaultArchiveAfterHours = 12
     /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
     public static var openTerminal: (() -> Void)?
     /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
@@ -53,7 +51,6 @@ public final class PreferencesWindowController: NSWindowController {
     private var pluginsSection: NSTabViewItem?
 
     private init() {
-        UserDefaults.standard.register(defaults: [Self.archiveAfterHoursKey: Self.defaultArchiveAfterHours])
         let sections = NSTabViewController()
         sections.tabStyle = .toolbar
         let session = Self.session

@@ -1,4 +1,4 @@
-// The terminal's parser and screen: wrapping, cursor movement and erasing, wide and combining characters, colors, scroll regions and the scrollback, the alternate screen, replies to queries, titles, UTF-8 across reads, resizing, and the text a selection copies.
+// The terminal's parser and screen: wrapping, cursor movement and erasing, wide and combining characters, colors, scroll regions and the scrollback, the alternate screen, replies to queries, titles, UTF-8 across reads, resizing, the text a selection copies, and the limits on what one cell and one sequence keep.
 import Foundation
 import Testing
 @testable import Terminal
@@ -61,6 +61,13 @@ import Testing
         #expect(screen.lines[0].cells[3].text == "!")
     }
 
+    @Test func aCellKeepsAtMostThirtyTwoScalars() {
+        let screen = screen(columns: 10, rows: 1)
+        screen.feed("a" + String(repeating: "\u{301}", count: 100) + "b")
+        #expect(screen.lines[0].cells[0].text.unicodeScalars.count == 32)
+        #expect(screen.lines[0].cells[1].text == "b")
+    }
+
     @Test func graphicRenditionSetsColorsAndAttributes() {
         let screen = screen(columns: 10, rows: 1)
         screen.feed("\u{1B}[1;31ma\u{1B}[38;5;200;48;2;1;2;3mb\u{1B}[0mc\u{1B}[7;94md")
@@ -80,6 +87,21 @@ import Testing
         screen.feed("\u{1B}[2;3r\u{1B}[3;1H\n5")
         #expect(rows(screen) == ["2", "4", "5"])
         #expect(screen.scrollback.count == 1)
+    }
+
+    @Test func theScrollbackDropsBlankCellsAtTheEndOfLinesThatDoNotWrap() {
+        let screen = screen(columns: 4, rows: 1)
+        // A wrapped line, the line it continues, an empty line, and a line erased in red.
+        screen.feed("abcdef\r\n\r\n\u{1B}[41m\u{1B}[2K\u{1B}[0m\r\n")
+        #expect(screen.scrollback.map(\.cells.count) == [4, 2, 0, 4])
+        #expect(screen.text(from: position(screen, -4, 0), to: position(screen, -3, 4)) == "abcdef")
+    }
+
+    @Test func intermediateBytesStayBounded() {
+        var parser = TerminalParser()
+        var actions: [TerminalAction] = []
+        parser.parse(Data("\u{1B}[".utf8) + Data(repeating: 0x20, count: 10_000) + Data("mx".utf8)) { actions.append($0) }
+        #expect(actions == [.controlSequence(parameters: [], privateMarker: nil, intermediates: [0x20, 0x20, 0x20, 0x20], final: UInt8(ascii: "m")), .print("x")])
     }
 
     @Test func theAlternateScreenRestoresTheMainScreen() {

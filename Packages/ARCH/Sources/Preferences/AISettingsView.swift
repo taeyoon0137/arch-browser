@@ -22,6 +22,8 @@ struct AISettingsView: View {
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
     @State private var page = Page.providers
+    /// The Test Prompt request, kept here rather than in its rows, so that leaving the Features page or the section stops it: it then neither runs on unseen nor lets Send start a second one when the page shows again.
+    @State private var testPromptTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,7 +43,7 @@ struct AISettingsView: View {
                 }
                 switch page {
                 case .providers: AIProvidersPage(service: service, settings: settings)
-                case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks)
+                case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks, testPromptTask: $testPromptTask)
                 case .sites: AISitesPage(settings: settings)
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
@@ -51,6 +53,8 @@ struct AISettingsView: View {
         }
         .frame(width: sectionWidth, height: 540)
         .onAppear { service.register(.testPrompt) }
+        .onChange(of: page) { testPromptTask?.cancel() }
+        .onDisappear { testPromptTask?.cancel() }
     }
 }
 
@@ -71,6 +75,7 @@ private struct AIFeaturesPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
     @ObservedObject var hooks: AIHookCenter
+    @Binding var testPromptTask: Task<Void, Never>?
 
     var body: some View {
         Section {
@@ -91,7 +96,7 @@ private struct AIFeaturesPage: View {
                     }))
                 AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? "Default Model" : "None")
                 if feature.id == AIFeature.testPrompt.id {
-                    AITestPromptRows(service: service, settings: settings)
+                    AITestPromptRows(service: service, settings: settings, task: $testPromptTask)
                 } else if let error = lastError(of: feature) {
                     Text(error).font(.callout).foregroundStyle(.red)
                 }
@@ -185,7 +190,7 @@ private struct AITestPromptRows: View {
     @State private var reply = ""
     @State private var status: String?
     @State private var isError = false
-    @State private var task: Task<Void, Never>?
+    @Binding var task: Task<Void, Never>?
 
     var body: some View {
         TextField("Prompt", text: $prompt, axis: .vertical)

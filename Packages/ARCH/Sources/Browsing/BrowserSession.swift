@@ -980,7 +980,13 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Closes unpinned listed tabs inactive for `ARCHArchiveAfterHours` hours (default 12; 0 disables), so a small window's tab stays. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
+    /// Settings ▸ Sidebar saves under this key how many hours an unpinned tab stays open without being selected; 0 turns archiving off.
+    public static let archiveAfterHoursKey = "ARCHArchiveAfterHours"
+
+    /// The hours while nothing is saved under `archiveAfterHoursKey`.
+    public static let archiveAfterHoursByDefault = 12
+
+    /// Closes unpinned listed tabs inactive for the hours saved under `archiveAfterHoursKey` (`archiveAfterHoursByDefault` while none are; 0 disables), so a small window's tab stays. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
         windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = Date() }
@@ -993,7 +999,7 @@ public final class BrowserSession: ObservableObject {
     /// `nil` when archiving is disabled.
     private static func archiveCutoff(now: Date) -> Date? {
         let defaults = UserDefaults.standard
-        let hours = defaults.object(forKey: "ARCHArchiveAfterHours") == nil ? 12 : defaults.integer(forKey: "ARCHArchiveAfterHours")
+        let hours = defaults.object(forKey: archiveAfterHoursKey) == nil ? archiveAfterHoursByDefault : defaults.integer(forKey: archiveAfterHoursKey)
         guard hours > 0 else { return nil }
         return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }

@@ -112,6 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// A program running in the built-in terminal stops when Arch quits, so the user confirms first, as closing the terminal's window asks.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        TerminalWindowController.allowsQuit() ? .terminateNow : .terminateCancel
+    }
+
     /// A Dock click opens a main window where the last one was while Settings, History, or another of the app's windows keeps the app running without one. Otherwise AppKit brings the windows forward as usual.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard let session, session.lastMainWindow == nil else { return true }

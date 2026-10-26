@@ -24,6 +24,8 @@ struct TerminalParser {
     }
 
     private static let maximumParameters = 32
+    /// Real sequences have at most two intermediate bytes, and the screen ignores every sequence that has any, so more are dropped.
+    private static let maximumIntermediates = 4
     private static let maximumCommandLength = 4_096
 
     private var state = State.ground
@@ -81,7 +83,7 @@ struct TerminalParser {
         case ..<0x20:
             perform(.control(byte))
         case 0x20...0x2F:
-            intermediates.append(byte)
+            addIntermediate(byte)
         case UInt8(ascii: "[") where intermediates.isEmpty:
             enter(.controlSequence)
         case UInt8(ascii: "]") where intermediates.isEmpty:
@@ -110,7 +112,7 @@ struct TerminalParser {
             // A private marker counts only before any parameter.
             if parameters.isEmpty, currentParameter == nil, privateMarker == nil { privateMarker = byte }
         case 0x20...0x2F:
-            intermediates.append(byte)
+            addIntermediate(byte)
         case 0x40...0x7E:
             if currentParameter != nil || !parameters.isEmpty { endParameter() }
             perform(.controlSequence(parameters: parameters, privateMarker: privateMarker, intermediates: intermediates, final: byte))
@@ -118,6 +120,10 @@ struct TerminalParser {
         default:
             state = .ground
         }
+    }
+
+    private mutating func addIntermediate(_ byte: UInt8) {
+        if intermediates.count < Self.maximumIntermediates { intermediates.append(byte) }
     }
 
     /// A parameter left out is 0. Parameters past the limit are dropped.

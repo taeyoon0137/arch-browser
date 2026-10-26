@@ -1,8 +1,16 @@
-// The built-in terminal: one window with the user's login shell, where the user installs command-line AI tools and signs in to them. Closing the window ends the shell. Showing the terminal again after its shell ended starts a new one.
+// The built-in terminal: one window with the user's login shell, where the user installs command-line AI tools and signs in to them. Closing the window or quitting the app ends the shell. Showing the terminal again after its shell ended starts a new one.
 import AppKit
 
 public final class TerminalWindowController: NSWindowController, NSWindowDelegate {
-    public static let shared = TerminalWindowController()
+    /// The controller, created when the terminal first shows.
+    public static var shared: TerminalWindowController {
+        if let instance { return instance }
+        let controller = TerminalWindowController()
+        instance = controller
+        return controller
+    }
+
+    private static var instance: TerminalWindowController?
 
     private let scrollView = NSScrollView()
     private var terminal: PseudoTerminal?
@@ -78,11 +86,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
     /// A program that runs in front, such as a tool in the middle of a sign-in, ends with the window, so the user confirms first.
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard terminal?.hasRunningProgram == true, !closesWithRunningProgram else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Close the terminal?"
-        alert.informativeText = "The program running in it will stop."
-        alert.addButton(withTitle: "Close")
-        alert.addButton(withTitle: "Cancel")
+        let alert = Self.runningProgramAlert(message: "Close the terminal?", action: "Close")
         alert.beginSheetModal(for: sender) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             self?.closesWithRunningProgram = true
@@ -95,5 +99,22 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         closesWithRunningProgram = false
         terminal?.close()
         terminal = nil
+    }
+
+    /// Quitting the app ends the shell as closing the window does, so while a program runs in front the terminal comes forward and the user confirms first. Returns whether the app may quit; it may when the terminal never showed. The app delegate asks it from `applicationShouldTerminate(_:)`, after the app has ended its windows' sheets.
+    public static func allowsQuit() -> Bool {
+        guard let controller = instance, controller.terminal?.hasRunningProgram == true else { return true }
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        return runningProgramAlert(message: "Quit Arch?", action: "Quit").runModal() == .alertFirstButtonReturn
+    }
+
+    private static func runningProgramAlert(message: String, action: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = "The program running in the terminal will stop."
+        alert.addButton(withTitle: action)
+        alert.addButton(withTitle: "Cancel")
+        return alert
     }
 }

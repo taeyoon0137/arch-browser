@@ -98,7 +98,7 @@ struct GeneralSection: View {
 
 /// How long an unpinned tab stays open without being selected.
 struct SidebarSection: View {
-    @AppStorage(PreferencesWindowController.archiveAfterHoursKey) private var archiveAfterHours = PreferencesWindowController.defaultArchiveAfterHours
+    @AppStorage(BrowserSession.archiveAfterHoursKey) private var archiveAfterHours = BrowserSession.archiveAfterHoursByDefault
 
     var body: some View {
         Form {
