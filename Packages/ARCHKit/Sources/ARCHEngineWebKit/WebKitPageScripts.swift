@@ -6,9 +6,12 @@ import WebKit
 final class WebKitUserContentController: WKUserContentController {
     /// The worlds whose channel has its message handler. WebKit refuses a second handler of the same name in a world, and a world keeps its handler, so a channel already open in a document stays open, as on the Chromium engine.
     private var openWorlds: Set<String> = []
+    /// The page scripts the controller runs.
+    private(set) var pageScripts: [EnginePageScript] = []
 
     /// Replaces the page scripts and keeps the controller's other scripts. WebKit removes user scripts only all at once, so the page scripts are told apart by the marker their sources start with.
     func setPageScripts(_ scripts: [EnginePageScript]) {
+        pageScripts = scripts
         let otherScripts = userScripts.filter { !$0.source.hasPrefix(WebKitPageScripts.marker) }
         removeAllUserScripts()
         otherScripts.forEach(addUserScript)

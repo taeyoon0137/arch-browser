@@ -19,12 +19,13 @@ public final class WebKitEngine: Engine {
         return Bundle(for: WKWebView.self).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ProcessInfo.processInfo.operatingSystemVersionString
     }
 
-    public init() {}
+    /// Registers the private APIs of the Web Inspector inside pages, so that the flags page lists them before the engine starts. Call on the main thread, where the flags live.
+    public init() {
+        MainActor.assumeIsolated { WebKitInspectorAPI.register() }
+    }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
-        // The engine starts on the main thread, where the flags live.
-        MainActor.assumeIsolated { WebKitInspectorAPI.register() }
-        return WebKitApplication(configuration: configuration)
+        WebKitApplication(configuration: configuration)
     }
 
     /// WebKit keeps a store of its own in `~/Library/WebKit/<bundle identifier>/WebsiteDataStore/<UUID>`, and removing one that does not exist also succeeds. The data of the profile's web extensions goes too. The WebKit application need not run.
@@ -278,6 +279,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// The web view's content controller, which holds its page scripts.
     let userContent: WebKitUserContentController
     let allowsDownloads: Bool
+    /// The base URL of the web extension whose pages alone the web view loads, since WebKit loads an extension's pages only in a web view made for that extension; nil for a web view that loads other pages.
+    let extensionBaseURL: URL?
     var bridge: WebKitDelegateBridge?
     /// Gives the dialog the page waits on its safe answer. Set while an `alert`, `confirm`, or `prompt` dialog is open.
     private var dismissPendingDialog: (() -> Void)?
@@ -304,7 +307,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.sessionID = sessionID
         self.context = context
         self.allowsDownloads = !configuration.disallowDownloads
-        let webConfiguration = WKWebViewConfiguration()
+        let (webConfiguration, extensionBaseURL) = Self.baseConfiguration(loading: configuration.initialURL, in: context)
+        self.extensionBaseURL = extensionBaseURL
         webConfiguration.websiteDataStore = context.dataStore
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
@@ -332,8 +336,17 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
 
-    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions.
-    init(sessionID: String, parentConfiguration: WKWebViewConfiguration, context: WebKitBrowserContext) {
+    /// WebKit loads a web extension's page only in a web view made from the configuration that the extension's context gives, and such a web view loads only that extension's pages. A web contents that starts at a loaded extension's page, as an options page or a tab that `tabs.create` opens at `runtime.getURL(…)`, starts from that configuration; any other starts from a new one.
+    private static func baseConfiguration(loading url: URL?, in context: WebKitBrowserContext) -> (WKWebViewConfiguration, extensionBaseURL: URL?) {
+        if #available(macOS 15.4, *), let url, let extensionContext = context.webExtensions?.extensionContext(ofPageAt: url),
+           let configuration = extensionContext.webViewConfiguration {
+            return (configuration, extensionContext.baseURL)
+        }
+        return (WKWebViewConfiguration(), nil)
+    }
+
+    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions, and loads the pages its opener loads: `extensionBaseURL` is the opener's.
+    init(sessionID: String, parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
         guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
             preconditionFailure("WebKit popups come from web views of WebKit web contents")
         }
@@ -341,6 +354,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         self.context = context
         self.userContent = userContent
         self.allowsDownloads = true
+        self.extensionBaseURL = extensionBaseURL
         let webView = WebKitWebView(frame: .zero, configuration: parentConfiguration)
         self.webView = webView
         self.view = WebKitPageView(webView: webView)

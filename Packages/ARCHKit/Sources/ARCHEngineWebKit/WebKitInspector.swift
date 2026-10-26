@@ -22,13 +22,13 @@ enum WebKitInspectorAPI {
         flags.register(PrivateAPI(id: developerExtrasAPIID, name: "WKPreferences._developerExtrasEnabled", framework: "WebKit") {
             WKPreferences.instancesRespond(to: NSSelectorFromString("_setDeveloperExtrasEnabled:"))
         })
-        flags.register(PrivateAPIFeature(id: featureID, name: "Web Inspector inside WebKit pages, with Inspect Element in their context menu", apiIDs: [inspectorAPIID, developerExtrasAPIID]))
+        flags.register(PrivateAPIFeature(id: featureID, name: "Web Inspector inside WebKit pages", apiIDs: [inspectorAPIID, developerExtrasAPIID]))
     }
 
     /// Whether the feature may run now. The flags live on the main thread, where web views are made.
     static var isAllowed: Bool { MainActor.assumeIsolated { PrivateAPIFlags.shared.allows(featureID) } }
 
-    /// Adds Inspect Element to the page's own context menu items.
+    /// Turns on WebKit's developer extras, without which the inspector does not open. The page context menu still leaves WebKit's Inspect Element item out, as it holds only items both engines run.
     static func enableDeveloperExtras(in preferences: WKPreferences) {
         // Key-value coding finds the `_setDeveloperExtrasEnabled:` setter the availability check looked for.
         preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -51,7 +51,9 @@ final class WebKitDevTools: EngineDevTools {
 
     var isOpen: Bool { inspector?.value(forKey: "visible") as? Bool ?? false }
 
+    /// A web view made while the private API flags were off has no developer extras, so they go on first. The web view shares its configuration's preferences, and the page follows their changes.
     func open() {
+        WebKitInspectorAPI.enableDeveloperExtras(in: webView.configuration.preferences)
         perform("show")
         perform("attach")
     }

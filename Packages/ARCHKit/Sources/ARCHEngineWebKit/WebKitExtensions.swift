@@ -12,6 +12,8 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
     /// The windows of the last `setWindows(_:focusedWindowID:)` call, in the app's order, each with the profile's tabs only.
     private var windows: [WebKitExtensionWindow] = []
     private var focusedWindow: WebKitExtensionWindow?
+    /// Where `setWindows(_:focusedWindowID:)` reports what changed: the controller, or a test's recorder.
+    lazy var windowEvents: any WebKitExtensionWindowEvents = controller
 
     /// Keeps the extensions' data as the profile keeps its website data: nothing for incognito, the default location for the default store, and otherwise under the store's identifier. Extensions reach cookies in the profile's store.
     init(context: WebKitBrowserContext) {
@@ -50,8 +52,8 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         unload(`extension`.id)
         let context = WKWebExtensionContext(for: webExtension)
         context.uniqueIdentifier = `extension`.id
-        // Identifiers are lowercase letters, so the address exists.
-        context.baseURL = URL(string: "webkit-extension://\(`extension`.id)/")!
+        // Identifiers are lowercase letters, so the address exists. The navigation policy hands addresses of this scheme to WebKit rather than to other apps.
+        context.baseURL = URL(string: "\(WebKitDelegateBridge.extensionScheme)://\(`extension`.id)/")!
         // As the profile's pages, which the browser bundled with macOS can inspect.
         context.isInspectable = true
         context.inspectionName = webExtension.displayName
@@ -64,6 +66,12 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         }
         try controller.load(context)
         contexts[`extension`.id] = context
+    }
+
+    /// The context of the loaded extension whose page `url` is.
+    func extensionContext(ofPageAt url: URL) -> WKWebExtensionContext? {
+        guard url.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme else { return nil }
+        return controller.extensionContext(for: url)
     }
 
     func unload(_ id: String) {
@@ -109,7 +117,7 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         windows.first { window in window.tabs.contains { $0 === tab } }
     }
 
-    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed: windows that opened and closed, tabs that opened, closed, and moved to another window, the active tab of each window, and the focused window. Tabs that only changed their place in a window are not reported; extensions read their index when they need it. A window with the identity of a window before it in the report is left out, so that each identity names one window.
+    /// Keeps each window's object while the window stays, as WebKit tells windows apart by their objects, and tells the loaded extensions what changed, in this order: windows that opened, tabs that closed, opened, and moved to another window, windows that closed with the tabs that closed with them, the active tab of each window, and the focused window. Tabs that only changed their place in a window are not reported; extensions read their index when they need it. A window with the identity of a window before it in the report is left out, so that each identity names one window.
     func setWindows(_ reported: [EngineExtensionWindow], focusedWindowID: UUID?) {
         let previousWindows = windows
         let previousFocus = focusedWindow
@@ -125,28 +133,29 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         }
         focusedWindow = windows.first { $0.id == focusedWindowID }
         let places = Self.places(in: windows)
-        for window in previousWindows where !windows.contains(where: { $0 === window }) {
-            for tab in window.tabs where places[ObjectIdentifier(tab)] == nil { controller.didCloseTab(tab, windowIsClosing: true) }
-            controller.didCloseWindow(window)
-        }
         for window in windows where !previousWindows.contains(where: { $0 === window }) {
-            controller.didOpenWindow(window)
+            windowEvents.didOpenWindow(window)
         }
         for (key, place) in previousPlaces where places[key] == nil && windows.contains(where: { $0 === place.window }) {
-            controller.didCloseTab(place.tab, windowIsClosing: false)
+            windowEvents.didCloseTab(place.tab, windowIsClosing: false)
         }
         for (key, place) in places {
             guard let previous = previousPlaces[key] else {
-                controller.didOpenTab(place.tab)
+                windowEvents.didOpenTab(place.tab)
                 continue
             }
-            if previous.window !== place.window { controller.didMoveTab(place.tab, from: previous.index, in: previous.window) }
+            if previous.window !== place.window { windowEvents.didMoveTab(place.tab, from: previous.index, in: previous.window) }
+        }
+        // A window closes after its tabs that moved to another window have left it.
+        for window in previousWindows where !windows.contains(where: { $0 === window }) {
+            for tab in window.tabs where places[ObjectIdentifier(tab)] == nil { windowEvents.didCloseTab(tab, windowIsClosing: true) }
+            windowEvents.didCloseWindow(window)
         }
         for window in windows {
             guard let active = window.activeTab, let previous = previousActiveTabs[window.id], previous !== active else { continue }
-            controller.didActivateTab(active, previousActiveTab: previous)
+            windowEvents.didActivateTab(active, previousActiveTab: previous)
         }
-        if focusedWindow !== previousFocus { controller.didFocusWindow(focusedWindow) }
+        if focusedWindow !== previousFocus { windowEvents.didFocusWindow(focusedWindow) }
     }
 
     /// Where the windows list each tab, by the tab's object.
@@ -269,6 +278,21 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         }
     }
 }
+
+/// The controller's calls through which `setWindows(_:focusedWindowID:)` tells the extensions what changed, so that a test can record them in the controller's place.
+@available(macOS 15.4, *) @MainActor
+protocol WebKitExtensionWindowEvents: AnyObject {
+    func didOpenWindow(_ newWindow: any WKWebExtensionWindow)
+    func didCloseWindow(_ closedWindow: any WKWebExtensionWindow)
+    func didFocusWindow(_ focusedWindow: (any WKWebExtensionWindow)?)
+    func didOpenTab(_ newTab: any WKWebExtensionTab)
+    func didCloseTab(_ closedTab: any WKWebExtensionTab, windowIsClosing: Bool)
+    func didActivateTab(_ activatedTab: any WKWebExtensionTab, previousActiveTab previousTab: (any WKWebExtensionTab)?)
+    func didMoveTab(_ movedTab: any WKWebExtensionTab, from index: Int, in oldWindow: (any WKWebExtensionWindow)?)
+}
+
+@available(macOS 15.4, *)
+extension WKWebExtensionController: WebKitExtensionWindowEvents {}
 
 /// Where the last report listed a tab.
 @available(macOS 15.4, *)

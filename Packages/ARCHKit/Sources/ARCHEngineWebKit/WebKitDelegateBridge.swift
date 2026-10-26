@@ -39,10 +39,19 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         ]
     }
 
+    /// The scheme of web extensions' pages, which WebKit loads besides the web schemes: an options page or another extension page in a tab, and a frame an extension adds to a page. `WebKitExtensions` gives each extension its base URL in it.
+    static let extensionScheme = "webkit-extension"
+
+    /// Whether the address belongs to another app: its scheme is neither one both engines load nor WebKit's extension scheme.
+    private static func opensExternally(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return !EngineURLSchemes.web.contains(scheme) && scheme != extensionScheme
+    }
+
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) {
+        if let url = navigationAction.request.url, Self.opensExternally(url) {
             decisionHandler(.cancel)
             owner.uiDelegate?.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
             return
@@ -122,14 +131,22 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let delegate = owner.uiDelegate else { return nil }
         // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
-        if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) {
+        if let url = navigationAction.request.url, Self.opensExternally(url) {
             delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
             return nil
         }
-        let child = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: configuration, context: owner.context)
+        // WebKit loads no web page in a web view made for an extension, so a web page that an extension's page opens loads in a web contents of its own, without an opener. A window that a web page opens for an extension's page gets its opener's configuration, and WebKit refuses the page there.
+        if let url = navigationAction.request.url, owner.extensionBaseURL != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            let child = WebKitWebContents(sessionID: UUID().uuidString, context: owner.context,
+                                          configuration: EngineWebContentsConfiguration(initialURL: url, pageScripts: owner.userContent.pageScripts))
+            delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: .newForegroundTab)
+            return nil
+        }
+        let child = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context)
         delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: .newForegroundTab)
         return child.webView
     }
+
 
     func webViewDidClose(_ webView: WKWebView) {
         owner.uiDelegate?.webContentsDidClose(owner)

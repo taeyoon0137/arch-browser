@@ -58,9 +58,16 @@ public final class PrivateAPIFlags: ObservableObject {
     public func isOn(feature id: String) -> Bool { flag("ARCHPrivateAPIFeature.\(id)") }
     public func setOn(_ isOn: Bool, feature id: String) { setFlag(isOn, "ARCHPrivateAPIFeature.\(id)") }
 
+    /// Lists the API and checks on a background queue whether it exists, so that neither launch nor the flags page waits for the check.
     public func register(_ api: PrivateAPI) {
         guard !apis.contains(where: { $0.id == api.id }) else { return }
         apis.append(api)
+        let check = api.check
+        let id = api.id
+        DispatchQueue.global(qos: .utility).async {
+            let isAvailable = check()
+            Task { @MainActor in self.availability[id] = isAvailable }
+        }
     }
 
     public func register(_ feature: PrivateAPIFeature) {
@@ -68,24 +75,12 @@ public final class PrivateAPIFlags: ObservableObject {
         features.append(feature)
     }
 
-    /// Checks every API not checked yet on a background queue, so that launch does not wait.
-    public func checkInBackground() {
-        for api in apis where availability[api.id] == nil {
-            let check = api.check
-            let id = api.id
-            DispatchQueue.global(qos: .utility).async {
-                let isAvailable = check()
-                Task { @MainActor in self.availability[id] = isAvailable }
-            }
-        }
-    }
-
-    /// Whether the API exists. An API not checked yet is checked now.
+    /// Whether the API exists. An API whose background check has not finished is checked now. The result is recorded after the current turn of the main actor, since a view that is drawing may ask, and a view must not change what it observes while it draws.
     public func isAvailable(_ id: String) -> Bool {
         if let isAvailable = availability[id] { return isAvailable }
         guard let api = apis.first(where: { $0.id == id }) else { return false }
         let isAvailable = api.check()
-        availability[id] = isAvailable
+        Task { @MainActor in self.availability[id] = isAvailable }
         return isAvailable
     }
 

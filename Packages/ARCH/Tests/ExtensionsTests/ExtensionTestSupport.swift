@@ -196,9 +196,9 @@ final class WebKitProfile {
         browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: browserDelegate, window: nil)
     }
 
-    func makeTab() -> WebKitWebContents {
+    func makeTab(at url: URL? = nil) -> WebKitWebContents {
         // The profile's browser makes WebKit web contents.
-        browser.createWebContents(EngineWebContentsConfiguration()) as! WebKitWebContents
+        browser.createWebContents(EngineWebContentsConfiguration(initialURL: url)) as! WebKitWebContents
     }
 
     /// Runs `body` with a new profile, then deletes the profile's website data and its extensions' data. WebKit deletes a store only while nothing in the process uses it, so `body` keeps everything that holds the profile, and the deletion waits for WebKit to let the store go.

@@ -21,7 +21,7 @@ import Testing
 
     @Test func eachWebViewKnowsItsWebContents() throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
-        let popup = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: tab.webView.configuration, context: context)
+        let popup = WebKitWebContents(sessionID: UUID().uuidString, parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)
         #expect((tab.webView as? WebKitWebView)?.contents === tab)
         #expect((popup.webView as? WebKitWebView)?.contents === popup)
     }

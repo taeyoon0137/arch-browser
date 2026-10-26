@@ -3,7 +3,6 @@ import AppKit
 import ARCHEngine
 import ARCHEngineChromium
 import ARCHEngineWebKit
-import ARCHPrivateAPI
 import Browsing
 import History
 import Import
@@ -72,8 +71,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.moveToMainWindowShortcut = { [weak self] in
             self?.windowMenu?.items.first { $0.action == #selector(AppDelegate.moveToMainWindow) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
         }
-        // Engines register their private APIs when they start; the checks run without delaying launch.
-        PrivateAPIFlags.shared.checkInBackground()
         session.restoreWindows()
         if !pendingURLs.isEmpty {
             pendingURLs.forEach { session.openTab(url: $0) }
