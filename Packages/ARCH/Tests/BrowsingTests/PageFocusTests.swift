@@ -1,4 +1,4 @@
-// Which view of a page's engine view a window focuses: the engine view when it takes focus, as on WebKit, or else the topmost view inside it that does, as Chromium's page view within CEF's view, which takes none.
+// Which view of a page's engine view a window focuses: the engine view when it takes focus, as on WebKit, or else the topmost visible view inside it that does, as the current page's view within CEF's view, which takes none.
 import AppKit
 import Testing
 @testable import Browsing
@@ -15,10 +15,10 @@ import Testing
         let container = NSView()
         let sourceView = NSView()
         let cefView = NSView()
+        let contentsView = NSView()
         let pageView = FocusableView()
 
         init() {
-            let contentsView = NSView()
             contentsView.addSubview(pageView)
             cefView.addSubview(contentsView)
             container.addSubview(sourceView)
@@ -40,6 +40,23 @@ import Testing
     @Test func thePageAboveTakesFocusBeforeAViewBelowIt() {
         let tab = ChromiumTab()
         tab.sourceView.addSubview(FocusableView())
+        #expect(BrowserWindowModel.viewTakingFocus(in: tab.container) === tab.pageView)
+    }
+
+    /// Chromium adds the current page's view below the others and keeps the view of a page left for another site, hidden, while that page is in the back-forward cache.
+    @Test func aHiddenPageLeftAboveTheCurrentPageTakesNoFocus() {
+        let tab = ChromiumTab()
+        let previousPageView = FocusableView()
+        previousPageView.isHidden = true
+        tab.contentsView.addSubview(previousPageView)
+        #expect(BrowserWindowModel.viewTakingFocus(in: tab.container) === tab.pageView)
+    }
+
+    @Test func aPageWhoseViewIsHiddenStillGivesItFocus() {
+        let tab = ChromiumTab()
+        tab.pageView.isHidden = true
+        #expect(BrowserWindowModel.viewTakingFocus(in: tab.container) === tab.pageView)
+        tab.cefView.isHidden = true
         #expect(BrowserWindowModel.viewTakingFocus(in: tab.container) === tab.pageView)
     }
 
