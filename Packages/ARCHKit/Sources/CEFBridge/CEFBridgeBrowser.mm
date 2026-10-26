@@ -18,6 +18,7 @@
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_permission_handler.h"
+#include "include/cef_picture_in_picture_handler.h"
 #include "include/cef_request_context.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_values.h"
@@ -423,7 +424,8 @@ class BridgeClient : public CefClient,
                      public CefPermissionHandler,
                      public CefRequestHandler,
                      public CefContextMenuHandler,
-                     public CefFrameHandler {
+                     public CefFrameHandler,
+                     public CefPictureInPictureHandler {
 public:
     explicit BridgeClient(ARCHCEFBrowser *owner) : owner_(owner) {}
 
@@ -443,6 +445,8 @@ public:
     CefRefPtr<CefFrameHandler> GetFrameHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    // The app shows a video in picture in picture in the system's window, so Chromium's own window never opens for these browsers.
+    CefRefPtr<CefPictureInPictureHandler> GetPictureInPictureHandler() override { return this; }
 
     void OnFrameCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) override { [owner_ handleFrameCreated:frame]; }
 
@@ -725,6 +729,28 @@ public:
                       bool finalUpdate) override {
         [owner_ handleFindResult:count activeMatchOrdinal:activeMatchOrdinal finalUpdate:finalUpdate];
     }
+
+    // CEF calls these on the UI thread, which is the main thread here.
+    void OnPictureInPictureStart(CefRefPtr<CefBrowser> browser, const CefSize &natural_size, const CefRect &source_rect) override {
+        [owner_.delegate cefBrowserDidStartPictureInPictureWithNaturalSize:NSMakeSize(natural_size.width, natural_size.height)
+                                                                 sourceRect:NSMakeRect(source_rect.x, source_rect.y, source_rect.width, source_rect.height)];
+    }
+
+    void OnPictureInPictureFrame(CefRefPtr<CefBrowser> browser, const CefAcceleratedPaintInfo &info) override {
+        IOSurfaceRef surface = static_cast<IOSurfaceRef>(info.shared_texture_io_surface);
+        if (!surface) {
+            return;
+        }
+        const cef_rect_t &content = info.extra.content_rect;
+        [owner_.delegate cefBrowserDidReceivePictureInPictureFrame:surface contentRect:NSMakeRect(content.x, content.y, content.width, content.height)];
+    }
+
+    void OnPictureInPicturePlaybackStateChange(CefRefPtr<CefBrowser> browser, bool playing, bool can_play_pause) override {
+        [owner_.delegate cefBrowserDidChangePictureInPicturePlaying:playing canPlayPause:can_play_pause];
+    }
+
+    // Arch's engine ends a closing browser's picture in picture before `OnBeforeClose`, so the delegate learns of the end before the close.
+    void OnPictureInPictureStop(CefRefPtr<CefBrowser> browser) override { [owner_.delegate cefBrowserDidStopPictureInPicture]; }
 
 private:
     void FinishDevTools() {
@@ -1019,6 +1045,18 @@ private:
     }
     // The media script defines this function so that pages can call it but not replace it.
     frame->ExecuteJavaScript(CefString(std::string("__archMediaControl(\"") + name + "\")"), frame->GetURL(), 0);
+}
+
+- (void)setPictureInPicturePlaying:(BOOL)playing {
+    if (_browser) {
+        _browser->GetHost()->SetPictureInPicturePlaying(playing);
+    }
+}
+
+- (void)closePictureInPicturePausingVideo:(BOOL)pause {
+    if (_browser) {
+        _browser->GetHost()->ClosePictureInPicture(pause);
+    }
 }
 
 - (void)exitFullscreenWillResize:(BOOL)willResize {

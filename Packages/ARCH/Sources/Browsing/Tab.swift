@@ -52,6 +52,8 @@ public final class Tab: ObservableObject, Identifiable {
     var didCancelDialogs: (() -> Void)?
     /// The session sets this callback to bring the tab forward, so that a sheet it needs can show.
     var requestSelection: (() -> Void)?
+    /// The session sets this callback to show the tab and bring its window and the app forward, as the return button of the page's picture-in-picture window asks.
+    var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show a sheet for the page, which waits until a window shows the page. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
@@ -137,6 +139,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
+    public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) { requestActivation?() }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {

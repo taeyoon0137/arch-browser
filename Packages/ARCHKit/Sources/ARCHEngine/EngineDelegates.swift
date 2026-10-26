@@ -94,6 +94,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
     func webContentsDidClose(_ webContents: any EngineWebContents)
+    /// The page asks to be shown, with its tab, its window, and the app in front, as the return button of its picture-in-picture window does.
+    func webContentsDidRequestActivation(_ webContents: any EngineWebContents)
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents)
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void)
@@ -124,6 +126,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}
+    func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) { completion() }

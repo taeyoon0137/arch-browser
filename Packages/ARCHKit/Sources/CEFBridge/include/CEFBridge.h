@@ -1,5 +1,6 @@
 // Objective-C interface to the Chromium Embedded Framework (CEF). Swift sees only these types. The C++ API stays inside the bridge.
 #import <AppKit/AppKit.h>
+#import <IOSurface/IOSurfaceRef.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -227,6 +228,14 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDevToolsDidOpenView:(NSView *)view;
 /// Reports that the developer tools closed. When they close on their own, their front-end has already left the view that `cefBrowserDevToolsDidOpenView:` reported; when the browser closes first, CEF takes it out right after this call. Do not reuse the view: new tools open in a new one.
 - (void)cefBrowserDevToolsDidClose;
+/// Reports that a video of the page entered picture in picture, which Chromium's own window then does not show. `naturalSize` is the video's size in pixels. `sourceRect` is where the page showed the video, in points from the top left of the browser's view; for a video in a frame of another site's process, it is relative to that frame. Frames follow until `cefBrowserDidStopPictureInPicture`. Another video of the page that enters picture in picture meanwhile takes the first one's place without a new report.
+- (void)cefBrowserDidStartPictureInPictureWithNaturalSize:(NSSize)naturalSize sourceRect:(NSRect)sourceRect NS_SWIFT_NAME(cefBrowserDidStartPictureInPicture(naturalSize:sourceRect:));
+/// Reports a frame of the video in picture in picture: an IOSurface in BGRA, of which only `contentRect`, in pixels from the surface's top left, holds the video. The surface keeps its contents until three later frames have arrived or `cefBrowserDidStopPictureInPicture` has returned, so it can be displayed without a copy. Retain it to use it after this call.
+- (void)cefBrowserDidReceivePictureInPictureFrame:(IOSurfaceRef)surface contentRect:(NSRect)contentRect NS_SWIFT_NAME(cefBrowserDidReceivePictureInPictureFrame(_:contentRect:));
+/// Reports whether the video in picture in picture plays, right after its start and whenever that changes. `canPlayPause` is NO when the page offers no play or pause control for the video, as for a camera stream.
+- (void)cefBrowserDidChangePictureInPicturePlaying:(BOOL)playing canPlayPause:(BOOL)canPlayPause NS_SWIFT_NAME(cefBrowserDidChangePictureInPicturePlaying(_:canPlayPause:));
+/// Reports that picture in picture ended, for any reason: the page ended it, navigated, crashed, or closed, another tab's video took its place, or the app called `closePictureInPicturePausingVideo:`. No frames follow.
+- (void)cefBrowserDidStopPictureInPicture;
 /// Asks for a user name and password for a server or proxy that requires HTTP authentication. `scheme` is lowercase, such as `basic` or `digest`. Call `completion` once, with a nil user name to cancel.
 - (void)cefBrowserDidReceiveAuthenticationChallengeForHost:(NSString *)host
                                                        port:(int)port
@@ -306,6 +315,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)postPageScriptMessage:(NSString *)json toWorld:(NSString *)world NS_SWIFT_NAME(postPageScriptMessage(_:toWorld:));
 /// Sends a media action to the frame that reported media through `cefBrowserDidChangeMedia:frame:`. Nothing happens once the frame is gone.
 - (void)performMediaAction:(ARCHCEFMediaAction)action inFrame:(NSString *)frameIdentifier NS_SWIFT_NAME(performMediaAction(_:inFrame:));
+/// Plays or pauses the video in picture in picture, through the page's Media Session handler when it has one. Does nothing while no video of the page is in picture in picture.
+- (void)setPictureInPicturePlaying:(BOOL)playing;
+/// Ends picture in picture for the page's video. `pause` pauses the video, as closing the window does; pass NO when the user returns to the page. CEF reports the end through `cefBrowserDidStopPictureInPicture` before this returns. Does nothing while no video of the page is in picture in picture.
+- (void)closePictureInPicturePausingVideo:(BOOL)pause NS_SWIFT_NAME(closePictureInPicture(pausingVideo:));
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the search and leaves the active match selected.
 - (void)stopFinding;

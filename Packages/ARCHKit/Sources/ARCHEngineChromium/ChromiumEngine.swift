@@ -6,7 +6,7 @@ import Foundation
 
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
-    public let capabilities: Set<EngineCapability> = [.devTools, .cookies]
+    public let capabilities: Set<EngineCapability> = [.devTools, .pictureInPicture, .cookies]
     /// Chromium runs no web extensions until VI.1, which gives the CEF version here.
     public let extensionRuntimeVersion: String? = nil
     let frameworkPath: String
@@ -310,6 +310,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var contextMenu: NSMenu?
     /// The page scripts, which a page this one opens starts with.
     private var pageScripts: [EnginePageScript]
+    /// The page's video in picture in picture, from the engine's start until AVKit has finished stopping.
+    private var pictureInPicture: ChromiumPictureInPicture?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     init(sessionID: String, context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
@@ -454,9 +456,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func exitFullscreen() {
         if isFullscreen { browser?.exitFullscreen(willResize: true) }
     }
-    /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now.
+    /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now. The engine ends the page's picture in picture as the browser closes, also unreported then, so the system's window closes now.
     public func discard() {
         (devTools as? ChromiumDevTools)?.setView(nil)
+        MainActor.assumeIsolated { pictureInPicture?.engineDidStop() }
         browser?.close()
     }
     public var closingStopsDownloads: Bool { browser?.hasDownloadsInProgress == true }
@@ -719,6 +722,34 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidChangeMedia(_ media: [String: Any]?, frame: String) {
         chromiumMediaSession.update(document: frame, report: media)
+    }
+
+    /// The video plays in the system's window from a layer below the page. The window's return button asks the UI delegate to show the page.
+    public func cefBrowserDidStartPictureInPicture(naturalSize: NSSize, sourceRect: NSRect) {
+        guard let browser else { return }
+        MainActor.assumeIsolated {
+            let session = ChromiumPictureInPicture(browser: browser) { [weak self] in
+                guard let self else { return }
+                self.uiDelegate?.webContentsDidRequestActivation(self)
+            } didFinish: { [weak self] session in
+                if self?.pictureInPicture === session { self?.pictureInPicture = nil }
+            }
+            pictureInPicture = session
+            session.start(in: view, below: browser.browserView, sourceRect: sourceRect, naturalSize: naturalSize)
+        }
+    }
+
+    public func cefBrowserDidReceivePictureInPictureFrame(_ surface: IOSurfaceRef, contentRect: NSRect) {
+        MainActor.assumeIsolated { pictureInPicture?.enqueue(surface, contentRect: contentRect) }
+    }
+
+    public func cefBrowserDidChangePictureInPicturePlaying(_ playing: Bool, canPlayPause: Bool) {
+        MainActor.assumeIsolated { pictureInPicture?.update(isPlaying: playing, canPlayPause: canPlayPause) }
+    }
+
+    /// The session stays until AVKit has finished stopping.
+    public func cefBrowserDidStopPictureInPicture() {
+        MainActor.assumeIsolated { pictureInPicture?.engineDidStop() }
     }
 
     public func cefBrowserDidReceivePageScriptMessage(_ json: String, world: String, frameURL: String, isMainFrame: Bool, reply: @escaping (String?) -> Void) {

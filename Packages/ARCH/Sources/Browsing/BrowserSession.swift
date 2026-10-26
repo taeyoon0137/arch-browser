@@ -754,6 +754,15 @@ public final class BrowserSession: ObservableObject {
                 window.closeInternalPage()
             }
         }
+        // The page asks to be seen, as the return button of its picture-in-picture window does: the tab is selected as above, and its window comes forward, out of the Dock if it is minimized, with the app.
+        tab.requestActivation = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            tab.requestSelection?()
+            guard let window = self.window(showing: tab)?.nsWindow else { return }
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        }
         // Chromium does not report cookie changes, so a finished load is the moment to copy them.
         // Saving after each load keeps the page state that a crash would otherwise lose.
         // The page takes its host's remembered zoom.
