@@ -2,7 +2,8 @@
 # Download the pinned CEF macOS arm64 distribution, a release of taeyoon0137/arch-chromium, to `Frameworks/cef` with
 # the GitHub CLI, signed in with access to that repository. Copy the wrapper sources and headers into the CEFBridge
 # target's `wrapper_src` and `cefroot` directories, which git ignores. Run once per checkout and again after changing
-# the pin. To try a distribution that arch-chromium's arch/build.sh made before it is released, set
+# the pin; a run after an interrupted download, or with a kept archive whose checksum differs from the pin's, downloads
+# the archive again. To try a distribution that arch-chromium's arch/build.sh made before it is released, set
 # `ARCH_CEF_ARCHIVE` to that archive's path; the pin's checksum does not apply to it.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,12 +20,22 @@ if [ -n "${ARCH_CEF_ARCHIVE:-}" ]; then
   NAME="$(basename "$ARCHIVE")"
 else
   ARCHIVE="$DOWNLOADS/$NAME"
-  mkdir -p "$DOWNLOADS"
-  if [ ! -f "$ARCHIVE" ]; then
-    gh release download "$CEF_RELEASE" --repo taeyoon0137/arch-chromium --pattern "$NAME" --dir "$DOWNLOADS"
+  if [ ! -f "$ARCHIVE" ] || [ "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" != "$CEF_SHA256" ]; then
+    # Download into a folder of its own and move the archive into place only once its checksum matches, so that an
+    # interrupted download is downloaded again on the next run rather than taken for the archive.
+    PARTIAL="$DOWNLOADS/partial"
+    rm -rf "$PARTIAL" "$ARCHIVE"
+    mkdir -p "$PARTIAL"
+    gh release download "$CEF_RELEASE" --repo taeyoon0137/arch-chromium --pattern "$NAME" --dir "$PARTIAL"
+    ACTUAL="$(shasum -a 256 "$PARTIAL/$NAME" | awk '{print $1}')"
+    if [ "$ACTUAL" != "$CEF_SHA256" ]; then
+      rm -rf "$PARTIAL"
+      echo "checksum mismatch for the downloaded $NAME: $ACTUAL, expected $CEF_SHA256" >&2
+      exit 1
+    fi
+    mv "$PARTIAL/$NAME" "$ARCHIVE"
+    rmdir "$PARTIAL"
   fi
-  ACTUAL="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
-  [ "$ACTUAL" = "$CEF_SHA256" ] || { echo "checksum mismatch for $NAME: $ACTUAL" >&2; exit 1; }
 fi
 
 rm -rf "$CEF"
