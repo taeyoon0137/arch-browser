@@ -146,7 +146,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
 - (void)cefExtensionsActivateBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionsActivate(_:));
 /// Asks to close the tab, as `tabs.remove` does.
 - (void)cefExtensionsCloseBrowser:(ARCHCEFBrowser *)browser NS_SWIFT_NAME(cefExtensionsClose(_:));
-/// Asks for a new window with a tab for each address, or with the new tab page for none. Return YES and call `completion` with the window once it lists its tabs, or with nil; return NO to refuse.
+/// Asks for a new window with a tab for each address, or with the new tab page for none. Return YES and call `completion` with the window once its tabs are set, or with nil; return NO to refuse. The bridge answers CEF once the window lists every one of those tabs, each created, or with no window when one of them closes first.
 - (BOOL)cefExtensionsOpenWindowWithURLs:(NSArray<NSString *> *)urls focused:(BOOL)focused completion:(void (^)(ARCHCEFExtensionWindow *_Nullable window))completion NS_SWIFT_NAME(cefExtensionsOpenWindow(withURLs:focused:completion:));
 /// Asks the user a prompt for the extension, about `browser` or no tab. Return YES and call `completion` once with the answer, or return NO to refuse. An accepted reload prompt reloads the tab.
 - (BOOL)cefExtensionsShowPrompt:(ARCHCEFExtensionPromptKind)kind

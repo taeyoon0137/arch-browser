@@ -114,7 +114,7 @@ final class RecordingHost: WebExtensionHost {
     }
 }
 
-/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab.
+/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab.
 final class RecordingEngine: EngineExtensions {
     weak var delegate: (any EngineExtensionsDelegate)?
     private(set) var loaded: [String: EngineExtension] = [:]
@@ -126,6 +126,8 @@ final class RecordingEngine: EngineExtensions {
     private(set) var performed: [String] = []
     /// The identifiers that the user allowed on a tab's site, in order.
     private(set) var grantedSiteAccess: [String] = []
+    /// For each call of `stopUnloadedExtensions()`, the identifiers loaded at that moment.
+    private(set) var stopsWhileLoaded: [Set<String>] = []
     /// Whether the actions say that the engine kept the extension from the tab's site.
     var actionsWantSiteAccess = false
     var refusedNames: Set<String> = []
@@ -149,6 +151,10 @@ final class RecordingEngine: EngineExtensions {
 
     func removeData(of id: String) async {
         removedData.append(id)
+    }
+
+    func stopUnloadedExtensions() {
+        stopsWhileLoaded.append(Set(loaded.keys))
     }
 
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction? {

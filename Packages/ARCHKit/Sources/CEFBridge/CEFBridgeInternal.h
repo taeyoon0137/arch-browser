@@ -63,7 +63,7 @@ void GlobalContextDidInitialize();
 void ReleaseExtensionObjects();
 // Sends again the tabs of the extension windows that list the browser, which CEF has just created.
 void ExtensionsBrowserDidCreate(ARCHCEFBrowser *browser);
-// Answers the requests that wait for the browser, which CEF is closing.
+// Answers the requests that wait for the browser, which CEF is closing, and the waits of the extension windows whose tabs include it.
 void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser);
 
 }  // namespace cef_bridge

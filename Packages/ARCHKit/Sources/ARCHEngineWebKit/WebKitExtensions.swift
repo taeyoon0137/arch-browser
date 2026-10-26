@@ -78,6 +78,9 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         await controller.removeData(ofTypes: types, from: records)
     }
 
+    /// The controller runs only the contexts the app loaded in this run.
+    func stopUnloadedExtensions() {}
+
     // MARK: Actions
 
     /// Only the profile's own web contents have actions here.

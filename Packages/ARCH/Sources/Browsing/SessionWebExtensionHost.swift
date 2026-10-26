@@ -1,4 +1,4 @@
-// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups and sheets in its windows, and reports its windows to them. Arch's tabs live in spaces, which windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a window shows there or else the one selected last. The window that last became main has the focused one.
+// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups and sheets in its windows, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -58,32 +58,45 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     private func report(to runtime: WebExtensionRuntime, of personaID: Persona.ID) {
         guard let session else { return }
-        let windows = spaceWindows(of: personaID, in: session).map { window in
-            EngineExtensionWindow(id: window.space.id, tabs: window.tabs.map(\.webContents), activeTab: window.active?.webContents, window: window.showing?.nsWindow)
+        let windows = extensionWindows(of: personaID, in: session).map { window in
+            EngineExtensionWindow(id: window.id, tabs: window.tabs.map(\.webContents), activeTab: window.active?.webContents, window: window.showing?.nsWindow)
         }
-        runtime.setWindows(windows, focusedWindowID: focusedSpace(of: personaID, in: session)?.id)
+        runtime.setWindows(windows, focusedWindowID: focusedWindowID(of: personaID, in: session))
     }
 
-    /// Each space of the Persona as its extensions' window: its tabs in order, its active tab, and the first window that shows it.
-    private func spaceWindows(of personaID: Persona.ID, in session: BrowserSession) -> [(space: Space, tabs: [Tab], active: Tab?, showing: BrowserWindowModel?)] {
+    /// One of the Persona's windows as its extensions see it: its identity, the space its tabs belong to, its tabs in order, its active tab, and the window that shows it.
+    private typealias ExtensionWindow = (id: UUID, space: Space, tabs: [Tab], active: Tab?, showing: BrowserWindowModel?)
+
+    /// Each space of the Persona, with the first main window that shows it, and then each small window of the Persona, with its one tab, as its extensions' windows. A space's identity is its window's.
+    private func extensionWindows(of personaID: Persona.ID, in session: BrowserSession) -> [ExtensionWindow] {
         let spaces = session.spaces.filter { $0.resolvedPersonaID == personaID }
         // A favorite's tab belongs to no space: it is in the Persona's space where a window shows it, or else in the Persona's first space.
         let favoriteTabs = Dictionary(grouping: session.openFavoriteTabs.filter { $0.personaID == personaID }) { tab in
             let shownIn = session.windows.first { $0.selectedTabID == tab.id }?.currentSpaceID
             return spaces.contains { $0.id == shownIn } ? shownIn : spaces.first?.id
         }
-        return spaces.map { space in
-            let showing = session.windows.filter { $0.currentSpaceID == space.id }
+        let spaceWindows = spaces.map { space -> ExtensionWindow in
+            let showing = session.windows.filter { $0.kind == .main && $0.currentSpaceID == space.id }
             let tabs = (favoriteTabs[space.id] ?? []) + session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
-                + session.tabs.filter { $0.spaceID == space.id && $0.isInSmallWindow }
             let active = showing.lazy.compactMap(\.selectedTab).first { tab in tabs.contains { $0 === tab } } ?? tabs.max { $0.lastActivatedAt < $1.lastActivatedAt }
-            return (space, tabs, active, showing.first)
+            return (space.id, space, tabs, active, showing.first)
         }
+        let smallWindows = session.windows.compactMap { window -> ExtensionWindow? in
+            guard window.kind == .small, window.personaID == personaID, let tab = window.selectedTab else { return nil }
+            return (window.id, window.currentSpace, [tab], tab, window)
+        }
+        return spaceWindows + smallWindows
     }
 
     /// The space of the window that last became main, when it is the Persona's.
     private func focusedSpace(of personaID: Persona.ID, in session: BrowserSession) -> Space? {
         session.windows.first.map(\.currentSpace).flatMap { $0.resolvedPersonaID == personaID ? $0 : nil }
+    }
+
+    /// The window that last became main as the Persona's extensions see it, when it is the Persona's: a small window itself, or else the space of a main window.
+    private func focusedWindowID(of personaID: Persona.ID, in session: BrowserSession) -> UUID? {
+        guard let window = session.windows.first, window.personaID == personaID else { return nil }
+        return window.kind == .small ? window.id : window.currentSpaceID
     }
 
     // MARK: WebExtensionHost
@@ -123,11 +136,14 @@ final class SessionWebExtensionHost: WebExtensionHost {
         return true
     }
 
-    /// The tab opens among the space's open tabs: before the tab at `index` among the window's tabs of the engine when that one is an open tab outside folders, else after the window's active tab when that one is, else at their end. The extensions hear of it at once, before the completion.
+    /// The tab opens among the space's open tabs, a small window's space for a small window, which holds one tab: before the tab at `index` among the space's tabs of the engine when that one is an open tab outside folders and the window is a space, else after the space's active tab when that one is, else at their end. The extensions hear of it at once, before the completion.
     func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void) {
         guard let session, session.personas.contains(where: { $0.id == persona }) else { return completion(nil) }
-        let windows = spaceWindows(of: persona, in: session)
-        let window = windows.first { $0.space.id == windowID } ?? focusedSpace(of: persona, in: session).flatMap { space in windows.first { $0.space.id == space.id } }
+        let windows = extensionWindows(of: persona, in: session)
+        let named = windows.first { $0.id == windowID }
+        let window = (named?.space ?? focusedSpace(of: persona, in: session)).flatMap { space in windows.first { $0.id == space.id } }
+        // An index among a small window's tabs says nothing about its space's.
+        let index = named.map { $0.id == $0.space.id } == false ? nil : index
         let space = window?.space ?? session.preferredSpace(in: persona)
         let tab = session.openTab(url: url, in: space.id, select: false, engine: engine)
         let listed = window?.tabs.filter { $0.engineKind == engine } ?? []
@@ -141,17 +157,15 @@ final class SessionWebExtensionHost: WebExtensionHost {
         completion(tab.webContents)
     }
 
-    /// A main window on the Persona's focused space, or its preferred one, with the pages as new tabs of that space, the first one selected; extensions see the space as the window. Without `focused`, the window that was key stays key.
+    /// A small window with the page, or the new tab page for none, as its one tab, which belongs to the Persona's focused space or its preferred one; extensions see it as a new window that lists only that tab. A request for several pages opens nothing, since a small window holds one tab. Without `focused`, the window that was key stays key.
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void) {
-        guard let session, session.personas.contains(where: { $0.id == persona }) else { return completion(nil) }
+        guard let session, session.personas.contains(where: { $0.id == persona }), urls.count <= 1 else { return completion(nil) }
         let space = focusedSpace(of: persona, in: session) ?? session.preferredSpace(in: persona)
         let keyWindow = NSApp.keyWindow
-        let window = session.openWindow(onSpace: space.id)
-        let tabs = (urls.isEmpty ? [nil] : urls.map { Optional($0) }).map { session.openTab(url: $0, in: space.id, select: false, engine: engine) }
-        window.selectTab(tabs.first?.id)
+        let window = session.openSmallWindow(session.makeWebContents(url: urls.first, engine: engine, state: nil, in: persona), spaceID: space.id, personaID: persona)
         if !focused { keyWindow?.makeKeyAndOrderFront(nil) }
         reportToEveryPersona()
-        completion(space.id)
+        completion(window.id)
     }
 
     /// Without a tab, the sheet is for the tab of the window that last became main. A sheet for a tab that has closed, or without any tab, gets the safe answer.

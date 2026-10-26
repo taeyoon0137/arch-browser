@@ -108,6 +108,8 @@ public final class ChromiumApplication: EngineApplication {
     public weak var delegate: (any EngineApplicationDelegate)?
     let configuration: EngineApplicationConfiguration
     var contexts: [EngineBrowserContextID: ChromiumBrowserContext] = [:]
+    /// When the engine started in this launch, as CEF had just initialized: an extension package installed before it is the one that Chromium read when it started a profile.
+    let startedAt = Date()
 
     init(configuration: EngineApplicationConfiguration) {
         self.configuration = configuration

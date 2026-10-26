@@ -74,8 +74,10 @@ using namespace cef_bridge;
 - (BOOL)listsBrowser:(ARCHCEFBrowser *)browser;
 /// Sends the tabs again if they list the browser, which CEF has just created.
 - (void)browserDidCreate:(ARCHCEFBrowser *)browser;
-/// Runs `block` once CEF's window exists, or at once with the window still without one once it cannot get one.
-- (void)whenCreated:(dispatch_block_t)block;
+/// Gives up waiting for the tabs when the browser, which CEF is closing, is one of them.
+- (void)browserWillClose:(ARCHCEFBrowser *)browser;
+/// Runs `block` once with YES when CEF's window exists and the tabs it last received are every tab the app listed, each created, as an answer to `OnOpenWindow` needs, or with NO once that cannot happen: the window has no CEF window, it closed, or one of its tabs closed first.
+- (void)whenTabsListed:(void (^)(BOOL listed))block;
 @end
 
 @interface ARCHCEFExtensionPopup ()
@@ -322,7 +324,7 @@ class BridgeExtensionHandler : public CefExtensionRuntimeHandler {
                                                       return;
                                                   }
                                                   ARCHCEFExtensionWindow *opened = window;
-                                                  [opened whenCreated:^{ answer->Continue([opened cefWindow]); }];
+                                                  [opened whenTabsListed:^(BOOL listed) { answer->Continue(listed ? [opened cefWindow] : nullptr); }];
                                               }];
     }
 
@@ -385,6 +387,9 @@ void ExtensionsBrowserDidCreate(ARCHCEFBrowser *browser) {
 
 void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     CancelPendingTabs(browser);
+    for (ARCHCEFExtensionWindow *window in gExtensionWindows.allObjects) {
+        [window browserWillClose:browser];
+    }
 }
 
 }  // namespace cef_bridge
@@ -556,7 +561,7 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     BOOL _closed;
     /// The identifiers of the browsers in the last list that CEF received.
     std::vector<int> _listedBrowsers;
-    NSMutableArray<dispatch_block_t> *_whenCreated;
+    NSMutableArray<void (^)(BOOL)> *_whenListed;
 }
 
 - (instancetype)initWithContentView:(NSView *)contentView {
@@ -565,7 +570,7 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
         _contentView = contentView;
         _tabs = [NSPointerArray weakObjectsPointerArray];
         _activeIndex = -1;
-        _whenCreated = [NSMutableArray array];
+        _whenListed = [NSMutableArray array];
     }
     return self;
 }
@@ -574,9 +579,7 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     if (_window) {
         _window->Close();
     }
-    for (dispatch_block_t block in _whenCreated) {
-        block();
-    }
+    [self finishWaitingForTabs:NO];
 }
 
 - (void)attachRuntime:(CefRefPtr<CefExtensionRuntime>)runtime {
@@ -592,11 +595,8 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
         if (_focused) {
             _window->SetFocused(true);
         }
-    }
-    NSArray<dispatch_block_t> *blocks = _whenCreated;
-    _whenCreated = [NSMutableArray array];
-    for (dispatch_block_t block in blocks) {
-        block();
+    } else {
+        [self finishWaitingForTabs:NO];
     }
 }
 
@@ -604,11 +604,35 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     return _window;
 }
 
-- (void)whenCreated:(dispatch_block_t)block {
-    if (_attached || _closed) {
-        block();
-    } else {
-        [_whenCreated addObject:[block copy]];
+- (void)whenTabsListed:(void (^)(BOOL))block {
+    [_whenListed addObject:[block copy]];
+    if (_closed || (_attached && !_window)) {
+        [self finishWaitingForTabs:NO];
+    } else if ([self listsEveryTab]) {
+        [self finishWaitingForTabs:YES];
+    }
+}
+
+/// Whether CEF's window exists and the tabs it last received are every tab the app listed, each created.
+- (BOOL)listsEveryTab {
+    if (!_window || _closed) {
+        return NO;
+    }
+    for (NSUInteger index = 0; index < _tabs.count; index++) {
+        ARCHCEFBrowser *tab = (__bridge ARCHCEFBrowser *)[_tabs pointerAtIndex:index];
+        if (tab && ![self listsBrowser:tab]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+/// Answers each wait for the tabs.
+- (void)finishWaitingForTabs:(BOOL)listed {
+    NSArray<void (^)(BOOL)> *blocks = _whenListed;
+    _whenListed = [NSMutableArray array];
+    for (void (^block)(BOOL) in blocks) {
+        block(listed);
     }
 }
 
@@ -644,6 +668,9 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     _listedBrowsers = identifiers;
     _window->SetTabs(browsers, active);
     ResolvePendingTabs();
+    if (_whenListed.count > 0 && [self listsEveryTab]) {
+        [self finishWaitingForTabs:YES];
+    }
 }
 
 - (BOOL)listsBrowser:(ARCHCEFBrowser *)browser {
@@ -655,6 +682,15 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
     for (NSUInteger index = 0; index < _tabs.count; index++) {
         if ([_tabs pointerAtIndex:index] == (__bridge void *)browser) {
             [self apply];
+            return;
+        }
+    }
+}
+
+- (void)browserWillClose:(ARCHCEFBrowser *)browser {
+    for (NSUInteger index = 0; _whenListed.count > 0 && index < _tabs.count; index++) {
+        if ([_tabs pointerAtIndex:index] == (__bridge void *)browser) {
+            [self finishWaitingForTabs:NO];
             return;
         }
     }
@@ -681,11 +717,7 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser) {
         _window = nullptr;
     }
     _listedBrowsers.clear();
-    NSArray<dispatch_block_t> *blocks = _whenCreated;
-    _whenCreated = [NSMutableArray array];
-    for (dispatch_block_t block in blocks) {
-        block();
-    }
+    [self finishWaitingForTabs:NO];
 }
 
 @end

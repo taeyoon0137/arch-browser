@@ -4,7 +4,7 @@ import ARCHEngine
 import CEFBridge
 import Foundation
 
-/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
+/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so once the app's first pass of loads has ended (`stopUnloadedExtensions()`), the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
 final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable {
     weak var delegate: (any EngineExtensionsDelegate)?
     private unowned let context: ChromiumBrowserContext
@@ -13,8 +13,10 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     private var loaded: [String: EngineExtension] = [:]
     /// The extensions whose load has not finished, which Chromium may list before the load ends.
     private var loading: Set<String> = []
-    /// The extensions that loaded once in this run. A first load of an extension that Chromium already runs from the same folder and version keeps Chromium's copy, so that it does not reinstall on every launch; later loads, as after an update, reload the package.
+    /// The extensions that loaded once in this run. A first load of a package installed before the engine started, which Chromium already runs from the same folder and version, keeps Chromium's copy, so that it does not reinstall on every launch; later loads and packages installed in this run, as after an update, reload the package, since Chromium read its copy when the profile started.
     private var loadedInRun: Set<String> = []
+    /// Set once the app's first pass of loads has ended, from which on the adapter switches off what the app has not loaded.
+    private var stopsUnloaded = false
     /// The extensions' names, from Chromium's last list, for actions without a title.
     private var names: [String: String] = [:]
     private var windows: [UUID: ChromiumExtensionWindow] = [:]
@@ -29,6 +31,11 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         self.context = context
         super.init()
         context.requestContext.extensionsDelegate = self
+        switchOffUnloadedExtensions()
+    }
+
+    func stopUnloadedExtensions() {
+        stopsUnloaded = true
         switchOffUnloadedExtensions()
     }
 
@@ -52,7 +59,10 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         requestContext.extensions { [weak self] installed in
             guard let self else { return completion(.failure(ChromiumExtensionError.notLoaded)) }
             let current = installed.first { $0.identifier == id }
-            let keepsCopy = !self.loadedInRun.contains(id) && current?.path == path && current?.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
+            let startedAt = self.context.application?.startedAt
+            let installedBefore = `extension`.installedAt.flatMap { installedAt in startedAt.map { installedAt < $0 } } ?? false
+            let keepsCopy = !self.loadedInRun.contains(id) && installedBefore && current?.path == path
+                && current?.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
             let finish: (Result<Void, any Error>) -> Void = { result in
                 self.loading.remove(id)
                 if case .success = result {
@@ -101,13 +111,13 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         }
     }
 
-    /// Switches off each extension that Chromium runs and the app has not loaded or is not loading.
+    /// Notes the names of the extensions that Chromium lists and, once `stopUnloadedExtensions()` has been called, switches off each one that Chromium runs and the app has not loaded or is not loading.
     private func switchOffUnloadedExtensions() {
         requestContext.extensions { [weak self] installed in
             guard let self else { return }
             for item in installed {
                 self.names[item.identifier] = item.name
-                guard item.isEnabled, self.loaded[item.identifier] == nil, !self.loading.contains(item.identifier) else { continue }
+                guard self.stopsUnloaded, item.isEnabled, self.loaded[item.identifier] == nil, !self.loading.contains(item.identifier) else { continue }
                 self.requestContext.setExtension(item.identifier, enabled: false)
             }
         }
@@ -238,7 +248,7 @@ extension ChromiumExtensions: ARCHCEFExtensionsDelegate {
     }
 }
 
-/// One of the app's windows as Chromium's extensions see it. CEF's client window reads its frame and state from an AppKit window that holds a given view, and keeps that window for its life, while the window that shows an app window changes and can be none; so each client window has a hidden stand-in of its own that takes the frame of the window that shows it. The stand-in never shows, and `windows.remove` and focus requests, which reach it, do nothing.
+/// One of the app's windows as Chromium's extensions see it. CEF's client window reads its frame and state from an AppKit window that holds a given view, and keeps that window for its life, while the window that shows an app window changes and can be none; so each client window has a hidden stand-in of its own that answers with the frame, minimized, zoomed, and full screen state of the window that shows it. The stand-in never shows, and `windows.remove` and focus requests, which reach it, do nothing.
 final class ChromiumExtensionWindow {
     let window: ARCHCEFExtensionWindow
     private let standIn: StandInWindow
@@ -251,17 +261,26 @@ final class ChromiumExtensionWindow {
         window = requestContext.makeExtensionWindow(for: standIn.contentView!)
     }
 
-    /// Takes the frame of the AppKit window that shows the app window, or none while no window shows it.
+    /// Answers from the AppKit window that shows the app window, or from the stand-in's own state while no window shows it.
     func follow(_ shown: NSWindow?) {
-        let frame = shown?.frame ?? .zero
-        if standIn.frame != frame { standIn.setFrame(frame, display: false) }
+        standIn.shown = shown
     }
 
     func close() {
         window.close()
     }
 
+    /// Reads the shown window's frame and state at each question, so that a move, a resize, or full screen needs no new report.
     private final class StandInWindow: NSWindow {
+        weak var shown: NSWindow?
+        override var frame: NSRect { shown?.frame ?? super.frame }
+        override var isMiniaturized: Bool { shown?.isMiniaturized ?? false }
+        override var isZoomed: Bool { shown?.isZoomed ?? false }
+        /// The full screen flag comes from the shown window; the rest of the mask stays the stand-in's own, which AppKit lays it out by.
+        override var styleMask: NSWindow.StyleMask {
+            get { shown?.styleMask.contains(.fullScreen) == true ? super.styleMask.union(.fullScreen) : super.styleMask }
+            set { super.styleMask = newValue }
+        }
         override var canBecomeKey: Bool { false }
         override var canBecomeMain: Bool { false }
         override func performClose(_ sender: Any?) {}

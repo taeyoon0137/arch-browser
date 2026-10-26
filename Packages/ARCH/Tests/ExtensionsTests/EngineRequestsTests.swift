@@ -1,4 +1,4 @@
-// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, and the popup sizes the presenter keeps.
+// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
 import AppKit
 import ARCHEngine
 import CryptoKit
@@ -89,6 +89,25 @@ struct EngineRequestsTests {
         #expect(ditto.terminationStatus == 0)
     }
 
+    // MARK: Launch
+
+    @Test func stopsWhatAnEngineKeptOnlyOnceThePassHasLoadedEverything() async throws {
+        let first = try await installLoaded("first", #"{"manifest_version": 3, "name": "First", "version": "1"}"#)
+        let second = try await installLoaded("second", #"{"manifest_version": 3, "name": "Second", "version": "1"}"#)
+        manager.close()
+        // At the next launch both load in one pass, and only then may the engine stop what it runs from the last launch.
+        let relaunched = RecordingEngine()
+        host.engines = [.webKit: RecordingEngine(), .chromium: relaunched]
+        let nextRuntime = WebExtensionRuntime(persona: persona, host: host, nativeMessagingHosts: folder.url)
+        let nextManager = PluginManager(persona: persona, directory: folder.url, builtIns: [], runtimes: [nextRuntime], secretStore: NoSecrets())
+        await nextRuntime.waitForEngines()
+        let ids = [first, second].map { WebExtensionManifest.extensionID(of: $0.id) }
+        #expect(relaunched.stopsWhileLoaded.first == Set(ids))
+        // Each load says when the package was installed, so that Chromium keeps its copy only of a package installed before it started.
+        #expect(relaunched.loaded[ids[0]]?.installedAt == first.installedAt && relaunched.loaded[ids[1]]?.installedAt == second.installedAt)
+        nextManager.close()
+    }
+
     // MARK: Tabs and windows
 
     @Test func opensTabsAndWindowsInTheCallingEngine() async throws {
@@ -141,6 +160,18 @@ struct EngineRequestsTests {
             "manifest.json": #"{"manifest_version": 3, "name": "E", "version": "1", "optional_permissions": ["cookies"], "optional_host_permissions": ["<all_urls>"]}"#,
         ]))
         #expect(everywhere.permissions == ["cookies"] && everywhere.grant.confirmationReason(for: "E") != nil)
+    }
+
+    @Test func confirmsEveryWebsiteThatTheInstallLeftOut() async throws {
+        let manifest = #"{"manifest_version": 3, "name": "W", "version": "1", "host_permissions": ["<all_urls>"]}"#
+        // Chromium withholds the sites the install left out and lets `permissions.request()` ask for them again, so every website needs confirming.
+        let withheld = try await manager.stage(folder.package("withheld", ["manifest.json": manifest]))
+        try manager.install(withheld, grant: PluginGrant(permissions: [], sites: []), isEnabled: true)
+        let leftOut = try #require(manager.plugins.first { $0.id == withheld.manifest.id })
+        #expect(WebExtensionManifest.runTimeAccess(of: leftOut).grant.confirmationReason(for: "W") != nil)
+        // With every website granted at install, nothing is left to ask for.
+        let granted = try await installLoaded("granted", manifest.replacingOccurrences(of: #""W""#, with: #""G""#))
+        #expect(WebExtensionManifest.runTimeAccess(of: granted).sites.isEmpty)
     }
 
     // MARK: Site access

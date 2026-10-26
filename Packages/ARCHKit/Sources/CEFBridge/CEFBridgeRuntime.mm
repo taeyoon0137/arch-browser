@@ -6,7 +6,9 @@
 
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
+#include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_life_span_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -128,9 +130,36 @@ static const int64_t kTimerDelayPlaceholder = INT64_MAX;
 
 namespace {
 
+// The browsers of Chromium's own windows that have not closed yet, which shutdown waits for.
+int gUnshownBrowsers = 0;
+
+// The client of the browsers that Chromium's own interface opens in windows of its own, as `identity.launchWebAuthFlow` does. Arch shows none of them: each one is logged and closed once CEF has created it. Without a default client such a browser would get no callbacks and hold up shutdown until someone closed its window.
+class UnshownBrowserClient : public CefClient, public CefLifeSpanHandler {
+public:
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        gUnshownBrowsers++;
+        CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+        NSString *host = frame ? [NSURL URLWithString:ToNSString(frame->GetURL())].host : nil;
+        NSLog(@"Arch closed a window that Chromium opened of its own%@.", host.length > 0 ? [@" for " stringByAppendingString:host] : @"");
+        // The close waits for the next turn of the run loop, so that CEF finishes creating the browser first.
+        CefRefPtr<CefBrowser> unshown = browser;
+        dispatch_async(dispatch_get_main_queue(), ^{ unshown->GetHost()->CloseBrowser(true); });
+    }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override { gUnshownBrowsers--; }
+
+private:
+    IMPLEMENT_REFCOUNTING(UnshownBrowserClient);
+};
+
 class BridgeApp : public CefApp, public CefBrowserProcessHandler {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+
+    // Every browser of Arch's has its own client, so only the browsers of Chromium's own windows get this one.
+    CefRefPtr<CefClient> GetDefaultClient() override { return new UnshownBrowserClient(); }
 
     // Runs on the UI thread, which is the main thread, once the global context's profile has initialized.
     void OnContextInitialized() override {
@@ -251,10 +280,10 @@ NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
     CefShutdown();
 }
 
-/// Runs CEF's work while any browser passes `test`, until `deadline`.
+/// Runs CEF's work while any browser passes `test` or a browser of Chromium's own windows has not closed, until `deadline`.
 + (void)runWorkUntil:(NSDate *)deadline whileAnyBrowser:(BOOL (^)(ARCHCEFBrowser *))test {
     while (deadline.timeIntervalSinceNow > 0) {
-        BOOL passes = NO;
+        BOOL passes = gUnshownBrowsers > 0;
         for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
             passes = passes || test(browser);
         }

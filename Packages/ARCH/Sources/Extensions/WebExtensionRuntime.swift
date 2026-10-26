@@ -20,7 +20,7 @@ public protocol WebExtensionHost: AnyObject {
     func present(_ popup: EngineExtensionPopup, for tab: (any EngineWebContents)?) -> Bool
     /// Opens a tab of the Persona in `engine` that loads `url`, or the new tab page for nil, in the window `windowID`, as the host reports windows, or in the Persona's focused one, at `index` among that window's tabs of the engine, or after its active tab, and selects it when `active`. Completes once the window reports the tab, with its web contents, or with nil when it did not open.
     func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void)
-    /// Opens a main window of the Persona with a tab in `engine` for each address, or with the new tab page for none, in front when `focused`. Completes once the window is reported, with its identity, or with nil.
+    /// Opens a new window of the Persona with a tab in `engine` for each address, or with the new tab page for none, in front when `focused`, which extensions see with only those tabs. Completes once the window is reported, with its identity, or with nil when it opens none.
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
     /// Shows the alert as a sheet for the tab, or for the front window's tab for no tab, and answers with the button the user chose.
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
@@ -177,7 +177,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// In each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, or whose pair gives the engine to the other version. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension or a staging.
+    /// In each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, or whose pair gives the engine to the other version. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Once every load has ended, each engine stops what it runs from an earlier launch and the pass did not load. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension or a staging.
     private func loadEnabledExtensions() async {
         let plugins = plugins
         guard plugins.contains(where: \.isEnabled) || attached != nil else { return }
@@ -221,6 +221,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
                 }
             }
         }
+        for (_, engine) in engines { engine.stopUnloadedExtensions() }
         objectWillChange.send()
     }
 
@@ -242,13 +243,13 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         try? WebExtensionManifest.writeKey(packageAt: packageURL, source: source)
     }
 
-    /// The extension as the engines load it: its package, the API permissions its grant covers with those that come with the install, and its granted sites. Every web page, which Arch's patterns write as `*://*/*`, goes as `<all_urls>`, which covers `*://*/*` and which extensions check for with `permissions.contains`; WebKit's `<all_urls>` reaches no file pages.
+    /// The extension as the engines load it: its package with the date of its install, the API permissions its grant covers with those that come with the install, and its granted sites. Every web page, which Arch's patterns write as `*://*/*`, goes as `<all_urls>`, which covers `*://*/*` and which extensions check for with `permissions.contains`; WebKit's `<all_urls>` reaches no file pages.
     private static func engineExtension(_ installed: InstalledPlugin) -> EngineExtension? {
         guard let packageURL = installed.packageURL else { return nil }
         let mapped = WebExtensionManifest.mappedPermissions.filter { installed.grant.permissions.contains($0.value) }.keys
         let sites = installed.grant.sites.map { $0.description == "*://*/*" ? "<all_urls>" : $0.description }
         return EngineExtension(id: extensionID(of: installed), packageURL: packageURL,
-                               permissions: Set(installed.manifest.extensionPermissions).union(mapped), sites: Set(sites))
+                               permissions: Set(installed.manifest.extensionPermissions).union(mapped), sites: Set(sites), installedAt: installed.installedAt)
     }
 
     /// The Persona's engines that run extensions, in the order of `EngineKind`, attached at first use with the runtime as their delegate and the windows the host reported.
@@ -366,7 +367,7 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
     }
 
-    /// A store install is refused without a sheet, since the store is no install source. A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time includes every website, and an extension that may ask for native messaging at run time without the install's grant is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
+    /// A store install is refused without a sheet, since the store is no install source. A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
         guard let host else { return completion(false) }
         switch prompt.kind {
@@ -378,12 +379,12 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
             guard let loaded = loadedExtension(id, in: extensions), let kind = engineKind(of: extensions) else { return completion(false) }
             let installed = plugins.first { $0.id == loaded.id } ?? loaded
             let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
-            let optional = installed.packageURL.map(WebExtensionManifest.optionalAccess(ofPackageAt:)) ?? WebExtensionManifest.OptionalAccess()
-            guard !optional.permissions.contains("nativeMessaging") || installed.grant.permissions.contains(.nativeMessaging) else { return completion(false) }
+            let requestable = WebExtensionManifest.runTimeAccess(of: installed)
+            guard !requestable.permissions.contains("nativeMessaging") || installed.grant.permissions.contains(.nativeMessaging) else { return completion(false) }
             let alert = WebExtensionEnginePrompt.permissionsAlert(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind)
             host.presentSheet(alert, for: prompt.tab) { response in
                 guard response == .alertFirstButtonReturn else { return completion(false) }
-                Task { completion(await WebExtensionEnginePrompt.confirm(optional.grant, extensionName: lead.manifest.name)) }
+                Task { completion(await WebExtensionEnginePrompt.confirm(requestable.grant, extensionName: lead.manifest.name)) }
             }
         }
     }

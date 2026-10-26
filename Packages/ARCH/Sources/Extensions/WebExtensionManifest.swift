@@ -118,6 +118,13 @@ struct WebExtensionManifest {
         let patterns = (fields["optional_host_permissions"] as? [String] ?? []) + names
         return OptionalAccess(permissions: Set(names.filter { !$0.contains(":") && $0 != "<all_urls>" }), sites: patterns.compactMap { try? MatchPattern($0) })
     }
+
+    /// What the installed extension may ask for at run time: its optional access, and the sites its manifest asks for that its grant leaves out, which Chromium withholds and lets `permissions.request()` ask for again.
+    static func runTimeAccess(of installed: InstalledPlugin) -> OptionalAccess {
+        var access = installed.packageURL.map(optionalAccess(ofPackageAt:)) ?? OptionalAccess()
+        access.sites += installed.manifest.sites.filter { !installed.grant.sites.contains($0) }
+        return access
+    }
 }
 
 /// A manifest problem, stated as a clause, as a sentence that names the file.

@@ -12,12 +12,15 @@ public struct EngineExtension: Hashable, Sendable {
     public var permissions: Set<String>
     /// The sites the user granted, as match patterns such as `https://*.example.com/*`.
     public var sites: Set<String>
+    /// When the app installed the package, which an update changes, or nil when unknown. An engine that keeps a copy of the extension from an earlier launch keeps it only for a package installed before the engine started.
+    public var installedAt: Date?
 
-    public init(id: String, packageURL: URL, permissions: Set<String>, sites: Set<String>) {
+    public init(id: String, packageURL: URL, permissions: Set<String>, sites: Set<String>, installedAt: Date? = nil) {
         self.id = id
         self.packageURL = packageURL
         self.permissions = permissions
         self.sites = sites
+        self.installedAt = installedAt
     }
 }
 
@@ -138,7 +141,7 @@ public protocol EngineExtensionsDelegate: AnyObject {
     /// Opens a tab of the engine that loads `url`, or the new tab page for nil, as `tabs.create` and an options page ask: in the window `windowID` as `setWindows` reported it, or in the focused window for nil, at `index` among that window's tabs of the engine, or where the app chooses for nil, and selects it when `active`. Completes with the tab's web contents once the app has reported it in its window, or with nil when it did not open.
     func extensions(_ extensions: any EngineExtensions, openTabWith url: URL?, inWindow windowID: UUID?, active: Bool, index: Int?,
                     completion: @escaping ((any EngineWebContents)?) -> Void)
-    /// Opens a window with a tab of the engine for each address, or with the new tab page for none, as `windows.create` asks, and brings it forward when `focused`. Completes with the identity of the window as `setWindows` reports it, or with nil when none opened.
+    /// Opens a window with a tab of the engine for each address, or with the new tab page for none, as `windows.create` asks, and brings it forward when `focused`. Completes with the identity of the window as `setWindows` reports it, a new window that lists only the tabs it opened, or with nil when none opened.
     func extensions(_ extensions: any EngineExtensions, openWindowWith urls: [URL], focused: Bool, completion: @escaping (UUID?) -> Void)
     /// Asks the user the engine's question for the extension and answers whether the user accepted.
     func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void)
@@ -163,6 +166,8 @@ public protocol EngineExtensions: AnyObject {
     func unload(_ id: String)
     /// Deletes the storage the extension keeps in the profile.
     func removeData(of id: String) async
+    /// Stops each extension that the profile runs from an earlier launch and that the app has not loaded in this run, now and whenever the engine lists another. The app calls it after each pass of loads, once every load of the pass has ended; until the first call such extensions keep running, so that one the app is about to load does not stop and start again. An engine that keeps no extension from one launch to the next does nothing.
+    func stopUnloadedExtensions()
     /// The extension's action for the tab, or nil when it is not loaded or has no action.
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction?
     /// Runs the action for the tab, as a click on it does: the extension shows its popup or receives the click.
