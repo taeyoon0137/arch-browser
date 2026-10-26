@@ -73,7 +73,7 @@ swift build
 open build/Arch.app
 ```
 
-The bridge needs the experimental DevTools, picture-in-picture, and extension runtime APIs of the engine changes listed under Engine Plan in `docs/plan.md`, which the pinned `arch-8078-2` carries. To try a local build of `arch-8078` before its release, install it with `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
+The bridge needs the experimental DevTools, picture-in-picture, and extension runtime APIs listed under Engine Plan in `docs/plan.md`. The pinned `arch-8078-2` includes these engine changes. To try a local build of `arch-8078` before its release, install it with `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
 
 After cloning, enable the commit message hook once:
 
@@ -92,7 +92,7 @@ git config core.hooksPath .githooks
 - [`docs/windows-personas.md`](../docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
 - [`docs/plugins.md`](../docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](../docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
-- [`docs/import-browsers.md`](../docs/import-browsers.md): importing from other browsers: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
+- [`docs/import-browsers.md`](../docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 
 <a id="scripts"></a>
 
@@ -106,7 +106,7 @@ git config core.hooksPath .githooks
 
 | Command | Description |
 | :-- | :-- |
-| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. `ARCH_CEF_ARCHIVE` installs a local archive instead, which the bridge needs until the pin moves (see Getting started). |
+| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. `ARCH_CEF_ARCHIVE` installs a local archive instead, as the bridge requires until the pin changes (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 

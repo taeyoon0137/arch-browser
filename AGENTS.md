@@ -14,7 +14,7 @@ Arch is a sidebar-first macOS browser with its own implementation. It runs on Ch
 
 - The repository contains the engine abstraction, the WebKit adapter, and the Chromium adapter built on CEF. It also contains `Browsing`, the first feature module, and the `Arch` app shell. `docs/plan.md` lists what each part supports.
 - For implementation decisions, read `docs/plan.md` first. It covers the goals, approach, current state, working rules, and next steps.
-- Do not name other browser products in code or documents. One exception is the opening of the README, which credits the project's inspiration by name. The other is importing from other browsers, which names the browsers it reads only in the `Import` module's source definitions (display names, bundle identifiers, and data locations), in the import interface, and in the feature's documents (`docs/import-browsers.md` and its rows in `docs/plan.md` and `docs/features.md`).
+- Do not name other browser products in code or documents. One exception is the opening of the README, which credits the project's inspiration by name. The other is browser import: it names the browsers it reads only in the `Import` module's source definitions (display names, bundle identifiers, and data locations), the import interface, and the feature's documents (`docs/import-browsers.md` and its rows in `docs/plan.md` and `docs/features.md`).
 
 ## Instruction priority
 
@@ -56,7 +56,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 - Do not create graphic assets. Leave placeholders for the user to fill.
 - Keep features lightweight. Delegate autofill to Apple Passwords or 1Password. By default, features use macOS facilities on both engines; for example, picture in picture uses AVKit rather than an engine's implementation. Follow the Platform integration table in `docs/features.md`.
 - Prefer public APIs. Use a private API (an undocumented class, selector, function, or key in a system framework or engine) only behind flags on `flags://`: one for all private APIs, one for each private API, and one for each feature that uses one. Check each private API's availability quietly and quickly, in the background or just before use. If a feature's private API is unavailable or switched off, the feature falls back to its public behavior or stays hidden. List every private API in the Private APIs section of `docs/features.md`.
-- You may change the Chromium (CEF) or WebKit source when a feature needs it. CEF changes are commits in the private repository `taeyoon0137/arch-chromium`, which follows its own `AGENTS.md`, and reach the app only through a release that `scripts/setup_cef.sh` pins. Keep each change small and list it in the engine changes table in `docs/plan.md`.
+- You may change the Chromium (CEF) or WebKit source when a feature needs it. CEF changes are commits in the private repository `taeyoon0137/arch-chromium`, which follows its own `AGENTS.md`. They reach the app only through a release pinned by `scripts/setup_cef.sh`. Keep each change small and list it in the engine changes table in `docs/plan.md`.
 
 ## Language
 
@@ -67,7 +67,7 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 
 After a change, run the applicable checks:
 
-- For source changes, run `swift build` and `swift test`. `swift test --filter <Module>Tests` runs one module's tests; the Build section of `docs/plan.md` Current State says what each test target checks.
+- For source changes, run `swift build` and `swift test`. `swift test --filter <Module>Tests` runs one module's tests; the Build section of `docs/plan.md` Current State describes each test target's checks.
 - For README or hero changes, run `./scripts/readme_update.sh`, then check the output.
 - Run `git diff --check` and `git status --short`.
 - When relevant, check the symbolic link with `ls -l CLAUDE.md`.

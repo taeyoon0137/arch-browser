@@ -15,12 +15,12 @@ This note designs the AI interface (feature row 43) and the parts of rows 52 to 
 | Module | Location | Role | Dependencies |
 |---|---|---|---|
 | `AI` | `Packages/ARCH/Sources/AI` | `AIClient` and its value types, `AIService` (routing, page access checks, fallbacks, rate limits, usage), providers, Keychain storage, `ai.json`, hooks | Foundation, Security |
-| `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI, and New Feature with AI… and its review in Settings ▸ Plugins | `AI`, `Plugins` |
+| `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI, plus New Feature with AI… and its review in Settings ▸ Plugins | `AI`, `Plugins` |
 | `Terminal` | `Packages/ARCH/Sources/Terminal` | The built-in terminal window | Foundation, AppKit |
 | `Browsing` | `Packages/ARCH/Sources/Browsing` | The page reader, questions in the page, hook events and their actions, and the page source for the interface | `AI` |
 | `Plugins` | `Packages/ARCH/Sources/Plugins` | The plugin system (V.11) and the plugin composer (VII.7) | `ARCHEngine`, `AI` |
 
-- `AI` does not depend on `Browsing`, `Plugins`, or an engine module. `Browsing` supplies page content through the `AIPageSource` protocol, and as the hook center's host (`AIHookHost`) it posts hook events and applies their actions.
+- `AI` does not depend on `Browsing`, `Plugins`, or an engine module. `Browsing` supplies page content through the `AIPageSource` protocol. As the hook center's host (`AIHookHost`), it posts hook events and applies their actions.
 - The app shell gives Settings ▸ AI a closure that opens the built-in terminal, as `BrowserSession.showSettings` does for the Settings window. This keeps `Preferences` independent of `Terminal`.
 
 ## Client API
@@ -175,7 +175,7 @@ extension AIClient {
 ```
 
 - Events arrive in this order: `waiting` (zero or more times), `started`, then `text` and `toolCall` in any order, then `usage` (when the provider reports it), then `finished`.
-- A `.json` reply arrives as `text` events whose concatenation is the JSON value. `reply` checks that it parses; when it does not, `reply` throws `replyTooLong` if the reply reached the length limit and `malformedReply` otherwise.
+- A `.json` reply arrives as `text` events whose concatenation is the JSON value. `reply` checks that it parses; if parsing fails, `reply` throws `replyTooLong` if the reply reached the length limit and `malformedReply` otherwise.
 
 ### Tool calls
 
@@ -569,7 +569,7 @@ func readableContent(limit: Int, completion: @escaping (Result<EngineReadableCon
 
 - The script walks the main frame's visible text. It skips `script`, `style`, `template`, hidden elements, `aria-hidden` subtrees, and the values of `input`, `textarea`, `select`, and editable regions, so drafts and passwords are never read. Link text is kept; link addresses are not. It stops at `limit` characters.
 - WebKit runs the script with `callAsyncJavaScript` in its own `WKContentWorld`. Chromium sends a process message to the page's renderer process. The renderer evaluates the script in the frame's context and replies with a JSON string, as it does for theme color. Chromium uses this route because `ExecuteJavaScript` returns no value and the DevTools protocol would attach a debugger. The page's scripts share that context and can change what the script sees. This changes only the page's own text.
-- `selection` is how a feature reads the page's selection; `EngineWebContents` has no other member for it.
+- `selection` lets a feature read the page's selection; `EngineWebContents` has no other member for it.
 - `Browsing` wraps the member in `AIPageSource`:
 
 ```swift
@@ -629,7 +629,7 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` follows the session's tabs, the favorites' tabs among them, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` each time a tab's main frame finishes loading a document, which the engines report through `webContentsDidFinishLoadingDocument`, and the tab has an address. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` follows the session's tabs, including favorites' tabs, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
 - `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
 
@@ -701,9 +701,9 @@ public enum AIHookError: Error, Sendable {
 ### Ordering
 
 - Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once.
-- Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only those the host applied appear in `appliedActions`.
+- Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only actions the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
-- The center skips, without sending a request, hooks whose feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. It checks again after each hook's delay, together with the event's site.
+- The center skips hooks without sending a request when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. After each hook's delay, it repeats these checks and checks the event's site.
 
 ### Cancellation
 
@@ -716,7 +716,7 @@ The center cancels a running hook and its request when:
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 
-The center discards canceled hooks' actions, even ones a hook returns after it was cancelled. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. The hook's client tells the center how each request ends, other than one the hook stopped reading: a reply clears the feature's last error, and a failure becomes it. Three consecutive `authentication` or `providerUnavailable` request errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route, and any other end of a request starts the count again; changing the route also clears the last error. A hook's own error, outside its requests, and a timeout become the last error without changing the count, and a hook that sends no request changes neither.
+The center discards canceled hooks' actions, even those returned after cancellation. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. The hook's client tells the center how each request ends, except requests the hook stopped reading: a reply clears the feature's last error, and a failure becomes it. Three consecutive `authentication` or `providerUnavailable` request errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route. Any other request outcome resets the count; changing the route also clears the last error. A hook's own error, outside its requests, and a timeout become the last error without changing the count. A hook that sends no request changes neither.
 
 ### Actions
 
@@ -749,18 +749,18 @@ AI writes a script plugin (row 55) from the user's request. The plugin runs on t
 ### Composing
 
 1. Settings ▸ Plugins shows New Feature with AI… while a provider can serve `pluginComposer` (Plugin Writer), which Settings registers when its window opens. The user describes the feature in a sheet. The command palette does not offer it yet.
-2. `PluginComposer` in `Plugins` sends the description as the only message, with instructions that hold Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form and its limit of 8,192 output tokens, which the request also sets; the manifest keys plugins that AI writes may use; the background script, the only file that runs, with its sandbox and limits; the `arch` calls; and the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}`. It sends no page data.
-3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; the files hold only the background script that the manifest names, since the background document loads no other file; its name is letters, digits, `-`, `_`, and `.`, starts with no dot, and ends in `.js`; it parses as a classic script, as the background document runs it, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` come to at most 256 KB, which only a command-line tool can pass, since it gets no output limit. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `xyz.taeyoon.arch.generated.<UUID>`, which the composer gives every version it writes, so that no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the checks of every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
-4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is asked for again without being sent back. One over 256 KB ends the request at once, since it would cost more to send back than the model can fix, and so does one that the output limit cut (`replyTooLong`), with the problem that the plugin is too long for one reply, since the same request would be cut again. Then the request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
+2. `PluginComposer` in `Plugins` sends the description as the only message. Its instructions contain Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form and its limit of 8,192 output tokens, which the request also sets; the manifest keys plugins that AI writes may use; the background script, the only file that runs, with its sandbox and limits; the `arch` calls; and the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}`. It sends no page data.
+3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; the files hold only the background script that the manifest names, since the background document loads no other file; its name consists of letters, digits, `-`, `_`, and `.`, does not start with a dot, and ends in `.js`; it parses as a classic script, the form the background document runs, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` total at most 256 KB, a limit only a command-line tool can exceed because it has no output limit. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `xyz.taeyoon.arch.generated.<UUID>`, which the composer gives every version it writes so no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the same checks as every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
+4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is requested again without being sent back. A reply over 256 KB ends the request at once, since it would cost more to send back than the model can fix. A reply cut by the output limit (`replyTooLong`) also ends it at once, reporting that the plugin is too long for one reply, since the same request would be cut again. The request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
 5. Plugins that AI writes may ask for the permissions the script runtime has, `tabs` and `clipboard`, and run in the same sandbox as any script plugin: no network, no files, and no page scripts. Nothing runs before the user installs and enables the plugin.
 
 ### Review
 
-The review is the install sheet of `docs/plugins.md` (Lifecycle), with what a plugin that AI wrote adds: its subtitle names the model, a Requests section lists the request and each change, and its Files section shows the source of every file, `plugin.json` among them, read-only.
+The review uses the install sheet in `docs/plugins.md` (Lifecycle), with additions for a plugin that AI wrote: its subtitle names the model, a Requests section lists the request and each change, and its Files section shows every file's source, including `plugin.json`, read-only.
 
-- Ask for Changes… goes back to the request field. The composer sends the request, the last version's reply, and the change, and the new version replaces the one under review, which is discarded.
-- Cancel discards the version under review, as closing the sheet any other way does, such as deleting its Persona.
-- Install installs it switched off, and Install and Enable switched on, with everything it asks for. A plugin installed switched off runs only once the user switches it on in Settings ▸ Plugins. As for every package, only a grant of every website asks for Touch ID or the login password, which a plugin without sites never needs.
+- Ask for Changes… returns to the request field. The composer sends the request, the last version's reply, and the change. The new version replaces the one under review, which is discarded.
+- Cancel discards the version under review, as does closing the sheet any other way, such as deleting its Persona.
+- Install installs it switched off, and Install and Enable installs it switched on, with everything it asks for. A plugin installed switched off runs only once the user switches it on in Settings ▸ Plugins. As for every package, only a grant of every website asks for Touch ID or the login password, which a plugin without sites never needs.
 
 ### Lifetime
 
@@ -803,7 +803,7 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A stop reason that reports a content filter | `refused` |
 | A missing tool executable, or a nonzero exit | `providerUnavailable` with the last line of standard error |
 | A tool that exits 0 without output | `malformedReply` |
-| A `.json` reply that the length limit cut before its value was complete | `replyTooLong` |
+| A `.json` reply cut by the length limit before its value was complete | `replyTooLong` |
 
 The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, and `budgetReached`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; and Retry for the rest except `cancelled`, which shows nothing.
 
@@ -871,7 +871,7 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, and for a feature whose hooks paused, Resume. An automatic feature's last error comes from the hook center, since its hooks can stop before a request.
+- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request.
 - Sites: the exclusion list.
 - Usage: the totals, the monthly spending limit, and the daily limit for automatic features.
 - Activity: the in-memory request list.
