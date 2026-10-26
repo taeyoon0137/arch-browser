@@ -9,6 +9,7 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_life_span_handler.h"
+#include "include/cef_sandbox_mac.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -226,8 +227,6 @@ int gUnshownBrowsers = 0;
     }
     CefMainArgs mainArgs(*_NSGetArgc(), *_NSGetArgv());
     CefSettings settings;
-    // The helper starts no sandbox context, so the renderer, GPU, and utility processes run without the macOS sandbox (`docs/plan.md`, Decisions).
-    settings.no_sandbox = true;
     settings.external_message_pump = true;
     CefString(&settings.framework_dir_path) = frameworkPath.UTF8String;
     CefString(&settings.root_cache_path) = cachePath.UTF8String;
@@ -305,6 +304,12 @@ int gUnshownBrowsers = 0;
 }
 
 + (int)runHelperWithArgc:(int)argc argv:(char **)argv {
+    // The renderer, GPU, and utility processes enter the macOS sandbox before the framework loads, as CEF requires; the
+    // context loads `libcef_sandbox.dylib` from the framework next to the helper bundles.
+    CefScopedSandboxContext sandboxContext;
+    if (!sandboxContext.Initialize(argc, argv)) {
+        return 1;
+    }
     CefScopedLibraryLoader libraryLoader;
     if (!libraryLoader.LoadInHelper()) {
         return 1;
