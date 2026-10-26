@@ -21,6 +21,7 @@ struct HTTPProvider: AIProvider {
     let session: URLSession
     var firstByteTimeout: Duration = .seconds(60)
     var chunkTimeout: Duration = .seconds(30)
+    var maxTokensRefusals = MaxTokensRefusals.shared
 
     init(configuration: AIProviderConfiguration, http: AIHTTPConfiguration, key: String?, session: URLSession) {
         self.configuration = configuration
@@ -46,8 +47,8 @@ struct HTTPProvider: AIProvider {
             let task = Task {
                 do {
                     switch http.format {
-                    case .chatCompletions: try await send(request, codec: ChatCompletionsCodec.self, to: continuation)
-                    case .messages: try await send(request, codec: MessagesCodec.self, to: continuation)
+                    case .chatCompletions: try await sendChatCompletions(request, to: continuation)
+                    case .messages: try await send(request, body: try MessagesCodec.body(for: request), codec: MessagesCodec.self, to: continuation)
                     }
                     continuation.finish()
                 } catch {
@@ -60,8 +61,21 @@ struct HTTPProvider: AIProvider {
 
     // MARK: Sending
 
-    private func send<Codec: AIWireCodec>(_ request: AIProviderRequest, codec: Codec.Type, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
-        let urlRequest = try makeRequest(path: Codec.path, body: try Codec.body(for: request))
+    /// Sends `max_tokens` unless the model refused it earlier in the launch. A 400 that refuses `max_tokens` sends the request once more with `max_completion_tokens`, which the model's later requests then send at once. The 400 comes before any event, so the caller sees one reply.
+    private func sendChatCompletions(_ request: AIProviderRequest, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
+        let model = MaxTokensRefusals.Model(provider: configuration.id, baseURL: http.baseURL, name: request.model)
+        if !maxTokensRefusals.contains(model) {
+            do {
+                return try await send(request, body: try ChatCompletionsCodec.body(for: request, outputLimit: .maxTokens), codec: ChatCompletionsCodec.self, to: continuation)
+            } catch is MaxTokensRefused {
+                maxTokensRefusals.insert(model)
+            }
+        }
+        try await send(request, body: try ChatCompletionsCodec.body(for: request, outputLimit: .maxCompletionTokens), codec: ChatCompletionsCodec.self, to: continuation)
+    }
+
+    private func send<Codec: AIWireCodec>(_ request: AIProviderRequest, body: Data, codec: Codec.Type, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
+        let urlRequest = try makeRequest(path: Codec.path, body: body)
         let timer = StallTimer(timeout: firstByteTimeout)
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -111,7 +125,12 @@ struct HTTPProvider: AIProvider {
 
     // MARK: Failures
 
-    /// Throws the `AIError` for a response that is not a success.
+    /// A `chatCompletions` 400 that refuses `max_tokens`. `sendChatCompletions` answers it with `max_completion_tokens`; a refusal of that request too becomes `invalidRequest`.
+    private struct MaxTokensRefused: Error {
+        var message: String
+    }
+
+    /// Throws the `AIError` for a response that is not a success, or `MaxTokensRefused`.
     private func check(_ response: URLResponse, body: Data) throws {
         guard let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode) else { return }
         let info = ProviderErrorInfo(json: try? JSONSerialization.jsonObject(with: body))
@@ -121,7 +140,10 @@ struct HTTPProvider: AIProvider {
         case 300..<400:
             throw AIError.invalidRequest("The server redirected the request to another address.")
         case 400:
-            throw info.saysInputTooLong ? AIError.contextTooLong(provider) : AIError.invalidRequest(message)
+            if info.saysInputTooLong { throw AIError.contextTooLong(provider) }
+            // The `messages` format has no other field for the limit.
+            if http.format == .chatCompletions, info.refusesMaxTokens { throw MaxTokensRefused(message: message) }
+            throw AIError.invalidRequest(message)
         case 401, 403:
             throw AIError.authentication(provider)
         case 404:
@@ -142,6 +164,8 @@ struct HTTPProvider: AIProvider {
         switch error {
         case let error as AIError:
             return redacted(error)
+        case let refusal as MaxTokensRefused:
+            return .invalidRequest(redacted(refusal.message))
         case is CancellationError:
             return .cancelled
         case let error as URLError where error.code == .cancelled:
@@ -330,10 +354,12 @@ struct ServerSentEventParser {
 
 // MARK: - Provider error bodies
 
-/// The `type`, `code`, and `message` of an error object, from an error response or a stream `error` event, in either format.
+/// The `type`, `code`, `param`, and `message` of an error object, from an error response or a stream `error` event, in either format.
 struct ProviderErrorInfo {
     var type: String?
     var code: String?
+    /// The request field the error is about, which `chatCompletions` servers name.
+    var param: String?
     var message: String?
 
     init(json: Any?) {
@@ -341,12 +367,18 @@ struct ProviderErrorInfo {
         let error = object?["error"] as? [String: Any] ?? object
         type = error?["type"] as? String
         code = (error?["code"] as? String) ?? (error?["code"] as? Int).map(String.init)
+        param = error?["param"] as? String
         message = error?["message"] as? String
     }
 
     /// Whether the error type or code says the input is too long.
     var saysInputTooLong: Bool {
         [type, code].compactMap { $0?.lowercased() }.contains { $0.contains("context_length") || $0.contains("too_long") || $0.contains("too_large") }
+    }
+
+    /// Whether the error refuses `max_tokens`: it names the field as its `param`, or its message asks for `max_completion_tokens`.
+    var refusesMaxTokens: Bool {
+        param == ChatCompletionsCodec.OutputLimitField.maxTokens.rawValue || message?.contains(ChatCompletionsCodec.OutputLimitField.maxCompletionTokens.rawValue) == true
     }
 
     /// A stream `error` event mapped by its type, otherwise `providerUnavailable`.

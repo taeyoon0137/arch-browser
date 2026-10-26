@@ -1,4 +1,4 @@
-// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, cut streams, keys kept out of error messages, `Retry-After` values, and the redirects the providers' session follows.
+// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, a server that refuses `max_tokens`, cut streams, keys kept out of error messages, `Retry-After` values, and the redirects the providers' session follows.
 import Foundation
 import Testing
 @testable import AI
@@ -14,6 +14,13 @@ private func request(_ text: String = "Hello", instructions: String? = "Be brief
 }
 
 private let weatherTool = AITool(name: "weather", description: "Looks up the weather.", inputSchema: Data(#"{"type":"object","properties":{"city":{"type":"string"}}}"#.utf8))
+
+private func badRequest(_ json: String) -> StubURLProtocol.Reply {
+    StubURLProtocol.Reply(status: 400, headers: ["Content-Type": "application/json"], chunks: [Data(json.utf8)])
+}
+
+/// The 400 that hosted `chatCompletions` servers answer for a reasoning model sent `max_tokens`.
+private let maxTokensRefusal = badRequest(#"{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.","type":"invalid_request_error","param":"max_tokens","code":"unsupported_parameter"}}"#)
 
 @Suite struct ChatCompletionsTests {
     @Test func streamsTextAndNormalizedUsage() async throws {
@@ -80,6 +87,49 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
         #expect(result.events == [#"text:{"ok":true}"#, "finished:completed"])
         let format = try #require(StubURLProtocol.requests(to: host).first?.json["response_format"] as? [String: Any])
         #expect(format["type"] as? String == "json_schema")
+    }
+
+    /// A server that refuses `max_tokens` gets the request once more with `max_completion_tokens`, and the model's later requests send that at once.
+    @Test func resendsWithMaxCompletionTokensWhenMaxTokensIsRefused() async {
+        let reply = StubURLProtocol.Reply(chunks: sse([
+            #"data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ]))
+        let host = StubURLProtocol.host { $0.json["max_tokens"] != nil ? maxTokensRefusal : reply }
+        var provider = httpProvider(host: host, format: .chatCompletions)
+        provider.maxTokensRefusals = MaxTokensRefusals()
+        let first = await collect(provider.stream(request()))
+        #expect(first.error == nil)
+        #expect(first.events == ["text:Hi", "finished:completed"])
+        let second = await collect(provider.stream(request()))
+        #expect(second.error == nil)
+        #expect(second.events == ["text:Hi", "finished:completed"])
+
+        let bodies = StubURLProtocol.requests(to: host).map(\.json)
+        #expect(bodies.map { $0["max_tokens"] as? Int } == [4096, nil, nil])
+        #expect(bodies.map { $0["max_completion_tokens"] as? Int } == [nil, 4096, 4096])
+    }
+
+    /// A 400 for the resent request, or one about another field, ends the request with the server's message.
+    @Test func reportsOtherBadRequestsWithoutResending() async {
+        let refusesBoth = StubURLProtocol.host { sent in
+            sent.json["max_tokens"] != nil ? maxTokensRefusal : badRequest(#"{"error":{"message":"max_completion_tokens is too large.","param":"max_completion_tokens"}}"#)
+        }
+        var provider = httpProvider(host: refusesBoth, format: .chatCompletions)
+        provider.maxTokensRefusals = MaxTokensRefusals()
+        guard case .invalidRequest(let message) = await collect(provider.stream(request())).error else {
+            Issue.record("Expected invalidRequest")
+            return
+        }
+        #expect(message == "max_completion_tokens is too large.")
+        #expect(StubURLProtocol.requests(to: refusesBoth).count == 2)
+
+        let other = StubURLProtocol.host(replying: badRequest(#"{"error":{"message":"Unknown field.","param":"temperature"}}"#))
+        guard case .invalidRequest("Unknown field.") = await collect(httpProvider(host: other, format: .chatCompletions).stream(request())).error else {
+            Issue.record("Expected invalidRequest")
+            return
+        }
+        #expect(StubURLProtocol.requests(to: other).count == 1)
     }
 
     @Test func mapsStreamErrorEvents() async {

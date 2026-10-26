@@ -4,9 +4,19 @@ import Foundation
 struct ChatCompletionsCodec: AIWireCodec {
     static let path = "chat/completions"
 
+    /// The field that limits the reply's tokens. Every server of the format reads `max_tokens`, so it goes first; some hosted servers refuse it for their reasoning models and ask for `max_completion_tokens` instead (`HTTPProvider.sendChatCompletions`).
+    enum OutputLimitField: String {
+        case maxTokens = "max_tokens"
+        case maxCompletionTokens = "max_completion_tokens"
+    }
+
     // MARK: Request
 
     static func body(for request: AIProviderRequest) throws -> Data {
+        try body(for: request, outputLimit: .maxTokens)
+    }
+
+    static func body(for request: AIProviderRequest, outputLimit: OutputLimitField) throws -> Data {
         var messages: [[String: Any]] = []
         if let instructions = request.instructions, !instructions.isEmpty {
             messages.append(["role": "system", "content": instructions])
@@ -19,7 +29,7 @@ struct ChatCompletionsCodec: AIWireCodec {
             "messages": messages,
             "stream": true,
             "stream_options": ["include_usage": true],
-            "max_tokens": request.maxOutputTokens,
+            outputLimit.rawValue: request.maxOutputTokens,
         ]
         if !request.tools.isEmpty {
             body["tools"] = try request.tools.map { tool in
@@ -172,5 +182,31 @@ struct ChatCompletionsCodec: AIWireCodec {
         let prompt = object["prompt_tokens"] as? Int ?? 0
         let cached = (object["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int ?? 0
         return AIUsage(inputTokens: max(prompt - cached, 0), outputTokens: object["completion_tokens"] as? Int ?? 0, cachedInputTokens: cached)
+    }
+}
+
+/// The models that refused `max_tokens`, by provider and base URL, kept for the launch so that their later requests send `max_completion_tokens` at once rather than after another refusal. Every `HTTPProvider` shares one, since the service makes a provider value for each request.
+final class MaxTokensRefusals: @unchecked Sendable {
+    static let shared = MaxTokensRefusals()
+
+    struct Model: Hashable {
+        var provider: AIProviderID
+        var baseURL: URL
+        var name: String
+    }
+
+    private let lock = NSLock()
+    private var models: Set<Model> = []
+
+    func contains(_ model: Model) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return models.contains(model)
+    }
+
+    func insert(_ model: Model) {
+        lock.lock()
+        models.insert(model)
+        lock.unlock()
     }
 }

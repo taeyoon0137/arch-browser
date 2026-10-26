@@ -2,7 +2,7 @@
 import Foundation
 @testable import AI
 
-/// Answers every request to a host with one scripted response, delivered in the given chunks. Each test makes its own host, so tests can run in parallel.
+/// Answers every request to a host with a scripted response, delivered in the given chunks: one response, or one chosen for each request. Each test makes its own host, so tests can run in parallel.
 final class StubURLProtocol: URLProtocol {
     struct Reply {
         var status = 200
@@ -24,14 +24,19 @@ final class StubURLProtocol: URLProtocol {
     }
 
     private static let lock = NSLock()
-    private static var replies: [String: Reply] = [:]
+    private static var replies: [String: @Sendable (CapturedRequest) -> Reply] = [:]
     private static var captured: [String: [CapturedRequest]] = [:]
 
     /// A new host that answers with `reply`.
     static func host(replying reply: Reply) -> String {
+        host { _ in reply }
+    }
+
+    /// A new host that answers each request with the reply `answer` gives for it, as a server that refuses some request bodies does.
+    static func host(answering answer: @escaping @Sendable (CapturedRequest) -> Reply) -> String {
         let host = "\(UUID().uuidString.lowercased()).example.test"
         lock.lock()
-        replies[host] = reply
+        replies[host] = answer
         lock.unlock()
         return host
     }
@@ -53,10 +58,12 @@ final class StubURLProtocol: URLProtocol {
 
     override func startLoading() {
         guard let url = request.url, let host = url.host else { return }
+        let sent = CapturedRequest(url: url, method: request.httpMethod ?? "GET", headers: request.allHTTPHeaderFields ?? [:], body: Self.body(of: request))
         Self.lock.lock()
-        let reply = Self.replies[host] ?? Reply(status: 599)
-        Self.captured[host, default: []].append(CapturedRequest(url: url, method: request.httpMethod ?? "GET", headers: request.allHTTPHeaderFields ?? [:], body: Self.body(of: request)))
+        let answer = Self.replies[host]
+        Self.captured[host, default: []].append(sent)
         Self.lock.unlock()
+        let reply = answer?(sent) ?? Reply(status: 599)
         let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: reply.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         for chunk in reply.chunks { client?.urlProtocol(self, didLoad: chunk) }
