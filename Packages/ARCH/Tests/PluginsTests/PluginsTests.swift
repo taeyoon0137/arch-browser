@@ -1,4 +1,4 @@
-// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
+// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, also for the run while `plugins.json` cannot be written, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -504,6 +504,37 @@ import Testing
         #expect(manager(persona: persona, [RecordingPlugin.self, DisabledPlugin.self]).plugins.map(\.isEnabled) == [false, true])
         // Another Persona has the plugins as they are by default.
         #expect(manager([RecordingPlugin.self, DisabledPlugin.self]).plugins.map(\.isEnabled) == [true, false])
+    }
+
+    @Test func keepsSwitchesThatThePluginListCannotRecordForTheRun() throws {
+        let persona = UUID()
+        let builtIns: [any BuiltInPlugin.Type] = [RecordingPlugin.self, DisabledPlugin.self]
+        let manager = manager(persona: persona, builtIns)
+        let file = folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/plugins.json")
+        // A folder at the file's path makes each write fail, as a full disk does.
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        manager.setEnabled(false, for: RecordingPlugin.manifest.id)
+        #expect(manager.plugins.map(\.isEnabled) == [false, false])
+        #expect(manager.listWriteFailure?.hasPrefix("Arch could not save the plugin list") == true)
+        manager.writeListAgain()
+        #expect(manager.listWriteFailure != nil)
+        // The next change that reaches the file saves the earlier one too.
+        try FileManager.default.removeItem(at: file)
+        manager.setEnabled(true, for: DisabledPlugin.manifest.id)
+        #expect(manager.listWriteFailure == nil)
+        #expect(self.manager(persona: persona, builtIns).plugins.map(\.isEnabled) == [false, true])
+        let savedFile = file.deletingLastPathComponent().appendingPathComponent("plugins.saved.json")
+        try FileManager.default.moveItem(at: file, to: savedFile)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        manager.setEnabled(false, for: DisabledPlugin.manifest.id)
+        #expect(manager.listWriteFailure != nil)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: savedFile, to: file)
+        // Until then the file keeps the last write that succeeded.
+        #expect(self.manager(persona: persona, builtIns).plugins.map(\.isEnabled) == [false, true])
+        manager.writeListAgain()
+        #expect(manager.listWriteFailure == nil)
+        #expect(self.manager(persona: persona, builtIns).plugins.map(\.isEnabled) == [false, false])
     }
 
     @Test func keepsAnUnreadablePluginListAside() throws {

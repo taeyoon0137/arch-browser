@@ -15,9 +15,9 @@ enum PluginFile {
         url.deletingPathExtension().appendingPathExtension("unreadable.json")
     }
 
-    /// Writes the data atomically, creating the file's folder first.
-    static func write(_ data: Data, to url: URL) {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+    /// Writes the data atomically, creating the file's folder first. Throws the file system's error, as on a full disk, and the file then stays as it was.
+    static func write(_ data: Data, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 }

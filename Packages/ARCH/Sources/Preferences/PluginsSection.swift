@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version….
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version….
 import AI
 import ARCHEngine
 import Browsing
@@ -57,7 +57,7 @@ struct PluginsSection: View {
     }
 }
 
-/// Install Plugin… and New Feature with AI…, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
+/// Install Plugin… and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -84,11 +84,20 @@ private struct PluginList: View {
                 .sheet(isPresented: $isComposing) { PluginComposerSheet(plugins: plugins) }
             }
         } footer: {
-            if let failure {
-                Text(failure)
-                    .font(.callout)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if failure != nil || plugins.listWriteFailure != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let failure {
+                        Text(failure)
+                            .foregroundStyle(.red)
+                    }
+                    if let listFailure = plugins.listWriteFailure {
+                        Text(listFailure)
+                            .foregroundStyle(.red)
+                        Button("Try Again") { plugins.writeListAgain() }
+                    }
+                }
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .sheet(item: $staged) { PluginInstallSheet(plugins: plugins, review: $0) }

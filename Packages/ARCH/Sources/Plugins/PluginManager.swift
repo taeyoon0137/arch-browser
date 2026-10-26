@@ -92,6 +92,8 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var contributions: PluginContributionIndex
     /// The pairs whose versions are both listed, in the order the user made them.
     @Published public private(set) var engineVersions: [PluginEngineVersions] = []
+    /// Why the last write of `plugins.json` failed, as Settings states it, while the file lacks changes of this run: switches, joins, separations, dismissed notes, removals, and the engines' answers, which keep their effect until Arch quits. Each change writes the whole file again, so the first write that succeeds saves them all and clears it. An install whose write fails throws instead and leaves nothing to save.
+    @Published public private(set) var listWriteFailure: String?
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
@@ -311,10 +313,26 @@ public final class PluginManager: ObservableObject {
         choices.append(PluginListFile.Choice(id: id.rawValue, isEnabled: isEnabled))
     }
 
-    /// Choices, installs, pairs, and dismissals are few and rare, so each writes the file at once.
+    /// Choices, pairs, dismissals, removals, and the engines' answers are few and rare, so each writes the file at once. A write that fails, as on a full disk, keeps the change for the run and says why in `listWriteFailure`, since Settings and the runtimes make these changes without waiting for an answer.
     private func saveList() {
-        guard let data = try? JSONEncoder().encode(PluginListFile(choices: choices, installed: installs, engineVersions: pairRecords.isEmpty ? nil : pairRecords)) else { return }
-        PluginFile.write(data, to: directory.appendingPathComponent(PluginListFile.name))
+        do {
+            try writeList()
+        } catch {
+            listWriteFailure = "Arch could not save the plugin list, so changes to it since then last only until Arch quits. \(error.localizedDescription)"
+        }
+    }
+
+    /// Writes `plugins.json` from the lists, with the changes of earlier writes that failed, and clears `listWriteFailure`. Throws the encoder's or the file system's error, and the file then stays as it was.
+    private func writeList() throws {
+        let data = try JSONEncoder().encode(PluginListFile(choices: choices, installed: installs, engineVersions: pairRecords.isEmpty ? nil : pairRecords))
+        try PluginFile.write(data, to: directory.appendingPathComponent(PluginListFile.name))
+        if listWriteFailure != nil { listWriteFailure = nil }
+    }
+
+    /// Writes `plugins.json` again after a write failed, for Settings' Try Again; nothing once the manager is closed.
+    public func writeListAgain() {
+        guard !isClosed else { return }
+        saveList()
     }
 
     /// Drops the plugin's running instance, whose context stops acting at once and which deactivates once its activation ends.
@@ -444,7 +462,7 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), and `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID.
+    /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
     @discardableResult
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {
         guard !isClosed else { throw PluginError.closed }
@@ -460,20 +478,11 @@ public final class PluginManager: ObservableObject {
             if let refusal = updateRefusal(for: package, updating: id) { throw PluginError.invalidPackage(refusal) }
         }
         let isNew = !plugins.contains { $0.id == id }
-        let destination = Self.packageFolder(of: id, in: directory)
-        let fileManager = FileManager.default
+        let listed = (choices, installs, pairRecords)
         badges[id] = nil
         stop(id)
-        let installedRoot: URL
-        if fileManager.fileExists(atPath: destination.path) {
-            installedRoot = try fileManager.replaceItemAt(destination, withItemAt: package.rootURL) ?? destination
-        } else {
-            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.moveItem(at: package.rootURL, to: destination)
-            installedRoot = destination
-        }
-        let installed = package.moved(to: installedRoot)
-        packages[id] = installed
+        let move = try PackageMove(from: package.rootURL, to: Self.packageFolder(of: id, in: directory))
+        let installed = package.moved(to: move.installedURL)
         let runtime = runtimes[installed.kind]
         let checks = Self.fileChecks(package.engineChecks, engines: runtime?.engines ?? [:])
         var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
@@ -485,7 +494,6 @@ public final class PluginManager: ObservableObject {
             installs.append(.readable(install))
         }
         recordChoice(isEnabled, for: id)
-        failures[id] = nil
         let plugin = Self.installedPlugin(installed, id: id, install: install, isEnabled: isEnabled, runtime: runtime)
         var next = plugins
         if let index = next.firstIndex(where: { $0.id == id }) {
@@ -501,7 +509,17 @@ public final class PluginManager: ObservableObject {
             dismiss(match.enginesRunningPackage, notesOf: id, in: &next)
             dismiss(plugin.enginesRunningPackage, notesOf: counterpart, in: &next)
         }
-        saveList()
+        do {
+            try writeList()
+        } catch {
+            // Without the entry, the next launch would not list a new plugin and would read an update's package with the old entry's grant and origin.
+            move.undo()
+            (choices, installs, pairRecords) = listed
+            throw error
+        }
+        move.finish()
+        packages[id] = installed
+        failures[id] = nil
         setPlugins(next)
         return id
     }
@@ -754,7 +772,7 @@ public final class PluginManager: ObservableObject {
         setEnabled(false, for: [id], failure: EngineKind.allCases.compactMap { plugin.engineFailures[$0] }.joined(separator: "\n"))
     }
 
-    /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed.
+    /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed. A write of `plugins.json` that fails does not throw but sets `listWriteFailure`: the file keeps the plugin's entry, which the next launch leaves out of the list, since its package is gone.
     public func remove(_ id: PluginID) throws {
         guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil
@@ -987,6 +1005,57 @@ public final class PluginManager: ObservableObject {
 
     private func secrets(for id: PluginID) -> ScopedPluginSecrets {
         ScopedPluginSecrets(store: secretStore, pluginID: id, personaID: persona)
+    }
+}
+
+/// A staged package moved to `<plugin id>/package/`, which an install undoes when `plugins.json` cannot record it: the package it replaces stays beside it as `package.replaced` until the install finishes. Each step renames within the Persona's folder, so undoing it needs no free space.
+private struct PackageMove {
+    /// The name of the replaced package beside the new one. A later update replaces one that a crash left there.
+    private static let replacedName = "package.replaced"
+    private let stagedURL: URL
+    private let destination: URL
+    /// Where the package is now, which `replaceItemAt` may choose.
+    let installedURL: URL
+    /// The package that the move replaced, if any.
+    private let replacedURL: URL?
+    /// The plugin's folder, if the move created it.
+    private let createdFolder: URL?
+
+    init(from stagedURL: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        let folder = destination.deletingLastPathComponent()
+        self.stagedURL = stagedURL
+        self.destination = destination
+        if fileManager.fileExists(atPath: destination.path) {
+            installedURL = try fileManager.replaceItemAt(destination, withItemAt: stagedURL, backupItemName: Self.replacedName, options: .withoutDeletingBackupItem) ?? destination
+            replacedURL = folder.appendingPathComponent(Self.replacedName, isDirectory: true)
+            createdFolder = nil
+        } else {
+            let createdFolder = fileManager.fileExists(atPath: folder.path) ? nil : folder
+            do {
+                try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+                try fileManager.moveItem(at: stagedURL, to: destination)
+            } catch {
+                if let createdFolder { try? fileManager.removeItem(at: createdFolder) }
+                throw error
+            }
+            installedURL = destination
+            replacedURL = nil
+            self.createdFolder = createdFolder
+        }
+    }
+
+    /// Deletes the replaced package once `plugins.json` records the install.
+    func finish() {
+        if let replacedURL { try? FileManager.default.removeItem(at: replacedURL) }
+    }
+
+    /// Moves the package back to staging, then the replaced package back to its place, and deletes the plugin's folder if the move created it. Once the package cannot leave, the rest stays as it is, so that no package is lost.
+    func undo() {
+        let fileManager = FileManager.default
+        guard (try? fileManager.moveItem(at: installedURL, to: stagedURL)) != nil else { return }
+        if let replacedURL { try? fileManager.moveItem(at: replacedURL, to: destination) }
+        if let createdFolder { try? fileManager.removeItem(at: createdFolder) }
     }
 }
 

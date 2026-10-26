@@ -76,7 +76,7 @@ final class PluginStorageFile: PluginStorage {
         firstUnsavedChange = nil
         // Every entry encodes, since `size(of:forKey:)` checked each value where the file holds it.
         guard let data = try? Self.encoder.encode(entries.mapValues(\.value)) else { return }
-        PluginFile.write(data, to: fileURL)
+        try? PluginFile.write(data, to: fileURL)
     }
 
     /// Drops the changes that have not reached the file, when the user removes the plugin or deletes its Persona, so that none writes the file again.

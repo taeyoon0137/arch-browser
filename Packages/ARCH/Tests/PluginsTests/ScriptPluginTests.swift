@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -305,6 +305,46 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let remembered = try #require(try stored("remembered", in: manager)?.fields)
         #expect(remembered["runs"] == .number(1))
         #expect(try String(contentsOf: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/org.example.sample/package/plugin.json"), encoding: .utf8).contains("2.0"))
+    }
+
+    @Test func undoesAnInstallAndAnUpdateThatThePluginListCannotRecord() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        try await installSample(in: manager)
+        let update = folder.url.appendingPathComponent("Update", isDirectory: true)
+        try FileManager.default.copyItem(at: sampleFolder, to: update)
+        let manifestURL = update.appendingPathComponent("plugin.json")
+        try Data(String(decoding: try Data(contentsOf: manifestURL), as: UTF8.self).replacingOccurrences(of: #""version": "1.0""#, with: #""version": "2.0""#).utf8).write(to: manifestURL)
+        let updatePackage = try await manager.stage(update)
+        let newPackage = try await manager.stage(writtenFiles, writtenBy: composition)
+        let listed = summary(of: manager)
+        let personaFolder = folder.url.appendingPathComponent("Plugins/\(persona.uuidString)", isDirectory: true)
+        let listURL = personaFolder.appendingPathComponent("plugins.json")
+        let savedList = folder.url.appendingPathComponent("plugins.saved.json")
+        // A folder at the file's path makes each write fail, as a full disk does.
+        try FileManager.default.moveItem(at: listURL, to: savedList)
+        try FileManager.default.createDirectory(at: listURL, withIntermediateDirectories: false)
+        #expect(throws: (any Error).self) { try manager.install(updatePackage, grant: PluginGrant(permissions: [], sites: []), isEnabled: true) }
+        #expect(throws: (any Error).self) { try manager.install(newPackage, grant: PluginGrant(requestedBy: newPackage.manifest), isEnabled: true) }
+        // Each staged package is back in `Staging/`, and the previous package in its place.
+        #expect(updatePackage.text(of: "plugin.json")?.contains(#""version": "2.0""#) == true)
+        #expect(newPackage.text(of: "background.js") == writtenFiles["background.js"])
+        let pluginFolder = personaFolder.appendingPathComponent(sampleID.rawValue, isDirectory: true)
+        #expect(try String(contentsOf: pluginFolder.appendingPathComponent("package/plugin.json"), encoding: .utf8).contains(#""version": "1.0""#))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: pluginFolder.path) == ["package"])
+        #expect(!FileManager.default.fileExists(atPath: personaFolder.appendingPathComponent(newPackage.manifest.id.rawValue).path))
+        #expect(summary(of: manager) == listed && manager.listWriteFailure == nil)
+        // The file, which the failed writes left as it was, lists the same plugins at the next launch.
+        try FileManager.default.removeItem(at: listURL)
+        try FileManager.default.moveItem(at: savedList, to: listURL)
+        let relaunched = self.manager()
+        defer { relaunched.close() }
+        #expect(summary(of: relaunched) == listed)
+    }
+
+    /// What the list shows of each plugin: its identifier, version, origin, switch, and grant.
+    private func summary(of manager: PluginManager) -> [String] {
+        manager.plugins.map { "\($0.id.rawValue) \($0.manifest.version) \($0.origin) \($0.isEnabled) \($0.grant)" }
     }
 
     @Test func removesThePackageStorageAndSecretsOfThePersona() async throws {

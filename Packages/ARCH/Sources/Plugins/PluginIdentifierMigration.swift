@@ -77,7 +77,7 @@ public struct PluginIdentifierMigration {
         list.choices = choices ?? list.choices
         list.installed = installs ?? list.installed
         guard let renamed = try? JSONEncoder().encode(list) else { return }
-        PluginFile.write(renamed, to: url)
+        try? PluginFile.write(renamed, to: url)
     }
 
     /// The entries with their previous identifiers renamed, less those whose new identifier another entry has, or nil when no entry has a previous identifier.
