@@ -73,6 +73,8 @@ swift build
 open build/Arch.app
 ```
 
+The bridge needs the experimental DevTools and picture-in-picture APIs of the engine changes listed under Engine Plan in `docs/plan.md`, which the pinned `arch-8078-1` lacks. Until the pin moves to the release that carries them, install a local build of `arch-8078` instead: `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
+
 After cloning, enable the commit message hook once:
 
 ```bash
@@ -104,7 +106,7 @@ git config core.hooksPath .githooks
 
 | Command | Description |
 | :-- | :-- |
-| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. |
+| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. `ARCH_CEF_ARCHIVE` installs a local archive instead, which the bridge needs until the pin moves (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 

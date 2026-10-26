@@ -39,7 +39,7 @@ public protocol EngineMediaSessionDelegate: AnyObject {
     func mediaSessionDidChange(_ session: any EngineMediaSession)
 }
 
-/// The media of one page, for Now Playing and the media keys. Picture-in-picture is not part of it: WebKit's video controls start the system's, and Chromium's needs a CEF source build (docs/plan.md, Phase VI).
+/// The media of one page, for Now Playing and the media keys. Picture-in-picture is not part of it: WebKit's video controls start the system's, and on Chromium `ChromiumPictureInPicture` shows the frames that Arch's engine captures through AVKit.
 public protocol EngineMediaSession: AnyObject {
     var delegate: (any EngineMediaSessionDelegate)? { get set }
     /// `.none` until media in the page plays sound, and again once that media leaves the page.
