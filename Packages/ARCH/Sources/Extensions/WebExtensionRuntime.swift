@@ -30,7 +30,7 @@ public protocol WebExtensionHost: AnyObject {
 public struct WebExtensionActionItem: Identifiable {
     public let id: PluginID
     public let name: String
-    /// The action of the version that the tab's engine runs. Nil while the tab's engine runs none of the plugin's versions, as on a Chromium tab or one whose engine refused its package, or before the extension has loaded.
+    /// The action of the version that the tab's engine runs. Nil while the tab's engine runs none of the plugin's versions, as on a tab of an engine that refused its package or runs no web extensions, or before the extension has loaded.
     public let action: EngineExtensionAction?
     /// The engines the plugin's enabled versions run on, for the note on another engine's tab.
     public let engines: Set<EngineKind>
@@ -367,12 +367,10 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
     }
 
-    /// A store install is refused without a sheet, since the store is no install source. A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
+    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
         guard let host else { return completion(false) }
         switch prompt.kind {
-        case .install:
-            completion(false)
         case let .reload(names):
             host.presentSheet(WebExtensionEnginePrompt.reloadAlert(names: names), for: prompt.tab) { completion($0 == .alertFirstButtonReturn) }
         case let .permissions(messages):

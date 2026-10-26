@@ -175,10 +175,10 @@ public final class BrowserSession: ObservableObject {
         if windows.isEmpty { reopenWindows(windowsToReopen) }
     }
 
-    /// New Window: opens a main window on `spaceID`, or on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
+    /// New Window: opens a main window on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
     @discardableResult
-    public func openWindow(onSpace spaceID: UUID? = nil) -> BrowserWindowModel {
-        let spaceID = spaceID ?? activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+    public func openWindow() -> BrowserWindowModel {
+        let spaceID = activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         return window

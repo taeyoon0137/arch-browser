@@ -72,8 +72,6 @@ public struct EngineExtensionPrompt {
         case permissions([String])
         /// A reload of the tab, so that the actions that the named extensions were kept from running there run.
         case reload([String])
-        /// An install from a store, which Arch does not offer.
-        case install
     }
 
     public var kind: Kind

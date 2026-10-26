@@ -142,11 +142,9 @@ struct EngineRequestsTests {
         answer = nil
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .reload(["Asker"]), tab: nil)) { answer = $0 }
         #expect(answer == false && host.sheets.last?.messageText == "Reload This Page?")
-        // The store's install prompt is refused without a sheet, as is a question from an extension that the engine did not load.
+        // A question from an extension that the engine did not load is refused without a sheet.
         let sheets = host.sheets.count
         answer = nil
-        runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .install, tab: nil)) { answer = $0 }
-        #expect(answer == false)
         runtime.extensions(chromium, extension: "unknown", asks: EngineExtensionPrompt(kind: .permissions([]), tab: nil)) { answer = $0 }
         #expect(answer == false && host.sheets.count == sheets)
     }

@@ -73,7 +73,7 @@ swift build
 open build/Arch.app
 ```
 
-The bridge needs the experimental DevTools and picture-in-picture APIs of the engine changes listed under Engine Plan in `docs/plan.md`, which the pinned `arch-8078-1` lacks. Until the pin moves to the release that carries them, install a local build of `arch-8078` instead: `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
+The bridge needs the experimental DevTools, picture-in-picture, and extension runtime APIs of the engine changes listed under Engine Plan in `docs/plan.md`, which the pinned `arch-8078-1` lacks. Until the pin moves to the release that carries them, install a local build of `arch-8078` instead: `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
 
 After cloning, enable the commit message hook once:
 
