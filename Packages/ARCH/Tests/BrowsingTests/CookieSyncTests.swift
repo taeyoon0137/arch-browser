@@ -1,4 +1,4 @@
-// What a copy between the engines writes and deletes: what the source changed since the stores last agreed, never a cookie that differs only in its SameSite policy, so the target keeps a policy the source store could not hold. A deletion travels like a change, a cookie only the target changed stays, a deletion leaves a cookie the target changed, and a write the target refused is not taken for agreement. The record of what the stores agreed on outlasts a launch in a file without values or session cookies, and a store that lost most of it makes the next launch's first copy work without it. The cookies hold made-up values only.
+// What a copy between the engines writes and deletes: what the source changed since the stores last agreed, never a cookie that differs only in its SameSite policy, so the target keeps a policy the source store could not hold. A deletion travels like a change, a cookie only the target changed stays, a deletion leaves a cookie the target changed, and a write the target refused is not taken for agreement. The record of what the stores agreed on outlasts a launch that quits in a file without values or session cookies, and a launch that did not quit, or a store that lost most of the record, makes the next launch's first copy work without it. The cookies hold made-up values only.
 import ARCHEngine
 import Foundation
 import Testing
@@ -78,7 +78,7 @@ import Testing
         #expect(CookieSync.agreement(between: [], and: [], before: Self.agreed).isEmpty)
     }
 
-    @Test func bothEnginesVersionsOfACookieHaveOneDigest() {
+    @Test func aCookieAndWebKitsCopyOfItHaveOneDigest() {
         // WebKit keeps the expiry to the whole second and the policy as SameSite=None.
         var readBack = Self.held
         readBack.sameSite = .noRestriction
@@ -94,6 +94,27 @@ import Testing
         notHTTPOnly.isHTTPOnly = false
         let digests = Set([Self.held, otherValue, laterExpiry, session, notHTTPOnly].map(CookieSync.Digest.init))
         #expect(digests.count == 5)
+    }
+
+    @Test func versionsEachEngineTookAloneAcrossASecondStayAgreed() {
+        // Both engines took the cookie from the site at about the same time, and their expiries fall on either side of a whole second.
+        var chromium = Self.held
+        chromium.expires = Date(timeIntervalSince1970: 2_000_000_000.8)
+        var webKit = Self.held
+        webKit.expires = Date(timeIntervalSince1970: 2_000_000_001)
+        webKit.sameSite = .noRestriction
+        #expect(CookieSync.Digest(chromium) != CookieSync.Digest(webKit))
+        for agreed in [CookieSync.agreement(between: [chromium], and: [webKit], before: [:]),
+                       CookieSync.agreement(between: [webKit], and: [chromium], before: [:])] {
+            // Chromium's page changes the value, and WebKit's older one does not replace it.
+            var rotated = chromium
+            rotated.value = "b2"
+            #expect(CookieSync.changes(from: [webKit], to: [rotated], agreed: agreed).write.isEmpty)
+            #expect(CookieSync.changes(from: [rotated], to: [webKit], agreed: agreed).write == [rotated])
+            // The site signs out in Chromium, and the deletion reaches WebKit, or the other way.
+            #expect(CookieSync.changes(from: [], to: [webKit], agreed: agreed).remove == [CookieSync.CookieKey(webKit)])
+            #expect(CookieSync.changes(from: [], to: [chromium], agreed: agreed).remove == [CookieSync.CookieKey(chromium)])
+        }
     }
 
     @Test func aRecordCountsWhileEachStoreHoldsMostOfItsCookies() {
@@ -134,11 +155,10 @@ import Testing
 
     @Test func aSignOutWhileTheOtherEngineDidNotRunReachesItInTheNextLaunch() throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let engines = Engines(webKit: [], chromium: [Self.held, Self.other])
         // A launch with both engines: WebKit starts and takes the Chromium cookies.
-        CookieSync(recordURL: Self.recordURL(in: folder)).copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
-        CookieSync.finishWrites()
+        Self.launchAndQuit(engines, in: folder)
         #expect(engines.webKit.cookies.map(\.name).sorted() == ["pref", "sid"])
         // A launch in which only WebKit runs: the site signs out there.
         engines.webKit.cookies.removeAll { $0.name == "sid" }
@@ -152,9 +172,8 @@ import Testing
         // The same holds when the engine that signed out runs first.
         let other = Engines(webKit: [], chromium: [Self.held, Self.other])
         let otherFolder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: otherFolder) }
-        CookieSync(recordURL: Self.recordURL(in: otherFolder)).copy(from: other.chromiumRuntime, to: other.webKitRuntime) {}
-        CookieSync.finishWrites()
+        defer { Self.remove(otherFolder) }
+        Self.launchAndQuit(other, in: otherFolder)
         other.webKit.cookies.removeAll { $0.name == "sid" }
         CookieSync(recordURL: Self.recordURL(in: otherFolder)).copy(from: other.webKitRuntime, to: other.chromiumRuntime) {}
         #expect(other.chromium.cookies.map(\.name) == ["pref"])
@@ -162,10 +181,9 @@ import Testing
 
     @Test func aValueOneEngineChangedAloneStaysTheNewerInTheNextLaunch() throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let engines = Engines(webKit: [], chromium: [Self.held, Self.other])
-        CookieSync(recordURL: Self.recordURL(in: folder)).copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
-        CookieSync.finishWrites()
+        Self.launchAndQuit(engines, in: folder)
         // A launch in which only Chromium runs: the site replaces the sign-in cookie.
         var rotated = Self.held
         rotated.value = "b2"
@@ -180,10 +198,9 @@ import Testing
 
     @Test func aStoreThatLostMostOfTheRecordSignsTheOtherOutOfNothing() throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let engines = Engines(webKit: [], chromium: [Self.held, Self.other])
-        CookieSync(recordURL: Self.recordURL(in: folder)).copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
-        CookieSync.finishWrites()
+        Self.launchAndQuit(engines, in: folder)
         // Chromium's cookies could not be read in the next launch, and a page set a new one.
         let fresh = EngineCookie(name: "visit", value: "1", domain: "example.net", expires: Self.expiry)
         engines.chromium.cookies = [fresh]
@@ -195,9 +212,30 @@ import Testing
         #expect(engines.chromium.cookies.map(\.name).sorted() == ["pref", "sid", "visit"])
     }
 
+    @Test func aRecordFromALaunchThatDidNotQuitDeletesNothing() throws {
+        let folder = try Self.makeFolder()
+        defer { Self.remove(folder) }
+        // A launch with both engines: the site signs in on WebKit, and the copy writes the cookie to Chromium.
+        let engines = Engines(webKit: [Self.held, Self.other], chromium: [Self.other])
+        CookieSync(recordURL: Self.recordURL(in: folder)).copy(from: engines.webKitRuntime, to: engines.chromiumRuntime) {}
+        CookieSync.finishWrites()
+        #expect(engines.chromium.cookies.map(\.name).sorted() == ["pref", "sid"])
+        // The launch ends in a crash before Chromium commits the cookie to disk.
+        engines.chromium.cookies.removeAll { $0.name == "sid" }
+        // A launch in which only Chromium runs quits, which leaves the record unread.
+        CookieSync(recordURL: Self.recordURL(in: folder)).saveAtQuit()
+        CookieSync.finishWrites()
+        // The next launch with both engines: Chromium's first copy leaves WebKit signed in, and WebKit's copy signs Chromium in again.
+        let sync = CookieSync(recordURL: Self.recordURL(in: folder))
+        sync.copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
+        #expect(engines.webKit.cookies.map(\.name).sorted() == ["pref", "sid"])
+        sync.copy(from: engines.webKitRuntime, to: engines.chromiumRuntime) {}
+        #expect(engines.chromium.cookies.map(\.name).sorted() == ["pref", "sid"])
+    }
+
     @Test func theFileKeepsNeitherValuesNorCookiesWithoutAnExpiry() throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let secret = EngineCookie(name: "token", value: "made-up-secret-value", domain: "example.com", expires: Self.expiry, isSecure: true)
         let session = EngineCookie(name: "per-launch", value: "1", domain: "example.com")
         let engines = Engines(webKit: [], chromium: [secret, session])
@@ -211,7 +249,7 @@ import Testing
 
     @Test func clearedCookiesLeaveTheFile() async throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let engines = Engines(webKit: [], chromium: [Self.held, Self.other])
         let sync = CookieSync(recordURL: Self.recordURL(in: folder))
         sync.runtimes = { [engines.webKitRuntime, engines.chromiumRuntime] }
@@ -219,6 +257,7 @@ import Testing
         await withCheckedContinuation { continuation in
             sync.removeCookies(where: { $0.domain == "example.com" }) { continuation.resume() }
         }
+        sync.saveAtQuit()
         CookieSync.finishWrites()
         #expect(engines.webKit.cookies.map(\.name) == ["pref"] && engines.chromium.cookies.map(\.name) == ["pref"])
         // The site sets the same cookie again on WebKit alone, and the next launch copies it to Chromium.
@@ -229,7 +268,7 @@ import Testing
 
     @Test func removingAPersonasRecordDeletesItsFile() throws {
         let folder = try Self.makeFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { Self.remove(folder) }
         let engines = Engines(webKit: [], chromium: [Self.held])
         CookieSync(recordURL: Self.recordURL(in: folder)).copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
         CookieSync.finishWrites()
@@ -242,7 +281,21 @@ import Testing
     private static let persona = UUID(uuidString: "5E1B0C1A-7D9E-4C35-9B6A-2F51A5C0D7E3")!
 
     private static func record(_ cookies: EngineCookie...) -> CookieSync.Record {
-        Dictionary(uniqueKeysWithValues: cookies.map { (CookieSync.CookieKey($0), CookieSync.Digest($0)) })
+        Dictionary(uniqueKeysWithValues: cookies.map { (CookieSync.CookieKey($0), [CookieSync.Digest($0)]) })
+    }
+
+    /// A launch with both engines in which WebKit starts second and takes the Chromium cookies, and that then quits.
+    private static func launchAndQuit(_ engines: Engines, in folder: URL) {
+        let sync = CookieSync(recordURL: recordURL(in: folder))
+        sync.copy(from: engines.chromiumRuntime, to: engines.webKitRuntime) {}
+        sync.saveAtQuit()
+        CookieSync.finishWrites()
+    }
+
+    /// Removes a test's folder once the record writes still on their queue are done, which would otherwise create it again.
+    private static func remove(_ folder: URL) {
+        CookieSync.finishWrites()
+        try? FileManager.default.removeItem(at: folder)
     }
 
     private static func makeFolder() throws -> URL {

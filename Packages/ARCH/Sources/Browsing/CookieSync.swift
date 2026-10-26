@@ -1,4 +1,4 @@
-// Keeps the cookie stores of one Persona's engines in step so that a site stays signed in, and signed out, whichever engine shows it. A copy carries what the source changed since the two stores last agreed: the cookies it added or changed, and the deletion of those it removed. A cookie that only the target changed stays, and the copy the other way carries it. When both changed one cookie, the source's version wins, but a deletion leaves a cookie the target changed, which may be a new sign-in after the old cookie expired. The record of what the stores agreed on outlasts the launch in a file per Persona, so the first copy of a launch also carries what one engine changed while the other was not running. The file keeps no cookie values. Local storage and IndexedDB stay with each engine.
+// Keeps the cookie stores of one Persona's engines in step so that a site stays signed in, and signed out, whichever engine shows it. A copy carries what the source changed since the two stores last agreed: the cookies it added or changed, and the deletion of those it removed. A cookie that only the target changed stays, and the copy the other way carries it. When both changed one cookie, the source's version wins, but a deletion leaves a cookie the target changed, which may be a new sign-in after the old cookie expired. The record of what the stores agreed on outlasts the launch in a file per Persona, so the first copy of a launch also carries what one engine changed while the other was not running. The file counts only when the launch that wrote it quit: an engine commits its cookie store to disk later than the file, so after a crash or a forced quit the file can list cookies that a store lost. The file keeps no cookie values. Local storage and IndexedDB stay with each engine.
 import ARCHEngine
 import CryptoKit
 import Foundation
@@ -21,7 +21,7 @@ final class CookieSync {
         }
     }
 
-    /// What the record keeps of an agreed cookie in place of its value: a SHA-256 digest of its value, its flags, and its expiry to the whole second, as WebKit keeps it. Both engines' versions of one cookie, which differ at most in their `SameSite` policy and in the fraction of a second of their expiry (`EngineCookie.hasSameContents(as:)`), have the same digest.
+    /// What the record keeps of a version of an agreed cookie in place of its value: a SHA-256 digest of its value, its flags, and its expiry to the whole second, as WebKit keeps it. A cookie and WebKit's copy of it, which differ at most in their `SameSite` policy and in the fraction of a second of their expiry, have the same digest. Versions that each engine took from a site on its own can have expiries less than a second apart on either side of a whole second, which `EngineCookie.hasSameContents(as:)` counts as the same and the digests do not, so the record keeps the digest of each store's version (`Record`).
     struct Digest: Hashable {
         let sha256: Data
         /// Whether the cookie has an expiry. The file leaves out cookies without one: both engines drop them at quit, and a later launch would take such a cookie that a site sets again with the same value in one engine for one that both stores hold.
@@ -42,8 +42,8 @@ final class CookieSync {
         }
     }
 
-    /// The cookies two stores held with the same contents after the last copy between them.
-    typealias Record = [CookieKey: Digest]
+    /// The cookies two stores held with the same contents after the last copy between them, each with the digests of the two stores' versions.
+    typealias Record = [CookieKey: Set<Digest>]
 
     /// The running engines, supplied by the session.
     var runtimes: () -> [EngineRuntime] = { [] }
@@ -87,17 +87,17 @@ final class CookieSync {
         }
     }
 
-    /// What a copy from `source` to `target` writes and deletes in the target, given the cookies both held alike after their last copy (`agreed`, empty without a record): each cookie of the source that differs from its agreed version and from the target's, and each agreed cookie that the source no longer holds and the target still holds as agreed. A cookie the target holds with the same contents keeps the target's `SameSite` policy, which the source store may not have kept: WebKit reads a Chromium cookie without a policy as `SameSite=None`, and writing it back would widen it.
+    /// What a copy from `source` to `target` writes and deletes in the target, given the cookies both held alike after their last copy (`agreed`, empty without a record): each cookie of the source that differs from its agreed versions and from the target's, and each agreed cookie that the source no longer holds and the target still holds as agreed. A cookie the target holds with the same contents keeps the target's `SameSite` policy, which the source store may not have kept: WebKit reads a Chromium cookie without a policy as `SameSite=None`, and writing it back would widen it.
     static func changes(from source: [EngineCookie], to target: [EngineCookie],
                         agreed: Record) -> (write: [EngineCookie], remove: Set<CookieKey>) {
         let held = Dictionary(grouping: target, by: CookieKey.init)
         let current = Set(source.map(CookieKey.init))
         let write = source.filter { cookie in
             let key = CookieKey(cookie)
-            return agreed[key] != Digest(cookie) && !(held[key] ?? []).contains { $0.hasSameContents(as: cookie) }
+            return !(agreed[key]?.contains(Digest(cookie)) ?? false) && !(held[key] ?? []).contains { $0.hasSameContents(as: cookie) }
         }
-        let remove = Set(agreed.filter { key, digest in
-            !current.contains(key) && (held[key] ?? []).contains { Digest($0) == digest }
+        let remove = Set(agreed.filter { key, digests in
+            !current.contains(key) && (held[key] ?? []).contains { digests.contains(Digest($0)) }
         }.keys)
         return (write, remove)
     }
@@ -108,7 +108,8 @@ final class CookieSync {
         let held = byKey(stored)
         var agreed = before
         for key in Set(current.keys).union(held.keys).union(before.keys) where same(current[key], held[key]) {
-            agreed[key] = current[key].map(Digest.init)
+            let digests = Set([current[key], held[key]].compactMap { $0 }.map(Digest.init))
+            agreed[key] = digests.isEmpty ? nil : digests
         }
         return agreed
     }
@@ -218,7 +219,7 @@ final class CookieSync {
 
     // MARK: Record file
 
-    /// The file's layout: for each pair of engines, the agreed cookies that have an expiry, each with its name, domain, path, and digest. A file of another version, or one that does not decode, counts as none.
+    /// The file's layout: for each pair of engines, the agreed cookies that have an expiry, each with its name, domain, path, and digests. A file of another version, one that does not decode, or one that a launch did not write as it quit counts as none.
     private struct RecordFile: Codable {
         static let currentVersion = 1
 
@@ -231,10 +232,12 @@ final class CookieSync {
             var name: String
             var domain: String
             var path: String
-            var digest: Data
+            var digests: [Data]
         }
 
         var version = currentVersion
+        /// Whether the launch quit after it last wrote the file (`saveAtQuit()`), as each engine commits its cookie store. Before then an engine can commit its store later than the file, as Chromium does only from time to time, so a launch that ended in a crash or a forced quit can have recorded cookies that a store lost with it, and the next launch's first copy would delete them from the other store.
+        var savedAtQuit: Bool
         var pairs: [Pair]
     }
 
@@ -249,6 +252,11 @@ final class CookieSync {
         return !FileManager.default.fileExists(atPath: url.path) || (try? FileManager.default.removeItem(at: url)) != nil
     }
 
+    /// Writes the records once more, marked as written at quit (`RecordFile.savedAtQuit`), as quitting needs before `finishWrites()`. A CookieSync that has not read its file this launch leaves it as it is.
+    func saveAtQuit() {
+        saveRecords(atQuit: true)
+    }
+
     /// Returns once every queued write of a record file is on disk, as quitting needs.
     static func finishWrites() {
         writeQueue.sync {}
@@ -259,28 +267,28 @@ final class CookieSync {
         guard !isLoaded else { return }
         isLoaded = true
         guard let recordURL, let data = try? Data(contentsOf: recordURL), let file = try? JSONDecoder().decode(RecordFile.self, from: data),
-              file.version == RecordFile.currentVersion else { return }
+              file.version == RecordFile.currentVersion, file.savedAtQuit else { return }
         for pair in file.pairs {
             let engines = Set(pair.engines)
             agreed[engines] = Dictionary(pair.cookies.map { cookie in
-                (CookieKey(name: cookie.name, domain: cookie.domain, path: cookie.path), Digest(saved: cookie.digest))
+                (CookieKey(name: cookie.name, domain: cookie.domain, path: cookie.path), Set(cookie.digests.map(Digest.init(saved:))))
             }) { first, _ in first }
             unchecked.insert(engines)
         }
     }
 
-    /// Writes every record's cookies that have an expiry on `writeQueue`, once the file has been read.
-    private func saveRecords() {
+    /// Writes every record's cookies that have an expiry on `writeQueue`, once the file has been read, marked as written at quit only when `atQuit` is true.
+    private func saveRecords(atQuit: Bool = false) {
         guard isLoaded, let recordURL else { return }
         let agreed = agreed
         Self.writeQueue.async {
             let pairs = agreed.map { engines, record in
                 RecordFile.Pair(engines: engines.sorted { $0.rawValue < $1.rawValue },
-                                cookies: record.filter(\.value.hasExpiry).map { key, digest in
-                                    RecordFile.Cookie(name: key.name, domain: key.domain, path: key.path, digest: digest.sha256)
+                                cookies: record.filter { $0.value.contains(where: \.hasExpiry) }.map { key, digests in
+                                    RecordFile.Cookie(name: key.name, domain: key.domain, path: key.path, digests: digests.map(\.sha256))
                                 })
             }
-            guard let data = try? JSONEncoder().encode(RecordFile(pairs: pairs)) else { return }
+            guard let data = try? JSONEncoder().encode(RecordFile(savedAtQuit: atQuit, pairs: pairs)) else { return }
             try? FileManager.default.createDirectory(at: recordURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: recordURL, options: .atomic)
         }

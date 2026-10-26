@@ -1473,9 +1473,14 @@ public final class BrowserSession: ObservableObject {
         store.scheduleSave { [weak self] in self?.snapshot() }
     }
 
-    /// Writes `session.json` at once and waits for the Personas' cookie records still on their queue, as quitting needs.
     public func saveNow() {
         store.saveNow(snapshot())
+    }
+
+    /// Writes `session.json` and each Persona's cookie record marked as written at quit (`CookieSync.saveAtQuit()`), then waits for the records still on their queue, as quitting needs.
+    public func saveAtQuit() {
+        saveNow()
+        personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
     }
 

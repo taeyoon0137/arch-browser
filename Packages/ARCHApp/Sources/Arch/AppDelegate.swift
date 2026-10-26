@@ -138,9 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session?.isQuitting = quitting
     }
 
-    /// Pages an import has not written yet and visits still on the history store's queue go in before the app quits.
+    /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits.
     func applicationWillTerminate(_ notification: Notification) {
-        session?.saveNow()
+        session?.saveAtQuit()
         session?.history.finishWrites()
     }
 
