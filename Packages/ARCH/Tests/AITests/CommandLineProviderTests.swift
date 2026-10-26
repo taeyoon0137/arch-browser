@@ -113,7 +113,8 @@ import Testing
     }
 }
 
-@Suite struct CommandLineProcessTests {
+/// A tool that a regression leaves running fails its test at the time limit instead of stopping the run.
+@Suite(.timeLimit(.minutes(1))) struct CommandLineProcessTests {
     @Test func runsWithASmallEnvironmentInAnEmptyFolderThatIsRemoved() async throws {
         setenv("ARCH_TEST_INHERITED", "1", 1)
         let tool = try toolScript("env; pwd; ls -A | wc -l")
@@ -358,7 +359,7 @@ private func replyText(_ events: [String]) -> String {
 }
 
 private func pidFileURL() -> URL {
-    FileManager.default.temporaryDirectory.appendingPathComponent("ArchAITests-\(UUID().uuidString).pid")
+    testRunFolder.appendingPathComponent("\(UUID().uuidString).pid")
 }
 
 /// The process group ID a tool script wrote, once it has started.

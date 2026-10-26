@@ -1,4 +1,4 @@
-// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, and cut streams.
+// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, cut streams, and the redirects the providers' session follows.
 import Foundation
 import Testing
 @testable import AI
@@ -298,6 +298,25 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
         #expect(!AIHTTPConfiguration.isAllowedBaseURL(URL(string: "http://api.example.com/v1")!))
         #expect(!AIHTTPConfiguration.isAllowedBaseURL(URL(string: "http://192.168.1.2/v1")!))
         #expect(!AIHTTPConfiguration.isAllowedBaseURL(URL(string: "ftp://example.com")!))
+    }
+
+    /// The session that every HTTP provider uses follows a redirect only within the base URL's scheme, host, and port, so the key in the request's headers reaches no other server.
+    @Test func redirectsStayWithTheBaseURLsOrigin() throws {
+        let session = StubURLProtocol.session()
+        defer { session.invalidateAndCancel() }
+        let original = try #require(URL(string: "https://api.example.test/v1/chat/completions"))
+        // The task never starts; the guard reads only its original request.
+        let task = session.dataTask(with: original)
+        let response = try #require(HTTPURLResponse(url: original, statusCode: 307, httpVersion: "HTTP/1.1", headerFields: nil))
+        func follows(_ target: String) -> Bool {
+            var followed: URLRequest?
+            AIRedirectGuard().urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: URLRequest(url: URL(string: target)!)) { followed = $0 }
+            return followed?.url?.absoluteString == target
+        }
+        #expect(follows("https://api.example.test/v2/chat/completions"))
+        #expect(!follows("https://other.example.test/v1/chat/completions"))
+        #expect(!follows("https://api.example.test:8443/v1/chat/completions"))
+        #expect(!follows("http://api.example.test/v1/chat/completions"))
     }
 
     @Test func readsRetryAfterDates() {

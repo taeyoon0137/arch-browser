@@ -4,11 +4,13 @@ import Foundation
 import Testing
 
 @MainActor @Suite struct PrivateAPIFlagsTests {
-    private let suiteName = "ARCHPrivateAPIFlagsTests-\(UUID().uuidString)"
+    /// macOS keeps an empty file for a removed domain, so each test reuses a domain named after it on every run, emptied as it starts.
+    private let suiteName = "test.arch.private-api-flags.\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
     private let defaults: UserDefaults
 
     init() throws {
         defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     @Test func flagsAreOnUntilTurnedOffAndStayAsSet() {

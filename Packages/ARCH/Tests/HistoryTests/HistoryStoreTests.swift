@@ -37,6 +37,8 @@ import Testing
         store.record(try #require(URL(string: "https://a.example/")), title: "A")
         #expect(await store.suggestions(for: "", limit: 10).isEmpty)
         #expect(await store.suggestions(for: " \n", limit: 10).isEmpty)
+        // Empty text never waits on the store's queue, so the visit is written before the folder goes.
+        store.finishWrites()
     }
 
     /// Pages whose addresses all hold `page`, a batch at a time.

@@ -1,4 +1,4 @@
-// Test doubles that keep every test off the network and out of the Keychain: a URL protocol that replays hand-written responses, an in-memory key store, a scripted provider, and helpers to build services and read streams.
+// Test doubles that keep every test off the network and out of the Keychain: a URL protocol that replays hand-written responses, an in-memory key store, a scripted provider, the run's folder for the tests' files, and helpers to build services and read streams.
 import Foundation
 @testable import AI
 
@@ -190,8 +190,17 @@ struct ScriptedProvider: AIProvider {
     }
 }
 
+/// The folder that holds every test's files in this run, which the run removes as it exits. The tests' folders stay until then, since the stores that write them and the tools a test starts can write after the test ends.
+let testRunFolder: URL = {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAITests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    atexit { try? FileManager.default.removeItem(at: testRunFolder) }
+    return url
+}()
+
+/// The path of a new folder in the run's folder. The caller, or the store it hands the path to, creates the folder.
 func temporaryDirectory() -> URL {
-    FileManager.default.temporaryDirectory.appendingPathComponent("ArchAITests-\(UUID().uuidString)", isDirectory: true)
+    testRunFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
 }
 
 func provider(_ name: String, models: [AIModelConfiguration], format: AIWireFormat = .chatCompletions, baseURL: String = "https://models.example.test/v1") -> AIProviderConfiguration {

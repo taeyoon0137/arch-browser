@@ -227,7 +227,8 @@ import Testing
 
     @Test func currentFilesLeaveNoCopy() throws {
         let folder = try SessionFolder()
-        try folder.write(version11File)
+        // A file of the version this build writes, whichever version that is.
+        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion),"#))
         _ = try #require(folder.store.load())
         #expect(try folder.fileNames() == ["session.json"])
     }

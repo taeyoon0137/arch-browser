@@ -187,13 +187,15 @@ private final class FakeDevTools: EngineDevTools {
     func openNetworkView() { open() }
 }
 
-/// Dock settings in defaults of their own for one test, removed when the test ends.
+/// Dock settings in defaults of their own for one test, named after the test and emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so each test reuses its name on every run.
 private final class TemporaryDefaults {
-    private let name = "ArchDevToolsDockTests-\(UUID().uuidString)"
+    private let name = "test.arch.devtools-dock.\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
     let settings: DevToolsDockSettings
 
     init() {
-        settings = DevToolsDockSettings(defaults: UserDefaults(suiteName: name)!)
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        settings = DevToolsDockSettings(defaults: defaults)
     }
 
     deinit {

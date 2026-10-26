@@ -42,7 +42,7 @@ import Testing
         try await limiter.acquire(isUser: true) { _ in }
         let waits = WaitLog()
         let second = Task { try await limiter.acquire(isUser: true) { waits.append($0) } }
-        try await Task.sleep(for: .milliseconds(50))
+        try #require(await waits.reaches(1))
         #expect(waits.reasons == [.queued])
         await limiter.release()
         try await second.value
@@ -52,19 +52,20 @@ import Testing
     @Test func userRequestsTakeSlotsBeforeAutomaticOnes() async throws {
         let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 1))
         try await limiter.acquire(isUser: true) { _ in }
-        let order = WaitLog()
+        let order = WaitLog(), waits = WaitLog()
         let automatic = Task {
-            try await limiter.acquire(isUser: false) { _ in }
+            try await limiter.acquire(isUser: false) { waits.append($0) }
             order.append(.rateLimited(until: .distantPast))
             await limiter.release()
         }
-        try await Task.sleep(for: .milliseconds(30))
+        try #require(await waits.reaches(1))
         let user = Task {
-            try await limiter.acquire(isUser: true) { _ in }
+            try await limiter.acquire(isUser: true) { waits.append($0) }
             order.append(.queued)
             await limiter.release()
         }
-        try await Task.sleep(for: .milliseconds(30))
+        // The user request joins the queue after the automatic one, and the slot frees only then.
+        try #require(await waits.reaches(2))
         await limiter.release()
         try await user.value
         try await automatic.value
@@ -103,8 +104,9 @@ import Testing
     @Test func cancellingAWaitingRequestFreesItsPlace() async throws {
         let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 1))
         try await limiter.acquire(isUser: true) { _ in }
-        let waiting = Task { try await limiter.acquire(isUser: true) { _ in } }
-        try await Task.sleep(for: .milliseconds(30))
+        let waits = WaitLog()
+        let waiting = Task { try await limiter.acquire(isUser: true) { waits.append($0) } }
+        try #require(await waits.reaches(1))
         waiting.cancel()
         await #expect(throws: CancellationError.self) { try await waiting.value }
         await limiter.release()
@@ -118,7 +120,7 @@ import Testing
         try await limiter.acquire(isUser: true) { _ in }
         let waits = WaitLog()
         let waiting = Task { try await limiter.acquire(isUser: true) { waits.append($0) } }
-        try await Task.sleep(for: .milliseconds(30))
+        try #require(await waits.reaches(1))
         let start = ContinuousClock.now
         await limiter.release(after: .rateLimited(retryAfter: Date() + 0.3))
         try await waiting.value
@@ -184,6 +186,14 @@ private final class WaitLog: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return entries
+    }
+
+    /// Waits up to two seconds until the log holds `count` waits, and reports whether it does. A request reports `queued` on the limiter's actor just before it joins the queue, so a release that follows finds it waiting.
+    func reaches(_ count: Int) async -> Bool {
+        for _ in 0..<200 where reasons.count < count {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return reasons.count >= count
     }
 }
 

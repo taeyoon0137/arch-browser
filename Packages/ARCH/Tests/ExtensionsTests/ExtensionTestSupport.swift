@@ -115,7 +115,7 @@ final class RecordingHost: WebExtensionHost {
     }
 }
 
-/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab.
+/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab. Its asynchronous calls change its records on the main actor, as the adapters change their state on the main thread, so the tests read them there without a race.
 final class RecordingEngine: EngineExtensions {
     weak var delegate: (any EngineExtensionsDelegate)?
     private(set) var loaded: [String: EngineExtension] = [:]
@@ -134,12 +134,14 @@ final class RecordingEngine: EngineExtensions {
     var refusedNames: Set<String> = []
     var refused: Set<String> = []
 
+    @MainActor
     func check(_ packageURL: URL) async throws {
         checkCount += 1
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: packageURL.appendingPathComponent("manifest.json"))) as? [String: Any]
         if let name = manifest?["name"] as? String, refusedNames.contains(name) { throw RecordingEngineError.refused }
     }
 
+    @MainActor
     func load(_ extension: EngineExtension) async throws {
         guard !refused.contains(`extension`.id) else { throw RecordingEngineError.refused }
         loaded[`extension`.id] = `extension`
@@ -150,6 +152,7 @@ final class RecordingEngine: EngineExtensions {
         loaded[id] = nil
     }
 
+    @MainActor
     func removeData(of id: String) async {
         removedData.append(id)
     }
@@ -202,7 +205,7 @@ final class WebKitProfile {
         browser.createWebContents(EngineWebContentsConfiguration(initialURL: url)) as! WebKitWebContents
     }
 
-    /// Runs `body` with a new profile, then deletes the profile's website data and its extensions' data. WebKit deletes a store only while nothing in the process uses it, so `body` keeps everything that holds the profile, and the deletion waits for WebKit to let the store go.
+    /// Runs `body` with a new profile, then deletes the profile's website data and its extensions' data. WebKit deletes a store only while nothing in the process uses it, so `body` keeps everything that holds the profile, and the deletion waits up to five seconds for WebKit to let the store go. A store that is still in use then fails the test, as a tab that outlives `body` in the suite's own properties keeps it.
     static func run(_ body: (WebKitProfile) async throws -> Void) async throws {
         let storage = UUID()
         var failure: (any Error)?
@@ -211,9 +214,13 @@ final class WebKitProfile {
         } catch {
             failure = error
         }
-        for _ in 0..<50 where await !removeData(of: storage) {
+        var removed = false
+        for _ in 0..<50 {
+            removed = await removeData(of: storage)
+            if removed { break }
             try await Task.sleep(for: .milliseconds(100))
         }
+        if !removed { Issue.record("WebKit kept the website data store \(storage.uuidString), which something that outlives the test still uses.") }
         // WebKit also keeps a state file for each extension it loaded, which no public call removes, in a folder named after the store.
         let webKitFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/WebKit/\(Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName)")
         try? FileManager.default.removeItem(at: webKitFolder.appendingPathComponent("WebExtensions/\(storage.uuidString)"))

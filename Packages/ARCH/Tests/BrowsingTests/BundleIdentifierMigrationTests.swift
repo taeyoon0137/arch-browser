@@ -1,5 +1,6 @@
-// The bundle identifier migration on a temporary Library folder and defaults suites named for each test, so the user's own data is never read or moved.
+// The bundle identifier migration on a temporary Library folder, defaults suites, and login keychain items named for each test, so the user's own data is never read or moved.
 import Foundation
+import Security
 import Testing
 @testable import Browsing
 
@@ -54,6 +55,62 @@ import Testing
         #expect(fixture.contents("WebKit/\(current)/WebsiteData/Default/salt") == "WebKit/\(current)/WebsiteData/Default/salt")
         #expect(fixture.exists("WebKit/\(previous)/WebsiteData/Default/salt"))
         #expect(fixture.exists("HTTPStorages/\(current).binarycookies"))
+    }
+
+    @Test func keychainItemsMoveWithTheirAttributesOnce() throws {
+        let fixture = try Fixture()
+        let previous = fixture.migration.previousIdentifier, current = fixture.migration.identifier
+        let keyService = { (identifier: String) in identifier + BundleIdentifierMigration.keychainServiceSuffixes[0] }
+        let masterKeyAccount = { (identifier: String) in BundleIdentifierMigration.webCryptoMasterKeyAccountPrefix + identifier }
+        defer {
+            fixture.remove()
+            for identifier in [previous, current] {
+                TestKeychain.delete(service: keyService(identifier), account: "provider")
+                TestKeychain.delete(account: masterKeyAccount(identifier))
+            }
+        }
+        // An AI provider key, and the master key that WebKit keeps under an account named by the identifier.
+        try TestKeychain.add("provider key", service: keyService(previous), account: "provider", label: "Provider")
+        try TestKeychain.add("master key", service: "WebKit WebCrypto", account: masterKeyAccount(previous), label: "WebCrypto Master Key")
+        for _ in 0..<2 { fixture.migration.moveKeychainItems() }
+        let movedKey = try #require(TestKeychain.item(service: keyService(current), account: "provider"))
+        #expect(movedKey.key == "provider key" && movedKey.label == "Provider")
+        let movedMasterKey = try #require(TestKeychain.item(account: masterKeyAccount(current)))
+        #expect(movedMasterKey.key == "master key" && movedMasterKey.service == "WebKit WebCrypto" && movedMasterKey.label == "WebCrypto Master Key")
+        #expect(TestKeychain.item(service: keyService(previous), account: "provider") == nil)
+        #expect(TestKeychain.item(account: masterKeyAccount(previous)) == nil)
+    }
+}
+
+/// Generic password items in the login keychain, where the migration finds them.
+private enum TestKeychain {
+    static func add(_ key: String, service: String, account: String, label: String) throws {
+        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
+                                   kSecAttrLabel as String: label, kSecValueData as String: Data(key.utf8)]
+        let status = SecItemAdd(item as CFDictionary, nil)
+        try #require(status == errSecSuccess, "SecItemAdd returned \(status)")
+    }
+
+    /// The key, service, and label of the item with `account`, and with `service` when it is given.
+    static func item(service: String? = nil, account: String) -> (key: String, service: String?, label: String?)? {
+        var query = query(service: service, account: account)
+        query[kSecReturnAttributes as String] = true
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let item = result as? [String: Any],
+              let key = item[kSecValueData as String] as? Data else { return nil }
+        return (String(decoding: key, as: UTF8.self), item[kSecAttrService as String] as? String, item[kSecAttrLabel as String] as? String)
+    }
+
+    static func delete(service: String? = nil, account: String) {
+        SecItemDelete(query(service: service, account: account) as CFDictionary)
+    }
+
+    private static func query(service: String?, account: String) -> [String: Any] {
+        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: account]
+        if let service { query[kSecAttrService as String] = service }
+        return query
     }
 }
 

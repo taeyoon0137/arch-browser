@@ -305,7 +305,7 @@ import Testing
         let service = scriptedService(providers: [provider("First", models: [AIModelConfiguration(name: "model-a")])], script: ["model-a": [.event(.text("first")), .sleep(.seconds(30)), .event(.finished(.completed))]], log: log)
         service.register(userFeature)
         let reader = Task { await collect(service.stream(textRequest(userFeature))) }
-        while log.requests.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(await eventually { !log.requests.isEmpty })
         try await Task.sleep(for: .milliseconds(50))
         reader.cancel()
         _ = await reader.value

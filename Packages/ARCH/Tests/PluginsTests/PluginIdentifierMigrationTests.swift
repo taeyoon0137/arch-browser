@@ -103,6 +103,8 @@ import Testing
 
     @Test func secretsMoveToTheServicesOfTheNewIdentifiers() throws {
         let migration = try migration(suiteName: Self.secretsSuiteName)
+        // A run that stopped before its cleanup left the suite saying that the secrets moved.
+        migration.defaults.removePersistentDomain(forName: Self.secretsSuiteName)
         let keychain = PluginKeychain()
         defer {
             migration.defaults.removePersistentDomain(forName: Self.secretsSuiteName)

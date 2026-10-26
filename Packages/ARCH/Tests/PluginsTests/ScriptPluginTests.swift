@@ -208,6 +208,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func runsCommandsInTheBackgroundScript() async throws {
         let manager = manager()
+        // Closing drops the storage write that the commands left waiting, which would bring back the deleted temporary folder.
+        defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager, PluginInvocation(tab: tab, linkURL: URL(string: "https://example.org/link")))
         #expect(try stored("remembered", in: manager) == .object([
@@ -232,6 +234,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func keepsTheBackgroundScriptInItsSandboxAndGrant() async throws {
         let manager = manager()
+        defer { manager.close() }
         try await installSample(in: manager)
         await run("probe", in: manager)
         #expect(try stored("probe", in: manager) == .object([
@@ -242,6 +245,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func stopsWhenIdleAndStartsAgainAtTheNextUse() async throws {
         let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.2))
+        defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager)
         try await Task.sleep(for: .milliseconds(600))
@@ -255,6 +259,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func runsACommandThatArrivesAsTheIdleLimitPasses() async throws {
         let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.2))
+        defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager)
         // Once the idle stop waits, it comes due while the main actor is busy, so it waits in the actor's queue as the next command arrives.
@@ -285,6 +290,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func updatesThePackageAndKeepsTheStorage() async throws {
         let manager = manager()
+        defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager)
         let update = folder.url.appendingPathComponent("Update", isDirectory: true)
@@ -346,6 +352,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
     @Test func listsInstalledPluginsAtLaunch() async throws {
         try await installSample(in: manager())
         let relaunched = manager()
+        defer { relaunched.close() }
         let installed = try #require(relaunched.plugins.first)
         #expect(relaunched.plugins.count == 1 && installed.isEnabled && installed.origin == .file(sampleFolder))
         #expect(installed.grant == PluginGrant(permissions: [], sites: installed.manifest.sites))

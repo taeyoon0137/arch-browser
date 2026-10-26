@@ -1,4 +1,4 @@
-// The sample extension on a WebKit tab, as the app runs it: installed through the plugin manager, loaded by the runtime into a profile's `WKWebExtensionController`, its content script running in the tab's page and telling its background script, which sets the action's badge for the tab, and its popup finding the tab through the windows the runtime reports; its pages also load in a tab, a window such a page opens for a web page gets a web view of its own, and a page loads an extension's web-accessible page in a frame. Windows that repeat an identity count once. WebKit's check passes the sample and refuses a package it cannot read, and the engine names its extension runtime's version.
+// The sample extension on a WebKit tab, as the app runs it: installed through the plugin manager, loaded by the runtime into a profile's `WKWebExtensionController`, its content script running in the tab's page and telling its background script, which sets the action's badge for the tab, and its popup finding the tab through the windows the runtime reports; its pages also load in a tab, a window such a page opens for a web page gets a web view of its own, and a page loads an extension's web-accessible page in a frame. WebKit's check passes the sample and refuses a package it cannot read, and the engine names its extension runtime's version.
 import ARCHEngine
 import ARCHEngineWebKit
 @testable import Extensions
@@ -84,17 +84,6 @@ struct WebKitExtensionTests {
             let unreadable = try folder.package("unreadable", ["manifest.json": "{"])
             await #expect(throws: (any Error).self) { try await extensions.check(unreadable) }
             await #expect(throws: (any Error).self) { try await extensions.check(folder.package("empty", ["notes.txt": ""])) }
-        }
-    }
-
-    /// A session file can list two spaces with one identifier; reporting them twice compares the second report with the first, which kept each identity once.
-    @Test func takesOneWindowForEachIdentity() async throws {
-        try await WebKitProfile.run { profile in
-            let extensions = try #require(profile.context.extensions)
-            let window = UUID()
-            let windows = [profile.makeTab(), profile.makeTab()].map { EngineExtensionWindow(id: window, tabs: [$0], activeTab: $0, window: nil) }
-            extensions.setWindows(windows, focusedWindowID: window)
-            extensions.setWindows(windows, focusedWindowID: window)
         }
     }
 

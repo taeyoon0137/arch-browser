@@ -336,6 +336,8 @@ struct EngineVersionsTests {
             let tab = profile.makeTab()
             let tabID = UUID()
             host.tabs[tabID] = tab
+            // The suite's host outlives the profile, so it lets the tab go for WebKit to delete the profile's store.
+            defer { host.tabs[tabID] = nil }
             let (manager, runtime) = launch()
             // The Chromium version comes first, so the pair takes its name and place.
             webKit.refusedNames = ["Reader for Chromium"]

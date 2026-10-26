@@ -117,13 +117,14 @@ import Testing
     }
 }
 
-/// Defaults of their own for one test, removed when the test ends.
+/// Defaults of their own for one test, named after the test and emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so each test reuses its name on every run.
 private final class TemporaryDefaults {
-    private let name = "ArchPreferencesTests-\(UUID().uuidString)"
+    private let name = "test.arch.shortcuts.\(Test.current.map { String($0.name.prefix { $0 != "(" }) } ?? UUID().uuidString)"
     let store: UserDefaults
 
     init() {
         store = UserDefaults(suiteName: name)!
+        store.removePersistentDomain(forName: name)
     }
 
     deinit {

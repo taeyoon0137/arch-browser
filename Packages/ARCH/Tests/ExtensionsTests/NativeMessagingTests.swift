@@ -1,4 +1,4 @@
-// Native messaging: finding a native app through its host manifest, the apps and extensions Arch refuses, one message and its reply, an app that does not start, a port's messages both ways, and an app that breaks the message format. A shell script stands for the app.
+// Native messaging: finding a native app through its host manifest, the apps and extensions Arch refuses, one message and its reply, the extension's origin as the app's argument, an app that ends without replying, an app that does not start, a port's messages both ways, and an app that breaks the message format. A shell script stands for the app.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -22,10 +22,12 @@ import Testing
         return NativeMessaging(directory: hosts)
     }
 
-    private func reply(to message: String, from app: String, through messaging: NativeMessaging) async -> Result<Data, any Error> {
-        await withCheckedContinuation { continuation in
-            messaging.send(Data(message.utf8), to: app, from: extensionID) { continuation.resume(returning: $0) }
-        }
+    /// The app's answer, which arrives on the main thread. It fails the test when none comes within ten seconds, so that an app that never ends fails instead of stopping the run.
+    private func reply(to message: String, from app: String, through messaging: NativeMessaging) async throws -> Result<Data, any Error> {
+        var result: Result<Data, any Error>?
+        messaging.send(Data(message.utf8), to: app, from: extensionID) { result = $0 }
+        _ = await eventually { result != nil }
+        return try #require(result)
     }
 
     @Test func sendsOneMessageAndReturnsTheReply() async throws {
@@ -33,6 +35,13 @@ import Testing
         let messaging = try installApp("org.example.echo", script: "exec cat")
         let reply = try await reply(to: #"{"text":"hello"}"#, from: "org.example.echo", through: messaging).get()
         #expect(String(decoding: reply, as: UTF8.self) == #"{"text":"hello"}"#)
+    }
+
+    @Test func passesTheExtensionsOriginAsTheArgument() async throws {
+        // The app answers only when its argument is the calling extension's origin.
+        let messaging = try installApp("org.example.origin", script: #"[ "$1" = "chrome-extension://jpignaibiiemhngfjkcpokkamffknabf/" ] || exit 1; exec cat"#)
+        let reply = try await reply(to: "1", from: "org.example.origin", through: messaging).get()
+        #expect(String(decoding: reply, as: UTF8.self) == "1")
     }
 
     @Test func refusesAppsAndExtensionsTheManifestsDoNotAllow() throws {
@@ -43,20 +52,20 @@ import Testing
         #expect(throws: NativeMessagingError.notFound("org.example.missing")) { try messaging.executable(of: "org.example.missing", for: extensionID) }
     }
 
-    @Test func passesTheOriginAndFailsAnAppThatEndsWithoutReplying() async throws {
-        let messaging = try installApp("org.example.quiet", script: #"[ "$1" = "chrome-extension://jpignaibiiemhngfjkcpokkamffknabf/" ] || exit 1; exec cat > /dev/null"#)
-        // The app reads until its input closes, which only ending the connection does, so a missing argument shows as an early end.
-        let result = await reply(to: "1", from: "org.example.quiet", through: messaging)
+    @Test func failsAnAppThatEndsWithoutReplyingOrBreaksTheFormat() async throws {
+        // The app closes its output and reads until its input closes.
+        let messaging = try installApp("org.example.quiet", script: "exec cat > /dev/null")
+        let result = try await reply(to: "1", from: "org.example.quiet", through: messaging)
         #expect(throws: NativeMessagingError.noReply) { try result.get() }
         let broken = try installApp("org.example.broken", script: #"printf '\377\377\377\177'"#)
-        let tooLarge = await reply(to: "1", from: "org.example.broken", through: broken)
+        let tooLarge = try await reply(to: "1", from: "org.example.broken", through: broken)
         #expect(throws: NativeMessagingError.messageTooLarge) { try tooLarge.get() }
     }
 
     @Test func failsAndLetsGoOfAnAppThatDoesNotStart() async throws {
         let messaging = try installApp("org.example.gone", script: "exit 0")
         try FileManager.default.removeItem(at: folder.url.appendingPathComponent("org.example.gone.sh"))
-        let result = await reply(to: "1", from: "org.example.gone", through: messaging)
+        let result = try await reply(to: "1", from: "org.example.gone", through: messaging)
         #expect(throws: (any Error).self) { try result.get() }
         weak var released: NativeMessagingConnection?
         do {

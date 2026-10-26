@@ -1,4 +1,4 @@
-// What a profile's web extensions hear when the app reports its windows: a window that closes while its tab moves to another window closes after the tab has moved there, a window that closes with its tabs closes after them, and the active tab and focus follow. The tests use a private profile, which keeps nothing on disk, and load no page.
+// What a profile's web extensions hear when the app reports its windows: a window that closes while its tab moves to another window closes after the tab has moved there, a window that closes with its tabs closes after them, the active tab and focus follow, and a window with the identity of a window before it in the report is left out. The tests use a private profile, which keeps nothing on disk, and load no page.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -41,6 +41,25 @@ struct WebKitExtensionWindowsTests {
 
         extensions.setWindows([], focusedWindowID: nil)
         #expect(recorder.events == ["close kept with its window", "close moved with its window", "close window main", "focus none"])
+    }
+
+    /// A session file can list two spaces with one identifier. The first window with the identity stands for it, so the second one's tab stays unlisted and the same report again changes nothing.
+    @Test func takesOneWindowForEachIdentity() throws {
+        guard #available(macOS 15.4, *) else { return }
+        let extensions = try #require(context.webExtensions)
+        let recorder = WindowEventRecorder()
+        extensions.windowEvents = recorder
+        let first = try makeTab(), second = try makeTab()
+        let window = UUID()
+        recorder.tabNames = [ObjectIdentifier(first.extensionTab): "first", ObjectIdentifier(second.extensionTab): "second"]
+        recorder.windowNames = [window: "space"]
+        let windows = [first, second].map { EngineExtensionWindow(id: window, tabs: [$0], activeTab: $0, window: nil) }
+        extensions.setWindows(windows, focusedWindowID: window)
+        #expect(recorder.events == ["open window space", "open first", "focus space"])
+        recorder.events.removeAll()
+
+        extensions.setWindows(windows, focusedWindowID: window)
+        #expect(recorder.events.isEmpty)
     }
 
     private func makeTab() throws -> WebKitWebContents {
