@@ -396,6 +396,24 @@ import Testing
         #expect(store.estimatedCost(in: "USD") == 2)
     }
 
+    /// A file from an earlier version that lists a month twice reads as one entry per month, whose totals and cost count both entries.
+    @Test func aFileThatListsAMonthTwiceAddsItsEntriesTogether() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai-usage.json")
+        func month(_ key: String, requests: Int, cost: Int) -> String {
+            #"{"month": "\#(key)", "totals": [{"feature": "user", "featureName": "User", "provider": "p", "providerName": "P", "model": "model-a", "requests": \#(requests), "errors": 0, "usage": {"inputTokens": \#(requests), "outputTokens": 0, "cachedInputTokens": 0}, "costs": {"USD": \#(cost)}}]}"#
+        }
+        let months = [month("2026-10", requests: 1, cost: 1), month("2026-11", requests: 2, cost: 2), month("2026-10", requests: 4, cost: 4), month("2026-11", requests: 8, cost: 8)]
+        try Data(#"{"version": 1, "months": [\#(months.joined(separator: ", "))], "day": "", "automaticRequests": {}}"#.utf8).write(to: file)
+        let store = AIUsageStore(fileURL: file) { Self.date(month: 11, day: 15) }
+        #expect(store.months.map(\.month) == ["2026-10", "2026-11"])
+        #expect(store.totals(monthsAgo: 0).map(\.requests) == [10])
+        #expect(store.totals(monthsAgo: 0).first?.usage == AIUsage(inputTokens: 10, outputTokens: 0))
+        #expect(store.totals(monthsAgo: 1).map(\.requests) == [5])
+        #expect(store.estimatedCost(in: "USD") == 10)
+    }
+
     private static func date(month: Int, day: Int) -> Date {
         Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12))!
     }

@@ -386,7 +386,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (class, nonatomic, readonly) BOOL isRunningWork;
 /// Closes every browser, runs CEF's work for up to two seconds while they close, and shuts CEF down. It runs by itself at `NSApplicationWillTerminateNotification`, once the quit is certain.
 + (void)shutdown;
-/// The version of the CEF distribution the bridge builds with, which the framework must match, such as `156.0.42-arch-8078.3687+g10ca70a+chromium-156.0.8078.48`.
+/// The version of the CEF distribution the bridge builds with, which the framework must match: the `CEF_VERSION` that `scripts/setup_cef.sh` pins.
 @property (class, nonatomic, readonly, copy) NSString *cefVersion;
 /// Builds the accessibility tree of every browser, now and as browsers open, or stops building it. Assistive apps then read Chromium pages as they read WebKit ones; the tree costs memory and time on every page.
 + (void)setAccessibilityEnabled:(BOOL)enabled;

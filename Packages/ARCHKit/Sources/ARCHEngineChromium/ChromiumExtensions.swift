@@ -90,17 +90,16 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         return copy.path == path && copy.version == ChromiumManifest(packageAt: `extension`.packageURL)?.version
     }
 
-    /// Every site the manifest asks for when the grant has them all, or every web page; otherwise on a click. Patterns compare with their schemes and hosts in lowercase, as the app's grants write them and Chromium reads them. The patterns for schemes other than `http`, `https`, and `*`, which the app's grants cannot hold and the install sheet never showed, are left out, since Arch's engine keeps extensions out of `file:` pages. A pattern with a port, which the install sheet never showed either, keeps the click.
+    /// Every site the manifest asks for when the grant has them all, or every web page; otherwise on a click. Patterns compare with their schemes and hosts in lowercase, as the app's grants write them and Chromium reads them. The patterns for `file:` pages, which Arch's engine keeps extensions out of, and for `ftp:` ones, which Chromium no longer loads, are left out. Any other pattern that the app's grants cannot hold and the install sheet never showed keeps the click: one with a port, and one for another scheme, such as `wss:`, which Chromium would otherwise grant with the rest.
     static func siteAccess(for extension: EngineExtension) -> ARCHCEFExtensionSiteAccess {
-        let asked = Set((ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []).map(lowercasingSchemeAndHost).filter(isWebPattern))
+        let asked = Set((ChromiumManifest(packageAt: `extension`.packageURL)?.hostPatterns ?? []).map(lowercasingSchemeAndHost).filter(countsForSiteAccess))
         return `extension`.sites.contains("<all_urls>") || asked.isSubset(of: `extension`.sites) ? .onAllSites : .onClick
     }
 
-    /// Whether the pattern, with its scheme in lowercase, is `<all_urls>` or has the scheme `http`, `https`, or `*`, as the app's grants do.
-    static func isWebPattern(_ pattern: String) -> Bool {
-        guard pattern != "<all_urls>" else { return true }
-        guard let separator = pattern.range(of: "://") else { return false }
-        return ["http", "https", "*"].contains(pattern[..<separator.lowerBound])
+    /// Whether the pattern, with its scheme in lowercase, counts toward the sites an extension needs: every pattern but those for `file:` and `ftp:` pages, which no extension reaches on Arch's engine.
+    static func countsForSiteAccess(_ pattern: String) -> Bool {
+        guard let separator = pattern.range(of: "://") else { return true }
+        return !["file", "ftp"].contains(pattern[..<separator.lowerBound])
     }
 
     /// The match pattern with its scheme and host in lowercase; its path keeps its case.

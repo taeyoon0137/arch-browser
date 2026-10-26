@@ -123,7 +123,7 @@ public final class AIUsageStore: ObservableObject {
         self.now = now
         if let data = try? Data(contentsOf: fileURL) {
             if let file = try? JSONDecoder().decode(File.self, from: data) {
-                months = file.months
+                months = Self.oneEntryPerMonth(file.months)
                 day = file.day
                 automaticRequests = file.automaticRequests
             } else {
@@ -136,6 +136,32 @@ public final class AIUsageStore: ObservableObject {
         NotificationCenter.default.addObserver(forName: Notification.Name("NSApplicationWillTerminateNotification"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveNow() }
         }
+    }
+
+    /// The months in order, the last `keptMonths` of them, with the entries for one month added together. An earlier version could list a month twice, after a clock or time zone went back past the start of a month, and recorded into the last of them.
+    private static func oneEntryPerMonth(_ months: [Month]) -> [Month] {
+        var merged: [Month] = []
+        for month in months {
+            guard let monthIndex = merged.firstIndex(where: { $0.month == month.month }) else {
+                merged.append(month)
+                continue
+            }
+            for total in month.totals {
+                guard let index = merged[monthIndex].totals.firstIndex(where: { $0.id == total.id }) else {
+                    merged[monthIndex].totals.append(total)
+                    continue
+                }
+                var sum = merged[monthIndex].totals[index]
+                sum.featureName = total.featureName
+                sum.providerName = total.providerName
+                sum.requests += total.requests
+                sum.errors += total.errors
+                sum.usage = sum.usage + total.usage
+                sum.costs.merge(total.costs, uniquingKeysWith: +)
+                merged[monthIndex].totals[index] = sum
+            }
+        }
+        return Array(merged.sorted { $0.month < $1.month }.suffix(keptMonths))
     }
 
     /// The totals `monthsAgo` months before the current one; empty when none were recorded.

@@ -862,7 +862,7 @@ public struct AIPrice: Codable, Sendable {
 ```
 
 - Arch ships no price list: prices change and differ by account. The user can enter a price per million tokens for each model. Arch shows cost only for models with a price, labels it as an estimate, and groups totals by currency.
-- `AIUsageStore` keeps totals without content or addresses in `ai-usage.json`. It stores request, error, and token counts by month (the last 13, oldest first, one entry each even when the clock or time zone goes back past the start of a month), feature, provider, and model. It also stores the current day's automatic request counts for the daily limit. A file that does not decode is renamed to `ai-usage.json.unreadable`, and the totals start empty.
+- `AIUsageStore` keeps totals without content or addresses in `ai-usage.json`. It stores request, error, and token counts by month (the last 13, oldest first, one entry each even when the clock or time zone goes back past the start of a month; reading a file that lists a month twice adds its entries together), feature, provider, and model. It also stores the current day's automatic request counts for the daily limit. A file that does not decode is renamed to `ai-usage.json.unreadable`, and the totals start empty.
 - Settings ▸ AI ▸ Usage shows this month and last month by feature and by model: requests, tokens, and estimated cost.
 - The page reader and question popover show the model and tokens under each answer, plus the estimated cost when the model has a price. A command-line tool that reports no usage shows only its name because the user's subscription covers its use.
 

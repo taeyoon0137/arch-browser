@@ -75,10 +75,17 @@ import Testing
 
     /// The install sheet lists only `http`, `https`, and `*` patterns without a port, and Arch's engine keeps extensions out of `file:` pages, so a grant of every site the sheet listed runs everywhere it asked, while a pattern with a port keeps the click.
     @Test func aGrantOfEverySiteTheInstallSheetListedRunsOnThemAllWithoutAClick() throws {
-        try withPackage(#"{"content_scripts": [{"matches": ["http://*/*", "https://*/*", "FILE:///*"]}], "host_permissions": ["ftp://example.org/*", "urn:*"]}"#) { package in
+        try withPackage(#"{"content_scripts": [{"matches": ["http://*/*", "https://*/*", "FILE:///*"]}], "host_permissions": ["ftp://example.org/*"]}"#) { package in
             let access = { (sites: Set<String>) in ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: sites)) }
             #expect(access(["http://*/*", "https://*/*"]) == .onAllSites)
             #expect(access(["https://*/*"]) == .onClick)
+        }
+        // A WebSocket pattern, which the install sheet never showed, keeps the click, so that Chromium grants it with no other site.
+        try withPackage(#"{"permissions": ["webRequest"], "host_permissions": ["https://mail.example.com/*", "wss://*/*"]}"#) { package in
+            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["https://mail.example.com/*"])) == .onClick)
+        }
+        try withPackage(#"{"host_permissions": ["wss://*/*"]}"#) { package in
+            #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: [])) == .onClick)
         }
         try withPackage(#"{"host_permissions": ["*://example.org/*", "https://example.org:8080/*"]}"#) { package in
             #expect(ChromiumExtensions.siteAccess(for: EngineExtension(id: "a", packageURL: package, permissions: [], sites: ["*://example.org/*"])) == .onClick)
@@ -88,12 +95,14 @@ import Testing
             #expect(access(["<all_urls>"]) == .onAllSites)
             #expect(access(["https://example.org/*"]) == .onClick)
         }
-        #expect(ChromiumExtensions.isWebPattern("<all_urls>"))
-        #expect(ChromiumExtensions.isWebPattern("*://*/*"))
-        #expect(ChromiumExtensions.isWebPattern("http://example.org/*"))
-        #expect(!ChromiumExtensions.isWebPattern("file:///*"))
-        #expect(!ChromiumExtensions.isWebPattern("chrome-extension://abc/*"))
-        #expect(!ChromiumExtensions.isWebPattern("example.org"))
+        #expect(ChromiumExtensions.countsForSiteAccess("<all_urls>"))
+        #expect(ChromiumExtensions.countsForSiteAccess("*://*/*"))
+        #expect(ChromiumExtensions.countsForSiteAccess("http://example.org/*"))
+        #expect(ChromiumExtensions.countsForSiteAccess("ws://example.org/*"))
+        #expect(ChromiumExtensions.countsForSiteAccess("chrome://favicon/*"))
+        #expect(ChromiumExtensions.countsForSiteAccess("uuid-in-package:*"))
+        #expect(!ChromiumExtensions.countsForSiteAccess("file:///*"))
+        #expect(!ChromiumExtensions.countsForSiteAccess("ftp://example.org/*"))
     }
 
     @Test func aFirstLoadKeepsChromiumsCopyOnlyOfThePackageChromiumReadAtStart() throws {

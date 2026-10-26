@@ -273,25 +273,25 @@ int gUnshownBrowsers = 0;
         [context detachContext];
     }
     ReleaseExtensionObjects();
-    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashed once Chrome-style developer tools had opened. The tools in a view close first: once their browser has closed, their contents close on their own, unreported, and CEF would shut down over them. The closes run CEF's work for at most two seconds in all.
+    // CEF asks for every browser to close before it shuts down; shutting down over open browsers crashed once Chrome-style developer tools had opened. The tools in a view close first: once their browser has closed, their contents close on their own, unreported, and CEF would shut down over them. The browsers that no view shows count only with the tabs, so that one still clearing site data leaves the tabs their time to close. The closes run CEF's work for at most two seconds in all.
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
         if (browser.showsDevToolsInView) {
             [browser closeDevTools];
         }
     }
-    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.showsDevToolsInView; }];
+    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.showsDevToolsInView; } orUnshownBrowser:NO];
     for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
         [browser close];
     }
-    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.isOpen; }];
+    [self runWorkUntil:deadline whileAnyBrowser:^BOOL(ARCHCEFBrowser *browser) { return browser.isOpen; } orUnshownBrowser:YES];
     CefShutdown();
 }
 
-/// Runs CEF's work while any browser passes `test` or a browser that no view shows has not closed, until `deadline`.
-+ (void)runWorkUntil:(NSDate *)deadline whileAnyBrowser:(BOOL (^)(ARCHCEFBrowser *))test {
+/// Runs CEF's work while any browser passes `test`, or, with `waitsForUnshown`, a browser that no view shows has not closed, until `deadline`.
++ (void)runWorkUntil:(NSDate *)deadline whileAnyBrowser:(BOOL (^)(ARCHCEFBrowser *))test orUnshownBrowser:(BOOL)waitsForUnshown {
     while (deadline.timeIntervalSinceNow > 0) {
-        BOOL passes = gUnshownBrowsers > 0;
+        BOOL passes = waitsForUnshown && gUnshownBrowsers > 0;
         for (ARCHCEFBrowser *browser in gBrowsers.allObjects) {
             passes = passes || test(browser);
         }
