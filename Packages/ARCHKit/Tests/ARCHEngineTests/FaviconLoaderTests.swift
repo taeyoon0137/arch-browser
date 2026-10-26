@@ -1,4 +1,4 @@
-// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one. Icons load without any profile's cookies or stored credentials, only from web and data URLs, and only up to a size and a time limit.
+// When a tab's icon outlives a change of its page's address: within one host, including the same-document navigations a single-page app makes, and never onto another host or a page without one. Icons load without any profile's cookies or stored credentials, only from web and data URLs, and only up to a size and a time limit; other images that a page names load the same way up to a limit of their own.
 import AppKit
 @testable import ARCHEngine
 import Foundation
@@ -48,5 +48,9 @@ import Testing
         #expect(await FaviconLoader.download(body(limit + 1)) == nil)
         // An endless body without a stated length stops at the limit.
         #expect(await FaviconLoader.download(URL(fileURLWithPath: "/dev/zero")) == nil)
+        // Another image, such as Now Playing's artwork, sets a limit of its own.
+        #expect(await FaviconLoader.download(body(limit + 1), limit: limit + 1)?.count == limit + 1)
+        #expect(await FaviconLoader.download(body(11), limit: 10) == nil)
+        #expect(await FaviconLoader.download(URL(fileURLWithPath: "/dev/zero"), limit: 4 * limit) == nil)
     }
 }

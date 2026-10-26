@@ -351,9 +351,10 @@ public final class BrowserWindowModel: ObservableObject {
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
         guard preview?.openedURL != url else { return }
         closePreview()
-        // The panel covers the page that a search or a region capture belongs to, so both end.
+        // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
         hideFindBar()
         cancelRegionCapture()
+        MainActor.assumeIsolated { closePageQuestion() }
         let runtime = session.runtime(for: engine, in: personaID)
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
         let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
@@ -611,9 +612,9 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that no internal page covers.
+    /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that neither an internal page nor the preview panel covers.
     @MainActor var canAskAboutPage: Bool {
-        guard internalPage == nil, let url = selectedTab?.url else { return false }
+        guard !isSelectedPageCovered, let url = selectedTab?.url else { return false }
         return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
     }
 

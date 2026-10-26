@@ -12,6 +12,8 @@ struct PageExchangeView: View {
     let pageURL: URL?
     /// The popover shows the selected text above its field instead.
     var showsSelection = true
+    /// Clears the conversation and asks the question again on its own, for a question that went out with earlier ones and was too long for the model. The popover asks each question on its own and passes none.
+    var startOver: (() -> Void)? = nil
     let retry: () -> Void
     @ObservedObject private var settings = AIService.shared.settings
 
@@ -89,10 +91,13 @@ struct PageExchangeView: View {
         }
     }
 
-    /// A cancelled request never fails: the conversation shows it as stopped.
+    /// A cancelled request never fails: the conversation shows it as stopped. Retry would only fail again where the conversation or Settings must change: a conversation too long for the model starts over, and a question too long on its own, or for a command-line tool that gets no page data, needs another model.
     private func action(for error: Error) -> (title: String, perform: () -> Void)? {
         switch error as? AIError {
-        case .notConfigured, .authentication, .budgetReached:
+        case .contextTooLong:
+            if exchange.followsEarlierQuestions, let startOver { return ("Start Over", startOver) }
+            return assistant.showAISettings.map { ("Open AI Settings", $0) }
+        case .notConfigured, .authentication, .budgetReached, .blockedByPolicy(.commandLineToolWithPageData):
             return assistant.showAISettings.map { ("Open AI Settings", $0) }
         case .blockedByPolicy(.siteExcluded):
             guard let pageURL else { return nil }

@@ -831,9 +831,12 @@ public final class BrowserSession: ObservableObject {
         return tab
     }
 
-    /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
+    /// Selects a tab that no window shows. A space's tab goes to the front main window that shows its space, or else to the sidebar target, which then shows the tab's space, so a window on another space, perhaps of another Persona, keeps its space while one shows the tab's. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
+        if let spaceID = tab.spaceID {
+            let window = windows.first { $0.kind == .main && $0.currentSpaceID == spaceID } ?? sidebarTarget()
+            return window.selectTab(tab.id)
+        }
         let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
         if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
         window.selectTab(tab.id)
@@ -957,15 +960,17 @@ public final class BrowserSession: ObservableObject {
         undoableCloseCount = 0
     }
 
-    /// Moves a tab next to `neighbor`, before or after it, while both are open tabs of one space outside folders, as for a tab a web extension opens; otherwise the tab stays where it is.
-    func placeTab(_ tab: Tab, nextTo neighbor: Tab, after: Bool) {
+    /// Moves a tab next to `neighbor`, before or after it, while both are open tabs of one space outside folders, as for a tab a web extension opens, and reports whether it moved; otherwise the tab stays where it is.
+    @discardableResult
+    func placeTab(_ tab: Tab, nextTo neighbor: Tab, after: Bool) -> Bool {
         guard tab.id != neighbor.id, neighbor.spaceID == tab.spaceID, !tab.isPinned, !neighbor.isPinned, tab.folderID == nil, neighbor.folderID == nil, neighbor.isListedInSidebar,
-              let from = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+              let from = tabs.firstIndex(where: { $0.id == tab.id }) else { return false }
         var reordered = tabs
         reordered.remove(at: from)
-        guard let to = reordered.firstIndex(where: { $0.id == neighbor.id }) else { return }
+        guard let to = reordered.firstIndex(where: { $0.id == neighbor.id }) else { return false }
         reordered.insert(tab, at: after ? to + 1 : to)
         tabs = reordered
+        return true
     }
 
     /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.

@@ -1,4 +1,4 @@
-// Stopping a question about a page while the engine still reads the page: the question shows as stopped at once, and the read that ends later changes nothing.
+// Stopping a question about a page while the engine still reads the page: the question shows as stopped at once, and the read that ends later changes nothing. A conversation that grew past what the model takes starts over with its failed question alone.
 import AI
 import Foundation
 import Testing
@@ -37,8 +37,43 @@ import Testing
         #expect(client.requestCount == 0)
     }
 
+    @Test func aConversationTooLongForTheModelStartsOverWithTheFailedQuestionAlone() async throws {
+        let client = ShortContextClient()
+        let conversation = PageConversation(feature: .pageReader, tabID: UUID(), instructions: "", pages: FixedPageSource(), client: client)
+        conversation.ask("Summarize")
+        try await Self.waitUntilAnswered(conversation)
+        #expect(Self.isFinished(conversation.exchanges.first))
+        #expect(conversation.exchanges.first?.followsEarlierQuestions == false)
+
+        conversation.ask("And then?")
+        try await Self.waitUntilAnswered(conversation)
+        let failed = try #require(conversation.exchanges.last)
+        #expect(Self.isTooLong(failed))
+        #expect(failed.followsEarlierQuestions)
+
+        conversation.startOver(asking: failed.id)
+        try await Self.waitUntilAnswered(conversation)
+        #expect(conversation.exchanges.map(\.prompt) == ["And then?"])
+        #expect(Self.isFinished(conversation.exchanges.first))
+        #expect(conversation.exchanges.first?.followsEarlierQuestions == false)
+        #expect(client.messageCounts == [1, 3, 1])
+    }
+
     private static func isStopped(_ exchange: PageConversation.Exchange?) -> Bool {
         if case .stopped = exchange?.state { true } else { false }
+    }
+
+    private static func isFinished(_ exchange: PageConversation.Exchange?) -> Bool {
+        if case .finished = exchange?.state { true } else { false }
+    }
+
+    private static func isTooLong(_ exchange: PageConversation.Exchange) -> Bool {
+        if case .failed(AIError.contextTooLong) = exchange.state { true } else { false }
+    }
+
+    private static func waitUntilAnswered(_ conversation: PageConversation) async throws {
+        for _ in 0..<200 where conversation.isAnswering { await Task.yield() }
+        try #require(!conversation.isAnswering)
     }
 
     /// Lets the conversation's task, which runs on the main actor, take what the page source handed it.
@@ -84,5 +119,34 @@ private final class RecordingClient: AIClient, @unchecked Sendable {
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         lock.withLock { count += 1 }
         return AsyncThrowingStream { $0.finish() }
+    }
+}
+
+/// A page source that reads the same short page at once.
+@MainActor
+private final class FixedPageSource: AIPageSource {
+    func content(ofTab id: UUID, limit: Int) async throws -> AIPageContent {
+        AIPageContent(url: URL(string: "https://example.com/")!, title: "Example", text: "Page text")
+    }
+
+    func selection(ofTab id: UUID) async throws -> AISelection? { nil }
+}
+
+/// A model that takes one message: it answers a question on its own and refuses one that carries earlier questions as too long.
+private final class ShortContextClient: AIClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [Int] = []
+
+    var messageCounts: [Int] { lock.withLock { counts } }
+
+    func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
+        lock.withLock { counts.append(request.messages.count) }
+        let fits = request.messages.count == 1
+        return AsyncThrowingStream { continuation in
+            guard fits else { return continuation.finish(throwing: AIError.contextTooLong(AIProviderID(rawValue: "test"))) }
+            continuation.yield(.text("Reply"))
+            continuation.yield(.finished(.completed))
+            continuation.finish()
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Downloads site icons for engine adapters and caches them in memory by icon URL. Concurrent requests for the same URL share one download. Failures are not cached. Icons from data URLs are decoded without caching. Clears a full 200-entry cache before caching another icon. Icons load outside every profile's store, without cookies or stored credentials, so the cache holds only what any profile would get. A page names its icon's URL, so only web and data URLs load, and a download ends after 30 seconds or once it passes `maximumSize`: a page can make the app neither read a local file nor buffer an endless response.
+// Downloads site icons for engine adapters and caches them in memory by icon URL. Concurrent requests for the same URL share one download. Failures are not cached. Icons from data URLs are decoded without caching. Clears a full 200-entry cache before caching another icon. Icons load outside every profile's store, without cookies or stored credentials, so the cache holds only what any profile would get. A page names its icon's URL, so only web and data URLs load, and a download ends after 30 seconds or once it passes `maximumSize`: a page can make the app neither read a local file nor buffer an endless response. Other images that a page names, such as Now Playing's artwork, download the same way with a limit of their own.
 import AppKit
 import Foundation
 
@@ -8,7 +8,7 @@ public enum FaviconLoader {
     /// The schemes an icon loads from. An icon URL with any other, such as `file`, loads nothing.
     static let schemes: Set<String> = ["http", "https", "data"]
     /// The most bytes an icon's body may have after decompression. A longer body loads nothing, and its download stops as it passes this size.
-    static let maximumSize = 1 << 20
+    public static let maximumSize = 1 << 20
     /// Sends no cookies or stored credentials, keeps none that a response sets, and writes nothing to disk. An icon request therefore never carries one Persona's sign-in to a site for another Persona's tab, and its response never sets a cookie any page sees. An icon a site shows only to signed-in users does not load. A download that has not finished after 30 seconds fails, so a response that trickles in forever never holds the icon's later requests.
     static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -48,15 +48,15 @@ public enum FaviconLoader {
         }
     }
 
-    /// The body at `url`, or nil when the request fails or the body passes `maximumSize`. The body arrives as it streams, so a long one stops at the limit, also one whose length the response does not state.
-    static func download(_ url: URL) async -> Data? {
+    /// The body at `url` through `session`, or nil when the request fails or the body passes `limit` bytes. The body arrives as it streams, so a long one stops at the limit, also one whose length the response does not state. The caller checks the scheme, as `load` does.
+    public static func download(_ url: URL, limit: Int = maximumSize) async -> Data? {
         guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
         defer { bytes.task.cancel() }
-        guard response.expectedContentLength <= maximumSize else { return nil }
+        guard response.expectedContentLength <= limit else { return nil }
         var data = Data()
         do {
             for try await byte in bytes {
-                guard data.count < maximumSize else { return nil }
+                guard data.count < limit else { return nil }
                 data.append(byte)
             }
         } catch {

@@ -141,21 +141,22 @@ final class NowPlaying: EngineMediaSessionDelegate {
         return .success
     }
 
-    /// The image loaded from `url`. The first request starts loading it, and Now Playing updates once it arrives.
+    /// The most bytes an artwork image may have. Larger artwork shows none.
+    static let maximumArtworkSize = 5 << 20
+
+    /// The image loaded from `url`. The first request starts loading it, and Now Playing updates once it arrives. The page names the address, so artwork loads as site icons do (`FaviconLoader.download`): outside every Persona's store, without cookies or stored credentials, within 30 seconds, and up to `maximumArtworkSize`.
     private func artworkImage(for url: URL?) -> NSImage? {
         guard let url, let scheme = url.scheme?.lowercased(), ["http", "https", "data"].contains(scheme) else { return nil }
         if let artwork, artwork.url == url { return artwork.image }
         guard loadingArtworkURL != url else { return nil }
         loadingArtworkURL = url
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            let image = data.flatMap(NSImage.init(data:))
-            DispatchQueue.main.async {
-                guard let self, self.loadingArtworkURL == url else { return }
-                self.loadingArtworkURL = nil
-                self.artwork = (url, image)
-                self.scheduleUpdate()
-            }
-        }.resume()
+        Task { @MainActor [weak self] in
+            let image = await FaviconLoader.download(url, limit: Self.maximumArtworkSize).flatMap(NSImage.init(data:))
+            guard let self, self.loadingArtworkURL == url else { return }
+            self.loadingArtworkURL = nil
+            self.artwork = (url, image)
+            self.scheduleUpdate()
+        }
         return nil
     }
 }

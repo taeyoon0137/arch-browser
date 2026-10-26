@@ -38,6 +38,8 @@ final class PageConversation: ObservableObject {
         let selectionSource: QuestionSelection
         /// The selected text the question went out with.
         var selection: String?
+        /// Whether earlier questions and replies went out with the question.
+        var followsEarlierQuestions = false
         var reply = ""
         /// The model that serves the reply, after any fallback.
         var model: AIModelRef?
@@ -104,6 +106,13 @@ final class PageConversation: ObservableObject {
         pageInMessages = nil
     }
 
+    /// Clears the conversation and asks a question that ended without a whole reply again, on its own, as for a conversation that grew past what the model takes.
+    func startOver(asking id: Exchange.ID) {
+        guard let exchange = exchanges.first(where: { $0.id == id }) else { return }
+        startOver()
+        ask(exchange.prompt, title: exchange.title, about: exchange.selectionSource)
+    }
+
     /// The tab moved to another page of the same site, so the next question carries that page's text.
     func pageDidChange() {
         pageChanges += 1
@@ -116,6 +125,7 @@ final class PageConversation: ObservableObject {
             let carriesPage = pageInMessages != pageRead
             // The page read before goes, so the model answers from the page now open, and the service, which cuts page text from the last page part first, never cuts the new page for the old one.
             let history = carriesPage ? messages.map(Self.withoutPage) : messages
+            update(id) { $0.followsEarlierQuestions = !history.isEmpty }
             var parts: [AIPart] = []
             if carriesPage {
                 parts.append(.page(try await pages.content(ofTab: tabID, limit: Self.pageTextLimit)))

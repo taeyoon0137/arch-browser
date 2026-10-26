@@ -113,7 +113,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
         session?.allTabs.first { $0.id == id }?.webContents
     }
 
-    /// The window that shows the tab selects it again; otherwise a window selects it as for a tab no window shows, which takes a favorite's tab to a window of its Persona.
+    /// The window that shows the tab selects it again; otherwise a window selects it as for a tab no window shows: a main window that shows the tab's space, which the extensions see as the tab's window, or for a favorite's tab a window of its Persona.
     func activate(_ tab: any EngineWebContents) {
         guard let session, let tab = self.tab(tab) else { return }
         if let window = session.window(showing: tab) {
@@ -143,13 +143,13 @@ final class SessionWebExtensionHost: WebExtensionHost {
         let named = windows.first { $0.id == windowID }
         let window = (named?.space ?? focusedSpace(of: persona, in: session)).flatMap { space in windows.first { $0.id == space.id } }
         // An index among a small window's tabs says nothing about its space's.
-        let index = named.map { $0.id == $0.space.id } == false ? nil : index
+        let namesSmallWindow = named.map { $0.id != $0.space.id } ?? false
+        let index = namesSmallWindow ? nil : index
         let space = window?.space ?? session.preferredSpace(in: persona)
         let tab = session.openTab(url: url, in: space.id, select: false, engine: engine)
         let listed = window?.tabs.filter { $0.engineKind == engine } ?? []
-        if let index, listed.indices.contains(index) {
-            session.placeTab(tab, nextTo: listed[index], after: false)
-        } else if let activeTab = window?.active {
+        let isPlacedAtIndex = index.map { listed.indices.contains($0) && session.placeTab(tab, nextTo: listed[$0], after: false) } ?? false
+        if !isPlacedAtIndex, let activeTab = window?.active {
             session.placeTab(tab, nextTo: activeTab, after: true)
         }
         if active { activate(tab.webContents) }

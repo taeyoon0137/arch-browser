@@ -567,7 +567,7 @@ public struct EngineReadableContent: Sendable {
 func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
 ```
 
-- The script walks the main frame's visible text. It skips `script`, `style`, `template`, hidden elements, `aria-hidden` subtrees, and the values of `input`, `textarea`, `select`, and editable regions, so drafts and passwords are never read. Link text is kept; link addresses are not. It stops at `limit` characters.
+- The script walks the main frame's visible text. It skips `script`, `style`, `template`, hidden elements, `aria-hidden` subtrees, and the values of `input`, `textarea`, `select`, and editable regions, so drafts and passwords are never read. A selection inside a field or an editable region, or one that reaches an editable region, as Select All does on a page with a draft, also in an open shadow tree, counts as none. Link text is kept; link addresses are not. It stops at `limit` characters.
 - WebKit runs the script with `callAsyncJavaScript` in its own `WKContentWorld`. Chromium sends a process message to the page's renderer process. The renderer evaluates the script in the frame's context and replies with a JSON string, as it does for theme color. Chromium uses this route because `ExecuteJavaScript` returns no value and the DevTools protocol would attach a debugger. The page's scripts share that context and can change what the script sees. This changes only the page's own text.
 - `selection` lets a feature read the page's selection; `EngineWebContents` has no other member for it.
 - `Browsing` wraps the member in `AIPageSource`:
@@ -805,7 +805,7 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A tool that exits 0 without output | `malformedReply` |
 | A `.json` reply cut by the length limit before its value was complete | `replyTooLong` |
 
-The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, and `budgetReached`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; and Retry for the rest except `cancelled`, which shows nothing.
+The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, `budgetReached`, and `commandLineToolWithPageData`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; for `contextTooLong`, Start Over in the page reader when earlier questions went out with the question, which clears the conversation and asks it again on its own, and otherwise Open Settings ▸ AI for another model; and Retry for the rest except `cancelled`, which shows nothing.
 
 ## Rate limits and budgets
 
