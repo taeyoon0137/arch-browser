@@ -1,4 +1,4 @@
-// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, and engine profiles take the remembered answers. Each test keeps its store in a temporary folder of its own.
+// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, and engine profiles take the remembered answers and, when they start, the removals of answers. Each test keeps its store in a temporary folder of its own.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -79,6 +79,29 @@ import Testing
         answers.restoreRememberedAnswers(for: EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), in: other)
         #expect(other.kept["camera \(Self.site.absoluteString)"] == .some(nil))
         #expect(other.kept["microphone \(Self.site.absoluteString)"] == .some(false))
+    }
+
+    @Test func aProfileThatStartsAfterAnAnswerWasRemovedForgetsItToo() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        store.set(.allow, for: [.geolocation, .camera], origin: Self.origin)
+        store.set(nil, for: [.geolocation, .camera], origin: Self.origin)
+        store.set(.deny, for: [.camera], origin: Self.origin)
+        #expect(store.removed == [Self.origin: [.geolocation]])
+
+        // The next launch reads the removal from the file, and a profile that starts then takes the answer away.
+        let relaunched = SitePermissionStore(directory: folder.url)
+        #expect(relaunched.removed == [Self.origin: [.geolocation]])
+        let answers = SitePermissionAnswers(store: relaunched)
+        let context = RecordingContext()
+        answers.follow(context)
+        #expect(context.kept["geolocation \(Self.origin)"] == .some(nil))
+        #expect(context.kept["camera \(Self.origin)"] == .some(false))
+
+        // A new answer takes the type off the list.
+        relaunched.set(.allow, for: [.geolocation], origin: Self.origin)
+        #expect(relaunched.removed.isEmpty)
+        #expect(context.kept["geolocation \(Self.origin)"] == .some(true))
     }
 }
 

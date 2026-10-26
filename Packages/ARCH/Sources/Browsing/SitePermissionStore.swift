@@ -1,4 +1,4 @@
-// Remembers the user's Allow and Don't Allow answers to websites' permission requests, per origin and permission type, in `permissions.json` in the app's Application Support folder. The session answers from it before asking, and Settings ▸ Websites changes and removes the answers.
+// Remembers the user's Allow and Don't Allow answers to websites' permission requests, per origin and permission type, in `permissions.json` in the app's Application Support folder. The session answers from it before asking, and Settings ▸ Websites changes and removes the answers. The file also lists the answers the user removed until new ones replace them, so that an engine profile that was not running at a removal forgets its own copy of the answer when it starts.
 import ARCHEngine
 import Combine
 import Foundation
@@ -11,14 +11,17 @@ public final class SitePermissionStore: ObservableObject {
 
     /// Each origin's answers, keyed by origins such as `https://example.com`.
     @Published public private(set) var decisions: [String: [EnginePermissionType: Decision]] = [:]
+    /// The types whose answers were removed, by origin, until a new answer replaces them. An engine profile keeps the answers it was given, so each profile that starts forgets these too.
+    public private(set) var removed: [String: Set<EnginePermissionType>] = [:]
     /// Sends the origin and the types whose answers changed, after the change.
     public let didChange = PassthroughSubject<(origin: String, types: [EnginePermissionType]), Never>()
     private let fileURL: URL
 
-    /// The file's layout. Answers are keyed by the permission type's raw value.
+    /// The file's layout. Answers and removed types are keyed by the permission type's raw value. A file from before `removed` has none.
     private struct File: Codable {
         var version = 1
         var sites: [String: [String: Decision]]
+        var removed: [String: [String]]?
     }
 
     init(directory: URL) {
@@ -29,23 +32,33 @@ public final class SitePermissionStore: ObservableObject {
             let known = Dictionary(uniqueKeysWithValues: answers.compactMap { key, decision in EnginePermissionType(rawValue: key).map { ($0, decision) } })
             if !known.isEmpty { decisions[origin] = known }
         }
+        for (origin, types) in file.removed ?? [:] {
+            let known = Set(types.compactMap(EnginePermissionType.init(rawValue:)))
+            if !known.isEmpty { removed[origin] = known }
+        }
     }
 
     public func decision(for type: EnginePermissionType, origin: String) -> Decision? {
         decisions[origin]?[type]
     }
 
-    /// Remembers `decision` for each of `types`, or forgets their answers when it is `nil`, and saves the file.
+    /// Remembers `decision` for each of `types`, or forgets their answers when it is `nil` and lists them in `removed`, and saves the file.
     public func set(_ decision: Decision?, for types: [EnginePermissionType], origin: String) {
         var answers = decisions[origin] ?? [:]
-        for type in types { answers[type] = decision }
+        var removedTypes = removed[origin] ?? []
+        for type in types {
+            answers[type] = decision
+            if decision == nil { removedTypes.insert(type) } else { removedTypes.remove(type) }
+        }
         decisions[origin] = answers.isEmpty ? nil : answers
+        removed[origin] = removedTypes.isEmpty ? nil : removedTypes
         save()
         didChange.send((origin, types))
     }
 
     private func save() {
-        let file = File(sites: decisions.mapValues { answers in Dictionary(uniqueKeysWithValues: answers.map { ($0.key.rawValue, $0.value) }) })
+        let file = File(sites: decisions.mapValues { answers in Dictionary(uniqueKeysWithValues: answers.map { ($0.key.rawValue, $0.value) }) },
+                        removed: removed.isEmpty ? nil : removed.mapValues { $0.map(\.rawValue).sorted() })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(file) else { return }

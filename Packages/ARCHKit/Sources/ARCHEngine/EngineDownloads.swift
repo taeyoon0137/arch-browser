@@ -27,7 +27,6 @@ public protocol EngineDownloadItem: AnyObject {
 }
 
 public protocol EngineDownloadsDelegate: AnyObject {
-    func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem])
     func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem)
     func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem)
     func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem)

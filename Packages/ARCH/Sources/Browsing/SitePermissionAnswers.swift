@@ -58,7 +58,7 @@ final class SitePermissionAnswers {
         }
     }
 
-    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings.
+    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings. Now also takes away the answers removed while the profile was not running.
     func follow(_ context: any EngineBrowserContext) {
         let store = store
         let apply = { (origin: String, types: [EnginePermissionType]) in
@@ -68,6 +68,7 @@ final class SitePermissionAnswers {
             }
         }
         for (origin, answers) in store.decisions { apply(origin, Array(answers.keys)) }
+        for (origin, types) in store.removed { apply(origin, Array(types)) }
         store.didChange
             .sink { apply($0.origin, $0.types) }
             .store(in: &cancellables)

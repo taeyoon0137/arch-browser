@@ -7,18 +7,16 @@ import Foundation
 import History
 import Plugins
 
-/// One engine's running pieces for one Persona: the engine's application, the Persona's profile in it, and the browser that owns the web contents of the Persona's tabs in that engine.
+/// One engine's running pieces for one Persona: the Persona's profile in the engine and the browser that owns the web contents of the Persona's tabs in that engine. The session keeps the engine's application.
 final class EngineRuntime {
     let kind: EngineKind
     let personaID: Persona.ID
-    let application: any EngineApplication
     let context: any EngineBrowserContext
     let browser: any EngineBrowser
 
-    init(kind: EngineKind, personaID: Persona.ID, application: any EngineApplication, context: any EngineBrowserContext, browser: any EngineBrowser) {
+    init(kind: EngineKind, personaID: Persona.ID, context: any EngineBrowserContext, browser: any EngineBrowser) {
         self.kind = kind
         self.personaID = personaID
-        self.application = application
         self.context = context
         self.browser = browser
     }
@@ -413,14 +411,14 @@ public final class BrowserSession: ObservableObject {
         application.createBrowserContext(persona.contextAttributes) { created = try? $0.get() }
         guard let context = created else { return nil }
         let browser = application.createBrowser(EngineBrowserCreateParams(initialBounds: .zero), context: context, delegate: self, window: nil)
-        let runtime = EngineRuntime(kind: kind, personaID: persona.id, application: application, context: context, browser: browser)
+        let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
         context.downloads.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
         browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
-        // An engine that starts after another in the Persona has none of the Persona's cookies yet.
+        // An engine that starts after another in the Persona takes the running engine's cookies. This first copy between the two in a launch has no record of what they agreed on, so it writes the cookies the new engine lacks or holds with other contents and deletes none (`CookieSync`).
         if let source = engines.runtimes.values.first(where: { $0.kind != kind }) {
             engines.cookieSync.copy(from: source, to: runtime) {}
         }
@@ -1449,13 +1447,15 @@ public final class BrowserSession: ObservableObject {
         store.saveNow(snapshot())
     }
 
-    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4).
+    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
     private func snapshot() -> SessionSnapshot {
         let mainWindows = windows.filter { $0.kind == .main }
         let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let front = windowRecords[0]
+        let now = Date()
+        let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
         return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
-                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID, suggestedTitle: $0.suggestedTitle) },
+                               tabs: tabs.map { SessionSnapshot.TabRecord(id: $0.id, spaceID: $0.spaceID ?? front.currentSpaceID, url: $0.url, title: $0.title, customTitle: $0.customTitle, isPinned: $0.isPinned, folderID: $0.folderID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt, engine: $0.engineKind, state: $0.webContents.restorableState, personaID: $0.personaID, suggestedTitle: $0.suggestedTitle) },
                                folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
                                splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
@@ -1568,11 +1568,6 @@ extension BrowserSession {
 }
 
 extension BrowserSession: EngineDownloadsDelegate {
-    public func downloads(_ downloads: any EngineDownloads, didInitializeWith items: [any EngineDownloadItem]) {
-        guard let personaID = runtime(owning: downloads)?.personaID else { return }
-        self.downloads += items.filter { entry(for: $0) == nil }.map { DownloadEntry(item: $0, personaID: personaID) }
-    }
-
     /// The download's entry. Engines number downloads per profile, so the item, not its ID, names one download among every Persona's.
     private func entry(for item: any EngineDownloadItem) -> DownloadEntry? {
         downloads.first { $0.item === item }
