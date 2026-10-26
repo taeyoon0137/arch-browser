@@ -34,7 +34,12 @@ struct CommandLineProvider: AIProvider {
         let input = Data(try Self.prompt(for: request).utf8)
         let environment = await environment()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Arch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            // A folder that cannot be made, as on a full disk, keeps the tool from starting; it is not a request the tool refused.
+            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start: \(error.localizedDescription)")
+        }
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
         do {

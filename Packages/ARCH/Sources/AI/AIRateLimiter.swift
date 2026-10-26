@@ -20,7 +20,7 @@ actor AIRateLimiter {
 
     let provider: AIProviderID
     private var limits: AIProviderLimits
-    /// An automatic request gives up after waiting this long.
+    /// An automatic request gives up after waiting this long. The default is half of a hook's default timeout, so a hook's request that gives up still has time for the route's next model.
     private let automaticWaitLimit: Duration
     private let initialBackoff: Duration
     private let maximumBackoff: Duration
@@ -31,7 +31,7 @@ actor AIRateLimiter {
     private(set) var coolDownUntil: Date?
     private var backoff: Duration
 
-    init(provider: AIProviderID, limits: AIProviderLimits, automaticWaitLimit: Duration = .seconds(30), initialBackoff: Duration = .seconds(20), maximumBackoff: Duration = .seconds(300)) {
+    init(provider: AIProviderID, limits: AIProviderLimits, automaticWaitLimit: Duration = .seconds(15), initialBackoff: Duration = .seconds(20), maximumBackoff: Duration = .seconds(300)) {
         self.provider = provider
         self.limits = limits
         self.automaticWaitLimit = automaticWaitLimit
@@ -138,8 +138,9 @@ actor AIRateLimiter {
         }
     }
 
+    /// Ends an automatic request's wait for a slot. It carries the cool-down only while one lasts, since one that has ended would read as a short cool-down that the same model can wait out.
     private func expireWaiter(_ id: UUID) {
-        removeWaiter(id, throwing: AIError.rateLimited(provider, until: coolDownUntil))
+        removeWaiter(id, throwing: AIError.rateLimited(provider, until: coolDownUntil.flatMap { $0 > Date() ? $0 : nil }))
     }
 
     private func removeWaiter(_ id: UUID, throwing error: any Error) {

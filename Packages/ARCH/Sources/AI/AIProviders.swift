@@ -30,6 +30,26 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         self.limits = limits
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind, models, limits
+    }
+
+    /// A provider written by hand may lack its models and limits, which then take the defaults: no models, and the limits of its kind.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(AIProviderID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(AIProviderKind.self, forKey: .kind)
+        models = try container.decodeIfPresent([AIModelConfiguration].self, forKey: .models) ?? []
+        if let limits = try container.decodeIfPresent(AIProviderLimits.self, forKey: .limits) {
+            self.limits = limits
+        } else if case .commandLine = kind {
+            limits = .commandLine
+        } else {
+            limits = .http
+        }
+    }
+
     /// The capabilities a model of this provider has unless it overrides them.
     public var defaultCapabilities: Set<AIModelCapability> {
         switch kind {
@@ -146,6 +166,19 @@ public struct AIHTTPConfiguration: Codable, Sendable, Equatable {
         self.baseURL = baseURL
         self.headers = headers
         self.hasKey = hasKey
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case format, baseURL, headers, hasKey
+    }
+
+    /// A provider written by hand may lack its headers and `hasKey`, which then mean no extra headers and no key.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        format = try container.decode(AIWireFormat.self, forKey: .format)
+        baseURL = try container.decode(URL.self, forKey: .baseURL)
+        headers = try container.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
+        hasKey = try container.decodeIfPresent(Bool.self, forKey: .hasKey) ?? false
     }
 
     /// Whether requests may go to `url`: https to any host, or http to a loopback host only.

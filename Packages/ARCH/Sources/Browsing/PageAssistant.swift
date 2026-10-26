@@ -219,10 +219,50 @@ final class TabPageSource: AIPageSource {
         return page.selection.map { AISelection(pageURL: page.url, pageTitle: page.title, text: $0) }
     }
 
+    /// Cancellation ends the read at once, since a page that does not answer, such as one whose script never yields, would keep it waiting after its request or hook has stopped. The engine's late answer is dropped.
     private func readableContent(ofTab id: UUID, limit: Int) async throws -> EngineReadableContent {
         guard let webContents = session?.allTabs.first(where: { $0.id == id })?.webContents else { throw EngineReadableContentError.unreadable }
-        return try await withCheckedThrowingContinuation { continuation in
-            webContents.readableContent(limit: limit) { continuation.resume(with: $0) }
+        let read = PageRead()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard read.start(continuation) else { return }
+                webContents.readableContent(limit: limit) { read.end(with: $0) }
+            }
+        } onCancel: {
+            read.end(with: .failure(CancellationError()))
         }
+    }
+}
+
+/// One page read, which ends once: with the engine's answer or with its cancellation, whichever comes first. A cancellation can come before the read starts.
+private final class PageRead: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<EngineReadableContent, Error>?
+    private var result: Result<EngineReadableContent, Error>?
+
+    /// Keeps the continuation, or resumes it with the end that came first; returns whether the read should run.
+    func start(_ continuation: CheckedContinuation<EngineReadableContent, Error>) -> Bool {
+        lock.lock()
+        guard let result else {
+            self.continuation = continuation
+            lock.unlock()
+            return true
+        }
+        lock.unlock()
+        continuation.resume(with: result)
+        return false
+    }
+
+    func end(with result: Result<EngineReadableContent, Error>) {
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }

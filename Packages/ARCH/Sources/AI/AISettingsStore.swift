@@ -24,7 +24,7 @@ public final class AISettingsStore: ObservableObject {
 
         init() {}
 
-        /// A file missing a field takes that field's default.
+        /// A file missing a field takes that field's default, as do the providers, routes, and limits in it for their fields that have one.
         init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
@@ -90,25 +90,29 @@ public final class AISettingsStore: ObservableObject {
         removeRouteModels { ref in ref.provider == provider.id && !provider.models.contains(where: { $0.name == ref.model }) }
     }
 
-    /// Removes the provider, its key, and its models from every route; a route left empty falls back as before.
-    public func removeProvider(_ id: AIProviderID) throws {
+    /// Removes the provider's key, then the provider and its models from every route; a route left empty falls back as before. A key the Keychain keeps leaves the provider in place, so that removing it can be tried again.
+    public func removeProvider(_ id: AIProviderID) async throws {
+        try await keys.removeKey(for: id)
         providers.removeAll { $0.id == id }
         removeRouteModels { $0.provider == id }
-        try keys.removeKey(for: id)
     }
 
     /// Writes the key to the Keychain and sets the provider's `hasKey`.
-    public func setKey(_ key: String, for provider: AIProviderID) throws {
-        guard let index = providers.firstIndex(where: { $0.id == provider }), case .http(var http) = providers[index].kind else { return }
-        try keys.setKey(key, for: provider, label: "Arch AI: \(providers[index].name)")
-        http.hasKey = true
-        providers[index].kind = .http(http)
+    public func setKey(_ key: String, for provider: AIProviderID) async throws {
+        guard let configuration = providers.first(where: { $0.id == provider }), case .http = configuration.kind else { return }
+        try await keys.setKey(key, for: provider, label: "Arch AI: \(configuration.name)")
+        setHasKey(true, for: provider)
     }
 
-    public func removeKey(for provider: AIProviderID) throws {
-        try keys.removeKey(for: provider)
+    public func removeKey(for provider: AIProviderID) async throws {
+        try await keys.removeKey(for: provider)
+        setHasKey(false, for: provider)
+    }
+
+    /// Finds the provider again after the Keychain call, during which the list may have changed.
+    private func setHasKey(_ hasKey: Bool, for provider: AIProviderID) {
         guard let index = providers.firstIndex(where: { $0.id == provider }), case .http(var http) = providers[index].kind else { return }
-        http.hasKey = false
+        http.hasKey = hasKey
         providers[index].kind = .http(http)
     }
 

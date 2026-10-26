@@ -302,9 +302,9 @@ struct AICommandLineEditor: View {
         dismiss()
     }
 
-    private func remove() {
+    private func remove() async {
         do {
-            try settings.removeProvider(draft.id)
+            try await settings.removeProvider(draft.id)
             dismiss()
         } catch {
             message = error.localizedDescription

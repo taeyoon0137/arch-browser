@@ -11,7 +11,7 @@ struct MessagesCodec: AIWireCodec {
     static func body(for request: AIProviderRequest) throws -> Data {
         var body: [String: Any] = [
             "model": request.model,
-            "messages": try request.messages.map(encode),
+            "messages": try request.messages.compactMap(encode),
             "max_tokens": request.maxOutputTokens,
             "stream": true,
         ]
@@ -30,8 +30,11 @@ struct MessagesCodec: AIWireCodec {
         return try JSONSerialization.data(withJSONObject: body)
     }
 
-    private static func encode(_ message: AIMessage) throws -> [String: Any] {
-        ["role": message.role.rawValue, "content": try message.parts.compactMap(encode)]
+    /// The format rejects a message without content, so a message whose parts all leave nothing, such as an empty answer earlier in a conversation, is left out. The format joins the messages of one role that then follow each other into one turn.
+    private static func encode(_ message: AIMessage) throws -> [String: Any]? {
+        let content = try message.parts.compactMap(encode)
+        guard !content.isEmpty else { return nil }
+        return ["role": message.role.rawValue, "content": content]
     }
 
     /// The format rejects empty text blocks, so empty text is left out.

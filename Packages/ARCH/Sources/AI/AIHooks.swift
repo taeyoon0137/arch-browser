@@ -96,7 +96,7 @@ public struct AIHookRegistration: Sendable {
     public var priority: Int
     /// How long after the event the hook runs. A newer event for the same subject during the wait replaces this one.
     public var delay: Duration
-    /// The center stops the hook when it runs longer.
+    /// The center cancels the hook when it runs longer, and waits for it no longer.
     public var timeout: Duration
     /// The kinds of action the center passes on to the host; it drops the others.
     public var allowedActions: Set<AIHookActionKind>
@@ -335,20 +335,47 @@ public final class AIHookCenter: ObservableObject {
         }
     }
 
-    /// Waits for the hook, cancelling it when its timeout passes or the chain is cancelled. A cancelled hook's result counts for nothing, even when the hook returned one.
+    /// Waits for the hook until it returns or its timeout passes, cancelling it at the timeout or when the chain is cancelled. A cancelled chain still waits for its hook to stop, so the next event's hooks start after it, but never past the timeout: a hook that does not stop when cancelled, such as one waiting for a page that does not answer, holds its event's chain no longer than that. A cancelled hook's result counts for nothing, even when the hook returned one, and so does a result that comes after the timeout.
     private func outcome(of task: Task<AIHookResult, any Error>, timeout: Duration) async -> Outcome {
+        let wait = HookWait()
+        // Neither task inherits the chain's cancellation, so both keep watching the hook after it.
         let watchdog = Task {
             try await Task.sleep(for: timeout)
+            let wasStopped = task.isCancelled
             task.cancel()
+            wait.end(wasStopped ? .stopped : .timedOut)
         }
-        let result = await withTaskCancellationHandler { await task.result } onCancel: { task.cancel() }
-        watchdog.cancel()
-        // The watchdog's sleep throws when it is cancelled before the timeout passed.
-        if (try? await watchdog.value) != nil { return .timedOut }
-        if task.isCancelled { return .stopped }
-        switch result {
-        case .success(let value): return .finished(value)
-        case .failure(let error): return .failed(error)
+        Task {
+            let result = await task.result
+            watchdog.cancel()
+            if task.isCancelled {
+                wait.end(.stopped)
+                return
+            }
+            switch result {
+            case .success(let value): wait.end(.finished(value))
+            case .failure(let error): wait.end(.failed(error))
+            }
+        }
+        return await withTaskCancellationHandler { await wait.outcome() } onCancel: { task.cancel() }
+    }
+
+    /// The first end of a hook's run that the center takes: its return or its timeout.
+    @MainActor
+    private final class HookWait {
+        private var ended: Outcome?
+        private var continuation: CheckedContinuation<Outcome, Never>?
+
+        func end(_ outcome: Outcome) {
+            guard ended == nil else { return }
+            ended = outcome
+            continuation?.resume(returning: outcome)
+            continuation = nil
+        }
+
+        func outcome() async -> Outcome {
+            if let ended { return ended }
+            return await withCheckedContinuation { continuation = $0 }
         }
     }
 

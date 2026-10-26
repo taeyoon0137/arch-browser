@@ -368,6 +368,8 @@ VII.2 implements two common message formats. Each has its own file with a small 
 - Requests use an ephemeral `URLSession` configuration: no cookies, no cache, no credential storage. The session's delegate refuses redirects to another host, so the key never reaches a host other than the base URL's.
 - Arch reads the response with `URLSession.bytes(for:)` and splits it into lines. Blank lines end an event. Timeouts: 60 seconds until the first byte and 30 seconds between chunks.
 - Usage is normalized so that `inputTokens` excludes cached input tokens, whichever way the format counts them.
+- The `messages` format refuses empty text blocks and messages without content, so its encoder leaves out empty text and a message left with no content, such as an empty answer earlier in a conversation. The format joins the messages of one role that then follow each other into one turn.
+- An error message from the provider, in an error response or a stream's `error` event, has the key replaced with an ellipsis before it becomes an `AIError`.
 
 ### Command-line tools
 
@@ -414,6 +416,8 @@ public struct AIJSONLinePaths: Codable, Sendable {
 
 - One generic password item per HTTP provider: service `xyz.taeyoon.arch.ai`, account the provider ID, label `Arch AI: <provider name>`, accessible when unlocked, not synchronizable.
 - Arch reads the key once per launch, when the first request to that provider starts. It keeps the key in memory until quit or until the user replaces or removes it. Arch never writes it to `ai.json`, logs, the activity list, or error messages.
+- Every Keychain call, reads, writes, and removals alike, runs one at a time on a queue of its own, off the main thread and Swift's cooperative threads, since a call can wait while macOS asks for the login keychain password. Requests that start together for a provider read its key once, and a read that a replacement follows never caches the old key over the new one. A key the Keychain does not give, as when the user cancels that prompt, ends the attempt with `providerUnavailable` and the Keychain's reason, not `authentication`, since no request went out.
+- Removing a provider removes its key first. A key the Keychain keeps leaves the provider and its routes in place, so the user can remove it again.
 - Builds signed with the same Apple Development identity keep access to the items. An ad hoc signed build changes its code signature with each rebuild, so macOS asks for the login keychain password once after each rebuild. Arch does not use the data protection keychain because it needs entitlements the bundle lacks.
 - Replacing or removing a key asks for Touch ID or the login password through LocalAuthentication (`deviceOwnerAuthentication`).
 
@@ -469,8 +473,8 @@ public final class AISettingsStore: ObservableObject {
     /// The stored route, or the feature's default from the table above.
     public func route(for feature: AIFeatureID) -> AIRoute
     /// Writes the key to the Keychain and sets the provider's `hasKey`.
-    public func setKey(_ key: String, for provider: AIProviderID) throws
-    public func removeKey(for provider: AIProviderID) throws
+    public func setKey(_ key: String, for provider: AIProviderID) async throws
+    public func removeKey(for provider: AIProviderID) async throws
 }
 ```
 
@@ -506,6 +510,7 @@ public final class AISettingsStore: ObservableObject {
 ```
 
 - A feature without an entry in `routes` uses the defaults in the table above. Removing a provider removes its models from every route; a route left empty falls back as described.
+- A field missing from the file takes its default, and so do these fields of a provider or route written by hand: a provider's `models` (none) and `limits` (those of its kind), an HTTP provider's `headers` (none) and `hasKey` (false), a route's `models` (none), and `automaticRequestsPerDay` in `limits` (300). A provider still needs its `id`, `name`, and `kind`, and a route its `isEnabled`.
 - Arch renames a file that does not decode to `ai.json.unreadable`, replaces it with defaults, and reports this in Settings ▸ AI.
 
 ## Page access
@@ -525,12 +530,12 @@ public struct AIDataScope: Codable, Sendable {
 }
 ```
 
-Before each attempt the service checks every part, including parts in tool results:
+Before each attempt the service checks every part, including parts in tool results. It checks them again once the attempt has its provider's slot and key, just before the request goes out, since the wait can last minutes and the user may have excluded the page's site meanwhile; a request refused then reaches no provider and counts toward no usage.
 
 1. A part whose kind is not in the feature's scope throws `blockedByPolicy(.dataNotDeclared)`. This catches programming mistakes; it is not a security boundary (see Content parts).
 2. A part whose address is on an excluded site throws `blockedByPolicy(.siteExcluded(host))`. The address is the page's for page and selection parts and both the source and the page for file and download parts.
 3. Addresses in parts lose their query and fragment.
-4. The service cuts page text to the scope's limit, then cuts the combined parts to the model's `inputCharacterLimit`, page text first and from its end. A cut page part gets `isTruncated`.
+4. The service cuts page text to the scope's limit, then cuts the combined parts to the model's `inputCharacterLimit` by cutting page text only, from the end of the last page part backward. A cut page part gets `isTruncated`. Parts that still do not fit, such as a long selection, end the attempt with `contextTooLong`.
 
 ### Site exclusions
 
@@ -643,7 +648,7 @@ public struct AIHookRegistration: Sendable {
     public var priority: Int
     /// How long after the event the hook runs. A newer event for the same subject during the wait replaces this one.
     public var delay: Duration
-    /// The center stops the hook when it runs longer. Default 30 seconds.
+    /// The center cancels the hook when it runs longer, and waits for it no longer. Default 30 seconds.
     public var timeout: Duration
     /// The kinds of action the center passes on to the host; it drops the others.
     public var allowedActions: Set<AIHookActionKind>
@@ -716,7 +721,7 @@ The center cancels a running hook and its request when:
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 
-The center discards canceled hooks' actions, even those returned after cancellation. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. The hook's client tells the center how each request ends, except requests the hook stopped reading: a reply clears the feature's last error, and a failure becomes it. Three consecutive `authentication` or `providerUnavailable` request errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route. Any other request outcome resets the count; changing the route also clears the last error. A hook's own error, outside its requests, and a timeout become the last error without changing the count. A hook that sends no request changes neither.
+A canceled hook's chain waits for the hook to stop, so the next event's hooks start after it, but never past the hook's timeout: a hook that does not stop when canceled, such as one waiting for a page that does not answer, holds its event's chain no longer than its timeout. The center discards canceled hooks' actions, even those returned after cancellation, and the actions of a hook that returns after its timeout. Page reads through `AIPageSource` end at once when their task is canceled, and the engine's late answer is dropped. Hook errors never show a sheet. The feature's row in Settings ▸ AI shows the last error. The hook's client tells the center how each request ends, except requests the hook stopped reading: a reply clears the feature's last error, and a failure becomes it. Three consecutive `authentication` or `providerUnavailable` request errors pause the feature's hooks until the user chooses Resume in that row or changes the feature's route. Any other request outcome resets the count; changing the route also clears the last error. A hook's own error, outside its requests, and a timeout become the last error without changing the count. A hook that sends no request changes neither.
 
 ### Actions
 
@@ -798,10 +803,12 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | HTTP 404 | `invalidRequest` (usually an unknown model) |
 | HTTP 408, 409, 5xx, network failures, timeouts | `providerUnavailable` |
 | HTTP 413, or a 400 whose error type says the input is too long | `contextTooLong` |
-| HTTP 429 | `rateLimited` with `retry-after` (seconds or a date) |
+| HTTP 429 | `rateLimited` with `retry-after` (seconds or a date, at most a day ahead; seconds that are not a finite number give no date) |
 | A stream `error` event | mapped by its type field, otherwise `providerUnavailable` |
 | A stop reason that reports a content filter | `refused` |
-| A missing tool executable, or a nonzero exit | `providerUnavailable` with the last line of standard error |
+| A key the Keychain does not give | `providerUnavailable` with the Keychain's reason |
+| A missing tool executable, or a working folder that cannot be made | `providerUnavailable` with the reason the tool could not start |
+| A tool's nonzero exit | `providerUnavailable` with the last line of standard error |
 | A tool that exits 0 without output | `malformedReply` |
 | A `.json` reply cut by the length limit before its value was complete | `replyTooLong` |
 
@@ -826,10 +833,10 @@ public struct AILimits: Codable, Sendable {
 ```
 
 - Each provider has an `AIRateLimiter` actor with a slot count, an optional requests-per-minute bucket, and a cool-down date. A 429 sets the cool-down from `retry-after`. Without that header, the cool-down lasts 20 seconds and doubles, up to 5 minutes, for each 429 after the last cool-down ended. A 429 without the header during a cool-down came from a request that was already running, so it keeps that cool-down. Success resets the doubling. The slot a 429 frees goes to a waiting request only after the cool-down is set, so that request waits for it.
-- Requests from features the user starts take free slots before automatic ones. A waiting request yields `waiting`. A user request waits until canceled; an automatic one gives up after 30 seconds with `rateLimited`.
+- Requests from features the user starts take free slots before automatic ones. A waiting request yields `waiting`. A user request waits until canceled; an automatic one gives up after 15 seconds with `rateLimited`, half of a hook's default timeout, so that a hook's request still has time for the route's next model. A wait for a slot that gives up carries the cool-down's end only while a cool-down lasts.
 - A cool-down longer than 10 seconds sends the request to the next model, if the route has one.
 - `automaticRequestsPerDay` counts requests per automatic feature per calendar day. When an automatic feature reaches it, its hooks pause until the next day and its row says so.
-- When the month's estimated cost in the limit's currency reaches `monthlySpendingLimit`, automatic requests stop and user requests throw `budgetReached`. Its action opens Settings ▸ AI to raise the limit.
+- When the month's estimated cost in the limit's currency reaches `monthlySpendingLimit`, automatic requests stop and user requests throw `budgetReached`. Its action opens Settings ▸ AI to raise the limit. The service checks the limit when a request starts and again once each attempt has its slot and key. A finished attempt records its usage before it frees its slot, so the request that takes the slot next counts that attempt's cost.
 
 ## Usage and cost
 
@@ -855,7 +862,7 @@ public struct AIPrice: Codable, Sendable {
 ```
 
 - Arch ships no price list: prices change and differ by account. The user can enter a price per million tokens for each model. Arch shows cost only for models with a price, labels it as an estimate, and groups totals by currency.
-- `AIUsageStore` keeps totals without content or addresses in `ai-usage.json`. It stores request, error, and token counts by month (the last 13), feature, provider, and model. It also stores the current day's automatic request counts for the daily limit. A file that does not decode is renamed to `ai-usage.json.unreadable`, and the totals start empty.
+- `AIUsageStore` keeps totals without content or addresses in `ai-usage.json`. It stores request, error, and token counts by month (the last 13, oldest first, one entry each even when the clock or time zone goes back past the start of a month), feature, provider, and model. It also stores the current day's automatic request counts for the daily limit. A file that does not decode is renamed to `ai-usage.json.unreadable`, and the totals start empty.
 - Settings ▸ AI ▸ Usage shows this month and last month by feature and by model: requests, tokens, and estimated cost.
 - The page reader and question popover show the model and tokens under each answer, plus the estimated cost when the model has a price. A command-line tool that reports no usage shows only its name because the user's subscription covers its use.
 
@@ -879,8 +886,8 @@ public struct AIPrice: Codable, Sendable {
 ## Testing
 
 - VII.2 adds an `AITests` test target in `Packages/ARCH/Tests/AITests` (Swift Testing, run with `swift test`). It depends on `AI`, and on `Plugins` for the composer tests.
-- HTTP provider tests use a `URLProtocol` subclass that replays hand-written server-sent event transcripts for both formats: text deltas, tool calls whose arguments arrive in pieces, usage, error events, 401, 429 with and without `retry-after`, 5xx, and a cut stream, and they check that the session every HTTP provider uses follows a redirect only within the base URL's scheme, host, and port. No test uses a real key or the network. The tests keep their files in one temporary folder for the run, which the run removes as it exits.
-- Command-line provider tests use a fixture script in the test target. It prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone. Adding the same script as a command-line tool in Settings ▸ AI lets the app run every feature without a provider account.
-- Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, the per-minute bucket, the cool-down a freed slot's next request waits for, and doubling only across cool-downs), the daily and monthly limits, and usage normalization.
-- Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
+- HTTP provider tests use a `URLProtocol` subclass that replays hand-written server-sent event transcripts for both formats: text deltas, tool calls whose arguments arrive in pieces, usage, error events and the key left out of their messages, 401, 429 with and without `retry-after`, `retry-after` values that are not finite or lie far ahead, 5xx, a cut stream, and messages without content left out, and they check that the session every HTTP provider uses follows a redirect only within the base URL's scheme, host, and port. No test uses a real key or the network. The tests keep their files in one temporary folder for the run, which the run removes as it exits.
+- Command-line provider tests write a shell script to a temporary folder for each test and run it as a command-line tool. Each script prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone.
+- Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, the per-minute bucket, the cool-down a freed slot's next request waits for, doubling only across cool-downs, and an expired wait after a cool-down has ended), the daily and monthly limits, the site and spending limit checks repeated once a waiting request has its slot, a key the Keychain does not give, a provider whose key stays, usage months after the clock goes back, the defaults of fields a hand-written `ai.json` lacks, and usage normalization.
+- Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, also of a hook that does not stop when canceled, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
 - Composer tests (`PluginComposerTests`) run the composer against the scripted provider, one reply per request, and stage in temporary folders: a plugin staged without being installed, with the request and model as its origin and only text sent; a problem sent back and the corrected reply staged; each unusable reply, from the reply's form, sites, page scripts, file names, and text to the checks staging makes, ending after three; a reply over the size limit ending at once; a change sent with the last version and keeping its identifier; and a route without a JSON model. `PluginsTests` cover staging the files AI writes, a path that leaves the package, and installing, listing again at launch, and removing a plugin that AI wrote with its origin.

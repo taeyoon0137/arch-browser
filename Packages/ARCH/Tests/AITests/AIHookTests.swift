@@ -1,4 +1,4 @@
-// The hook center: ordering by priority, `stop`, allowed actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, actions dropped after cancellation, the checks that keep hooks from running, the errors each feature's row shows, and pausing after consecutive failed requests.
+// The hook center: ordering by priority, `stop`, allowed actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, also of a hook that does not stop when cancelled, actions dropped after cancellation, the checks that keep hooks from running, the errors each feature's row shows, and pausing after consecutive failed requests.
 import Foundation
 import Testing
 @testable import AI
@@ -125,6 +125,33 @@ import Testing
         #expect(await eventually { fixture.center.lastErrors[automaticFeature.id] != nil })
         #expect(fixture.center.lastErrors[automaticFeature.id] as? AIHookError == .timedOut)
         #expect(fixture.host.applied.isEmpty)
+    }
+
+    /// A hook that does not stop when cancelled, as one waiting for a page that does not answer, times out at its timeout and holds its tab's next event no longer; what it returns later counts for nothing.
+    @Test func aHookThatIgnoresCancellationTimesOutWithoutHoldingItsChain() async {
+        let fixture = HookFixture()
+        let log = HookLog()
+        fixture.center.subscribe(registration(timeout: .milliseconds(100)) { event, _ in
+            let path = event.urls.first?.path ?? ""
+            if path == "/first" {
+                // A wait that cancellation does not end.
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) { continuation.resume() }
+                }
+                log.record("returned \(path)")
+            }
+            return .actions([.renameTab(event.subject, title: path)], stop: false)
+        })
+        let tab = UUID()
+        fixture.center.post(pageLoad(tab, path: "/first"))
+        #expect(await eventually { fixture.center.lastErrors[automaticFeature.id] != nil })
+        #expect(fixture.center.lastErrors[automaticFeature.id] as? AIHookError == .timedOut)
+        fixture.center.post(pageLoad(tab, path: "/second"))
+        #expect(await eventually { fixture.host.applied.map(\.title) == ["/second"] })
+        #expect(log.entries.isEmpty)
+        #expect(await eventually { log.entries == ["returned /first"] })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.host.applied.map(\.title) == ["/second"])
     }
 
     @Test func switchingTheFeatureOffStopsItsRunningHook() async {

@@ -115,7 +115,7 @@ struct HTTPProvider: AIProvider {
     private func check(_ response: URLResponse, body: Data) throws {
         guard let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode) else { return }
         let info = ProviderErrorInfo(json: try? JSONSerialization.jsonObject(with: body))
-        let message = redacted(info.message ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode))
+        let message = info.message ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
         let provider = configuration.id
         switch response.statusCode {
         case 300..<400:
@@ -141,7 +141,7 @@ struct HTTPProvider: AIProvider {
     private func mapped(_ error: any Error) -> AIError {
         switch error {
         case let error as AIError:
-            return error
+            return redacted(error)
         case is CancellationError:
             return .cancelled
         case let error as URLError where error.code == .cancelled:
@@ -153,21 +153,37 @@ struct HTTPProvider: AIProvider {
         }
     }
 
-    /// A provider's message never carries the key into the interface, even if the provider echoes it.
+    /// The error with the key taken out of the provider's messages it carries, from an error response or a stream's error event, so that a provider that echoes the key never carries it into the interface.
+    private func redacted(_ error: AIError) -> AIError {
+        switch error {
+        case .providerUnavailable(let provider, let detail): return .providerUnavailable(provider, detail: redacted(detail))
+        case .invalidRequest(let message): return .invalidRequest(redacted(message))
+        case .refused(let message): return .refused(redacted(message))
+        case .malformedReply(let message): return .malformedReply(redacted(message))
+        default: return error
+        }
+    }
+
     private func redacted(_ text: String) -> String {
         guard let key, !key.isEmpty else { return text }
         return text.replacingOccurrences(of: key, with: "\u{2026}")
     }
 
-    /// `Retry-After` in seconds or as an HTTP date.
+    /// The longest cool-down a `Retry-After` header sets.
+    static let maximumRetryAfter: TimeInterval = 24 * 60 * 60
+
+    /// `Retry-After` in seconds or as an HTTP date, at most `maximumRetryAfter` ahead. Seconds that are not a finite number, such as `inf`, which `TimeInterval` reads, give no date.
     static func retryDate(_ value: String?, now: Date = Date()) -> Date? {
         guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
-        if let seconds = TimeInterval(value) { return now + max(seconds, 0) }
+        if let seconds = TimeInterval(value) {
+            guard seconds.isFinite else { return nil }
+            return now + min(max(seconds, 0), maximumRetryAfter)
+        }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        return formatter.date(from: value)
+        return formatter.date(from: value).map { min($0, now + maximumRetryAfter) }
     }
 
     // MARK: Reading

@@ -278,9 +278,9 @@ private struct AIProviderEditor: View {
         settings.save(configuration)
         do {
             if !key.isEmpty {
-                try settings.setKey(key, for: configuration.id)
+                try await settings.setKey(key, for: configuration.id)
             } else if draft.removesKey {
-                try settings.removeKey(for: configuration.id)
+                try await settings.removeKey(for: configuration.id)
             }
             dismiss()
         } catch {
@@ -294,7 +294,7 @@ private struct AIProviderEditor: View {
             return
         }
         do {
-            try settings.removeProvider(draft.id)
+            try await settings.removeProvider(draft.id)
             dismiss()
         } catch {
             message = error.localizedDescription

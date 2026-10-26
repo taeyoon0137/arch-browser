@@ -1,4 +1,4 @@
-// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, cut streams, and the redirects the providers' session follows.
+// Both HTTP message formats against hand-written server-sent event transcripts: text, tool calls whose arguments arrive in pieces, usage, error events, HTTP failures, cut streams, keys kept out of error messages, `Retry-After` values, and the redirects the providers' session follows.
 import Foundation
 import Testing
 @testable import AI
@@ -94,6 +94,17 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
             return
         }
         #expect(detail == "Server overloaded")
+    }
+
+    @Test func streamErrorsNeverCarryTheKey() async {
+        let host = StubURLProtocol.host(replying: .init(chunks: sse([
+            #"data: {"error":{"message":"Invalid key test-key","type":"server_error"}}"#,
+        ])))
+        guard case .providerUnavailable(_, let detail) = await collect(httpProvider(host: host, format: .chatCompletions).stream(request())).error else {
+            Issue.record("Expected providerUnavailable")
+            return
+        }
+        #expect(detail == "Invalid key \u{2026}")
     }
 
     @Test func aNullErrorFieldIsNoError() async {
@@ -215,6 +226,18 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
         }
     }
 
+    /// An empty answer earlier in a conversation leaves its message out, since the format refuses a message without content.
+    @Test func leavesOutMessagesWithoutContent() throws {
+        let messages = [
+            AIMessage(role: .user, parts: [.text("First question")]),
+            AIMessage(role: .assistant, parts: [.text("")]),
+            AIMessage(role: .user, parts: [.text("Second question")]),
+        ]
+        let body = try JSONSerialization.jsonObject(with: MessagesCodec.body(for: AIProviderRequest(model: "model-a", instructions: nil, messages: messages, tools: [], output: .text, maxOutputTokens: 100))) as? [String: Any]
+        let sent = try #require(body?["messages"] as? [[String: Any]])
+        #expect(sent.map { $0["role"] as? String } == ["user", "user"])
+    }
+
     @Test func refusalStopsTheReply() async {
         let host = StubURLProtocol.host(replying: .init(chunks: sse([
             "event: message_delta\n" + #"data: {"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":1}}"#,
@@ -324,6 +347,11 @@ private let weatherTool = AITool(name: "weather", description: "Looks up the wea
         #expect(HTTPProvider.retryDate("12", now: now) == now + 12)
         #expect(HTTPProvider.retryDate("Wed, 21 Oct 2015 07:28:00 GMT") == Date(timeIntervalSince1970: 1_445_412_480))
         #expect(HTTPProvider.retryDate(nil) == nil)
+        // Values a sleep or a count of seconds cannot hold give no date or the longest cool-down.
+        #expect(HTTPProvider.retryDate("inf", now: now) == nil)
+        #expect(HTTPProvider.retryDate("nan", now: now) == nil)
+        #expect(HTTPProvider.retryDate("1e25", now: now) == now + HTTPProvider.maximumRetryAfter)
+        #expect(HTTPProvider.retryDate("Fri, 31 Dec 9999 23:59:59 GMT", now: now) == now + HTTPProvider.maximumRetryAfter)
     }
 }
 

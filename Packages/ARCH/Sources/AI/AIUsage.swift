@@ -52,14 +52,27 @@ public struct AIPrice: Codable, Sendable, Equatable {
 }
 
 public struct AILimits: Codable, Sendable, Equatable {
+    public static let defaultAutomaticRequestsPerDay = 300
+
     /// Per automatic feature.
     public var automaticRequestsPerDay: Int
     /// nil means no limit.
     public var monthlySpendingLimit: AIMoney?
 
-    public init(automaticRequestsPerDay: Int = 300, monthlySpendingLimit: AIMoney? = nil) {
+    public init(automaticRequestsPerDay: Int = AILimits.defaultAutomaticRequestsPerDay, monthlySpendingLimit: AIMoney? = nil) {
         self.automaticRequestsPerDay = automaticRequestsPerDay
         self.monthlySpendingLimit = monthlySpendingLimit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case automaticRequestsPerDay, monthlySpendingLimit
+    }
+
+    /// Limits written by hand may lack the daily limit, which then takes the default.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        automaticRequestsPerDay = try container.decodeIfPresent(Int.self, forKey: .automaticRequestsPerDay) ?? Self.defaultAutomaticRequestsPerDay
+        monthlySpendingLimit = try container.decodeIfPresent(AIMoney.self, forKey: .monthlySpendingLimit)
     }
 }
 
@@ -134,12 +147,15 @@ public final class AIUsageStore: ObservableObject {
     /// Adds one request to the totals of its feature and model. A failed request counts as an error and adds the tokens the provider reported before it failed.
     func record(feature: AIFeature, provider: AIProviderConfiguration, model: AIModelConfiguration, usage: AIUsage?, isError: Bool) {
         let key = Self.monthKey(now())
-        if months.last?.month != key {
-            months.append(Month(month: key, totals: []))
-            months = Array(months.suffix(Self.keptMonths))
+        if !months.contains(where: { $0.month == key }) {
+            // A clock or time zone that went back past the start of a month finds that month again, so each month has one entry and the months stay in order.
+            months.insert(Month(month: key, totals: []), at: months.firstIndex(where: { $0.month > key }) ?? months.endIndex)
+            if months.count > Self.keptMonths { months.removeFirst(months.count - Self.keptMonths) }
         }
+        // A month older than every kept one, after the clock went back by more than a year, keeps nothing.
+        guard let monthIndex = months.firstIndex(where: { $0.month == key }) else { return }
         let total = Total(feature: feature.id.rawValue, featureName: feature.name, provider: provider.id.rawValue, providerName: provider.name, model: model.name, requests: 0, errors: 0, usage: AIUsage(inputTokens: 0, outputTokens: 0), costs: [:])
-        var totals = months[months.count - 1].totals
+        var totals = months[monthIndex].totals
         let index = totals.firstIndex(where: { $0.id == total.id }) ?? {
             totals.append(total)
             return totals.count - 1
@@ -154,7 +170,7 @@ public final class AIUsageStore: ObservableObject {
                 totals[index].costs[price.currency, default: 0] += price.cost(of: usage)
             }
         }
-        months[months.count - 1].totals = totals
+        months[monthIndex].totals = totals
         scheduleSave()
     }
 
@@ -175,7 +191,8 @@ public final class AIUsageStore: ObservableObject {
 
     /// The current month's estimated cost in `currency`.
     func estimatedCost(in currency: String) -> Decimal {
-        guard let month = months.last, month.month == Self.monthKey(now()) else { return 0 }
+        let key = Self.monthKey(now())
+        guard let month = months.first(where: { $0.month == key }) else { return 0 }
         return month.totals.reduce(0) { $0 + ($1.costs[currency] ?? 0) }
     }
 

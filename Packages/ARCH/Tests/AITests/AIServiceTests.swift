@@ -1,5 +1,6 @@
-// The service: route resolution, the default route for user features only, fallbacks before and not after the first text, capability filtering, part checks and truncation, budgets, usage, cancellation, and tool rounds.
+// The service: route resolution, the default route for user features only, fallbacks before and not after the first text, capability filtering, part checks and truncation, the checks repeated after a request's waits, budgets, usage, cancellation, and tool rounds.
 import Foundation
+import Security
 import Testing
 @testable import AI
 
@@ -64,14 +65,29 @@ import Testing
         }
     }
 
-    @Test func removingAProviderClearsItsRoutesAndKey() throws {
+    @Test func removingAProviderClearsItsRoutesAndKey() async throws {
         let first = provider("First", models: [AIModelConfiguration(name: "model-a")])
         let service = scriptedService(providers: [first], script: [:])
-        try service.settings.setKey("secret", for: first.id)
+        try await service.settings.setKey("secret", for: first.id)
         service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: first.id, model: "model-a")]), for: userFeature.id)
-        try service.settings.removeProvider(first.id)
+        try await service.settings.removeProvider(first.id)
         #expect(service.settings.route(for: userFeature.id).models.isEmpty)
-        #expect(try service.settings.keys.key(for: first.id) == nil)
+        #expect(try await service.settings.keys.key(for: first.id) == nil)
+    }
+
+    /// A key the Keychain keeps leaves its provider and routes in place, so that the provider can be removed again.
+    @Test func aKeyThatStaysKeepsItsProvider() async throws {
+        let first = provider("First", models: [AIModelConfiguration(name: "model-a")])
+        let keys = InMemoryKeys()
+        let settings = AISettingsStore(fileURL: temporaryDirectory().appendingPathComponent("ai.json"), keys: keys)
+        settings.providers = [first]
+        try await settings.setKey("secret", for: first.id)
+        settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: first.id, model: "model-a")]), for: userFeature.id)
+        keys.removalError = AIKeychainError(status: errSecUserCanceled)
+        await #expect(throws: AIKeychainError.self) { try await settings.removeProvider(first.id) }
+        #expect(settings.providers.map(\.id) == [first.id])
+        #expect(settings.route(for: userFeature.id).models.count == 1)
+        #expect(try await keys.key(for: first.id) == "secret")
     }
 }
 
@@ -161,8 +177,8 @@ import Testing
         let bad = provider("Bad", models: [AIModelConfiguration(name: "model-a")], baseURL: "https://\(failing)/v1")
         let good = provider("Good", models: [AIModelConfiguration(name: "model-b")], baseURL: "https://\(working)/v1")
         settings.providers = [bad, good]
-        try settings.setKey("wrong-key", for: bad.id)
-        try settings.setKey("right-key", for: good.id)
+        try await settings.setKey("wrong-key", for: bad.id)
+        try await settings.setKey("right-key", for: good.id)
         let session = StubURLProtocol.session()
         let service = AIService(settings: settings, usage: AIUsageStore(fileURL: directory.appendingPathComponent("ai-usage.json")), keys: keys) { configuration, key in
             guard case .http(let http) = configuration.kind else { fatalError() }
@@ -251,6 +267,90 @@ import Testing
     }
 }
 
+/// The checks a request passes again once it has waited for its provider's slot and its key.
+@MainActor
+@Suite struct ChecksAfterWaitingTests {
+    /// A provider with one slot, which a first text request holds for 300 milliseconds.
+    private func service(price: AIPrice? = nil, log: ProviderLog) -> AIService {
+        var first = provider("First", models: [AIModelConfiguration(name: "model-a", price: price)])
+        first.limits = AIProviderLimits(concurrentRequests: 1)
+        let service = scriptedService(providers: [first], script: ["model-a": [
+            .sleep(.milliseconds(300)), .event(.text("x")), .event(.usage(AIUsage(inputTokens: 2, outputTokens: 1))), .event(.finished(.completed)),
+        ]], log: log)
+        service.register(userFeature)
+        return service
+    }
+
+    /// Starts the request and waits until it reports that it waits for the slot.
+    private func waitingRequest(_ request: AIRequest, on service: AIService) async throws -> Task<AIError?, Never> {
+        let events = HookLog()
+        let task = Task {
+            do {
+                for try await event in service.stream(request) { events.record(describe(event)) }
+                return nil as AIError?
+            } catch {
+                return error as? AIError
+            }
+        }
+        try #require(await eventually { events.entries.contains("waiting:queued") })
+        return task
+    }
+
+    @Test func aSiteSwitchedOffDuringTheWaitKeepsItsPage() async throws {
+        let log = ProviderLog()
+        let service = service(log: log)
+        let first = Task { await collect(service.stream(textRequest(userFeature))) }
+        try #require(await eventually { log.requests.count == 1 })
+        let page = AIPageContent(url: URL(string: "https://news.example.org/story")!, title: "Story", text: "Text")
+        let waiting = try await waitingRequest(AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.text("Summarize."), .page(page)])]), on: service)
+        service.settings.setAllowsAI(false, on: page.url)
+        guard case .blockedByPolicy(.siteExcluded("news.example.org")) = await waiting.value else {
+            Issue.record("Expected siteExcluded")
+            return
+        }
+        #expect(await first.value.error == nil)
+        #expect(log.requests.count == 1)
+        #expect(!AIPartText.carriesData(log.requests[0].messages))
+        // The refused request reached no provider, so it counts toward no usage.
+        #expect(service.usage.totals(monthsAgo: 0).first?.requests == 1)
+    }
+
+    @Test func theRequestAheadThatReachesTheSpendingLimitStopsTheWaitingOne() async throws {
+        let log = ProviderLog()
+        // Each request costs 3 USD, the whole limit.
+        let service = service(price: AIPrice(currency: "USD", inputPerMillion: 1_000_000, outputPerMillion: 1_000_000), log: log)
+        service.settings.limits.monthlySpendingLimit = AIMoney(currency: "USD", amount: 3)
+        let first = Task { await collect(service.stream(textRequest(userFeature))) }
+        try #require(await eventually { log.requests.count == 1 })
+        let waiting = try await waitingRequest(textRequest(userFeature), on: service)
+        guard case .budgetReached(.monthlySpending) = await waiting.value else {
+            Issue.record("Expected the spending limit")
+            return
+        }
+        #expect(await first.value.error == nil)
+        #expect(log.requests.count == 1)
+        #expect(service.usage.totals(monthsAgo: 0).first?.costs["USD"] == 3)
+    }
+
+    /// A key the Keychain does not give makes the provider unavailable with the Keychain's reason, and the request that never went out counts toward no usage.
+    @Test func aKeyThatCannotBeReadMakesTheProviderUnavailable() async throws {
+        let log = ProviderLog()
+        let first = provider("First", models: [AIModelConfiguration(name: "model-a")])
+        let service = scriptedService(providers: [first], script: [:], log: log)
+        service.register(userFeature)
+        try await service.settings.setKey("secret", for: first.id)
+        let keys = try #require(service.settings.keys as? InMemoryKeys)
+        keys.readError = AIKeychainError(status: errSecUserCanceled)
+        guard case .providerUnavailable(_, let detail) = await collect(service.stream(textRequest(userFeature))).error else {
+            Issue.record("Expected providerUnavailable")
+            return
+        }
+        #expect(detail.hasPrefix("The key could not be read from the Keychain."))
+        #expect(log.requests.isEmpty)
+        #expect(service.usage.totals(monthsAgo: 0).isEmpty)
+    }
+}
+
 @MainActor
 @Suite struct BudgetAndUsageTests {
     @Test func automaticFeaturesStopAtTheDailyLimit() async {
@@ -279,6 +379,25 @@ import Testing
             Issue.record("Expected the spending limit")
             return
         }
+    }
+
+    /// A clock or time zone that goes back past the start of a month records into that month's entry again, and the spending limit counts all of the current month.
+    @Test func aClockThatGoesBackFindsItsMonthAgain() {
+        var now = Self.date(month: 11, day: 15)
+        let store = AIUsageStore(fileURL: temporaryDirectory().appendingPathComponent("ai-usage.json")) { now }
+        let model = AIModelConfiguration(name: "model-a", price: AIPrice(currency: "USD", inputPerMillion: 1_000_000, outputPerMillion: 0))
+        let first = provider("First", models: [model])
+        for day in [(11, 15), (10, 31), (11, 16)] {
+            now = Self.date(month: day.0, day: day.1)
+            store.record(feature: userFeature, provider: first, model: model, usage: AIUsage(inputTokens: 1, outputTokens: 0), isError: false)
+        }
+        #expect(store.months.map(\.month) == ["2026-10", "2026-11"])
+        #expect(store.totals(monthsAgo: 0).first?.requests == 2)
+        #expect(store.estimatedCost(in: "USD") == 2)
+    }
+
+    private static func date(month: Int, day: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12))!
     }
 
     @Test func usageTotalsCountRequestsErrorsAndTokens() async {

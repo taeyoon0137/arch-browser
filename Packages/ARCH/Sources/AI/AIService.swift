@@ -157,23 +157,29 @@ public final class AIService: ObservableObject, AIClient {
     /// One attempt on one model: rate limiting, page access checks for the model's limit, the provider's stream, and usage.
     private func send(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, attempt: inout AIAttempt, entry: inout AIActivityEntry) async throws -> AIFinishReason {
         entry.model = candidate.ref
-        let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
-        let messages = try policy.prepare(request.messages)
-        let providerRequest = AIProviderRequest(model: candidate.model.name,
-                                                instructions: AIPartText.instructions(request.instructions, for: messages),
-                                                messages: messages, tools: request.tools, output: request.output,
-                                                maxOutputTokens: request.maxOutputTokens ?? 4096)
-        entry.parts = Self.partSummary(messages)
-        entry.content = AIPartText.transcript(of: providerRequest)
+        // A part the checks refuse ends the attempt before it waits.
+        _ = try prepare(request, feature: feature, on: candidate, entry: &entry)
         let limiter = limiter(for: candidate.provider.id)
         await limiter.update(candidate.provider.limits)
         try await limiter.acquire(isUser: feature.trigger == .user) { [continuation = attempt.continuation] reason in
             continuation.yield(.waiting(reason))
         }
+        let key: String?
+        let providerRequest: AIProviderRequest
+        do {
+            key = try await storedKey(for: candidate.provider)
+            // The waits for the slot, a cool-down, and the Keychain can last minutes. Meanwhile the request may have been cancelled, the user may have switched AI off for the page's site, or the request ahead of it may have reached the spending limit, so each is checked again just before the request goes out.
+            try Task.checkCancellation()
+            if reachedSpendingLimit() { throw AIError.budgetReached(.monthlySpending) }
+            providerRequest = try prepare(request, feature: feature, on: candidate, entry: &entry)
+        } catch {
+            // Nothing reached the provider, so nothing counts toward usage.
+            await limiter.release(after: .other)
+            throw error
+        }
         var reported: AIUsage?
         var outcome: Result<AIFinishReason, AIError>
         do {
-            let key = try await storedKey(for: candidate.provider)
             var finishReason: AIFinishReason?
             for try await event in makeProvider(candidate.provider, key).stream(providerRequest) {
                 switch event {
@@ -195,34 +201,51 @@ public final class AIService: ObservableObject, AIClient {
         } catch {
             outcome = .failure(Task.isCancelled ? .cancelled : AIError(error))
         }
-        // One limiter call frees the slot and starts a 429's cool-down, so a request waiting for the slot waits for the cool-down as well.
+        // The usage counts before the slot is freed, so the request that takes the slot next finds this one's cost in the spending limit.
         let isError: Bool
         switch outcome {
-        case .success:
-            await limiter.release(after: .answered)
-            isError = false
-        case .failure(.rateLimited(let provider, let retryAfter)):
-            outcome = .failure(.rateLimited(provider, until: await limiter.release(after: .rateLimited(retryAfter: retryAfter))))
-            isError = true
-        case .failure(let error):
-            await limiter.release(after: .other)
-            if case .cancelled = error { isError = false } else { isError = true }
+        case .success, .failure(.cancelled): isError = false
+        case .failure: isError = true
         }
         entry.usage = reported
         usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: reported, isError: isError)
+        // One limiter call frees the slot and starts a 429's cool-down, so a request waiting for the slot waits for the cool-down as well.
+        switch outcome {
+        case .success:
+            await limiter.release(after: .answered)
+        case .failure(.rateLimited(let provider, let retryAfter)):
+            outcome = .failure(.rateLimited(provider, until: await limiter.release(after: .rateLimited(retryAfter: retryAfter))))
+        case .failure:
+            await limiter.release(after: .other)
+        }
         return try outcome.get()
     }
 
-    /// The budget that keeps the feature from starting a request now: an automatic feature's daily request limit, or the monthly spending limit, which stops automatic and user requests alike until the user raises it.
+    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit. The activity entry shows its parts and content.
+    private func prepare(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, entry: inout AIActivityEntry) throws -> AIProviderRequest {
+        let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
+        let messages = try policy.prepare(request.messages)
+        let providerRequest = AIProviderRequest(model: candidate.model.name,
+                                                instructions: AIPartText.instructions(request.instructions, for: messages),
+                                                messages: messages, tools: request.tools, output: request.output,
+                                                maxOutputTokens: request.maxOutputTokens ?? 4096)
+        entry.parts = Self.partSummary(messages)
+        entry.content = AIPartText.transcript(of: providerRequest)
+        return providerRequest
+    }
+
+    /// The budget that keeps the feature from starting a request now: an automatic feature's daily request limit, or the monthly spending limit.
     func reachedBudget(for feature: AIFeature) -> AIBudget? {
-        let limits = settings.limits
-        if feature.trigger == .automatic, usage.automaticRequestCount(for: feature.id) >= limits.automaticRequestsPerDay {
+        if feature.trigger == .automatic, usage.automaticRequestCount(for: feature.id) >= settings.limits.automaticRequestsPerDay {
             return .automaticRequestsPerDay
         }
-        if let limit = limits.monthlySpendingLimit, usage.estimatedCost(in: limit.currency) >= limit.amount {
-            return .monthlySpending
-        }
-        return nil
+        return reachedSpendingLimit() ? .monthlySpending : nil
+    }
+
+    /// Whether the month's estimated cost has reached the monthly spending limit, which stops automatic and user requests alike until the user raises it.
+    private func reachedSpendingLimit() -> Bool {
+        guard let limit = settings.limits.monthlySpendingLimit else { return false }
+        return usage.estimatedCost(in: limit.currency) >= limit.amount
     }
 
     private func limiter(for provider: AIProviderID) -> AIRateLimiter {
@@ -232,15 +255,13 @@ public final class AIService: ObservableObject, AIClient {
         return limiter
     }
 
-    /// The Keychain read can wait for the user to unlock the keychain, so it runs off the main thread.
+    /// The provider's saved key. A key the Keychain does not give, as when the user cancels the keychain password prompt, makes the provider unavailable with the Keychain's reason rather than its key wrong, since no request went out.
     private func storedKey(for provider: AIProviderConfiguration) async throws -> String? {
         guard case .http(let http) = provider.kind, http.hasKey else { return nil }
-        let keys = keys
-        let id = provider.id
         do {
-            return try await Task.detached { try keys.key(for: id) }.value
+            return try await keys.key(for: provider.id)
         } catch {
-            throw AIError.authentication(id)
+            throw AIError.providerUnavailable(provider.id, detail: "The key could not be read from the Keychain. \(error.localizedDescription)")
         }
     }
 

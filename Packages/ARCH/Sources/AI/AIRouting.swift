@@ -25,6 +25,17 @@ public struct AIRoute: Codable, Sendable, Equatable {
         self.models = models
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled, models
+    }
+
+    /// A route written by hand may lack its models, which then means none.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        models = try container.decodeIfPresent([AIModelRef].self, forKey: .models) ?? []
+    }
+
     /// The route of a feature without an entry in `ai.json`: hooks start switched off, everything else on, and none has models of its own.
     public static func standard(for feature: AIFeatureID) -> AIRoute {
         AIRoute(isEnabled: !feature.rawValue.hasPrefix("hook."))

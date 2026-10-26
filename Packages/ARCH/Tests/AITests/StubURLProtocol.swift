@@ -91,26 +91,44 @@ func sse(_ events: [String]) -> [Data] {
     events.map { Data("\($0)\n\n".utf8) }
 }
 
+/// Keys in memory. `readError` and `removalError`, when set, make reads and removals fail as the Keychain can, as when the user cancels its password prompt.
 final class InMemoryKeys: AIKeyStore, @unchecked Sendable {
     private let lock = NSLock()
     private var keys: [AIProviderID: String] = [:]
+    private var failures: (read: (any Error)?, removal: (any Error)?) = (nil, nil)
 
-    func key(for provider: AIProviderID) throws -> String? {
+    var readError: (any Error)? {
+        get { locked { failures.read } }
+        set { locked { failures.read = newValue } }
+    }
+
+    var removalError: (any Error)? {
+        get { locked { failures.removal } }
+        set { locked { failures.removal = newValue } }
+    }
+
+    func key(for provider: AIProviderID) async throws -> String? {
+        try locked {
+            if let error = failures.read { throw error }
+            return keys[provider]
+        }
+    }
+
+    func setKey(_ key: String, for provider: AIProviderID, label: String) async throws {
+        locked { keys[provider] = key }
+    }
+
+    func removeKey(for provider: AIProviderID) async throws {
+        try locked {
+            if let error = failures.removal { throw error }
+            keys[provider] = nil
+        }
+    }
+
+    private func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
-        return keys[provider]
-    }
-
-    func setKey(_ key: String, for provider: AIProviderID, label: String) throws {
-        lock.lock()
-        keys[provider] = key
-        lock.unlock()
-    }
-
-    func removeKey(for provider: AIProviderID) throws {
-        lock.lock()
-        keys[provider] = nil
-        lock.unlock()
+        return try body()
     }
 }
 

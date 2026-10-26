@@ -1,4 +1,4 @@
-// Site patterns, the rate limiter, and the `ai.json` file: its shape, unreadable files (and an unreadable `ai-usage.json`), and keys kept out of it.
+// Site patterns, the rate limiter, and the `ai.json` file: its shape, the defaults of fields a hand-written file lacks, unreadable files (and an unreadable `ai-usage.json`), and keys kept out of it.
 import Foundation
 import Testing
 @testable import AI
@@ -101,6 +101,21 @@ import Testing
         await limiter.release()
     }
 
+    /// An automatic request that gives up waiting for a slot after a cool-down has ended carries no date, so the service moves to the next model instead of waiting out a cool-down that is over.
+    @Test func aWaitThatExpiresAfterAnEndedCoolDownCarriesNoDate() async throws {
+        let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 1), automaticWaitLimit: .milliseconds(100))
+        try await limiter.acquire(isUser: true) { _ in }
+        await limiter.release(after: .rateLimited(retryAfter: Date() - 1))
+        try await limiter.acquire(isUser: true) { _ in }
+        do {
+            try await limiter.acquire(isUser: false) { _ in }
+            Issue.record("Expected rateLimited")
+        } catch AIError.rateLimited(_, let until) {
+            #expect(until == nil)
+        }
+        await limiter.release()
+    }
+
     @Test func cancellingAWaitingRequestFreesItsPlace() async throws {
         let limiter = AIRateLimiter(provider: AIProviderID(), limits: AIProviderLimits(concurrentRequests: 1))
         try await limiter.acquire(isUser: true) { _ in }
@@ -199,13 +214,13 @@ private final class WaitLog: @unchecked Sendable {
 
 @MainActor
 @Suite struct SettingsFileTests {
-    @Test func writesTheDocumentedShapeWithoutKeys() throws {
+    @Test func writesTheDocumentedShapeWithoutKeys() async throws {
         let directory = temporaryDirectory()
         let keys = InMemoryKeys()
         let store = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
         let first = provider("Work API", models: [AIModelConfiguration(name: "model-a", price: AIPrice(currency: "USD", inputPerMillion: 3, outputPerMillion: 15))], baseURL: "https://api.example.com/v1")
         store.providers = [first]
-        try store.setKey("secret-key", for: first.id)
+        try await store.setKey("secret-key", for: first.id)
         store.setRoute(AIRoute(isEnabled: false), for: .tabNameHook)
         store.saveNow()
 
@@ -225,7 +240,7 @@ private final class WaitLog: @unchecked Sendable {
         let reloaded = AISettingsStore(fileURL: store.fileURL, keys: keys)
         #expect(reloaded.providers == store.providers)
         #expect(reloaded.route(for: .tabNameHook) == AIRoute(isEnabled: false))
-        #expect(try keys.key(for: first.id) == "secret-key")
+        #expect(try await keys.key(for: first.id) == "secret-key")
     }
 
     @Test func readsTheDocumentedExample() throws {
@@ -259,6 +274,30 @@ private final class WaitLog: @unchecked Sendable {
         #expect(store.route(for: .defaultRoute).models == [AIModelRef(provider: AIProviderID(rawValue: "6F1C"), model: "model-a")])
         #expect(store.route(for: .downloadNameHook) == AIRoute(isEnabled: false))
         #expect(store.route(for: .pageQuestion) == AIRoute(isEnabled: true))
+    }
+
+    /// A hand-written provider or route that lacks a field with a default takes the default instead of making the whole file unreadable.
+    @Test func fillsInTheFieldsAHandWrittenFileLacks() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai.json")
+        try Data("""
+        {
+          "providers": [
+            { "id": "6F1C", "name": "Work API", "kind": { "http": { "format": "messages", "baseURL": "https://api.example.com/v1" } } },
+            { "id": "A9D2", "name": "Terminal tool", "kind": { "commandLine": { "executable": "/usr/local/bin/example-tool" } } }
+          ],
+          "routes": { "hook.tabName": { "isEnabled": true } },
+          "limits": { "monthlySpendingLimit": { "currency": "USD", "amount": 5 } }
+        }
+        """.utf8).write(to: file)
+        let store = AISettingsStore(fileURL: file, keys: InMemoryKeys())
+        #expect(!store.replacedUnreadableFile)
+        #expect(store.providers.map(\.limits) == [.http, .commandLine])
+        #expect(store.providers.map(\.models.count) == [0, 0])
+        #expect(store.providers.first?.kind == .http(AIHTTPConfiguration(format: .messages, baseURL: URL(string: "https://api.example.com/v1")!)))
+        #expect(store.route(for: .tabNameHook) == AIRoute(isEnabled: true))
+        #expect(store.limits == AILimits(monthlySpendingLimit: AIMoney(currency: "USD", amount: 5)))
     }
 
     @Test func setsAsideAnUnreadableUsageFile() throws {
