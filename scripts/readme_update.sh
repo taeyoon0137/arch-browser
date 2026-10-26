@@ -20,15 +20,8 @@ if [ ! -f "$PRESET_HERO_FILE" ]; then
   exit 1
 fi
 
-# Prefer the configured Git remote, then fall back to the canonical project URL.
-REPOSITORY_URL="$(git -C "$ROOT_DIR" config --get remote.origin.url || true)"
-if [ -z "$REPOSITORY_URL" ]; then
-  REPOSITORY_URL="https://github.com/taeyoon0137/arch-browser"
-fi
-
-REPOSITORY_URL="${REPOSITORY_URL#git+}"
-REPOSITORY_URL="${REPOSITORY_URL%.git}"
-REPOSITORY_URL="${REPOSITORY_URL/git@github.com:/https:\/\/github.com\/}"
+# The project's canonical URL, never the checkout's remote, which may be an SSH address, a fork, or a URL with credentials.
+REPOSITORY_URL="https://github.com/taeyoon0137/arch-browser"
 
 # Generate resources/readme-hero.svg:
 # - embed any existing hero images as base64 data URIs

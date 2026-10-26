@@ -301,6 +301,20 @@ public final class BrowserSession: ObservableObject {
         return now.timeIntervalSince(becameActiveAt) < smallWindowActivationGrace
     }
 
+    /// The web address that a link from another app or an `open location` script names, or `nil` when it names none: only an http or https address opens, so a file, `mailto:`, or other address is dropped. A script's text may lack a scheme, so it is read as the address field reads it. AppKit escapes that text, spaces among them, so it is read with its escapes decoded first, then as it came for escapes the script wrote itself, as in a query's `%20`; escapes in a host stand for text that is no address.
+    public static func webAddress(forOpened opened: URL) -> URL? {
+        let address: URL?
+        if opened.scheme != nil {
+            address = opened
+        } else {
+            let text = opened.absoluteString
+            address = text.removingPercentEncoding.flatMap(url(forInput:))
+                ?? url(forInput: text).flatMap { $0.host(percentEncoded: true)?.contains("%") == false ? $0 : nil }
+        }
+        guard let scheme = address?.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return address
+    }
+
     /// The app sets this to name Move to Main Window's shortcut, which Settings can change, in the small window's button.
     public var moveToMainWindowShortcut: () -> String? = { nil }
 
@@ -1520,6 +1534,11 @@ extension BrowserSession {
 
     public func clearFinishedDownloads() {
         downloads.filter(\.isFinished).forEach { $0.item.remove() }
+    }
+
+    /// The downloads in progress or paused. Quitting stops them, and the next launch does not list them.
+    public var unfinishedDownloadCount: Int {
+        downloads.count { !$0.isFinished }
     }
 
     /// The downloads folder saved in Settings, falling back to the user's Downloads folder, then the temporary folder.

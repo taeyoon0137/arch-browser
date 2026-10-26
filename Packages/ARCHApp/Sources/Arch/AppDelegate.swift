@@ -84,11 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, while Settings ▸ General allows small windows, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; otherwise links open in new tabs of the sidebar target. A script's text may lack a scheme, so it is read as the address field reads it, and text that is not a web address is dropped.
+    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, while Settings ▸ General allows small windows, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; otherwise links open in new tabs of the sidebar target. Only http and https addresses open (`BrowserSession.webAddress(forOpened:)`); a script's text without a scheme is read as the address field reads it, and anything else is dropped.
     func application(_ application: NSApplication, open urls: [URL]) {
-        let urls = urls.compactMap { url in
-            url.scheme == nil ? BrowserSession.url(forInput: url.absoluteString.removingPercentEncoding ?? url.absoluteString) : url
-        }
+        let urls = urls.compactMap(BrowserSession.webAddress(forOpened:))
         guard !urls.isEmpty else { return }
         guard let session else {
             pendingURLs += urls
@@ -112,9 +110,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// A program running in the built-in terminal stops when Arch quits, so the user confirms first, as closing the terminal's window asks.
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        TerminalWindowController.allowsQuit() ? .terminateNow : .terminateCancel
+    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the windows' sheets, so that Cancel leaves them showing. Closing the last main window quits through the same path.
+    func confirmsQuit() -> Bool {
+        confirmsQuitStoppingDownloads() && TerminalWindowController.allowsQuit()
+    }
+
+    private func confirmsQuitStoppingDownloads() -> Bool {
+        guard let count = session?.unfinishedDownloadCount, count > 0 else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Quit Arch?"
+        alert.informativeText = count == 1 ? "A download has not finished. It stops when Arch quits." : "\(count) downloads have not finished. They stop when Arch quits."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// A Dock click opens a main window where the last one was while Settings, History, or another of the app's windows keeps the app running without one. Otherwise AppKit brings the windows forward as usual.

@@ -98,6 +98,11 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
 done
 
 # A stable signing identity keeps the Keychain items Chromium creates readable across builds. Set `ARCH_SIGN_IDENTITY` to override the automatic choice. Otherwise, use the first Apple Development identity on this Mac, or ad-hoc signing if none exists.
+# The `vtool` step above leaves the executable's signature invalid, and macOS does not run an executable so signed. A signing that fails, as with a mistyped identity or a locked keychain, therefore shows why and falls back to ad-hoc signing, and the script fails when that fails too. The script's own message leaves out the identity's name.
 IDENTITY="${ARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
-codesign --force --deep --sign "${IDENTITY:--}" "$APP" >/dev/null 2>&1 || echo "signing with '${IDENTITY:-ad-hoc}' failed; the app may still run locally" >&2
+if ! SIGN_OUTPUT="$(codesign --force --deep --sign "${IDENTITY:--}" "$APP" 2>&1)"; then
+  printf '%s\n' "$SIGN_OUTPUT" >&2
+  echo "signing failed; signing ad hoc instead, so the Keychain items Chromium created under the identity may ask for access" >&2
+  codesign --force --deep --sign - "$APP"
+fi
 echo "$APP"

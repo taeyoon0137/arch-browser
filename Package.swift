@@ -77,7 +77,7 @@ let package = Package(
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
-        .executableTarget(name: "Arch", dependencies: ["Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
+        .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         // Needs no CEF framework: the bridge loads it at run time, and these tests start no engine.
         .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),

@@ -106,7 +106,7 @@ git config core.hooksPath .githooks
 
 | Command | Description |
 | :-- | :-- |
-| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout. `ARCH_CEF_ARCHIVE` installs a local archive instead, as the bridge requires until the pin changes (see Getting started). |
+| `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 
