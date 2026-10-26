@@ -66,14 +66,14 @@ struct WebExtensionAccessPrompt {
 
 /// The questions that an engine's extension runtime asks in its own words: more access that Chromium describes in its sentences, which do not say which permissions or sites they stand for, and a reload of a tab so that the extensions it kept from running there run.
 enum WebExtensionEnginePrompt {
-    /// Allow, then Don't Allow, under a title that names the version of a pair that asks. The engine keeps what the user allows until the extension's storage goes, as Chromium keeps the permissions it grants at run time.
+    /// Allow, then Don't Allow, under a title that names the version of a pair that asks. The engine keeps what the user allows until the extension's storage goes, as Chromium keeps the permissions it grants at run time, while sites can go sooner (`EngineExtensionPrompt.Kind.permissions`).
     static func permissionsAlert(messages: [String], extensionName: String, version: EngineKind?, engine: EngineKind) -> NSAlert {
         let alert = NSAlert()
         let name = "\u{201C}\(extensionName)\u{201D}"
         alert.messageText = "Allow \(version.map { "the \($0.displayName) version of \(name)" } ?? name) more access?"
         let keeper = version.map { "Only the \($0.displayName) version gets this access." } ?? "The extension gets this access on \(engine.displayName) tabs."
         alert.informativeText = (messages.isEmpty ? "" : messages.joined(separator: "\n") + "\n\n")
-            + "\(keeper) \(engine.displayName) keeps it until you remove the extension."
+            + "\(keeper) \(engine.displayName) keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension\u{2019}s websites out."
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")
         return alert
