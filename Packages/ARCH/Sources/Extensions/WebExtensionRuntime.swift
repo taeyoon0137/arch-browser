@@ -1,4 +1,4 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
+// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, deletes a removed extension's storage in each engine, in a later launch for an engine that did not run at the removal, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
 import AppKit
 import ARCHEngine
 import Plugins
@@ -47,6 +47,10 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     public var onCheck: ((PluginID, [EngineKind: PluginEngineCheck]) -> Void)?
     public var onEngineFailure: ((PluginID, EngineKind, String) -> Void)?
     public var onEnginesChange: (() -> Void)?
+    /// `webExtension.json` in the Persona's folder, which keeps the removals that engines missed (`MissedRemoval`). Setting it reads them.
+    public var runtimeFile: URL? {
+        didSet { missedRemovals = runtimeFile.map(Self.readMissedRemovals) ?? [] }
+    }
     private let persona: PersonaID
     private weak var host: (any WebExtensionHost)?
     private let nativeMessaging: NativeMessaging
@@ -63,6 +67,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     private var focusedWindowID: UUID?
     /// The installed extensions whose package has had its key written in this run, with the date of the install that wrote it, as an update brings a new package.
     private var keyedPackages: [PluginID: Date] = [:]
+    /// The removals whose storage an engine still keeps because it did not run for the Persona when the user removed the extension, in the order they happened, as `runtimeFile` keeps them.
+    private var missedRemovals: [MissedRemoval] = []
 
     /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach.
     public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL) {
@@ -133,18 +139,69 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         engine == .chromium ? [.folder, .zip, PluginPackage.crxType] : [.folder, .zip]
     }
 
-    /// Takes the extension out of the engines that loaded it and deletes its storage in every engine, except in one where another plugin with the same engine identifier keeps it: the engine that the pair's record gives the counterpart, whether or not the counterpart is on, or one that loaded the other plugin.
+    /// Takes the extension out of the engines that loaded it and deletes its storage in every engine, except in one where another plugin with the same engine identifier keeps it: the engine that the pair's record gives the counterpart, whether or not the counterpart is on, or one that loaded the other plugin. An engine that does not run for the Persona in this launch, as when its application or the Persona's profile did not start, and every engine while none runs extensions, misses the removal: `runtimeFile` keeps it until the first pass after that engine attaches in a later launch deletes the storage there.
     public func remove(_ installed: InstalledPlugin) {
         let id = Self.extensionID(of: installed)
         let others = plugins.filter { $0.id != installed.id && Self.extensionID(of: $0) == id }
         plugins.removeAll { $0.id == installed.id }
+        guard unavailability == nil else {
+            return noteMissedRemoval(of: id, on: EngineKind.allCases.filter { kind in !others.contains { $0.pairEngine == kind } })
+        }
         changeEngines { runtime in
+            await runtime.removeMissedData(in: runtime.orderedEngines())
             var cleared: [any EngineExtensions] = []
-            for (kind, engine) in runtime.orderedEngines() {
-                if runtime.loaded[kind]?.removeValue(forKey: installed.id) != nil { engine.unload(id) }
-                if !others.contains(where: { $0.pairEngine == kind || runtime.loaded[kind]?[$0.id] != nil }) { cleared.append(engine) }
+            var missed: [EngineKind] = []
+            for kind in EngineKind.allCases {
+                let engine = runtime.attached?[kind]
+                if let engine, runtime.loaded[kind]?.removeValue(forKey: installed.id) != nil { engine.unload(id) }
+                guard !others.contains(where: { $0.pairEngine == kind || runtime.loaded[kind]?[$0.id] != nil }) else { continue }
+                if let engine { cleared.append(engine) } else { missed.append(kind) }
             }
+            runtime.noteMissedRemoval(of: id, on: missed)
             for engine in cleared { await engine.removeData(of: id) }
+        }
+    }
+
+    /// Keeps in `runtimeFile` that the engines of `kinds`, which did not run for the Persona, still keep the storage of the extension with the engine identifier `id`.
+    private func noteMissedRemoval(of id: String, on kinds: [EngineKind]) {
+        let new = kinds.map { MissedRemoval(engine: $0.rawValue, id: id) }.filter { !missedRemovals.contains($0) }
+        guard !new.isEmpty else { return }
+        missedRemovals += new
+        saveMissedRemovals()
+    }
+
+    /// Deletes in each of `engines`, the attached engines, the storage of the extensions that the user removed in an earlier launch in which the engine did not run for the Persona, then drops those removals from `runtimeFile`. Each pass does so before it loads anything, so that an extension installed again with the same identifier starts without the removed one's storage. A removal that names an engine this build does not know stays in the file.
+    private func removeMissedData(in engines: [(EngineKind, any EngineExtensions)]) async {
+        var due: [(removal: MissedRemoval, engine: any EngineExtensions)] = []
+        for removal in missedRemovals {
+            guard let engine = engines.first(where: { $0.0.rawValue == removal.engine })?.1 else { continue }
+            due.append((removal, engine))
+        }
+        guard !due.isEmpty else { return }
+        for (removal, engine) in due { await engine.removeData(of: removal.id) }
+        missedRemovals.removeAll { removal in due.contains { $0.removal == removal } }
+        saveMissedRemovals()
+    }
+
+    /// Whether a removal waits for an engine that the host lists as running extensions, so that a pass attaches the engines although no extension is enabled.
+    private var hasMissedRemovalsForListedEngines: Bool {
+        let listed = Set(engines.keys.map(\.rawValue))
+        return missedRemovals.contains { listed.contains($0.engine) }
+    }
+
+    /// The removals in the file at `url`. A missing file has none, and so has one that does not read or decode, which the next change replaces: it names only storage to delete, so losing it leaves that storage in the engines until the user deletes the Persona.
+    private static func readMissedRemovals(at url: URL) -> [MissedRemoval] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode(WebExtensionRuntimeFile.self, from: data))?.missedRemovals ?? []
+    }
+
+    /// Writes the removals to `runtimeFile` atomically, or deletes the file once none is left. A write that fails, as on a full disk, keeps them for the run only.
+    private func saveMissedRemovals() {
+        guard let runtimeFile else { return }
+        if missedRemovals.isEmpty {
+            try? FileManager.default.removeItem(at: runtimeFile)
+        } else if let data = try? JSONEncoder().encode(WebExtensionRuntimeFile(missedRemovals: missedRemovals)) {
+            try? data.write(to: runtimeFile, options: .atomic)
         }
     }
 
@@ -182,11 +239,12 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// In each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, or whose pair gives the engine to the other version. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Once every load has ended, each engine stops what it runs from an earlier launch and the pass did not load. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension or a staging.
+    /// First deletes in each engine the storage of the extensions removed in an earlier launch in which the engine did not run (`removeMissedData(in:)`). Then, in each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, or whose pair gives the engine to the other version. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Once every load has ended, each engine stops what it runs from an earlier launch and the pass did not load. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension, a staging, or a removal that waits for an engine the host lists.
     private func loadEnabledExtensions() async {
         let plugins = plugins
-        guard plugins.contains(where: \.isEnabled) || attached != nil else { return }
+        guard plugins.contains(where: \.isEnabled) || attached != nil || hasMissedRemovalsForListedEngines else { return }
         let engines = orderedEngines()
+        await removeMissedData(in: engines)
         for installed in plugins where keyedPackages[installed.id] != installed.installedAt {
             Self.writeKey(of: installed)
             keyedPackages[installed.id] = installed.installedAt
@@ -415,6 +473,17 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         guard loadedExtension(id, in: extensions, granted: .nativeMessaging) != nil else { throw PluginError.permissionDenied(.nativeMessaging) }
         try nativeMessaging.connect(port, from: id)
     }
+}
+
+/// `webExtension.json` in the Persona's folder, as `WebExtensionRuntime.runtimeFile` keeps it: `{"missedRemovals": [{"engine": "chromium", "id": "<engine identifier>"}]}`.
+private struct WebExtensionRuntimeFile: Codable {
+    var missedRemovals: [MissedRemoval]
+}
+
+/// An extension's removal that an engine missed, since it did not run for the Persona then: the engine, by its `EngineKind` raw value, kept as text so that a name this build does not know survives its writes, and the engine identifier of the extension whose storage that engine still keeps.
+private struct MissedRemoval: Codable, Hashable {
+    var engine: String
+    var id: String
 }
 
 /// A web extension's instance in the plugin system, which runs its action from the palette. The extension itself runs in the engines while it is enabled, whether or not an instance exists.

@@ -1,4 +1,4 @@
-// Web extension manifests: what Arch reads from `manifest.json` for the plugin list and the install sheet, the identifiers it gives extensions, localized names, the manifests it refuses, and staging and installing web extensions beside script plugins.
+// Web extension manifests: what Arch reads from `manifest.json` for the plugin list and the install sheet, the identifiers it gives extensions, localized names, the manifests it refuses, and staging and installing web extensions beside script plugins, which may not take the name of the runtime's file.
 import Foundation
 @testable import Extensions
 @testable import Plugins
@@ -98,6 +98,15 @@ import Testing
         #expect(try await manager.stage(archive).manifest.name == "Sample Extension")
         await #expect(throws: PluginError.invalidPackage("The package has no plugin.json or manifest.json at its top level.")) {
             try await manager.stage(folder.package("empty", ["notes.txt": ""]))
+        }
+    }
+
+    @Test func refusesTheNameOfTheRuntimesFileAsAnIdentifier() async throws {
+        let manager = PluginManager.withWebExtensions(WebExtensionRuntime(persona: UUID(), host: RecordingHost(), nativeMessagingHosts: folder.url), in: folder)
+        // The plugin's folder would take the name of `webExtension.json`, which macOS compares without case.
+        let script = try folder.package("script", ["plugin.json": #"{"id": "webExtension.json", "name": "S", "version": "1", "apiVersion": 1, "summary": "S."}"#])
+        await #expect(throws: PluginError.invalidPackage("Arch keeps a file named webextension.json beside the installed plugins, so no plugin can have it as its identifier.")) {
+            try await manager.stage(script)
         }
     }
 

@@ -123,6 +123,8 @@ final class RecordingEngine: EngineExtensions {
     private(set) var loadCounts: [String: Int] = [:]
     private(set) var checkCount = 0
     private(set) var removedData: [String] = []
+    /// The loads and storage deletions in order, as `load <id>` and `removeData <id>`.
+    private(set) var loadsAndRemovals: [String] = []
     /// The identifiers whose actions ran, in order.
     private(set) var performed: [String] = []
     /// The identifiers that the user allowed on a tab's site, in order.
@@ -146,6 +148,7 @@ final class RecordingEngine: EngineExtensions {
         guard !refused.contains(`extension`.id) else { throw RecordingEngineError.refused }
         loaded[`extension`.id] = `extension`
         loadCounts[`extension`.id, default: 0] += 1
+        loadsAndRemovals.append("load \(`extension`.id)")
     }
 
     func unload(_ id: String) {
@@ -155,6 +158,7 @@ final class RecordingEngine: EngineExtensions {
     @MainActor
     func removeData(of id: String) async {
         removedData.append(id)
+        loadsAndRemovals.append("removeData \(id)")
     }
 
     func stopUnloadedExtensions() {

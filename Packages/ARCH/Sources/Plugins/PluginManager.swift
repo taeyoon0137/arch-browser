@@ -80,7 +80,7 @@ public final class PluginManager: ObservableObject {
     private static let failureWindow: TimeInterval = 5 * 60
 
     private let persona: PersonaID
-    /// `Plugins/<persona id>/` in the app's Application Support folder, with `plugins.json`, a folder for each plugin named by its identifier, and `Staging/` for packages under review.
+    /// `Plugins/<persona id>/` in the app's Application Support folder, with `plugins.json`, a folder for each plugin named by its identifier, `Staging/` for packages under review, and each runtime's own file.
     private let directory: URL
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.
     @Published public private(set) var plugins: [InstalledPlugin] {
@@ -174,6 +174,7 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
         for runtime in self.runtimes.values {
+            runtime.runtimeFile = Self.runtimeFile(of: runtime.kind, in: self.directory)
             runtime.onCheck = { [weak self] id, checks in self?.record(checks, for: id) }
             runtime.onEngineFailure = { [weak self] id, engine, reason in self?.recordEngineFailure(reason, of: id, on: engine) }
             runtime.onEnginesChange = { [weak self, kind = runtime.kind] in self?.readEngineChecks(of: kind) }
@@ -435,7 +436,7 @@ public final class PluginManager: ObservableObject {
         return (versions[0].id, versions.map(\.id))
     }
 
-    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one under `archIdentifierPrefix` but outside `PluginComposer.identifierPrefix`, which a later build's built-in plugin could take, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, the install entry's identifier of a version that joined under its counterpart's identifier, such as `extension.<identifier>.chromium`, which an install would otherwise replace although its package names another identifier, or the name of `plugins.json` or of the copy kept of it when it does not decode, which the plugin's folder would take in the Persona's folder.
+    /// Throws `PluginError.invalidPackage` for an identifier that no installed plugin of `kind` may have: a built-in plugin's, one under `archIdentifierPrefix` but outside `PluginComposer.identifierPrefix`, which a later build's built-in plugin could take, one of earlier builds that `PluginIdentifierMigration` renames at launch, an installed plugin's of another kind, which an update cannot turn into this kind, the install entry's identifier of a version that joined under its counterpart's identifier, such as `extension.<identifier>.chromium`, which an install would otherwise replace although its package names another identifier, or the name of `plugins.json`, of the copy kept of it when it does not decode, or of a runtime's file, such as `webExtension.json`, which the plugin's folder would take in the Persona's folder, whose names macOS compares without case.
     private func checkInstallable(_ id: PluginID, of kind: PluginKind) throws {
         guard builtIns[id] == nil else { throw PluginError.invalidPackage("A plugin built into Arch has the identifier \(id.rawValue).") }
         if id.rawValue.hasPrefix(Self.archIdentifierPrefix), !id.rawValue.hasPrefix(PluginComposer.identifierPrefix) {
@@ -451,7 +452,8 @@ public final class PluginManager: ObservableObject {
             throw PluginError.invalidPackage("A version of an installed plugin has the identifier \(id.rawValue).")
         }
         let list = directory.appendingPathComponent(PluginListFile.name)
-        guard ![list, PluginFile.unreadableURL(of: list)].contains(where: { $0.lastPathComponent == id.rawValue }) else {
+        let files = [list, PluginFile.unreadableURL(of: list)] + runtimes.keys.map { Self.runtimeFile(of: $0, in: directory) }
+        guard !files.contains(where: { $0.lastPathComponent.lowercased() == id.rawValue }) else {
             throw PluginError.invalidPackage("Arch keeps a file named \(id.rawValue) beside the installed plugins, so no plugin can have it as its identifier.")
         }
     }
@@ -843,6 +845,11 @@ public final class PluginManager: ObservableObject {
     /// `<plugin id>/package/` in the Persona's folder `directory`.
     private static func packageFolder(of id: PluginID, in directory: URL) -> URL {
         folder(of: id, in: directory).appendingPathComponent("package", isDirectory: true)
+    }
+
+    /// `<kind>.json` in the Persona's folder `directory`, the runtime's own file (`PluginRuntime.runtimeFile`).
+    private static func runtimeFile(of kind: PluginKind, in directory: URL) -> URL {
+        directory.appendingPathComponent("\(kind.rawValue).json")
     }
 
     // MARK: Contributions

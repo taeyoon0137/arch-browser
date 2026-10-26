@@ -526,6 +526,35 @@ struct EngineVersionsTests {
         #expect(webKit.removedData.contains(keyID) && chromium.removedData.contains(keyID) && webKit.loaded.isEmpty && chromium.loaded.isEmpty)
     }
 
+    @Test func leavesTheStorageOfACounterpartWithTheSameIdentifierInAnEngineThatMissedTheRemoval() async throws {
+        let (first, firstRuntime) = launch()
+        let (reader, version) = try await installComplementaryPair(in: first)
+        await firstRuntime.waitForEngines()
+        first.close()
+
+        // Chromium's profile does not start when the user removes the WebKit version, and Chromium keeps the Chromium version's storage under the same identifier, so no removal waits for Chromium.
+        host.enginesThatDoNotStart = [.chromium]
+        let (second, secondRuntime) = launch()
+        await secondRuntime.waitForEngines()
+        try second.remove(reader)
+        await secondRuntime.waitForEngines()
+        #expect(webKit.removedData == [keyID])
+        #expect(!FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/webExtension.json").path))
+        // Without Chromium, the remaining version runs on no engine, as WebKit refuses its package, and goes off.
+        #expect(try !plugin(version, in: second).isEnabled)
+        second.close()
+
+        // At the next launch Chromium deletes nothing, and the remaining version, switched on again, runs there.
+        host.enginesThatDoNotStart = []
+        let (third, thirdRuntime) = launch()
+        await thirdRuntime.waitForEngines()
+        #expect(chromium.removedData.isEmpty)
+        third.setEnabled(true, for: version)
+        await thirdRuntime.waitForEngines()
+        let remaining = try plugin(version, in: third)
+        #expect(remaining.isEnabled && chromium.removedData.isEmpty && chromium.loaded[keyID]?.packageURL == remaining.packageURL)
+    }
+
     @Test func keepsRecordsAndEngineNamesThisBuildIgnores() async throws {
         let (first, _) = launch()
         let a = try await first.installEverything(from: package("a", name: "A"))

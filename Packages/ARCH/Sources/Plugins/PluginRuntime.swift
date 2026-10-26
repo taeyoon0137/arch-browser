@@ -30,11 +30,13 @@ public protocol PluginRuntime: AnyObject, Sendable {
     var onEngineFailure: ((PluginID, EngineKind, String) -> Void)? { get set }
     /// Set by the manager, which reads each plugin's current answers and the kind's unavailability again: `engines` lost an engine, as one whose profile did not start for the Persona.
     var onEnginesChange: (() -> Void)? { get set }
+    /// Set by the manager before it first lists the plugins: a file of the runtime's own in the Persona's folder, `<kind>.json`, for what the runtime must keep across launches beside `plugins.json`, such as the removals that an engine has not had yet. No plugin identifier can name it, and it goes with the folder when the user deletes the Persona.
+    var runtimeFile: URL? { get set }
     /// The installed plugins of the kind, on or off, each time they change; none while `unavailability` says why the kind cannot run. The runtime runs the enabled ones.
     func run(_ installed: [InstalledPlugin])
     /// A new instance of an enabled plugin of the kind, which the manager starts at the plugin's first command, panel, or page script value.
     func makePlugin(_ installed: InstalledPlugin) -> any Plugin
-    /// Deletes what the runtime keeps of a plugin the user removes, such as a web extension's storage in the engines, except in an engine where the other version of its pair runs under the same engine identifier.
+    /// Deletes what the runtime keeps of a plugin the user removes, such as a web extension's storage in the engines, except in an engine where the other version of its pair runs under the same engine identifier. An engine that does not run in this launch deletes it in a later one.
     func remove(_ installed: InstalledPlugin)
     /// The types the open panel accepts for a package of the kind that `engine` runs, for Install <Engine> Version….
     func packageTypes(for engine: EngineKind) -> [UTType]

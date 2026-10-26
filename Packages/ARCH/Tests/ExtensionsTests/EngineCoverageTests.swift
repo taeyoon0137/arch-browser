@@ -1,4 +1,4 @@
-// Which engines run each web extension's package: the checks at staging, of the installed plugin a package updates, before loads without a current answer, of switched-off plugins once the engines run, and of a plugin switched on again after every engine refused it, `engineChecks` in `plugins.json` with each engine's version and the names this build does not know, loading only where a package runs, failures to start kept to their engine, only the engines whose profiles start counting, the kind unavailable only without an engine, and where the review sheet and Settings say a plugin runs. A recording engine stands in for Chromium.
+// Which engines run each web extension's package: the checks at staging, of the installed plugin a package updates, before loads without a current answer, of switched-off plugins once the engines run, and of a plugin switched on again after every engine refused it, `engineChecks` in `plugins.json` with each engine's version and the names this build does not know, loading only where a package runs, failures to start kept to their engine, only the engines whose profiles start counting, the kind unavailable only without an engine, where the review sheet and Settings say a plugin runs, and a removal's storage deleted at a later launch in an engine that did not run at the removal. A recording engine stands in for Chromium.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -56,6 +56,16 @@ struct EngineCoverageTests {
     private func fileChecks() throws -> [String: String] {
         let checks = try #require(try installEntry()["engineChecks"] as? [String: [String: Any]])
         return checks.mapValues { "\($0["runs"] as? Bool ?? false) \($0["version"] as? String ?? "")" }
+    }
+
+    /// The runtime's file in the Persona's folder.
+    private var runtimeFileURL: URL { folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/webExtension.json") }
+
+    /// The removals that engines missed, as the runtime's file keeps them, as `engine id`; none without the file.
+    private func missedRemovals() throws -> [String] {
+        guard FileManager.default.fileExists(atPath: runtimeFileURL.path) else { return [] }
+        let file = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: runtimeFileURL)) as? [String: Any])
+        return try #require(file["missedRemovals"] as? [[String: String]]).map { "\($0["engine"] ?? "") \($0["id"] ?? "")" }
     }
 
     @Test func recordsEachEngineCheckAtStagingAndInstall() async throws {
@@ -280,6 +290,71 @@ struct EngineCoverageTests {
         #expect(withChromium.plugins.first?.unavailability == nil)
         await runtime.waitForEngines()
         #expect(chromium.loaded[sampleID] != nil && withChromium.plugins.first?.enginesNote == "Runs on Chromium tabs.")
+    }
+
+    @Test func deletesTheStorageOfARemovalThatAnEngineMissedOnceItAttaches() async throws {
+        let (first, firstRuntime) = launch()
+        let installed = try await first.installEverything(from: sampleExtensionFolder)
+        await firstRuntime.waitForEngines()
+        first.close()
+
+        // Chromium's application does not start, so the host does not list it: the removal deletes the storage on WebKit and is kept for Chromium.
+        var (webKit, chromium) = replaceEngines(webKit: "W1", chromium: "C1")
+        host.engines = [.webKit: webKit]
+        let (second, secondRuntime) = launch()
+        await secondRuntime.waitForEngines()
+        try second.remove(installed.id)
+        await secondRuntime.waitForEngines()
+        #expect(webKit.removedData == [sampleID] && chromium.removedData.isEmpty)
+        #expect(try missedRemovals() == ["chromium \(sampleID)"])
+        second.close()
+
+        // A removal kept by a newer build for an engine this build does not know stays in the file.
+        let file = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: runtimeFileURL)) as? [String: [[String: String]]])
+        try JSONSerialization.data(withJSONObject: ["missedRemovals": (file["missedRemovals"] ?? []) + [["engine": "future", "id": "abc"]]]).write(to: runtimeFileURL)
+
+        // At the next launch Chromium attaches, although the Persona has no extension left: its first pass deletes the storage once, and the removal leaves the file.
+        (webKit, chromium) = replaceEngines(webKit: "W1", chromium: "C1")
+        let (third, thirdRuntime) = launch()
+        await thirdRuntime.waitForEngines()
+        #expect(chromium.removedData == [sampleID] && webKit.removedData.isEmpty)
+        #expect(try missedRemovals() == ["future abc"])
+        // Later passes delete nothing more.
+        try await third.installEverything(from: folder.package("other", ["manifest.json": #"{"manifest_version": 3, "name": "O", "version": "1"}"#]))
+        await thirdRuntime.waitForEngines()
+        #expect(chromium.removedData == [sampleID] && webKit.removedData.isEmpty)
+    }
+
+    @Test func deletesAMissedRemovalBeforeTheEngineLoadsTheExtensionAgain() async throws {
+        let (first, firstRuntime) = launch()
+        let installed = try await first.installEverything(from: sampleExtensionFolder)
+        await firstRuntime.waitForEngines()
+        first.close()
+
+        // No engine runs extensions in this launch, so both miss the removal, and the same extension installs again as unavailable.
+        host.engines = [:]
+        let (second, _) = launch()
+        try second.remove(installed.id)
+        #expect(try missedRemovals() == ["webKit \(sampleID)", "chromium \(sampleID)"])
+        try await second.installEverything(from: sampleExtensionFolder)
+        second.close()
+
+        // WebKit's profile does not start: Chromium deletes the removed copy's storage before it loads the new one, and WebKit's removal waits.
+        var (webKit, chromium) = replaceEngines(webKit: "W1", chromium: "C1")
+        host.enginesThatDoNotStart = [.webKit]
+        let (third, thirdRuntime) = launch()
+        await thirdRuntime.waitForEngines()
+        #expect(chromium.loadsAndRemovals == ["removeData \(sampleID)", "load \(sampleID)"] && webKit.loadsAndRemovals.isEmpty)
+        #expect(try missedRemovals() == ["webKit \(sampleID)"])
+        third.close()
+
+        // Once WebKit attaches too, it does the same, Chromium deletes nothing more, and the file goes with the last removal.
+        (webKit, chromium) = replaceEngines(webKit: "W1", chromium: "C1")
+        host.enginesThatDoNotStart = []
+        let (_, fourthRuntime) = launch()
+        await fourthRuntime.waitForEngines()
+        #expect(webKit.loadsAndRemovals == ["removeData \(sampleID)", "load \(sampleID)"] && chromium.loadsAndRemovals == ["load \(sampleID)"])
+        #expect(!FileManager.default.fileExists(atPath: runtimeFileURL.path))
     }
 
     @Test func keepsEngineNamesThisBuildDoesNotKnow() async throws {
