@@ -85,7 +85,7 @@ private struct PageReaderTabView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(conversation.exchanges) { exchange in
-                        PageExchangeView(exchange: exchange, assistant: assistant, pageURL: url) { conversation.retry(exchange.id) }
+                        PageExchangeView(exchange: exchange, assistant: assistant, tab: tab, pageURL: url) { conversation.retry(exchange.id) }
                             .id(exchange.id)
                     }
                 }

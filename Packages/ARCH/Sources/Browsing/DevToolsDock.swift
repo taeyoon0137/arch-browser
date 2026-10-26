@@ -60,7 +60,15 @@ public final class DevToolsDock: ObservableObject {
     /// The titles of the tools' tab, which name the tools' window while they float.
     private var titles: AnyPublisher<String, Never> = Empty().eraseToAnyPublisher()
 
+    /// The least width or height of docked tools, and the least content size of their window.
     static let minimumSize: CGFloat = 200
+    /// The least width or height that docked tools leave the page beside them.
+    static let minimumPageSize: CGFloat = 200
+
+    /// The size docked tools show at in `room`, the page area's length along their side less the page's margins and the margin between the page and the tools: the saved size, or less so that the page keeps `minimumPageSize`, but not below `minimumSize` unless `room` itself is smaller. A size saved in a larger window then fits a smaller one, and a drag cannot push the page or the handle out of the window.
+    static func shownSize(_ saved: CGFloat, in room: CGFloat) -> CGFloat {
+        max(0, min(room, max(minimumSize, min(saved, room - minimumPageSize))))
+    }
 
     init(settings: DevToolsDockSettings = .shared, undockedWindows: DevToolsUndockedWindows = .shared) {
         self.settings = settings
@@ -240,7 +248,7 @@ final class DevToolsWindow: NSWindow {
     }
 }
 
-/// Makes room for docked developer tools beside the page: the page narrows by the tools' size, and the tools' view fills the free space in the page's rounded frame. The margin between the page and the tools is a handle that resizes them.
+/// Makes room for docked developer tools beside the page: the page narrows by the tools' size, and the tools' view fills the free space in the page's rounded frame. The margin between the page and the tools is a handle that resizes them. The tools show at their shared size, made to fit the page area (`DevToolsDock.shownSize(_:in:)`), so the page area never grows past the window.
 struct DevToolsDockSpace: ViewModifier {
     @ObservedObject var dock: DevToolsDock
     let isHidden: Bool
@@ -252,13 +260,21 @@ struct DevToolsDockSpace: ViewModifier {
     private var side: DevToolsSide? { isHidden ? nil : dock.dockedSide }
 
     func body(content: Content) -> some View {
-        content
-            .padding(side == .right ? .trailing : side == .left ? .leading : .bottom, side == nil ? 0 : size + gap(for: side!))
-            .overlay(alignment: alignment) { if let side { space(for: side) } }
+        GeometryReader { proxy in
+            let room = side.map { self.room(for: $0, in: proxy.size) } ?? 0
+            let size = DevToolsDock.shownSize(side == .bottom ? settings.height : settings.width, in: room)
+            content
+                .padding(side == .right ? .trailing : side == .left ? .leading : .bottom, side == nil ? 0 : size + gap(for: side!))
+                .overlay(alignment: alignment) { if let side { space(for: side, size: size, room: room) } }
+        }
     }
 
-    private var size: CGFloat { side == .bottom ? settings.height : settings.width }
     private var alignment: Alignment { side == .left ? .leading : side == .bottom ? .bottom : .trailing }
+
+    /// The length that the page and the tools share along the tools' side of the page area, `size`: the page area's length less the page's margins on that axis and the margin between the page and the tools.
+    private func room(for side: DevToolsSide, in size: CGSize) -> CGFloat {
+        side == .bottom ? size.height - margins.top - margins.bottom - gap(for: side) : size.width - margins.leading - margins.trailing - gap(for: side)
+    }
 
     /// The page's own margin on that side already separates it from the tools, so only the tools' outer margin is added.
     private func gap(for side: DevToolsSide) -> CGFloat {
@@ -269,40 +285,45 @@ struct DevToolsDockSpace: ViewModifier {
         }
     }
 
-    @ViewBuilder private func space(for side: DevToolsSide) -> some View {
+    /// The tools at `size`, the size they show at in `room`, with the handle that resizes them within it.
+    @ViewBuilder private func space(for side: DevToolsSide, size: CGFloat, room: CGFloat) -> some View {
         switch side {
         case .bottom:
             VStack(spacing: 0) {
-                DevToolsResizeHandle(axis: .vertical, size: $settings.height, sign: -1)
+                DevToolsResizeHandle(axis: .vertical, size: $settings.height, shownSize: size, room: room, sign: -1)
                     .frame(height: margins.bottom)
                 WebContentsHostView(contentView: dock.view)
-                    .frame(height: settings.height)
+                    .frame(height: size)
             }
             .padding(EdgeInsets(top: 0, leading: margins.leading, bottom: margins.bottom, trailing: margins.trailing))
         case .left:
             HStack(spacing: 0) {
                 WebContentsHostView(contentView: dock.view)
-                    .frame(width: settings.width)
-                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: 1)
+                    .frame(width: size)
+                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, shownSize: size, room: room, sign: 1)
                     .frame(width: margins.leading)
             }
             .padding(EdgeInsets(top: margins.top, leading: margins.leading, bottom: margins.bottom, trailing: 0))
         default:
             HStack(spacing: 0) {
-                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, sign: -1)
+                DevToolsResizeHandle(axis: .horizontal, size: $settings.width, shownSize: size, room: room, sign: -1)
                     .frame(width: margins.trailing)
                 WebContentsHostView(contentView: dock.view)
-                    .frame(width: settings.width)
+                    .frame(width: size)
             }
             .padding(EdgeInsets(top: margins.top, leading: 0, bottom: margins.bottom, trailing: margins.trailing))
         }
     }
 }
 
-/// The margin between the page and the tools. Dragging it resizes the tools; `sign` is -1 where dragging toward the page enlarges them.
+/// The margin between the page and the tools. Dragging it resizes the tools from the size they show at, within `room` as `DevToolsDock.shownSize(_:in:)` limits it, and saves the result; `sign` is -1 where dragging toward the page enlarges them.
 private struct DevToolsResizeHandle: View {
     let axis: Axis
+    /// The saved size, which every window's tools share.
     @Binding var size: CGFloat
+    /// The size the tools show at, which a smaller window makes less than the saved one.
+    let shownSize: CGFloat
+    let room: CGFloat
     let sign: CGFloat
     @State private var startSize: CGFloat?
     /// Whether the handle has pushed the resize pointer, which it pops once.
@@ -327,10 +348,10 @@ private struct DevToolsResizeHandle: View {
             }
             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
-                    let start = startSize ?? size
+                    let start = startSize ?? shownSize
                     startSize = start
                     let delta = axis == .horizontal ? value.translation.width : value.translation.height
-                    size = max(DevToolsDock.minimumSize, start + sign * delta)
+                    size = DevToolsDock.shownSize(start + sign * delta, in: room)
                 }
                 .onEnded { _ in startSize = nil })
     }

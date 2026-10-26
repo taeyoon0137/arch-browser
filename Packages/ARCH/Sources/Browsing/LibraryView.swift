@@ -7,10 +7,10 @@ struct LibraryPanel: View {
     let windowButtons: WindowButtonMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
             Color.clear
                 .frame(height: SidebarTopRow.height)
-                .padding(.top, max(0, windowButtons.centerY - SidebarTopRow.height / 2))
+                .padding(.top, SidebarTopRow.topPadding(below: windowButtons))
             LibraryView(session: session)
                 .padding(.top, 6)
                 .frame(maxHeight: .infinity)
@@ -18,10 +18,10 @@ struct LibraryPanel: View {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
             }
-            .frame(height: 28)
+            .frame(height: SidebarBottomBar.height)
         }
         .padding(.horizontal, SidebarView.inset)
-        .padding(.bottom, 10)
+        .padding(.bottom, SidebarView.bottomMargin)
     }
 }
 

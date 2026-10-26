@@ -118,10 +118,14 @@ public final class PageAssistant: ObservableObject {
 
     // MARK: Links in replies
 
-    /// Opens a web link from a reply in a new tab. Other links open nothing, so a reply cannot hand an address to another app.
-    func openLink(_ url: URL) -> OpenURLAction.Result {
+    /// Opens a web link from a reply about `tab`'s page as a page that the tab's page opened: in a new tab of the tab's Persona, in the default engine, selected in the window that shows the tab, or in a small window of its own beside a small window (`BrowserWindowModel.showOpenedPage`), or in the Persona's preferred space while no window shows the tab. Other links open nothing, so a reply cannot hand an address to another app.
+    func openLink(_ url: URL, from tab: Tab) -> OpenURLAction.Result {
         guard let session, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .discarded }
-        session.openTab(url: url)
+        if let window = session.window(showing: tab) {
+            window.showOpenedPage(session.makeWebContents(url: url, engine: nil, state: nil, in: tab.personaID), personaID: tab.personaID)
+        } else {
+            session.openTab(url: url, in: session.preferredSpace(in: tab.personaID).id)
+        }
         return .handled
     }
 

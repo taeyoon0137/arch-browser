@@ -14,8 +14,8 @@ enum SidebarDragItem: Equatable {
     }
 }
 
-/// The tab row, favorite, or space symbol lifted by a drag. The window draws it above the sidebar and the page, so it can follow the pointer out of the list.
-final class TabDragState: ObservableObject {
+/// A drag in the window's sidebar: the tab row, favorite, or space symbol it lifts, its drop target, and the frames of the space symbols and the page area's panes that a dragged tab's targets are found in. The window draws the lifted item above the sidebar and the page, so it can follow the pointer out of the list.
+final class SidebarDragState: ObservableObject {
     /// How long a lifted item's shadow and its slot's dimming take to appear and disappear.
     static let liftDuration = 0.4
 
@@ -113,22 +113,22 @@ final class TabDragState: ObservableObject {
 /// Draws the lifted tab row at the pointer.
 struct TabDragLayer: View {
     @ObservedObject var session: BrowserSession
-    @ObservedObject var tabDrag: TabDragState
+    @ObservedObject var sidebarDrag: SidebarDragState
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if let id = tabDrag.tabID, let tab = session.tabs.first(where: { $0.id == id }) {
+        if let id = sidebarDrag.tabID, let tab = session.tabs.first(where: { $0.id == id }) {
             // Over the page the row needs a backing of its own.
             TabRowView(session: session, tab: tab)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(tabDrag.isLifted ? 1 : 0))
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
-                .shadow(color: .black.opacity(tabDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(sidebarDrag.isLifted ? 1 : 0))
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
+                .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
                 // A tab released over a space's symbol or a folder's row shrinks into it.
-                .scaleEffect(tabDrag.isEntering ? 0.2 : 1)
-                .opacity(tabDrag.isEntering ? 0 : 1)
+                .scaleEffect(sidebarDrag.isEntering ? 0.2 : 1)
+                .opacity(sidebarDrag.isEntering ? 0 : 1)
                 .environment(\.isDraggingTab, true)
-                .frame(width: tabDrag.frame.width, height: tabDrag.frame.height)
-                .offset(x: tabDrag.frame.minX, y: tabDrag.frame.minY)
+                .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
+                .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)

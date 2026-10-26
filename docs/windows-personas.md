@@ -416,7 +416,7 @@ public static let opensLinksInSmallWindowByDefault: Bool
 
 `SmallWindowView` (new, internal, step 11, `SmallWindowView.swift`): `init(session: BrowserSession, window: BrowserWindowModel)`; its layout is under Small window.
 
-`PageAreaView` (internal, in `SplitView.swift`, where split view (III.5) put it before step 11): `init(session: BrowserSession, tabDrag: TabDragState?, margins: EdgeInsets)`, holding the panes with the page host and its background, the crash notice, the internal page, the region capture overlay, and the frame stroke, and around them the preview panel, the margins, the developer tools space, and the window's full screen for page fullscreen. Both window kinds show the page through it, so page fullscreen and the docked tools behave the same in each. A window without a sidebar passes no `tabDrag`.
+`PageAreaView` (internal, in `SplitView.swift`, where split view (III.5) put it before step 11): `init(session: BrowserSession, sidebarDrag: SidebarDragState?, margins: EdgeInsets)`, holding the panes with the page host and its background, the crash notice, the internal page, the region capture overlay, and the frame stroke, and around them the preview panel, the margins, the developer tools space, and the window's full screen for page fullscreen. Both window kinds show the page through it, so page fullscreen and the docked tools behave the same in each. A window without a sidebar passes no `sidebarDrag`.
 
 `CommandPaletteLayer` (internal, step 11, in `CommandPaletteView.swift`, extracted from `BrowserWindowView`): the palette, its dimming, the warm-up copy, and their motion, which both window kinds show. The main window passes its address pill's frame and pull; the small window passes none.
 

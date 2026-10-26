@@ -1025,10 +1025,10 @@ public final class BrowserSession: ObservableObject {
         tab.isPinned.toggle()
     }
 
-    /// Accepts only a full URL with a scheme and host, or a dotted host without spaces. Adds `https://` to a dotted host.
+    /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or a dotted host without spaces. Adds `https://` to a dotted host. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
     public static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let parsed = URL(string: text), parsed.scheme != nil, parsed.host != nil { return parsed }
+        if let parsed = URL(string: text), let scheme = parsed.scheme, parsed.host != nil || scheme.lowercased() == "file" { return parsed }
         if !text.contains(" "), let parsed = URL(string: "https://\(text)"), parsed.host?.contains(".") == true { return parsed }
         return nil
     }

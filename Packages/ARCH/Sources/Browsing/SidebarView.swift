@@ -28,8 +28,14 @@ struct SidebarView: View {
     static func clampedWidth(_ width: Double) -> CGFloat { min(max(CGFloat(width), minWidth), maxWidth) }
     /// The margin between the sidebar's edges and its controls.
     static let inset: CGFloat = 6
-    /// Spring that settles the space pages after a swipe or a change of space.
+    /// The space between the sidebar's rows, such as below the top row and above the bottom bar, which the library and the line beside it repeat.
+    static let rowSpacing: CGFloat = 8
+    /// The margin below the bottom bar.
+    static let bottomMargin: CGFloat = 10
+    /// Spring of the sidebar's moves: the space pages after a swipe or a change of space, the sidebar sliding in or out, docked or as a card, the library, the page reader, and the window buttons' slide.
     static let pageSpring = Animation.spring(response: 0.35, dampingFraction: 0.88)
+    /// How long a move with `pageSpring` takes to come to rest, for a change that waits until the move ends, such as the card giving way to the docked sidebar. Change it with the spring's response.
+    static let pageSpringSettleDelay: TimeInterval = 0.4
 
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -98,9 +104,9 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
             // Swipes over the bottom bar stay with it, so its symbols can scroll when there are many.
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 if let tab = windowModel.selectedTab {
                     SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
                 } else {
@@ -125,11 +131,11 @@ struct SidebarView: View {
                 .modifier(SidebarDropTarget())
             }
             // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
-            .background(SpaceSwipeView(isEnabled: !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -8))
+            .background(SpaceSwipeView(isEnabled: !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -Self.rowSpacing))
             SidebarBottomBar(session: session)
         }
         .padding(.horizontal, Self.inset)
-        .padding(.bottom, 10)
+        .padding(.bottom, Self.bottomMargin)
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
         .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
     }
@@ -173,10 +179,10 @@ struct SidebarColumn: View {
                 .frame(width: libraryWidth)
                 .allowsHitTesting(progress > 0)
                 .accessibilityHidden(progress == 0)
-            // The line sits in the middle of the gap, from below the window buttons' row to above the button row.
+            // The line sits in the middle of the gap, from below the window buttons' row to above the bottom bar, at the sidebar's spacing from each.
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
-                .padding(.top, windowButtons.centerY + SidebarTopRow.height / 2 + 8)
-                .padding(.bottom, 10 + 28 + 8)
+                .padding(.top, SidebarTopRow.topPadding(below: windowButtons) + SidebarTopRow.height + SidebarView.rowSpacing)
+                .padding(.bottom, SidebarView.bottomMargin + SidebarBottomBar.height + SidebarView.rowSpacing)
                 .frame(width: gap)
             SidebarView(session: session, windowButtons: windowButtons,
                         librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(travel, max(0, $0)) },
@@ -247,6 +253,11 @@ struct SelectedTabHeaderView: View {
 struct SidebarTopRow: View {
     static let height: CGFloat = 30
 
+    /// The space above the row, which centers it on the window buttons. The library and the small window's top row keep the same line.
+    static func topPadding(below windowButtons: WindowButtonMetrics) -> CGFloat {
+        max(0, windowButtons.centerY - height / 2)
+    }
+
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let windowButtons: WindowButtonMetrics
     var tab: Tab?
@@ -266,7 +277,7 @@ struct SidebarTopRow: View {
         .frame(height: Self.height)
         // The sidebar's margin comes on top of this, so the row starts one margin past the last traffic light.
         .padding(.leading, windowButtons.trailingEdge ?? 0)
-        .padding(.top, max(0, windowButtons.centerY - Self.height / 2))
+        .padding(.top, Self.topPadding(below: windowButtons))
     }
 }
 

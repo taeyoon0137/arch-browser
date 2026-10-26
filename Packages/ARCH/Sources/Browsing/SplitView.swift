@@ -6,7 +6,7 @@ struct PageAreaView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Receives the panes' frames, so that a tab dragged from the sidebar can open beside one; nil in a window without a sidebar. The page area itself does not change during a drag.
-    let tabDrag: TabDragState?
+    let sidebarDrag: SidebarDragState?
     let margins: EdgeInsets
     /// Set when the window entered full screen for a page, so that it leaves full screen again with the page.
     @State private var enteredFullScreenForPage = false
@@ -63,7 +63,7 @@ struct PageAreaView: View {
                 }
             }
         }
-        .onPreferenceChange(PaneFramesKey.self) { tabDrag?.paneFrames = $0 }
+        .onPreferenceChange(PaneFramesKey.self) { sidebarDrag?.paneFrames = $0 }
     }
 }
 
@@ -220,7 +220,7 @@ private struct PaneFramesKey: PreferenceKey {
     }
 }
 
-extension TabDragState {
+extension SidebarDragState {
     /// Where `tab` released at `point` opens in split view: before the pane under the pointer over its leading half, after it over its trailing half. `nil` when the tab cannot join the panes on screen, or when a pane would stay where it is.
     func splitDrop(of tab: Tab, at point: CGPoint, in windowModel: BrowserWindowModel) -> SplitDrop? {
         guard let paneIndex = paneFrames.firstIndex(where: { $0.frame.contains(point) }) else { return nil }
@@ -239,10 +239,10 @@ extension TabDragState {
 
 /// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes.
 struct SplitDropIndicator: View {
-    @ObservedObject var tabDrag: TabDragState
+    @ObservedObject var sidebarDrag: SidebarDragState
 
     var body: some View {
-        if let frame = tabDrag.splitDrop?.frame {
+        if let frame = sidebarDrag.splitDrop?.frame {
             RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius, style: .continuous)
                 .fill(Color.accentColor.opacity(0.15))
                 .overlay(RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius, style: .continuous).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2))

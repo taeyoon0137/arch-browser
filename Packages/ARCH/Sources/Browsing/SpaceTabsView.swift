@@ -1,4 +1,4 @@
-// The space pages below the favorites: one page per space, each with the space's header and menu, then its pinned tabs, its open tabs, their folders, and the new tab row. A tab row's drag starts and ends here (`TabDragState.swift`).
+// The space pages below the favorites: one page per space, each with the space's header and menu, then its pinned tabs, its open tabs, their folders, and the new tab row. A tab row's drag starts and ends here (`SidebarDragState.swift`).
 import AppKit
 import SwiftUI
 
@@ -34,7 +34,7 @@ struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
-    @EnvironmentObject private var tabDrag: TabDragState
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
     /// Each tab and folder row's frame in the window, and those of the rows that end the pinned and open lists, used to find the row under the pointer and the dropped tab's destination.
@@ -75,7 +75,7 @@ struct SpaceTabsView: View {
     /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row.
     private func listItems(pinned: Bool) -> [Item] {
         let folders = session.folders(in: space.id, pinned: pinned).flatMap { folder in
-            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == windowModel.selectedTabID || ($0.id == tabDrag.tabID && !tabDrag.isSettling) }
+            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == windowModel.selectedTabID || ($0.id == sidebarDrag.tabID && !sidebarDrag.isSettling) }
             return [Item.folder(folder)] + shown.map { Item.tab($0, isInFolder: true) }
         }
         return folders + session.tabsOutsideFolders(in: space.id, pinned: pinned).map { Item.tab($0, isInFolder: false) }
@@ -107,13 +107,13 @@ struct SpaceTabsView: View {
             }
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
-            .environment(\.isDraggingTab, tabDrag.tabID != nil)
+            .environment(\.isDraggingTab, sidebarDrag.tabID != nil)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
             .onChange(of: isDragGestureActive) { _, isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
-                    if !isDragGestureActive, !tabDrag.isSettling { tabDrag.end(ownedBy: dragOwner) }
+                    if !isDragGestureActive, !sidebarDrag.isSettling { sidebarDrag.end(ownedBy: dragOwner) }
                 }
             }
         }
@@ -125,17 +125,17 @@ struct SpaceTabsView: View {
                 .onChange(of: frame) { listFrame = $1 }
         })
         // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
-        .onDisappear { tabDrag.end(ownedBy: dragOwner) }
+        .onDisappear { sidebarDrag.end(ownedBy: dragOwner) }
     }
 
     /// A dragged tab leaves an empty, dimmed slot in the list.
     private func row(for tab: Tab) -> some View {
-        let isDragged = tabDrag.tabID == tab.id
+        let isDragged = sidebarDrag.tabID == tab.id
         return TabRowView(session: session, tab: tab)
             .opacity(isDragged ? 0 : 1)
             .background {
                 if isDragged {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(tabDrag.isLifted ? 0.06 : 0))
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(sidebarDrag.isLifted ? 0.06 : 0))
                 }
             }
             .background(frameReader(for: tab.id))
@@ -155,19 +155,19 @@ struct SpaceTabsView: View {
 
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
-        guard !tabDrag.isSettling, tabDrag.item == nil || (tabDrag.tabID == tab.id && tabDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
-        if tabDrag.item == nil {
-            tabDrag.begin(.tab(tab.id), frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
+        guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.tabID == tab.id && sidebarDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
+        if sidebarDrag.item == nil {
+            sidebarDrag.begin(.tab(tab.id), frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
-            DispatchQueue.main.async { withAnimation(.easeInOut(duration: TabDragState.liftDuration)) { tabDrag.isLifted = true } }
+            DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
-        tabDrag.move(to: value.location)
+        sidebarDrag.move(to: value.location)
         let isOverList = listFrame.contains(value.location)
         // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
-        setDropTarget(\.targetSpaceID, to: tabDrag.space(at: value.location).flatMap { $0 == tab.spaceID || !session.canMoveTab(tab.id, toSpace: $0) ? nil : $0 })
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.space(at: value.location).flatMap { $0 == tab.spaceID || !session.canMoveTab(tab.id, toSpace: $0) ? nil : $0 })
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
-        setDropTarget(\.splitDrop, to: tabDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? tabDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
+        setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead.
         guard isOverList else { return }
         let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
@@ -190,31 +190,31 @@ struct SpaceTabsView: View {
     }
 
     /// Lights up a drop target newly under the dragged tab, with a light haptic, or turns off the one it left.
-    private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<TabDragState, Target?>, to target: Target?) {
-        guard tabDrag[keyPath: keyPath] != target else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { tabDrag[keyPath: keyPath] = target }
+    private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<SidebarDragState, Target?>, to target: Target?) {
+        guard sidebarDrag[keyPath: keyPath] != target else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag[keyPath: keyPath] = target }
         if target != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     }
 
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
     private func dragEnded() {
-        guard tabDrag.owner == dragOwner, let id = tabDrag.tabID, let slot = rowFrames[id] else { return tabDrag.end(ownedBy: dragOwner) }
+        guard sidebarDrag.owner == dragOwner, let id = sidebarDrag.tabID, let slot = rowFrames[id] else { return sidebarDrag.end(ownedBy: dragOwner) }
         // Over another space's symbol, the tab goes after that space's own tabs and the lifted row shrinks into the symbol.
-        if let spaceID = tabDrag.targetSpaceID {
+        if let spaceID = sidebarDrag.targetSpaceID {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toSpace: spaceID) }
-            return tabDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
+            return sidebarDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
         }
         // Over a folder's row, the tab goes after the folder's own tabs and the lifted row shrinks into the folder's row.
-        if let folderID = tabDrag.targetFolderID, let folderRow = rowFrames[folderID] {
+        if let folderID = sidebarDrag.targetFolderID, let folderRow = rowFrames[folderID] {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toFolder: folderID) }
-            return tabDrag.settle(shrinkingInto: folderRow, ownedBy: dragOwner)
+            return sidebarDrag.settle(shrinkingInto: folderRow, ownedBy: dragOwner)
         }
         // Over the page area, the tab opens in split view, and its row returns to its slot.
-        if let drop = tabDrag.splitDrop, let tab = session.tabs.first(where: { $0.id == id }) {
-            withAnimation(.easeInOut(duration: 0.15)) { tabDrag.splitDrop = nil }
+        if let drop = sidebarDrag.splitDrop, let tab = session.tabs.first(where: { $0.id == id }) {
+            withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag.splitDrop = nil }
             windowModel.openInSplitView(tab, at: drop.index)
         }
-        tabDrag.settle(into: slot, ownedBy: dragOwner)
+        sidebarDrag.settle(into: slot, ownedBy: dragOwner)
     }
 }
 

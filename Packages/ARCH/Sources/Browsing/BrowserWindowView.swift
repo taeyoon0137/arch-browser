@@ -23,7 +23,7 @@ public struct BrowserWindowView: View {
     /// The window's child windows when the card appeared or the window last changed full screen, such as the full screen toolbar's. Only child windows opened after that, like the card's popovers, keep the card visible.
     @State private var childWindowsBeforePeek: Set<ObjectIdentifier> = []
     @State private var windowReference = WindowReference()
-    @StateObject private var tabDrag = TabDragState()
+    @StateObject private var sidebarDrag = SidebarDragState()
 
     public init(session: BrowserSession, window: BrowserWindowModel) {
         self.session = session
@@ -54,7 +54,7 @@ public struct BrowserWindowView: View {
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
-                PageAreaView(session: session, tabDrag: tabDrag, margins: pageMargins)
+                PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
                 if !windowModel.isPageFullscreen {
                     PageReaderColumn(session: session)
                 }
@@ -62,10 +62,10 @@ public struct BrowserWindowView: View {
             if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {
                 peekingSidebar
             }
-            SplitDropIndicator(tabDrag: tabDrag)
-            TabDragLayer(session: session, tabDrag: tabDrag)
+            SplitDropIndicator(sidebarDrag: sidebarDrag)
+            TabDragLayer(session: session, sidebarDrag: sidebarDrag)
                 .modifier(SidebarAppearance())
-            SidebarItemDragLayer(session: session, tabDrag: tabDrag)
+            SidebarItemDragLayer(session: session, sidebarDrag: sidebarDrag)
                 .modifier(SidebarAppearance())
             CommandPaletteLayer(session: session, addressPillFrame: addressPillFrame, windowWidth: windowSize.width, addressPillPull: $addressPillPull)
             if windowModel.isTabSwitcherVisible {
@@ -73,7 +73,7 @@ public struct BrowserWindowView: View {
             }
         }
         .coordinateSpace(name: Self.coordinateSpace)
-        .environmentObject(tabDrag)
+        .environmentObject(sidebarDrag)
         .environmentObject(windowModel)
         .environment(\.addressPillPull, addressPillPull)
         .onPreferenceChange(AddressPillFrameKey.self) { addressPillFrame = $0 }
@@ -101,7 +101,7 @@ public struct BrowserWindowView: View {
             peekCheck?.cancel()
             guard isVisible, isSidebarPeeking else { return isSidebarPeeking = false }
             withAnimation(SidebarView.pageSpring) { isCardDocking = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + SidebarView.pageSpringSettleDelay) {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
@@ -177,11 +177,11 @@ public struct BrowserWindowView: View {
         let hasOpenChild = window?.attachedSheet != nil
             || (window?.childWindows ?? []).contains { $0.isVisible && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
         let isEditingText = windowModel.renamingSpaceID != nil || windowModel.renamingTabID != nil || windowModel.renamingFolderID != nil || window?.firstResponder is NSText
-        let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || tabDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
+        let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || sidebarDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
         // Close the card's library after the card disappears, so the card reopens showing the sidebar.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + SidebarView.pageSpringSettleDelay) {
             guard !windowModel.isSidebarVisible, !isSidebarPeeking, windowModel.isLibraryVisible else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true

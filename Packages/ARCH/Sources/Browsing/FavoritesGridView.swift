@@ -7,7 +7,7 @@ import SwiftUI
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    @EnvironmentObject private var tabDrag: TabDragState
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Each tile's frame in the window, used to find the tile under a dragged favorite.
     @State private var tileFrames: [UUID: CGRect] = [:]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
@@ -29,7 +29,7 @@ struct FavoritesGridView: View {
             ForEach(favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasTab(favorite))
                     // The release that ends a drag does not also open the favorite.
-                    .onTapGesture { if tabDrag.item == nil { windowModel.openFavorite(favorite) } }
+                    .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
                     .contextMenu {
                         Button("Close") { session.closeFavorite(favorite) }
@@ -38,7 +38,7 @@ struct FavoritesGridView: View {
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
                     }
                     .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
-                    .modifier(ShiftHoverPreview { if tabDrag.item == nil { windowModel.previewFavorite(favorite) } })
+                    .modifier(ShiftHoverPreview { if sidebarDrag.item == nil { windowModel.previewFavorite(favorite) } })
             }
         }
     }

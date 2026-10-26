@@ -6,13 +6,13 @@ struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let folder: TabFolder
-    @EnvironmentObject private var tabDrag: TabDragState
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
 
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
-    private var isDropTarget: Bool { tabDrag.targetFolderID == folder.id }
+    private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
 
     /// Rows ignore the pointer while a tab is dragged over them; the folder under it lights up instead.
     private var fill: Color {

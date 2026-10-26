@@ -6,13 +6,16 @@ import SwiftUI
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    @EnvironmentObject private var tabDrag: TabDragState
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
     @Environment(\.spaceTheme) private var theme
 
     /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
+
+    /// The bar's height, which the library's button row and the line beside the library repeat.
+    static let height: CGFloat = 28
 
     /// Width shared by each symbol and the new space button, keeping the row visually grouped.
     fileprivate static let itemWidth: CGFloat = 18
@@ -35,9 +38,9 @@ struct SidebarBottomBar: View {
                     PersonaDivider()
                 }
                 let isCurrent = space.id == windowModel.currentSpaceID
-                let isTabTarget = tabDrag.targetSpaceID == space.id
+                let isTabTarget = sidebarDrag.targetSpaceID == space.id
                 // The release that ends a drag of the symbol does not also switch spaces.
-                Button(action: { if tabDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
+                Button(action: { if sidebarDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
                         .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
@@ -65,7 +68,7 @@ struct SidebarBottomBar: View {
 
     /// The symbol under the pointer makes room for the dragged space, with a light haptic at each new position, while it belongs to the same Persona. Only the strip animates the move; the space pages move at once, so the current page stays in view.
     private func reorder(_ space: Space, at location: CGPoint) {
-        guard let id = tabDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }),
+        guard let id = sidebarDrag.space(at: location), id != space.id, let target = session.spaces.first(where: { $0.id == id }),
               target.resolvedPersonaID == space.resolvedPersonaID else { return }
         session.moveSpace(space.id, to: target)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -92,14 +95,14 @@ struct SidebarBottomBar: View {
             .background(GeometryReader { proxy in
                 let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
                 Color.clear
-                    .onAppear { tabDrag.spaceStripFrame = frame }
-                    .onChange(of: frame) { tabDrag.spaceStripFrame = $1 }
+                    .onAppear { sidebarDrag.spaceStripFrame = frame }
+                    .onChange(of: frame) { sidebarDrag.spaceStripFrame = $1 }
             })
-            .onPreferenceChange(SidebarItemFramesKey.self) { tabDrag.spaceSymbolFrames = $0 }
+            .onPreferenceChange(SidebarItemFramesKey.self) { sidebarDrag.spaceSymbolFrames = $0 }
             // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
             .offset(x: isFloating ? 0 : 2)
         }
-        .frame(height: 28)
+        .frame(height: Self.height)
     }
 }
 

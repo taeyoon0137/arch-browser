@@ -23,7 +23,7 @@ struct SmallWindowView: View {
                         .modifier(SidebarAppearance())
                 }
                 HStack(spacing: 0) {
-                    PageAreaView(session: session, tabDrag: nil, margins: Self.pageMargins)
+                    PageAreaView(session: session, sidebarDrag: nil, margins: Self.pageMargins)
                     if !windowModel.isPageFullscreen {
                         PageReaderColumn(session: session)
                     }
@@ -89,6 +89,6 @@ private struct SmallWindowTopRow: View {
         .frame(height: SidebarTopRow.height)
         .padding(.leading, (windowButtons.trailingEdge ?? 0) + BrowserWindowView.pageMargin)
         .padding(.trailing, BrowserWindowView.pageMargin)
-        .padding(.top, max(0, windowButtons.centerY - SidebarTopRow.height / 2))
+        .padding(.top, SidebarTopRow.topPadding(below: windowButtons))
     }
 }

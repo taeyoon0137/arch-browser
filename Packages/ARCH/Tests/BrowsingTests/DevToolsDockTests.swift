@@ -1,4 +1,4 @@
-// Where a window's dock puts developer tools that the engine shows in a view: beside the page on the shared side, or in a window of their own while they float, and what every dock and window learn when the tools close.
+// Where a window's dock puts developer tools that the engine shows in a view: beside the page on the shared side, or in a window of their own while they float, what every dock and window learn when the tools close, and the size docked tools show at in the page area.
 import AppKit
 import ARCHEngine
 import Combine
@@ -146,6 +146,19 @@ import Testing
         tools.open()
         #expect(second.view === tools.view)
         #expect(first.view == nil)
+    }
+
+    @Test func dockedToolsShowAtTheirSavedSizeOnlyWhileThePageKeepsItsRoom() {
+        let page = DevToolsDock.minimumPageSize
+        #expect(DevToolsDock.shownSize(480, in: 1200) == 480)
+        // A size saved in a wider window, or dragged past the window's edge, leaves the page its least size.
+        #expect(DevToolsDock.shownSize(1200, in: 900) == 900 - page)
+        #expect(DevToolsDock.shownSize(5000, in: 900) == 900 - page)
+        // The tools keep their own least size before the page does, and never grow past the room.
+        #expect(DevToolsDock.shownSize(480, in: 300) == DevToolsDock.minimumSize)
+        #expect(DevToolsDock.shownSize(480, in: 150) == 150)
+        #expect(DevToolsDock.shownSize(480, in: -20) == 0)
+        #expect(DevToolsDock.shownSize(50, in: 1200) == DevToolsDock.minimumSize)
     }
 }
 

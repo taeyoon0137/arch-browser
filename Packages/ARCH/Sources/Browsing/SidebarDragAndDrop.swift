@@ -1,4 +1,4 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over the symbol of another space of its Persona moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab rows is in `TabDragState.swift`.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over the symbol of another space of its Persona moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab rows is in `SidebarDragState.swift`.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -18,7 +18,7 @@ struct SidebarItemDrag: ViewModifier {
     /// The corner radius of the slot's dimming.
     let cornerRadius: CGFloat
     let reorder: (CGPoint) -> Void
-    @EnvironmentObject private var tabDrag: TabDragState
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Set during the drag gesture. Resets automatically if the gesture is cancelled, such as when the item disappears.
     @GestureState private var isGestureActive = false
     /// The item's frame in the window.
@@ -27,12 +27,12 @@ struct SidebarItemDrag: ViewModifier {
     @State private var owner = UUID()
 
     func body(content: Content) -> some View {
-        let isDragged = tabDrag.item == item
+        let isDragged = sidebarDrag.item == item
         content
             .opacity(isDragged ? 0 : 1)
             .background {
                 if isDragged {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color.primary.opacity(tabDrag.isLifted ? 0.06 : 0))
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color.primary.opacity(sidebarDrag.isLifted ? 0.06 : 0))
                 }
             }
             .background(GeometryReader { proxy in
@@ -50,26 +50,26 @@ struct SidebarItemDrag: ViewModifier {
             .onChange(of: isGestureActive) { _, isActive in
                 guard !isActive else { return }
                 DispatchQueue.main.async {
-                    if !isGestureActive, !tabDrag.isSettling { tabDrag.end(ownedBy: owner) }
+                    if !isGestureActive, !sidebarDrag.isSettling { sidebarDrag.end(ownedBy: owner) }
                 }
             }
-            .onDisappear { tabDrag.end(ownedBy: owner) }
+            .onDisappear { sidebarDrag.end(ownedBy: owner) }
     }
 
     private func dragChanged(_ value: DragGesture.Value) {
-        guard !tabDrag.isSettling, tabDrag.item == nil || (tabDrag.item == item && tabDrag.owner == owner), let frame else { return }
-        if tabDrag.item == nil {
-            tabDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: owner)
+        guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == owner), let frame else { return }
+        if sidebarDrag.item == nil {
+            sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: owner)
             // The item appears without a shadow, which then fades in.
-            DispatchQueue.main.async { withAnimation(.easeInOut(duration: TabDragState.liftDuration)) { tabDrag.isLifted = true } }
+            DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
-        tabDrag.move(to: value.location)
+        sidebarDrag.move(to: value.location)
         reorder(value.location)
     }
 
     private func dragEnded() {
-        guard tabDrag.owner == owner, let frame else { return tabDrag.end(ownedBy: owner) }
-        tabDrag.settle(into: frame, ownedBy: owner)
+        guard sidebarDrag.owner == owner, let frame else { return sidebarDrag.end(ownedBy: owner) }
+        sidebarDrag.settle(into: frame, ownedBy: owner)
     }
 }
 
@@ -77,15 +77,15 @@ struct SidebarItemDrag: ViewModifier {
 struct SidebarItemDragLayer: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    @ObservedObject var tabDrag: TabDragState
+    @ObservedObject var sidebarDrag: SidebarDragState
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
-        if tabDrag.item != nil, tabDrag.tabID == nil {
+        if sidebarDrag.item != nil, sidebarDrag.tabID == nil {
             liftedItem
-                .shadow(color: .black.opacity(tabDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
-                .frame(width: tabDrag.frame.width, height: tabDrag.frame.height)
-                .offset(x: tabDrag.frame.minX, y: tabDrag.frame.minY)
+                .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
+                .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -94,11 +94,11 @@ struct SidebarItemDragLayer: View {
 
     // Over the page the item needs a backing of its own.
     @ViewBuilder private var liftedItem: some View {
-        switch tabDrag.item {
+        switch sidebarDrag.item {
         case .favorite(let id):
             if let favorite = session.favorites.first(where: { $0.id == id }) {
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasTab(favorite))
-                    .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
+                    .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
             if let space = session.spaces.first(where: { $0.id == id }) {
@@ -106,7 +106,7 @@ struct SidebarItemDragLayer: View {
                     .font(.system(size: 12))
                     .foregroundStyle(theme.symbolColor(for: space.tint))
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(.regularMaterial).opacity(tabDrag.isLifted ? 1 : 0))
+                    .background(Circle().fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .tab, nil:
             EmptyView()

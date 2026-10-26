@@ -6,6 +6,8 @@ import SwiftUI
 struct PageExchangeView: View {
     let exchange: PageConversation.Exchange
     let assistant: PageAssistant
+    /// The tab whose page the question was about, whose window and Persona open the reply's links.
+    let tab: Tab
     /// The page the question was about, for Allow AI on This Site.
     let pageURL: URL?
     /// The popover shows the selected text above its field instead.
@@ -30,7 +32,7 @@ struct PageExchangeView: View {
             status
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .environment(\.openURL, OpenURLAction { assistant.openLink($0) })
+        .environment(\.openURL, OpenURLAction { assistant.openLink($0, from: tab) })
     }
 
     @ViewBuilder private var status: some View {

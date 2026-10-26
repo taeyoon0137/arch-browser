@@ -1,4 +1,4 @@
-// The tab switcher floats over the window while Control stays down after ⌃Tab. It lists the current space's tabs, most recently selected first, and highlights the tab that releasing Control selects.
+// The tab switcher floats over the window while Control stays down after ⌃Tab. It lists the current space's listed tabs and the open tabs of the window's Persona's favorites (`BrowserWindowModel.recentTabs`), most recently selected first, and highlights the tab that releasing Control selects.
 import SwiftUI
 
 struct TabSwitcherView: View {

@@ -45,7 +45,7 @@ private struct PageQuestionPopover: View {
             } else {
                 questionField
                 if let exchange = conversation.exchanges.last {
-                    let answer = PageExchangeView(exchange: exchange, assistant: assistant, pageURL: tab.url, showsSelection: false) { conversation.retry(exchange.id) }
+                    let answer = PageExchangeView(exchange: exchange, assistant: assistant, tab: tab, pageURL: tab.url, showsSelection: false) { conversation.retry(exchange.id) }
                     // As tall as the reply, up to a limit; a longer reply scrolls.
                     ViewThatFits(in: .vertical) {
                         answer
