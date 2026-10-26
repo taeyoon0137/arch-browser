@@ -111,7 +111,9 @@ public final class BrowserSession: ObservableObject {
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
-            PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
+            let pluginDataRemoved = PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
+            let cookieRecordRemoved = CookieSync.removeRecord(ofPersona: $0, in: userDataDirectory)
+            return pluginDataRemoved && cookieRecordRemoved
         }
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
@@ -402,7 +404,7 @@ public final class BrowserSession: ObservableObject {
     /// The Persona's runtimes and plugins, created empty on first use.
     private func engines(of personaID: Persona.ID) -> PersonaEngines {
         if let engines = personaEngines[personaID] { return engines }
-        let engines = PersonaEngines(personaID: personaID)
+        let engines = PersonaEngines(personaID: personaID, cookieRecord: CookieSync.recordURL(ofPersona: personaID, in: userDataDirectory))
         personaEngines[personaID] = engines
         return engines
     }
@@ -434,7 +436,7 @@ public final class BrowserSession: ObservableObject {
         permissionAnswers.follow(context)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
         browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
-        // An engine that starts after another in the Persona takes the running engine's cookies. This first copy between the two in a launch has no record of what they agreed on, so it writes the cookies the new engine lacks or holds with other contents and deletes none (`CookieSync`).
+        // An engine that starts after another in the Persona takes what the running engine changed since the two stores last agreed. This first copy of a launch reads the Persona's record of that agreement, so it also carries what one engine changed while the other was not running (`CookieSync`).
         if let source = engines.runtimes.values.first(where: { $0.kind != kind }) {
             engines.cookieSync.copy(from: source, to: runtime) {}
         }
@@ -1471,8 +1473,10 @@ public final class BrowserSession: ObservableObject {
         store.scheduleSave { [weak self] in self?.snapshot() }
     }
 
+    /// Writes `session.json` at once and waits for the Personas' cookie records still on their queue, as quitting needs.
     public func saveNow() {
         store.saveNow(snapshot())
+        CookieSync.finishWrites()
     }
 
     /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.

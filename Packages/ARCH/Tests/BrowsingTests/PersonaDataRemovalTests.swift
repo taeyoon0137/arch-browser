@@ -1,4 +1,4 @@
-// The removal pass at launch: a deleted Persona's plugin data goes first, and the Persona stays listed until every engine that keeps Persona storage reports its data removed.
+// The removal pass at launch: the data Arch keeps for a deleted Persona outside the engines goes first, and the Persona stays listed until every engine that keeps Persona storage reports its data removed.
 import ARCHEngine
 import Foundation
 import Testing
@@ -7,7 +7,7 @@ import Testing
 @Suite struct PersonaDataRemovalTests {
     @Test func anIDLeavesTheListOnceBothEnginesRemovedItsData() {
         let webKit = StubEngine(kind: .webKit), chromium = StubEngine(kind: .chromium)
-        let removal = PersonaDataRemoval(ids: [personaA, personaB], registry: registry(webKit, chromium), configuration: configuration, removePluginData: { _ in true })
+        let removal = PersonaDataRemoval(ids: [personaA, personaB], registry: registry(webKit, chromium), configuration: configuration, removeAppData: { _ in true })
         var removals = 0
         removal.didRemove = { removals += 1 }
         #expect(webKit.requests == [personaA, personaB])
@@ -21,7 +21,7 @@ import Testing
 
     @Test func anIDStaysWhileAnEngineCouldNotRemoveItsData() {
         let webKit = StubEngine(kind: .webKit), chromium = StubEngine(kind: .chromium)
-        let removal = PersonaDataRemoval(ids: [personaA], registry: registry(webKit, chromium), configuration: configuration, removePluginData: { _ in true })
+        let removal = PersonaDataRemoval(ids: [personaA], registry: registry(webKit, chromium), configuration: configuration, removeAppData: { _ in true })
         webKit.report(true)
         chromium.report(false)
         #expect(removal.pendingIDs == [personaA])
@@ -29,12 +29,12 @@ import Testing
 
     @Test func anIDStaysWhileAnEngineIsNotRegistered() {
         let webKit = StubEngine(kind: .webKit)
-        let removal = PersonaDataRemoval(ids: [personaA], registry: registry(webKit), configuration: configuration, removePluginData: { _ in true })
+        let removal = PersonaDataRemoval(ids: [personaA], registry: registry(webKit), configuration: configuration, removeAppData: { _ in true })
         webKit.report(true)
         #expect(removal.pendingIDs == [personaA])
     }
 
-    @Test func anIDWhosePluginDataStaysWaitsForTheNextLaunch() {
+    @Test func anIDWhoseAppDataStaysWaitsForTheNextLaunch() {
         let webKit = StubEngine(kind: .webKit), chromium = StubEngine(kind: .chromium)
         var askedIDs: [UUID] = []
         let removal = PersonaDataRemoval(ids: [personaA, personaB], registry: registry(webKit, chromium), configuration: configuration) { id in
@@ -50,7 +50,7 @@ import Testing
 
     @Test func aPersonaDeletedWhileRunningWaitsForTheNextLaunch() {
         let webKit = StubEngine(kind: .webKit)
-        let removal = PersonaDataRemoval(ids: [], registry: registry(webKit), configuration: configuration, removePluginData: { _ in true })
+        let removal = PersonaDataRemoval(ids: [], registry: registry(webKit), configuration: configuration, removeAppData: { _ in true })
         removal.removeAtNextLaunch(personaA)
         removal.removeAtNextLaunch(personaA)
         #expect(removal.pendingIDs == [personaA])

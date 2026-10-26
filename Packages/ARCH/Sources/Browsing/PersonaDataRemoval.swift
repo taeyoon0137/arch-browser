@@ -1,4 +1,4 @@
-// A deleted Persona's cookies, website data, and plugin data stay on the Mac until the next launch, because an engine cannot remove the storage of a profile it has loaded. Data goes only for the IDs that `session.json` lists, never because a Persona is missing.
+// A deleted Persona's cookies, website data, plugin data, and record of cookie copies stay on the Mac until the next launch, because an engine cannot remove the storage of a profile it has loaded. Data goes only for the IDs that `session.json` lists, never because a Persona is missing.
 import ARCHEngine
 import Foundation
 
@@ -14,10 +14,10 @@ final class PersonaDataRemoval {
     /// The engines that have not yet reported each pending ID's data removed.
     private var remainingEngines: [UUID: Set<EngineKind>] = [:]
 
-    /// Has `removePluginData` delete each ID's plugin data, which reports whether all of it is gone, then asks every registered engine to remove the ID's data. Runs before any engine starts. An ID whose plugin data stays waits for the next launch, engines included, so that it leaves the list only once all its data is gone.
-    init(ids: [UUID], registry: EngineRegistry, configuration: EngineApplicationConfiguration, removePluginData: (UUID) -> Bool) {
+    /// Has `removeAppData` delete the data Arch keeps for each ID outside the engines, its plugins' data and its record of cookie copies, and report whether all of it is gone, then asks every registered engine to remove the ID's data. Runs before any engine starts. An ID whose app data stays waits for the next launch, engines included, so that it leaves the list only once all its data is gone.
+    init(ids: [UUID], registry: EngineRegistry, configuration: EngineApplicationConfiguration, removeAppData: (UUID) -> Bool) {
         pendingIDs = ids
-        for id in ids where removePluginData(id) {
+        for id in ids where removeAppData(id) {
             remainingEngines[id] = Set(Self.storageEngines)
             for kind in Self.storageEngines {
                 registry.engine(for: kind)?.removeStoredData(forStorage: id, configuration: configuration) { [weak self] removed in
