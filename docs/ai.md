@@ -281,6 +281,7 @@ The first features:
 | `hook.downloadName` | VII.6 | automatic | download | - |
 | `pluginComposer` | VII.7 | user | text only | `jsonOutput` |
 | `plugin.<id>` | not built | automatic when the manifest declares hooks, otherwise user | the kinds in the manifest's `ai` permission | - |
+| `agent` | not built (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
 
@@ -412,6 +413,7 @@ public struct AIJSONLinePaths: Codable, Sendable {
 - Arch decodes output as UTF-8 across chunk boundaries. It skips non-JSON lines in `jsonLines` mode. It accepts replies delivered at the end by tools that buffer output without a terminal.
 - Cancellation sends `SIGTERM` to the process group and `SIGKILL` two seconds later if it still runs. Timeouts: 120 seconds until the first output and 60 seconds between outputs. Output ends a second after the tool exits, even when a process the tool started in the background keeps standard output open.
 - A tool that can run commands could be steered by text in a page. Requests that carry page, selection, file, or download parts therefore go to a command-line provider only when `runsWithoutTools` is on. Settings ▸ AI explains this next to the checkbox. Arch cannot check the claim; it only keeps the working directory empty and the environment small.
+- Agent sessions, designed in `docs/agents.md` but not built, are the only exception to the rule that command-line tools get no tools from Arch. The Claude Code and Codex presets set a new `AICommandLineConfiguration.agent` and build every argument: the tool's own tools, settings, hooks, and other MCP servers are off, and the session connects only Arch's MCP server. Arch checks the tool's start event or stream and ends a run that shows anything else. The presets' ordinary requests use no tools, so they accept page data without `runsWithoutTools`. `AIModelCapability` gains `agent`, available only to those presets and HTTP models with `tools`; `ai.json` cannot change it, and the `agent` feature requires it.
 - Capabilities: `jsonOutput` (through the instructions, with the reply checked as JSON). A Check button sends a short test request and shows the reply or the error.
 
 ### Keychain
