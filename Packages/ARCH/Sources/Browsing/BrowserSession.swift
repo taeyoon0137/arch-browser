@@ -96,8 +96,8 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships.
-    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type]) throws {
+    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships. `agentOnlyPersonaID` is the Agents Persona that `agent.json` records, which is agent-only before any engine starts, so that a profile that a restored favorite's tab starts here takes no remembered answers.
+    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], agentOnlyPersonaID: Persona.ID? = nil) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
@@ -105,7 +105,7 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
@@ -1158,10 +1158,15 @@ public final class BrowserSession: ObservableObject {
     /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
     let permissionAnswers: SitePermissionAnswers
 
-    /// The Agents Persona, which the agents' service names through `BrowserAgentHost` before any of its profiles starts: its profiles get no remembered answers, and its requests are denied without a sheet (agent decision 9). Never the default Persona, whose profile follows the answers from launch.
+    /// The Agents Persona, which the session takes from `agent.json` when it is created and the agents' service then names through `BrowserAgentHost`: its profiles get no remembered answers, and its requests are denied without a sheet (agent decision 9). Never the default Persona, whose profile follows the answers from launch.
     var agentOnlyPersonaID: Persona.ID? {
         get { permissionAnswers.agentOnlyPersonaID }
-        set { permissionAnswers.agentOnlyPersonaID = newValue == Persona.defaultID ? nil : newValue }
+        set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
+    }
+
+    /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.
+    private static func agentOnly(_ id: Persona.ID?) -> Persona.ID? {
+        id == Persona.defaultID ? nil : id
     }
 
     // MARK: Sheets

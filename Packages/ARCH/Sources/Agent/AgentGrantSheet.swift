@@ -1,4 +1,4 @@
-// The grant sheet (docs/agents.md, Outside clients: identity, grants, revocation): on the front main window, it names the client and its executable, lets the user choose the Persona, space, access, extra scopes, and duration, each starting at its safe default, and says in plain sentences what the grant lets the client read. It has no default button: Return and Space do nothing, and Allow takes only a pointer click. A notification without page content posts while Arch is in the background. An unanswered sheet closes as Don't Allow after the outside clients' approval window.
+// The grant sheet (docs/agents.md, Outside clients: identity, grants, revocation): on the front main window, it names the client and its executable, says when every program in the client's shell shares the access, lets the user choose the Persona, space, access, extra scopes, and duration, each starting at its safe default, and says in plain sentences what the grant lets the client read. It has no default button: Return and Space do nothing, and Allow takes only a pointer click. A notification without page content posts while Arch is in the background. An unanswered sheet closes as Don't Allow after the outside clients' approval window.
 import AgentControl
 import AppKit
 import SwiftUI
@@ -75,6 +75,9 @@ struct AgentGrantSheetView: View {
                     .textSelection(.enabled)
                 if request.client.isInterpreter {
                     Text("\(request.client.name) runs scripts, and this access covers every script it runs.")
+                }
+                if request.client.reachedThroughShell {
+                    Text(AgentClientIdentity.shellNote)
                 }
                 if request.client.isBoundToProcess {
                     Text("This access ends when this \(request.client.name) process ends.")

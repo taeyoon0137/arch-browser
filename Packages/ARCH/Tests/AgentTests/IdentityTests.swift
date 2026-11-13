@@ -1,4 +1,4 @@
-// Who an outside client is (docs/agents.md, Outside clients: identity, grants, revocation), over a process table in memory: the walk passes over Arch's tools by their code and shells, `env`, `login`, and `sudo` by their paths; a team-signed client is its identifier and team; an ad hoc signed or unsigned one is its path and code directory hash; a chain that reaches launchd or Arch binds the process just below them; a program named like a shell elsewhere is the client; and a process that changes while it is read is no client. The system's own reader is checked against this test process.
+// Who an outside client is (docs/agents.md, Outside clients: identity, grants, revocation), over a process table in memory: the walk passes over Arch's tools by their code and shells, `env`, `login`, and `sudo` by their paths; a team-signed client is its identifier and team; an ad hoc signed or unsigned one is its path and code directory hash; the client's name is the one it was started with; a client reached through a shell is marked as such; a chain that reaches launchd or Arch binds the process just below them; a program named like a shell elsewhere is the client; and a process that changes while it is read is no client. The system's own reader is checked against this test process and a process started through a link.
 import Darwin
 import Foundation
 import Testing
@@ -10,6 +10,8 @@ private struct TableInspector: AgentProcessInspector {
     /// Start times that the second read of a process returns, as for one that ended and whose ID another took.
     var laterStarts = Shared<[pid_t: AgentProcessStart]>([:])
     var reads = Shared<[pid_t: Int]>([:])
+    /// The paths processes were started with; a process missing here has none to read, as launchd for another user.
+    var launchPaths: [pid_t: String] = [:]
 
     func record(of processID: pid_t) -> AgentProcessRecord? {
         reads.value[processID, default: 0] += 1
@@ -19,6 +21,8 @@ private struct TableInspector: AgentProcessInspector {
     }
 
     func code(of processID: pid_t) -> AgentProcessCode? { codes[processID] }
+
+    func launchPath(of processID: pid_t) -> String? { launchPaths[processID] }
 }
 
 @Suite struct IdentityTests {
@@ -39,11 +43,33 @@ private struct TableInspector: AgentProcessInspector {
         AgentClientIdentifier(inspector: inspector, archProcessID: Self.archID, toolHash: Self.toolHash, passedOverPaths: ["/bin/zsh", "/bin/bash", "/usr/bin/login", "/usr/bin/env", "/usr/bin/sudo"])
     }
 
-    @Test func aTeamSignedClientIsItsIdentifierAndTeam() throws {
-        let identity = try identifier(chain(client: AgentProcessCode(path: "/Users/someone/.local/share/claude/versions/2.1.323", codeHash: Data([0xEE]), signingIdentifier: "com.anthropic.claude-code", verifiedTeam: "Q6L2SF6YDW"))).identify(peer: 10)
+    /// Claude Code runs from `~/.local/bin/claude`, a link to a file named after its version, which Security reports.
+    @Test func aTeamSignedClientIsItsIdentifierAndTeamNamedAsItWasStarted() throws {
+        var inspector = chain(client: AgentProcessCode(path: "/Users/someone/.local/share/claude/versions/2.1.323", codeHash: Data([0xEE]), signingIdentifier: "com.anthropic.claude-code", verifiedTeam: "Q6L2SF6YDW"))
+        inspector.launchPaths[13] = "/Users/someone/.local/bin/claude"
+        let identity = try identifier(inspector).identify(peer: 10)
         #expect(identity.key == .signed(identifier: "com.anthropic.claude-code", team: "Q6L2SF6YDW"))
-        #expect(identity.name == "2.1.323")
+        #expect(identity.name == "claude")
+        #expect(identity.executablePath == "/Users/someone/.local/share/claude/versions/2.1.323")
         #expect(!identity.isBoundToProcess)
+        // Without the path it was started with, the file's name stands.
+        inspector.launchPaths[13] = nil
+        #expect(try identifier(inspector).identify(peer: 10).name == "2.1.323")
+    }
+
+    /// A program that `exec`s `arch-cli`, or a shell that runs it, takes the place of a process below the client, so the client's access reaches every program in its shell.
+    @Test func aClientReachedThroughAShellIsMarked() throws {
+        var inspector = chain(client: AgentProcessCode(path: "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", codeHash: Data([0x0F]), signingIdentifier: "com.apple.Terminal", verifiedTeam: nil))
+        #expect(try identifier(inspector).identify(peer: 10).reachedThroughShell)
+        // arch-cli started by the client itself, with no shell between them.
+        inspector.records[10]?.parentID = 13
+        let direct = try identifier(inspector).identify(peer: 10)
+        #expect(direct.key == .unsigned(path: "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", codeHash: "0f"))
+        #expect(!direct.reachedThroughShell)
+        // A shell that Arch started is the client, and every program in it shares the access.
+        inspector.records[10]?.parentID = 11
+        inspector.records[11]?.parentID = Self.archID
+        #expect(try identifier(inspector).identify(peer: 10).reachedThroughShell)
     }
 
     @Test func anAdHocOrUnsignedClientIsItsPathAndHash() throws {
@@ -102,5 +128,23 @@ private struct TableInspector: AgentProcessInspector {
         let code = try #require(inspector.code(of: getpid()))
         #expect(code.codeHash == (try ownCodeHash()))
         #expect(code.path.hasPrefix("/"))
+        #expect(inspector.launchPath(of: getpid())?.isEmpty == false)
+    }
+
+    /// A process started through a link: Security reports the file, and `KERN_PROCARGS2` the link it was started with.
+    @Test func theSystemsReaderNamesAProcessByThePathItWasStartedWith() throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("agt-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let link = folder.appendingPathComponent("nap")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/bin/sleep"))
+        let process = Process()
+        process.executableURL = link
+        process.arguments = ["10"]
+        try process.run()
+        defer { process.terminate() }
+        let inspector = AgentSystemProcessInspector()
+        #expect(inspector.code(of: process.processIdentifier)?.path == "/bin/sleep")
+        #expect(inspector.launchPath(of: process.processIdentifier).map { URL(fileURLWithPath: $0).lastPathComponent } == "nap")
     }
 }

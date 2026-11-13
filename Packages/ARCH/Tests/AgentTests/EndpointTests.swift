@@ -188,6 +188,7 @@ import Testing
         let early = try TestClient(harness.location)
         _ = try await early.receive()
         await #expect(throws: AgentClientError.failed(.invalidRequest("Say hello first, once."))) { try await early.call("tools/list") }
+        await #expect(throws: AgentClientError.closed) { try await early.receive() }
         let client = try TestClient(harness.location)
         _ = try await client.hello()
         await #expect(throws: AgentClientError.failed(.methodNotFound("task/start"))) { try await client.call("task/start") }

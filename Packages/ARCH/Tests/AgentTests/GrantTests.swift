@@ -138,6 +138,7 @@ import Testing
         service.expireGrants()
         #expect(service.grants.isEmpty)
         #expect(try await client.receive() == .notification(method: "revoked", params: ["message": "This client's access to Arch expired."]))
+        await #expect(throws: AgentClientError.closed) { try await client.receive() }
         #expect(service.activity.entries.last?.event == .expired)
 
         // A grant bound to a process ends once that process does.
@@ -154,6 +155,8 @@ import Testing
         harness.processStarts.value = [4242: AgentProcessStart(seconds: 1_900_000_100, microseconds: 0)]
         service.expireGrants()
         #expect(service.grants.isEmpty)
+        #expect(try await shell.receive() == .notification(method: "revoked", params: ["message": "This client's access to Arch expired."]))
+        await #expect(throws: AgentClientError.closed) { try await shell.receive() }
     }
 
     @Test func aReleasedGrantAsksAgain() async throws {

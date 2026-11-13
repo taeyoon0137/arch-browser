@@ -43,10 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let chromium = ChromiumEngine(frameworkPath: Self.cefFrameworkPath, helperPath: Self.cefHelperPath) {
             registry.register(chromium)
         }
-        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app.
+        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app. The Agents Persona that `agent.json` records, read before its seal is checked, is agent-only from the start, before a restored favorite's tab can start one of its profiles.
         let session: BrowserSession
         do {
-            session = try BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self])
+            session = try BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self],
+                                         agentOnlyPersonaID: AgentService.recordedAgentsPersonaID(in: supportDirectory))
         } catch {
             fatalError("The browser session could not start: \(error)")
         }
@@ -56,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.session = session
-        // Before the windows open, so that the Agents Persona that `agent.json` names is agent-only before any of its profiles starts. It listens only once Allow Outside Clients is on.
+        // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
         let agents = AgentService(directory: supportDirectory, host: BrowserAgentHost(session: session),
                                   version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
         self.agents = agents

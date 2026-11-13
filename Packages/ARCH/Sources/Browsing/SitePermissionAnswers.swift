@@ -13,7 +13,7 @@ final class SitePermissionAnswers {
     /// The agent-only Persona's profiles, which follow the remembered answers only once their Persona becomes ordinary again.
     private var unfollowed: [(personaID: UUID, context: any EngineBrowserContext)] = []
 
-    /// The Agents Persona while `agent.json` names it, which the agents' service sets before any of its profiles starts. A Persona that stops being agent-only, as after `agent.json` lost its seal, has its running profiles follow the remembered answers from then on; a profile that followed them before its Persona became agent-only keeps them until quit.
+    /// The Agents Persona while `agent.json` names it, which the session sets when it creates the answers, before any engine starts, and the agents' service keeps in line with the checked seal. A Persona that stops being agent-only, as after `agent.json` lost its seal, has its running profiles follow the remembered answers from then on; a profile that followed them before its Persona became agent-only keeps them until quit.
     var agentOnlyPersonaID: UUID? {
         didSet {
             guard agentOnlyPersonaID != oldValue else { return }
@@ -23,8 +23,9 @@ final class SitePermissionAnswers {
         }
     }
 
-    init(store: SitePermissionStore) {
+    init(store: SitePermissionStore, agentOnlyPersonaID: UUID? = nil) {
         self.store = store
+        self.agentOnlyPersonaID = agentOnlyPersonaID
     }
 
     /// Answers a request of the tab `tabID` in the Persona `personaID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. A request in the agent-only Persona is denied at once. `context` is the profile of the tab's page.

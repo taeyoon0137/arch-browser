@@ -89,6 +89,9 @@ struct AgentSettingsPage: View {
                     }
                     Text(grant.client.executablePath).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(details(of: grant)).font(.caption).foregroundStyle(.secondary)
+                    if grant.client.reachedThroughShell {
+                        Text(AgentClientIdentity.shellNote).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             if service.grants.count > 1 {

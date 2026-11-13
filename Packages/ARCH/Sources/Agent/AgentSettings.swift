@@ -83,21 +83,38 @@ public struct AgentClientIdentity: Codable, Equatable, Sendable {
     }
 
     public var key: Key
-    /// The executable's name, such as `claude`.
+    /// The name the executable was started with, such as `claude` for a link to a file named after its version.
     public var name: String
     public var executablePath: String
     /// The app around the client or one of its ancestors, such as Terminal, or "Arch's terminal".
     public var host: String?
     /// An interpreter such as `node` is one identity for every script it runs, which the sheet says.
     public var isInterpreter: Bool
+    /// The walk reached the client through a shell, `env`, `login`, or `sudo`, or took one as the client. Every program that runs in that shell can then take `arch-cli`'s place below it with `exec` and use the client's access, which the sheet and Settings say.
+    public var reachedThroughShell: Bool
 
-    public init(key: Key, name: String, executablePath: String, host: String?, isInterpreter: Bool) {
+    public init(key: Key, name: String, executablePath: String, host: String?, isInterpreter: Bool, reachedThroughShell: Bool = false) {
         self.key = key
         self.name = name
         self.executablePath = executablePath
         self.host = host
         self.isInterpreter = isInterpreter
+        self.reachedThroughShell = reachedThroughShell
     }
+
+    /// A field that an earlier build lacks takes its default.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(Key.self, forKey: .key)
+        name = try container.decode(String.self, forKey: .name)
+        executablePath = try container.decode(String.self, forKey: .executablePath)
+        host = try container.decodeIfPresent(String.self, forKey: .host)
+        isInterpreter = try container.decode(Bool.self, forKey: .isInterpreter)
+        reachedThroughShell = try container.decodeIfPresent(Bool.self, forKey: .reachedThroughShell) ?? false
+    }
+
+    /// What the sheet and Settings say for a client reached through a shell.
+    public static let shellNote = "Every program that runs in its shell can use this access too."
 
     /// "claude in Terminal", as the sheet and Settings name the client.
     public var displayName: String {

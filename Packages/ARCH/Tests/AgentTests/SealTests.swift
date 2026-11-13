@@ -1,4 +1,4 @@
-// `agent.json`'s seal (docs/agents.md, Sealed settings): sealed settings read back; a file edited without the key, one that does not read, and one whose key the Keychain no longer has are renamed `agent.json.unreadable` and ignored, with outside access off and the Agents Persona ordinary; a Keychain that does not give the key leaves the file untouched, keeps outside access off and every grant unused, and keeps the recorded Agents Persona agent-only until Try Again reads the key; and members of a later build count in the seal.
+// `agent.json`'s seal (docs/agents.md, Sealed settings): sealed settings read back; a file edited without the key, one that does not read, one whose key the Keychain no longer has, and an earlier copy put back after a Revoke are renamed `agent.json.unreadable` and ignored, with outside access off and the Agents Persona ordinary; a Keychain that does not give the key leaves the file untouched, keeps outside access off and every grant unused, and keeps the recorded Agents Persona agent-only until Try Again reads the key, and the app reads that Persona without the key; and members of a later build count in the seal.
 import AgentControl
 import CryptoKit
 import Foundation
@@ -15,6 +15,13 @@ import Testing
         _ = try await client.callTool("session_info")
         service.stop()
         return (try #require(service.settings.agentsPersonaID), try #require(service.settings.grants.first?.id))
+    }
+
+    /// Waits until the Keychain records the generation of the file on disk.
+    private func recorded(_ harness: Harness) async throws {
+        let key = try #require(harness.keys.key)
+        let generation = try #require(AgentSettingsFile.open(try Data(contentsOf: harness.settingsURL), with: key)?.generation)
+        try await waitUntil { harness.keys.generation == generation }
     }
 
     @Test func sealedSettingsReadBack() async throws {
@@ -65,6 +72,38 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: reading.settingsURL.appendingPathExtension("unreadable").path))
     }
 
+    /// An outside agent with a shell keeps a copy of `agent.json` and puts it back while Arch is closed, after the user revoked its grant. The copy's seal matches, but its generation is below the one the Keychain keeps with the key.
+    @Test func anEarlierCopyPutBackAfterARevokeIsRenamedAndIgnored() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let written = try await writeSettings(harness)
+        try await recorded(harness)
+        let copy = try Data(contentsOf: harness.settingsURL)
+        let revoking = try harness.makeService()
+        try await harness.settled(revoking)
+        #expect(revoking.state == .ready)
+        revoking.revoke(written.grantID)
+        try await recorded(harness)
+        revoking.stop()
+        let latest = try Data(contentsOf: harness.settingsURL)
+        try copy.write(to: harness.settingsURL)
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        #expect(service.state == .replacedUnreadable)
+        #expect(service.grants.isEmpty)
+        #expect(!service.settings.allowsOutsideClients)
+        #expect(harness.host.agentOnlyPersonaID == nil)
+        #expect(!harness.socketExists)
+        #expect(try Data(contentsOf: harness.settingsURL.appendingPathExtension("unreadable")) == copy)
+        // The file Arch wrote last still opens.
+        try latest.write(to: harness.settingsURL)
+        let next = try harness.makeService()
+        try await harness.settled(next)
+        #expect(next.state == .ready)
+        #expect(next.settings.allowsOutsideClients)
+        #expect(next.grants.isEmpty)
+    }
+
     @Test func aKeyTheKeychainDoesNotGiveLeavesTheFileUntouched() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -78,6 +117,8 @@ import Testing
         #expect(service.grants.isEmpty)
         #expect(!harness.socketExists)
         #expect(harness.host.agentOnlyPersonaID == written.agentsID)
+        // The app reads the same Persona before it creates the session.
+        #expect(AgentService.recordedAgentsPersonaID(in: harness.folder) == written.agentsID)
         #expect(try Data(contentsOf: harness.settingsURL) == original)
         #expect(!service.canChangeSettings)
         await #expect(throws: (any Error).self) { try await service.setAllowsOutsideClients(false) }
@@ -117,6 +158,7 @@ import Testing
         #expect(service.state == .ready)
         #expect(service.settings == AgentSettings())
         #expect(harness.host.agentOnlyPersonaID == nil)
+        #expect(AgentService.recordedAgentsPersonaID(in: harness.folder) == nil)
         #expect(!harness.socketExists)
     }
 }

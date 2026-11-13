@@ -1,4 +1,4 @@
-// The Agents Persona's exception to Persona rule 6 (agent decision 9): its profiles take no remembered permission answers, its requests are denied without a sheet and remembered nowhere, also not in the profile, and a profile of it follows the answers once it becomes an ordinary Persona again. And the one sidebar order that AppleScript's `tabs` and the agents' `list_tabs` read (`BrowserSession.tabsInSidebarOrder`).
+// The Agents Persona's exception to Persona rule 6 (agent decision 9): its profiles take no remembered permission answers, also when the answers are made with it, as the session makes them before any engine starts, its requests are denied without a sheet and remembered nowhere, also not in the profile, and a profile of it follows the answers once it becomes an ordinary Persona again. And the one sidebar order that AppleScript's `tabs` and the agents' `list_tabs` read (`BrowserSession.tabsInSidebarOrder`).
 import AppKit
 import ARCHEngine
 import Foundation
@@ -29,6 +29,20 @@ import Testing
         answers.agentOnlyPersonaID = nil
         #expect(agentProfile.kept["camera \(Self.origin)"] == .some(true))
         #expect(agentProfile.kept["microphone \(Self.origin)"] == .some(false))
+    }
+
+    /// The session makes its answers with the Persona that `agent.json` records, before any engine starts, so the profile that a restored favorite's tab starts while the session is created takes nothing.
+    @Test func answersMadeWithTheAgentsPersonaGiveItsFirstProfileNothing() throws {
+        let folder = try Folder()
+        let store = SitePermissionStore(directory: folder.url)
+        store.set(.allow, for: [.camera], origin: Self.origin)
+        let agents = UUID()
+        let answers = SitePermissionAnswers(store: store, agentOnlyPersonaID: agents)
+        #expect(answers.agentOnlyPersonaID == agents)
+        let profile = KeptAnswers()
+        answers.follow(profile, of: agents)
+        store.set(.allow, for: [.microphone], origin: Self.origin)
+        #expect(profile.kept.isEmpty)
     }
 
     @Test func theAgentsPersonasRequestsAreDeniedWithoutASheetAndNotRemembered() async throws {

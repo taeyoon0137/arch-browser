@@ -84,14 +84,14 @@ final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {
     }
 }
 
-/// A seal key in memory; `failure` makes it act as a Keychain that does not give the key.
+/// A seal key and its generation in memory; `failure` makes it act as a Keychain that does not give the key.
 final class MemoryKeys: AgentSealKeyStore, @unchecked Sendable {
     private let lock = NSLock()
-    private var stored: SymmetricKey?
+    private var stored: AgentSealKey?
     private var _failure: String?
 
     init(key: SymmetricKey? = nil) {
-        stored = key
+        stored = key.map { AgentSealKey(key: $0) }
     }
 
     var failure: String? {
@@ -99,22 +99,31 @@ final class MemoryKeys: AgentSealKeyStore, @unchecked Sendable {
         set { lock.withLock { _failure = newValue } }
     }
 
-    var key: SymmetricKey? { lock.withLock { stored } }
+    var key: SymmetricKey? { lock.withLock { stored?.key } }
+    /// The generation of the last write recorded.
+    var generation: Int? { lock.withLock { stored?.generation } }
 
-    func key() async throws -> SymmetricKey? {
+    func key() async throws -> AgentSealKey? {
         try lock.withLock {
             if let failure = _failure { throw TestKeyError(message: failure) }
             return stored
         }
     }
 
-    func keyCreatingIfNeeded() async throws -> SymmetricKey {
+    func keyCreatingIfNeeded() async throws -> AgentSealKey {
         try lock.withLock {
             if let failure = _failure { throw TestKeyError(message: failure) }
             if let stored { return stored }
-            let key = SymmetricKey(size: .bits256)
+            let key = AgentSealKey(key: SymmetricKey(size: .bits256))
             stored = key
             return key
+        }
+    }
+
+    func record(_ key: AgentSealKey) async throws {
+        try lock.withLock {
+            if let failure = _failure { throw TestKeyError(message: failure) }
+            stored = key
         }
     }
 }

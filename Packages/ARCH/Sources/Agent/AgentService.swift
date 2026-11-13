@@ -110,6 +110,11 @@ import Foundation
 
     // MARK: Settings
 
+    /// The Agents Persona that `agent.json` in `directory` names, read without the key. The app hands it to the browser session when it creates it, so that the Persona is agent-only before any of its profiles starts, as one a restored favorite's tab starts; the service then keeps the session's choice in line with the checked seal. An unverified ID only restricts a Persona, never widens one.
+    public static func recordedAgentsPersonaID(in directory: URL) -> UUID? {
+        AgentSettingsFile.unverifiedAgentsPersonaID(at: directory.appendingPathComponent(settingsFileName))
+    }
+
     /// Whether outside clients may connect now: Allow Outside Clients is on in settings whose seal matched.
     var acceptsOutsideClients: Bool {
         switch state {
@@ -159,9 +164,10 @@ import Foundation
         try await file.prepareKey()
         var changed = settings
         changed.allowsOutsideClients = isOn
-        try file.write(changed)
+        let record = try file.write(changed)
         settings = changed
         saveProblem = nil
+        watch(record)
         updateListening()
     }
 
@@ -180,10 +186,22 @@ import Foundation
 
     private func write() {
         do {
-            try file.write(settings)
+            let record = try file.write(settings)
             saveProblem = nil
+            watch(record)
         } catch {
             saveProblem = error.localizedDescription
+        }
+    }
+
+    /// Says so when the Keychain did not record a write's generation, which leaves the file before it opening until a later write's record.
+    private func watch(_ record: Task<Void, any Error>) {
+        Task {
+            do {
+                try await record.value
+            } catch {
+                saveProblem = "The Keychain did not record this change, so an earlier copy of agent.json would still open: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -232,7 +250,7 @@ import Foundation
         updateListening()
     }
 
-    /// At quit: closes the grant sheets as Don't Allow, writes the grants' last-use dates, and removes the socket. Grants exist only once the key is in, so a launch without one writes nothing, and no write waits for the Keychain past quit.
+    /// At quit: closes the grant sheets as Don't Allow, writes the grants' last-use dates, and removes the socket. Grants exist only once the key is in, so a launch without one writes nothing, and no write waits for the Keychain past quit. The Keychain may not record this last write's generation before Arch exits; the file before it then still opens, and it differs only in those dates, since every other change writes at once.
     public func stop() {
         expiryTimer?.invalidate()
         dependencies.prompt.cancelAll()
