@@ -325,6 +325,14 @@ import Testing
         #expect(await LoginShell.readVariables(shell: shell) == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config", configHome: "/tmp/config-home"))
     }
 
+    /// A profile that makes unset variables an error still prints every line.
+    @Test func readsTheVariablesOfAProfileThatRefusesUnsetVariables() async throws {
+        let unset = try toolScript("set -u\nexport PATH=/usr/bin:/bin\neval \"$4\"")
+        #expect(await LoginShell.readVariables(shell: unset) == LoginShell.Variables(path: "/usr/bin:/bin"))
+        let exported = try toolScript("set -u\nexport PATH=/usr/bin:/bin GH_CONFIG_DIR=/tmp/gh-config\neval \"$4\"")
+        #expect(await LoginShell.readVariables(shell: exported) == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config"))
+    }
+
     @Test func locatesExecutablesInTheSearchPath() async throws {
         let tool = try toolScript("exit 0")
         let folder = tool.deletingLastPathComponent()

@@ -32,7 +32,7 @@ public final class LiveFolderService {
     public static let gitHubProcessLimit = 1
 
     public let store: LiveFolderStore
-    /// Private feed addresses (live folder rule 8).
+    /// Private feed addresses (live folder rule 8), read here; `setPrivateAddress(_:for:folderName:)` writes them.
     public let addresses: any LiveFolderAddressStore
     /// Called when a folder starts or ends a refresh. The folder's items and read state are in `store`; `isRefreshing(_:)` tells which.
     public var didChange: ((UUID) -> Void)?
@@ -45,6 +45,10 @@ public final class LiveFolderService {
     private var waiting: [UUID] = []
     private var running: [UUID: Task<Void, Never>] = [:]
     private var scheduler: NSBackgroundActivityScheduler?
+    /// The Keychain work asked for last. Each piece waits for the one before, so a cleanup never removes an address written while it ran (Storage).
+    private var addressWork: Task<Void, Never>?
+    /// Folders whose address `setPrivateAddress` wrote and that no `register(_:)` has listed as private feeds since; cleanups keep their items.
+    private var unregisteredAddresses: Set<UUID> = []
 
     public init(store: LiveFolderStore, addresses: any LiveFolderAddressStore = LiveFolderKeychain(), fetchers: any LiveFolderFetching = LiveFolderFetchers(),
                 isLowPowerMode: @escaping () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }, now: @escaping () -> Date = Date.init) {
@@ -55,18 +59,43 @@ public final class LiveFolderService {
         self.now = now
     }
 
-    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes; the others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), so a new private feed's address goes into `addresses` before its folder is registered.
+    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet.
     public func register(_ folders: [UUID: LiveFolderConfiguration]) {
         for folder in self.folders.keys where folders[folder] == nil { cancel(folder) }
         self.folders = folders
+        unregisteredAddresses.subtract(Self.privateFeeds(in: folders))
         store.removeFolders(notIn: Set(folders.keys))
-        Task { [weak self] in await self?.removeUnusedAddresses() }
-        for (folder, configuration) in folders where store[folder].source != configuration.source {
-            cancel(folder)
-            store.update(folder) { $0 = LiveFolderState(source: configuration.source) }
-            enqueue(folder)
+        afterEarlierAddressWork { [weak self] in await self?.removeUnusedAddresses() }
+        for (folder, configuration) in folders {
+            let state = store[folder]
+            if state.source != configuration.source {
+                startOver(folder, configuration)
+            } else if state.itemLimit != configuration.itemLimit {
+                cancel(folder)
+                store.update(folder) { state in
+                    state.items = Array(state.items.prefix(configuration.itemLimit))
+                    state.validators = FeedValidators()
+                    state.itemLimit = configuration.itemLimit
+                }
+                enqueue(folder)
+            }
         }
         refreshDueFolders(.timer)
+        // A fetch cancelled above can leave a free slot to a waiting folder.
+        startWaitingFolders()
+    }
+
+    /// Writes a private feed's whole address to `addresses` (live folder rule 8) before its folder is registered; registering keeps it from then on. A registered private feed whose address changed, as when Edit Live Folder… changes only the query that its source leaves out, starts over and refreshes.
+    public func setPrivateAddress(_ address: URL, for folder: UUID, folderName: String) async throws {
+        unregisteredAddresses.insert(folder)
+        let addresses = addresses
+        let changed = try await afterEarlierAddressWork {
+            let previous = try? await addresses.address(for: folder)
+            try await addresses.setAddress(address, for: folder, folderName: folderName)
+            return previous != address
+        }.value
+        guard changed, let configuration = folders[folder], case .feed(_, isPrivate: true) = configuration.source else { return }
+        startOver(folder, configuration)
     }
 
     /// Refresh Now.
@@ -110,7 +139,7 @@ public final class LiveFolderService {
         self.scheduler = scheduler
     }
 
-    /// At quit: stops the checks, cancels running fetches, which ends the `gh` process group, and writes the store.
+    /// At quit: stops the checks, cancels running fetches, which ends the `gh` process group, and writes the store. A cancelled fetch records no attempt, so its folder is due at the next launch.
     public func stop() {
         scheduler?.invalidate()
         scheduler = nil
@@ -160,9 +189,16 @@ public final class LiveFolderService {
         waiting.removeAll { folders[$0] == nil }
     }
 
+    /// Cancels the folder's fetch, forgets its items, read state, and fetch state, and refreshes it.
+    private func startOver(_ folder: UUID, _ configuration: LiveFolderConfiguration) {
+        cancel(folder)
+        store.update(folder) { $0 = LiveFolderState(source: configuration.source, itemLimit: configuration.itemLimit) }
+        enqueue(folder)
+    }
+
     private func start(_ folder: UUID, _ configuration: LiveFolderConfiguration) {
         let validators = store[folder].validators
-        store.update(folder) { $0.lastAttempt = now() }
+        let started = now()
         let fetchers = fetchers, addresses = addresses
         running[folder] = Task { [weak self] in
             let outcome: Result<Fetched, LiveFolderError>
@@ -173,9 +209,9 @@ public final class LiveFolderService {
             } catch {
                 outcome = .failure(.network(error.localizedDescription))
             }
-            // Cancelled: the folder went, its source changed, or Arch is quitting; a newer task may run for the folder.
+            // Cancelled: the folder went, its source, address, or item limit changed, or Arch is quitting; a newer task may run for the folder.
             guard !Task.isCancelled else { return }
-            self?.finish(folder, configuration, outcome)
+            self?.finish(folder, configuration, started: started, outcome)
         }
         didChange?(folder)
     }
@@ -208,12 +244,13 @@ public final class LiveFolderService {
         }
     }
 
-    /// Records the outcome, unless the folder went or its source changed meanwhile.
-    private func finish(_ folder: UUID, _ configuration: LiveFolderConfiguration, _ outcome: Result<Fetched, LiveFolderError>) {
+    /// Records the attempt, with the time it started, and its outcome, unless the folder went or its source changed meanwhile.
+    private func finish(_ folder: UUID, _ configuration: LiveFolderConfiguration, started: Date, _ outcome: Result<Fetched, LiveFolderError>) {
         running[folder] = nil
         if folders[folder]?.source == configuration.source {
             let date = now()
             store.update(folder) { state in
+                state.lastAttempt = started
                 switch outcome {
                 case .success(.items(let items, let validators, let title, let interval)):
                     state.recordSuccess(items: items, validators: validators, feedTitle: title, feedInterval: interval, at: date)
@@ -228,13 +265,30 @@ public final class LiveFolderService {
         startWaitingFolders()
     }
 
-    /// Removes the Keychain items of folders that are not private feeds' among the folders registered when it runs.
+    // MARK: Keychain
+
+    /// Removes the Keychain items of folders that are not private feeds' among the folders registered when it runs, apart from addresses written for folders not registered yet.
     private func removeUnusedAddresses() async {
-        let privateFeeds = Set(folders.compactMap { id, configuration -> UUID? in
+        try? await addresses.removeAddresses(except: Self.privateFeeds(in: folders).union(unregisteredAddresses))
+    }
+
+    /// Runs Keychain work once the work asked for before it has ended.
+    @discardableResult
+    private func afterEarlierAddressWork<T: Sendable>(_ work: @escaping @MainActor () async throws -> T) -> Task<T, any Error> {
+        let previous = addressWork
+        let task = Task { @MainActor in
+            await previous?.value
+            return try await work()
+        }
+        addressWork = Task { _ = try? await task.value }
+        return task
+    }
+
+    private static func privateFeeds(in folders: [UUID: LiveFolderConfiguration]) -> Set<UUID> {
+        Set(folders.compactMap { id, configuration -> UUID? in
             guard case .feed(_, isPrivate: true) = configuration.source else { return nil }
             return id
         })
-        try? await addresses.removeAddresses(except: privateFeeds)
     }
 
     private func cancel(_ folder: UUID) {

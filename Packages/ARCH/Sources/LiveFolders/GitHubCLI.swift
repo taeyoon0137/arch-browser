@@ -1,6 +1,7 @@
 // GitHub searches through the user's `gh` (docs/bookmarks.md, Live folders ▸ GitHub; live folder rule 3). `gh` keeps its own sign-in, made with `gh auth login` in the built-in terminal. Arch runs only `gh auth status` and `gh api graphql` with a fixed query, sends the search on standard input, and never asks `gh` for its token or reads its files.
 import AI
 import Foundation
+import Network
 
 public enum GitHubCLIStatus: Equatable, Sendable {
     case notInstalled
@@ -37,19 +38,23 @@ public actor GitHubCLI {
     private let executableName: String
     private let timeLimit: Duration
     private let outputLimit: Int
+    private let isOffline: @Sendable () async -> Bool
     private var executable: URL?
 
-    /// Tests pass a login shell that stands in for the user's, and shorter limits.
-    public init(shell: LoginShell = .shared, executableName: String = "gh", timeLimit: Duration = .seconds(30), outputLimit: Int = 8 * 1_024 * 1_024) {
+    /// Tests pass a login shell that stands in for the user's, shorter limits, and whether the Mac is offline.
+    public init(shell: LoginShell = .shared, executableName: String = "gh", timeLimit: Duration = .seconds(30), outputLimit: Int = 8 * 1_024 * 1_024,
+                isOffline: (@Sendable () async -> Bool)? = nil) {
         self.shell = shell
         self.executableName = executableName
         self.timeLimit = timeLimit
         self.outputLimit = outputLimit
+        self.isOffline = isOffline ?? { await NetworkPath.isOffline() }
     }
 
-    /// `gh` in the login shell's PATH, looked up once per launch, and again with `again` (Check Again) or once the file is gone.
+    /// `gh` in the login shell's PATH, looked up once per launch, and again once the file is gone. `again` (Check Again) also reads the login shell again, so a PATH or `GH_CONFIG_DIR` that a profile gained in the built-in terminal counts, for this lookup and for `status(host:)` and `search(_:limit:)` after it.
     public func locate(again: Bool = false) async -> URL? {
         if !again, let executable, AICommandLineConfiguration.isExecutable(at: executable) { return executable }
+        if again { await shell.reload() }
         executable = await shell.locateExecutable(named: executableName)
         return executable
     }
@@ -67,13 +72,19 @@ public actor GitHubCLI {
         }
     }
 
-    /// The first `limit` results of `search`, in GitHub's order, which the built-in searches sort by the latest update. Throws `LiveFolderError`: signed out at exit 4, GitHub's or `gh`'s message at exit 1, `rateLimited` for a `RATE_LIMITED` error, and the limits.
+    /// The first `limit` results of `search`, in GitHub's order, which the built-in searches sort by the latest update, without those that GitHub answers as null with an error about them alone. Throws `LiveFolderError`: signed out at exit 4, GitHub's or `gh`'s message at exit 1, `offline` for such a failure while the Mac has no network, `rateLimited` for a `RATE_LIMITED` error, and the limits.
     public func search(_ search: GitHubSearch, limit: Int) async throws -> [LiveItem] {
         guard GitHubSearch.isValidHost(search.host) else { throw LiveFolderError.gitHubFailed("\(search.host) is not a GitHub host.") }
         let body: [String: Any] = ["query": Self.query, "variables": ["q": search.query, "n": limit]]
         let input = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         let run = try await run(["api", "graphql", "--hostname", search.host, "--input", "-"], input: input)
-        return try Self.items(from: run, host: search.host)
+        do {
+            return try Self.items(from: run, host: search.host)
+        } catch LiveFolderError.gitHubFailed(let message) {
+            // `gh` reports a lost connection only in words, so the Mac's network path tells an offline failure, which does not count toward the backoff (live folder rule 6).
+            if await isOffline() { throw LiveFolderError.offline }
+            throw LiveFolderError.gitHubFailed(message)
+        }
     }
 
     // MARK: Running
@@ -160,8 +171,24 @@ public actor GitHubCLI {
         }
 
         struct Problem: Decodable {
+            /// A step of the error's `path`: a field's name, or nil for a list index.
+            struct Step: Decodable {
+                var name: String?
+
+                init(from decoder: any Decoder) throws {
+                    name = try? decoder.singleValueContainer().decode(String.self)
+                }
+            }
+
             var type: String?
             var message: String?
+            var path: [Step]?
+
+            /// Whether the error concerns one result, such as one in an organization whose SAML enforcement the sign-in was not granted for, which GitHub answers as null beside the other results.
+            var isAboutOneResult: Bool {
+                guard let path, path.count >= 3 else { return false }
+                return path[0].name == "search" && path[1].name == "nodes" && path[2].name == nil
+            }
         }
 
         var data: Payload?
@@ -206,7 +233,9 @@ public actor GitHubCLI {
             let reset = response?.data?.rateLimit?.resetAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }
             throw LiveFolderError.rateLimited(until: reset ?? Date().addingTimeInterval(rateLimitWait))
         }
-        if run.termination == .exited(0), problems.isEmpty, let nodes = response?.data?.search?.nodes {
+        // Errors about single results alone leave the other results; `gh` exits 1 for them.
+        let answered = run.termination == .exited(0) || (run.termination == .exited(1) && !problems.isEmpty)
+        if answered, problems.allSatisfy(\.isAboutOneResult), let nodes = response?.data?.search?.nodes {
             return nodes.compactMap { $0.flatMap(item) }
         }
         if let message = problems.compactMap(\.message).first(where: { !$0.isEmpty }) {
@@ -242,5 +271,39 @@ public actor GitHubCLI {
                                 checks: checks.flatMap(GitHubItem.CheckState.init(rawValue:)))
         let title = FeedText.collapsed(node.title ?? "").nonEmpty ?? gitHub.detail
         return LiveItem(id: address, url: url, title: title, date: node.updatedAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }, gitHub: gitHub)
+    }
+}
+
+/// The Mac's network path, from `NWPathMonitor`.
+enum NetworkPath {
+    /// Whether the Mac has no usable network path now: the monitor's first path, or false when none comes within a second.
+    static func isOffline() async -> Bool {
+        let monitor = NWPathMonitor()
+        let queue = DispatchQueue(label: "xyz.taeyoon.arch.live-folders.network-path")
+        return await withCheckedContinuation { continuation in
+            let answer = Answer(continuation, monitor: monitor)
+            monitor.pathUpdateHandler = { path in answer.give(path.status != .satisfied) }
+            queue.asyncAfter(deadline: .now() + 1) { answer.give(false) }
+            monitor.start(queue: queue)
+        }
+    }
+
+    /// Resumes the continuation with the first answer only and stops the monitor. Both answers come on the monitor's queue, one at a time.
+    private final class Answer: @unchecked Sendable {
+        private var continuation: CheckedContinuation<Bool, Never>?
+        private var monitor: NWPathMonitor?
+
+        init(_ continuation: CheckedContinuation<Bool, Never>, monitor: NWPathMonitor) {
+            self.continuation = continuation
+            self.monitor = monitor
+        }
+
+        func give(_ offline: Bool) {
+            monitor?.pathUpdateHandler = nil
+            monitor?.cancel()
+            monitor = nil
+            continuation?.resume(returning: offline)
+            continuation = nil
+        }
     }
 }

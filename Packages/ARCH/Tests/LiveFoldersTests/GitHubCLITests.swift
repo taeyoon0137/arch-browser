@@ -155,17 +155,61 @@ private let searchResponse = """
     @Test func exitStatusOneShowsGitHubsMessageOrTheLastLineOfStandardError() async throws {
         let errors = try temporaryDirectory()
         try gh(in: errors, answer(#"{"errors":[{"type":"INVALID","message":"Something went wrong while executing your query."},{"message":"Second"}]}"#, status: 1))
-        #expect(await searchError(GitHubCLI(shell: try loginShell(in: errors))) == .gitHubFailed("Something went wrong while executing your query."))
+        #expect(await searchError(GitHubCLI(shell: try loginShell(in: errors), isOffline: { false })) == .gitHubFailed("Something went wrong while executing your query."))
 
         let standardError = try temporaryDirectory()
         let long = String(repeating: "x", count: 300)
         try gh(in: standardError, "echo 'first line' >&2\necho 'gh: \(long)' >&2\nexit 1")
-        guard case .gitHubFailed(let message) = await searchError(GitHubCLI(shell: try loginShell(in: standardError))) else {
+        guard case .gitHubFailed(let message) = await searchError(GitHubCLI(shell: try loginShell(in: standardError), isOffline: { false })) else {
             Issue.record("Expected gh's message")
             return
         }
         #expect(message.hasPrefix("gh: xxx"))
         #expect(message.count == 200)
+    }
+
+    @Test func aFailureWhileTheMacIsOfflineIsOffline() async throws {
+        let folder = try temporaryDirectory()
+        try gh(in: folder, "echo 'error connecting to api.github.com' >&2\necho 'check your internet connection or https://githubstatus.com' >&2\nexit 1")
+        #expect(await searchError(GitHubCLI(shell: try loginShell(in: folder), isOffline: { true })) == .offline)
+        #expect(await searchError(GitHubCLI(shell: try loginShell(in: folder), isOffline: { false })) == .gitHubFailed("check your internet connection or https://githubstatus.com"))
+    }
+
+    @Test func theNetworkPathAnswersWithinItsLimit() async {
+        let start = ContinuousClock.now
+        _ = await NetworkPath.isOffline()
+        #expect(ContinuousClock.now - start < .seconds(3))
+    }
+
+    @Test func errorsAboutSingleResultsLeaveTheOthers() async throws {
+        let partial = try temporaryDirectory()
+        try gh(in: partial, answer(#"{"data":{"search":{"nodes":[{"__typename":"PullRequest","number":12,"title":"Kept","url":"https://github.com/owner/repo/pull/12","updatedAt":"2026-11-13T10:00:00Z","state":"OPEN","isDraft":false,"repository":{"nameWithOwner":"owner/repo"},"author":{"login":"octo"}},null]},"rateLimit":{"resetAt":"2026-11-13T11:00:00Z"}},"errors":[{"type":"FORBIDDEN","path":["search","nodes",1],"message":"Resource protected by organization SAML enforcement."}]}"#, status: 1))
+        let items = try await GitHubCLI(shell: try loginShell(in: partial), isOffline: { false }).search(GitHubSearch(kind: .myPullRequests), limit: 25)
+        #expect(items.map(\.id) == ["https://github.com/owner/repo/pull/12"])
+
+        // An error about the search itself still fails the folder.
+        let whole = try temporaryDirectory()
+        try gh(in: whole, answer(#"{"data":{"search":null},"errors":[{"type":"FORBIDDEN","path":["search"],"message":"Resource not accessible."}]}"#, status: 1))
+        #expect(await searchError(GitHubCLI(shell: try loginShell(in: whole), isOffline: { false })) == .gitHubFailed("Resource not accessible."))
+    }
+
+    @Test func checkAgainReadsTheLoginShellAgain() async throws {
+        let folder = try temporaryDirectory()
+        let tools = folder.appendingPathComponent("tools", isDirectory: true)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        try gh(in: tools, "exit 0")
+        let profile = folder.appendingPathComponent("profile")
+        try Data("export PATH=/usr/bin:/bin\n".utf8).write(to: profile)
+        let shell = try script("login-shell", in: folder, ". '\(profile.path)'\nexec /bin/sh -c \"$4\"")
+        let cli = GitHubCLI(shell: LoginShell(executable: shell), isOffline: { false })
+        #expect(await cli.locate() == nil)
+        #expect(await cli.status(host: "github.com") == .notInstalled)
+        // The built-in terminal installs a package manager, whose folder the profile gains, and `gh` into it.
+        try Data("export PATH='\(tools.path)':/usr/bin:/bin GH_CONFIG_DIR=/Users/test/gh-config\n".utf8).write(to: profile)
+        #expect(await cli.locate() == nil)
+        #expect(await cli.locate(again: true)?.path == tools.appendingPathComponent("gh").path)
+        #expect(await cli.status(host: "github.com") == .signedIn)
+        #expect(try environment(in: tools)["GH_CONFIG_DIR"] == "/Users/test/gh-config")
     }
 
     @Test func aRateLimitWaitsForItsReset() async throws {

@@ -5,6 +5,9 @@ import Foundation
 public struct LiveFolderState: Codable, Equatable, Sendable {
     /// The source these items came from. A folder whose configuration names another source starts over (Interface ▸ Edit Live Folder…).
     public var source: LiveFolderSource?
+    /// The item limit the items and validators are for. A folder whose configuration names another limit keeps the items within it and refreshes without validators.
+    public var itemLimit: Int?
+    /// When the last attempt that ended started.
     public var lastAttempt: Date?
     public var lastSuccess: Date?
     /// Failures in a row, not counting those while the Mac was offline.
@@ -25,8 +28,9 @@ public struct LiveFolderState: Codable, Equatable, Sendable {
     /// Items whose tabs the user closed; they stay out of the folder while the source lists them.
     public var dismissed: Set<String> = []
 
-    public init(source: LiveFolderSource? = nil) {
+    public init(source: LiveFolderSource? = nil, itemLimit: Int? = nil) {
         self.source = source
+        self.itemLimit = itemLimit
     }
 
     /// Records a fetch's items. Items seen at the folder's first success count as viewed then, and `viewedAt` and the dismissed items lose entries for items the source no longer lists (Read and unread).

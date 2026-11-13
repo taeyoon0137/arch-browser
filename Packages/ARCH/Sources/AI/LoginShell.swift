@@ -51,13 +51,18 @@ public actor LoginShell {
         self.executable = executable
     }
 
-    /// The login shell's variables, read once per launch. Callers during a read share it; a read that fails is tried again by the next call.
+    /// The login shell's variables, read once per launch and again after `reload()`. Callers during a read share it; a read that fails is tried again by the next call.
     public func variables() async -> Variables? {
         let task = lookup ?? Task { [executable] in await Self.readVariables(shell: executable) }
         lookup = task
         let variables = await task.value
         if variables == nil, lookup == task { lookup = nil }
         return variables
+    }
+
+    /// Forgets the variables read, so the next call reads the login shell again, as after the user changed a profile in the built-in terminal (Check Again).
+    public func reload() {
+        lookup = nil
     }
 
     /// The login shell's PATH.
@@ -77,11 +82,11 @@ public actor LoginShell {
         return AICommandLineConfiguration.locate(name, searchPath: searchPath)
     }
 
-    /// Runs `shell -l -i -c` with a command that prints a marker followed by `$PATH`, `$GH_CONFIG_DIR`, and `$XDG_CONFIG_HOME`, one to a line, and takes the lines after the marker, since a profile may print text of its own first. Reading stops as soon as those lines are complete, because a process the profile starts in the background can keep the output open; the shell and that process then end. Gives up after 10 seconds.
+    /// Runs `shell -l -i -c` with a command that prints a marker followed by `$PATH`, `GH_CONFIG_DIR`, and `XDG_CONFIG_HOME`, one to a line, and takes the lines after the marker, since a profile may print text of its own first. `printenv` prints the two folders, or `echo` an empty line, so a profile that makes unset variables an error (`set -u`, `setopt nounset`) still prints all four lines. Reading stops as soon as those lines are complete, because a process the profile starts in the background can keep the output open; the shell and that process then end. Gives up after 10 seconds.
     static func readVariables(shell: URL) async -> Variables? {
         let process: CommandLineProcess
         do {
-            let command = "printf '%s\\n%s\\n%s\\n%s\\n' \(marker) \"$PATH\" \"$GH_CONFIG_DIR\" \"$XDG_CONFIG_HOME\""
+            let command = "printf '%s\\n%s\\n' \(marker) \"$PATH\"; printenv GH_CONFIG_DIR || echo; printenv XDG_CONFIG_HOME || echo"
             process = try CommandLineProcess(executable: shell, arguments: ["-l", "-i", "-c", command],
                                              environment: baseEnvironment, directory: URL(fileURLWithPath: NSHomeDirectory()), input: Data())
         } catch {
