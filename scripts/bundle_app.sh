@@ -97,9 +97,32 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   printf 'APPL????' > "$helper/Contents/PkgInfo"
 done
 
-# A stable signing identity keeps the Keychain items Chromium creates readable across builds. Set `ARCH_SIGN_IDENTITY` to override the automatic choice. Otherwise, use the first Apple Development identity on this Mac, or ad-hoc signing if none exists.
+# A stable signing identity keeps the Keychain items Chromium creates readable across builds. Set `ARCH_SIGN_IDENTITY` to override the automatic choice. Otherwise, use the user's own developer team: the newest valid Developer ID Application identity, then the newest Apple Development identity, whose certificate names its holder as its organization, as an individual team's certificate does. Without one, use the first Apple Development identity on this Mac, or ad-hoc signing if none exists. The choice is passed as the certificate's SHA-1 hash, so nothing prints the identity's name or team.
 # The `vtool` step above leaves the executable's signature invalid, and macOS does not run an executable so signed. A signing that fails, as with a mistyped identity or a locked keychain, therefore shows why and falls back to ad-hoc signing, and the script fails when that fails too. The script's own message leaves out the identity's name.
-IDENTITY="${ARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
+individual_identity() {
+  security find-identity -v -p codesigning 2>/dev/null | python3 -I -c '
+import re, subprocess, sys
+pems = subprocess.run(["security", "find-certificate", "-a", "-Z", "-p"], capture_output=True, text=True).stdout
+certs = dict(re.findall(r"SHA-1 hash: ([0-9A-F]{40})\n(-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----)", pems, re.S))
+best = None
+for sha, name in re.findall(r"\)\s+([0-9A-F]{40})\s+\"([^\"]+)\"", sys.stdin.read()):
+    kind = name.split(":")[0]
+    if kind not in ("Developer ID Application", "Apple Development") or sha not in certs:
+        continue
+    info = subprocess.run(["openssl", "x509", "-noout", "-subject", "-nameopt", "RFC2253", "-startdate"], input=certs[sha], capture_output=True, text=True).stdout
+    organization = re.search(r"(?:^|[=,])O=([^,\n]+)", info)
+    holder = re.sub(r"\s*\([A-Z0-9]{10}\)$", "", name.split(": ", 1)[-1])
+    if not organization or organization.group(1).strip() != holder.strip():
+        continue
+    start = subprocess.run(["date", "-j", "-f", "%b %d %H:%M:%S %Y %Z", re.search(r"notBefore=(.+)", info).group(1).strip(), "+%s"], capture_output=True, text=True).stdout.strip()
+    rank = (kind == "Developer ID Application", int(start or 0))
+    if best is None or rank > best[0]:
+        best = (rank, sha)
+print(best[1] if best else "")
+'
+}
+IDENTITY="${ARCH_SIGN_IDENTITY:-$(individual_identity)}"
+IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
 if ! SIGN_OUTPUT="$(codesign --force --deep --sign "${IDENTITY:--}" "$APP" 2>&1)"; then
   printf '%s\n' "$SIGN_OUTPUT" >&2
   echo "signing failed; signing ad hoc instead, so the Keychain items Chromium created under the identity may ask for access" >&2
