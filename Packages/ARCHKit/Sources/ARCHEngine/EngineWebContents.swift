@@ -117,13 +117,13 @@ public protocol EngineDevTools: AnyObject {
 ///
 /// Points are in the page's viewport, in points from the top-left corner of the area that shows the page. An element's box from `getBoundingClientRect()`, in CSS pixels, maps to it as `(x - visualViewport.offsetLeft) * visualViewport.scale * zoomFactor`, and likewise for `y`.
 ///
-/// Each method sends all of its events or throws `EngineInputError` and sends none. The page handles them in order after the method returns.
+/// Each method sends all of its events or throws `EngineInputError` and sends none. The page handles them in order after the method returns. The engine finds the element under each pointer event, and the focused element for each key and text, only when the page handles the event, so an element that the page moves under the point, or focus that it moves, after a caller's check receives the input; a caller that must act on one element checks the target in the event itself (`docs/agents.md`, Actions).
 public protocol EngineInput: AnyObject {
     /// Moves the pointer to `point` with no button pressed.
     func movePointer(to point: CGPoint, modifiers: EngineInputModifiers) throws
-    /// Moves the pointer to `point`, then presses and releases the primary button `count` times, from 1 to 3, as a single, double, or triple click does. Engines refuse Control, with which a click opens the context menu.
+    /// Presses and releases the primary button at `point` `count` times, from 1 to 3, as a single, double, or triple click does. No pointer move goes first, so the page gets no event between a caller's check of what lies at the point and the press; the press itself makes the element under it the hovered one. Engines refuse Control, with which a click opens the context menu.
     func click(at point: CGPoint, count: Int, modifiers: EngineInputModifiers) throws
-    /// Turns the wheel with the pointer at `point` by `deltaX` and `deltaY` points, signed as DOM's `WheelEvent`: positive values scroll right and down.
+    /// Turns the wheel with the pointer at `point` by `deltaX` and `deltaY` points, signed as DOM's `WheelEvent`: positive values scroll right and down. Each delta is rounded to whole points and clamped to `EngineWheelTurn.maximumDelta` either way; engines refuse a delta that is not finite.
     func scroll(at point: CGPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) throws
     /// Presses and releases a key in the page's focused element, or in its document when no element has focus.
     func press(_ key: EngineKey, modifiers: EngineInputModifiers) throws
@@ -141,8 +141,24 @@ public enum EngineInputError: Error, Equatable, Sendable {
     case noPage
     /// The input needs the page's window to be the key window, or a key needs the page to have its window's keyboard focus, and it does not.
     case notFocused
-    /// The engine does not deliver this input as the user's own, such as a key combination, a character without a key, text with a line break, or a click with Control or a count outside 1 to 3.
+    /// The engine does not deliver this input as the user's own, such as a key combination, a character without a key, text with a line break, a click with Control or a count outside 1 to 3, or a wheel delta that is not finite.
     case unsupported
+}
+
+/// The whole-point deltas that both adapters send for `EngineInput.scroll`, within the range that every engine's wheel event holds.
+public struct EngineWheelTurn: Hashable, Sendable {
+    /// The largest delta either way, in points: many times any page's height, so a turn by it reaches the end of a scrolling area, and far inside the 32-bit range of the engines' wheel events.
+    public static let maximumDelta = 100_000
+    public var deltaX: Int
+    public var deltaY: Int
+
+    /// Rounds and clamps each delta; throws `EngineInputError.unsupported` for one that is not finite.
+    public init(deltaX: Double, deltaY: Double) throws {
+        guard deltaX.isFinite, deltaY.isFinite else { throw EngineInputError.unsupported }
+        let limit = Double(Self.maximumDelta)
+        self.deltaX = Int(min(max(deltaX, -limit), limit).rounded())
+        self.deltaY = Int(min(max(deltaY, -limit), limit).rounded())
+    }
 }
 
 public struct EngineInputModifiers: OptionSet, Hashable, Sendable {

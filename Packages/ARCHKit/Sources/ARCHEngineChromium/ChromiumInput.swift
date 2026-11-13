@@ -22,12 +22,11 @@ final class ChromiumInput: EngineInput {
         try browser(at: point).sendMouseMove(to: point, modifiers: Self.modifiers(modifiers))
     }
 
-    /// A click with Control opens the page's context menu, whose menu tracks modally, so the input sends none.
+    /// A click with Control opens the page's context menu, whose menu tracks modally, so the input sends none. No pointer move goes first: Chromium finds the element under a press and makes it the hovered one, as for a move.
     func click(at point: CGPoint, count: Int, modifiers: EngineInputModifiers) throws {
         guard (1...3).contains(count), !modifiers.contains(.control) else { throw EngineInputError.unsupported }
         let browser = try browser(at: point)
         let modifiers = Self.modifiers(modifiers)
-        browser.sendMouseMove(to: point, modifiers: modifiers)
         for click in 1...count {
             browser.sendMouseClick(at: point, mouseUp: false, clickCount: click, modifiers: modifiers)
             browser.sendMouseClick(at: point, mouseUp: true, clickCount: click, modifiers: modifiers)
@@ -35,7 +34,8 @@ final class ChromiumInput: EngineInput {
     }
 
     func scroll(at point: CGPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) throws {
-        try browser(at: point).sendMouseWheel(at: point, deltaX: Int(deltaX.rounded()), deltaY: Int(deltaY.rounded()), modifiers: Self.modifiers(modifiers))
+        let turn = try EngineWheelTurn(deltaX: deltaX, deltaY: deltaY)
+        try browser(at: point).sendMouseWheel(at: point, deltaX: turn.deltaX, deltaY: turn.deltaY, modifiers: Self.modifiers(modifiers))
     }
 
     /// CEF sends the key straight to the page, past the user's input source and the window's first responder, and the bridge stops a key the page leaves unhandled, so every key and modifier goes.

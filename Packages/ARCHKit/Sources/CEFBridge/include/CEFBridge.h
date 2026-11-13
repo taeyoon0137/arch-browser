@@ -484,7 +484,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (BOOL)sendMouseMoveTo:(NSPoint)point modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseMove(to:modifiers:));
 /// A press, with the primary button down, or a release of that button. `clickCount` counts the presses of a double or triple click from 1.
 - (BOOL)sendMouseClickAt:(NSPoint)point mouseUp:(BOOL)mouseUp clickCount:(NSInteger)clickCount modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseClick(at:mouseUp:clickCount:modifiers:));
-/// `deltaX` and `deltaY` are in points, signed as DOM's `WheelEvent`: positive values scroll right and down.
+/// `deltaX` and `deltaY` are in points, signed as DOM's `WheelEvent`: positive values scroll right and down. CEF takes each as an `int`, so callers keep them within its range, as `EngineWheelTurn` does.
 - (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseWheel(at:deltaX:deltaY:modifiers:));
 /// `keyCode` is the macOS virtual key code, and the characters are AppKit's, one UTF-16 unit each; CEF builds an AppKit key event from them. A character event alone types its character as an input method's text does, with a keypress.
 - (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendKeyEvent(_:keyCode:character:unmodifiedCharacter:modifiers:));

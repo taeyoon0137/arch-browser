@@ -17,30 +17,29 @@ final class WebKitInput: EngineInput {
         webView.mouseMoved(with: try Self.mouseEvent(.mouseMoved, at: location, in: window, modifiers: modifiers, clickCount: 0))
     }
 
-    /// A click with Control opens the page's context menu, whose menu tracks modally, so the input sends none. The pointer move before the presses fires `mousemove` only in the key window; the press updates the page's hover state in any window.
+    /// A click with Control opens the page's context menu, whose menu tracks modally, so the input sends none. The press updates the page's hover state in any window, so no pointer move goes first.
     func click(at point: CGPoint, count: Int, modifiers: EngineInputModifiers) throws {
         guard (1...3).contains(count), !modifiers.contains(.control) else { throw EngineInputError.unsupported }
         let (webView, window, location) = try place(point)
-        var events = [try Self.mouseEvent(.mouseMoved, at: location, in: window, modifiers: modifiers, clickCount: 0)]
-        for click in 1...count {
-            events.append(try Self.mouseEvent(.leftMouseDown, at: location, in: window, modifiers: modifiers, clickCount: click))
-            events.append(try Self.mouseEvent(.leftMouseUp, at: location, in: window, modifiers: modifiers, clickCount: click))
+        let events = try (1...count).flatMap { click in
+            try [NSEvent.EventType.leftMouseDown, .leftMouseUp].map { try Self.mouseEvent($0, at: location, in: window, modifiers: modifiers, clickCount: click) }
         }
         for event in events {
-            switch event.type {
-            case .leftMouseDown: webView.mouseDown(with: event)
-            case .leftMouseUp: webView.mouseUp(with: event)
-            default: webView.mouseMoved(with: event)
+            if event.type == .leftMouseDown {
+                webView.mouseDown(with: event)
+            } else {
+                webView.mouseUp(with: event)
             }
         }
     }
 
     /// AppKit has no public constructor for wheel events, so the event starts as a Core Graphics event. WebKit reads its location as one in the web view's window. AppKit gives that location for an event at the point's place on screen when it finds the window there, and otherwise the screen location, so such an event is made with the window point as its screen location instead.
     func scroll(at point: CGPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) throws {
+        let turn = try EngineWheelTurn(deltaX: deltaX, deltaY: deltaY)
         let (webView, window, location) = try place(point)
-        var event = Self.wheelEvent(at: window.convertPoint(toScreen: location), deltaX: deltaX, deltaY: deltaY, modifiers: modifiers)
+        var event = Self.wheelEvent(at: window.convertPoint(toScreen: location), turn: turn, modifiers: modifiers)
         if event?.window !== window {
-            event = Self.wheelEvent(at: location, deltaX: deltaX, deltaY: deltaY, modifiers: modifiers)
+            event = Self.wheelEvent(at: location, turn: turn, modifiers: modifiers)
         }
         guard let event, event.window === window || event.window == nil,
               abs(event.locationInWindow.x - location.x) < 0.5, abs(event.locationInWindow.y - location.y) < 0.5
@@ -48,11 +47,14 @@ final class WebKitInput: EngineInput {
         webView.scrollWheel(with: event)
     }
 
-    /// WebKit hands a key down that the page leaves unhandled back to the application, which sends it to the key window's first responder and first offers keys with Command, Control, or the function key flag to the menus and the key window's key equivalents. So a key goes only while its window is key or no window is, only to a web view that is its window's first responder, which drops the key when it comes back (`WebKitWebView.sendKeyEvent(_:)`), never with Command or Control, and with no function key flag. A character key would pass through the user's input source, which may type another character, so only named keys go; `insertText(_:)` types text.
+    /// WebKit hands a key down that the page leaves unhandled back to the application, which sends it to the key window's first responder and first offers keys with Command, Control, or the function key flag to the menus and the key window's key equivalents. So a key goes only while its window is key or no window is, only to a web view that is its window's first responder, which drops the key when it comes back (`WebKitWebView.sendKeyEvent(_:)`), never with Command or Control, and with no function key flag. A character key or Space would pass through the user's input source, which may type another character, such as a full-width space, or convert text the input source is composing, so only the other named keys go; `insertText(_:)` types text, a space included.
     func press(_ key: EngineKey, modifiers: EngineInputModifiers) throws {
         guard let webView = webView as? WebKitWebView, let window = webView.window else { throw EngineInputError.notInWindow }
         guard modifiers.isDisjoint(with: [.command, .control]), let stroke = key.stroke(with: modifiers) else { throw EngineInputError.unsupported }
-        if case .character = key { throw EngineInputError.unsupported }
+        switch key {
+        case .character, .space: throw EngineInputError.unsupported
+        default: break
+        }
         guard (NSApplication.shared.keyWindow ?? window) === window, window.firstResponder === webView else { throw EngineInputError.notFocused }
         let events = try [NSEvent.EventType.keyDown, .keyUp].map { type in
             guard let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: Self.modifierFlags(modifiers), timestamp: ProcessInfo.processInfo.systemUptime,
@@ -88,9 +90,9 @@ final class WebKitInput: EngineInput {
     }
 
     /// A pixel wheel event at a point in screen coordinates, Cocoa's, with the origin at the bottom left of the main screen.
-    private static func wheelEvent(at screenPoint: NSPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) -> NSEvent? {
+    private static func wheelEvent(at screenPoint: NSPoint, turn: EngineWheelTurn, modifiers: EngineInputModifiers) -> NSEvent? {
         guard let screenHeight = NSScreen.screens.first?.frame.height,
-              let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-deltaY.rounded()), wheel2: Int32(-deltaX.rounded()), wheel3: 0)
+              let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-turn.deltaY), wheel2: Int32(-turn.deltaX), wheel3: 0)
         else { return nil }
         wheel.location = CGPoint(x: screenPoint.x, y: screenHeight - screenPoint.y)
         wheel.flags = CGEventFlags(rawValue: UInt64(modifierFlags(modifiers).rawValue))
