@@ -116,6 +116,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 4. Cookies copy between the engines only within a Persona: each Persona has its own `CookieSync`.
 5. A Persona's stored data is removed only through an explicit list in the snapshot, at the next launch, before any engine starts. Removal is never inferred from a missing Persona.
 6. History, remembered permissions, zoom, site search, the search engine, the download settings, and `ai.json` stay app-wide (open decisions 2 and 3).
+7. Naming: wherever the interface names a Persona, it shows "Persona / Space": the Persona's name and the surface's space name, such as "Work / Research". This is a window's current space, a tab's space, or a space menu's space. A surface that belongs to a whole Persona without a space, such as Settings ▸ Plugins' Persona picker, a plugin's review sheet, and the New, Rename, and Delete Persona sheets, names the Persona alone. With one Persona, nothing names it, as now. The user set this rule on 2026-11-13.
 
 ## Risks and mitigations
 
@@ -638,11 +639,11 @@ Preference
 - With one Persona, nothing visible changes. That is the state after the migration.
 - With two or more Personas:
   - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking.
-  - `SpaceHeaderView` shows the Persona's name above the space name in small secondary text.
+  - `SpaceHeaderView` shows the Persona's name above the space name in small secondary text. The two lines read as Persona / Space (Persona rule 7), and the space's name stays editable on its own line.
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
-  - The window title adds the Persona's name.
+  - The window title adds the Persona and the space, as "Example Domain — Work / Research" (Persona rule 7). Until IV.15 it adds the Persona's name alone.
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.
-  - The Clear Site Data sheet names the Persona: "…removed from both engines in the Persona “Work”…".
+  - The Clear Site Data sheet names the Persona of the tab's place, whose data is removed from every space: "…removed from both engines in the Persona of “Work / Research”…" (Persona rule 7). Until IV.15 it says "…in the Persona “Work”…".
 - Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the window the command acts on: the window of the space menu, or for the Spaces menu the sidebar target, which comes forward from behind a small window; an empty name changes nothing. The Spaces menu's items act on the sidebar target's Persona. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
 - Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the drop target filter in `SpaceTabsView` uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette and the tab switcher list only tabs of the window's Persona, and palette commands run through its plugins. A page that a page or a preview opens joins a space of its own Persona, the window's current space or else `preferredSpace(in:)`, as does Open Link in New Tab from a favorite's page.
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:

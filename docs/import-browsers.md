@@ -5,7 +5,8 @@
 - This note describes importing from Chrome, Dia, Arc, and Safari, row 57 of `docs/features.md`. Queue task I.17 in `docs/plan.md` performs the Checks with the app.
 - File ▸ Import from Browser… finds those browsers and their profiles on the Mac, reads their files in place, and adds the user's selections to the session, history store, and site search in one step. File ▸ Import Bookmarks and History… (row 33) remains unchanged for exported files.
 - Arch reads the other browsers' files and never writes to them. It reads SQLite databases from copies, as the file import does.
-- Passwords, passkeys, cards, and addresses are excluded: Arch stores none and leaves them to the Passwords app and 1Password, which have their own imports. Cookies are excluded: each browser encrypts them with its own key in the Keychain, and a copied session cookie would sign the user in where they had not signed in. Extensions are excluded: the import does not install another browser's extensions. The user installs each one in Settings ▸ Plugins from an unpacked folder or a `.zip` archive, through its review sheet (rows 44 and 50). Extensions run on WebKit tabs on macOS 15.4 and later; on Chromium they wait for VI.1. Open and unpinned tabs, windows, reading lists, downloads, and site permissions are also excluded.
+- Passwords, passkeys, cards, and addresses are excluded: Arch stores none and leaves them to the Passwords app and 1Password, which have their own imports. Cookies are excluded: each browser encrypts them with its own key in the Keychain, and a copied session cookie would sign the user in where they had not signed in. Extensions are excluded: the import does not install another browser's extensions. The user installs each one in Settings ▸ Plugins from an unpacked folder, a `.zip` archive, a `.crx` file, or the Web Store (`docs/web-store.md`), through its review sheet (rows 44 and 50). Extensions run on WebKit tabs on macOS 15.4 and later; on Chromium they wait for VI.1. Open and unpinned tabs, windows, reading lists, downloads, and site permissions are also excluded.
+- `BrowserSource.swift` also lists the folders where native apps install host manifests for other browsers; the password manager design reads these folders (Native messaging hosts).
 - No private API is used. One undocumented System Settings link is listed under Open decisions.
 
 ## Facts this design relies on
@@ -155,6 +156,20 @@ Importing the same source again adds only what is not there yet. Names and addre
 - A running browser may lock its databases; copying them with their `-wal` and `-journal` files handles this, as `DatabaseCopy` does. The files are copied one after another, so a write in between could pair the database with a log from another moment. The copy is repeated while any file's size or modification time changes during it; after three such copies, the database is unreadable. A database behind a symbolic link is copied from its target, with the files beside the target, since a copied link would let SQLite open and write the browser's own file. Each copy goes into a new folder in the user's temporary folder, which only the user can open, and is deleted once read. The whole file is copied, including tables Arch does not read, such as `Web Data`'s autofill entries and addresses, so a copy exists only while its rows are read. Each import first deletes copies left by an earlier import when Arch quit while reading.
 - Unknown `StorableSidebar.json` versions are still read; unknown item kinds are skipped. Without a container holding `items` and `spaces`, or when no space names a pinned container, Arc's sidebar items are unreadable, but its profiles still offer history and search shortcuts.
 - macOS records a privacy grant such as Full Disk Access with the app's code signature requirement, so a bundle signed with the stable identity should keep it across rebuilds (not checked). Whether a grant applies to the running app or only after relaunch was not checked. The sheet reads again on activation; if access is still denied, it says to quit and reopen Arch.
+
+## Native messaging hosts
+
+- `BrowserSource.nativeMessagingHostFolders` lists the folders where native app vendors install host manifests for other browsers, in this order. `NativeMessagingHostLinks` reads them without changing them and links their manifests into Arch's own folder (`docs/password-managers.md`, Host discovery). The import does not use the list.
+  1. `/Library/Google/Chrome/NativeMessagingHosts`
+  2. `/Library/Application Support/Chromium/NativeMessagingHosts`
+  3. `/Library/Microsoft/Edge/NativeMessagingHosts`
+  4. `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`
+  5. `~/Library/Application Support/Chromium/NativeMessagingHosts`
+  6. `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts`
+  7. `~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts`
+  8. `~/Library/Application Support/Vivaldi/NativeMessagingHosts`
+- System folders come first: root owns them, and they are not app data folders. macOS protects Chrome's user folder while Chrome is installed (Permissions), so the other browsers' user folders follow it; vendors install the same manifests there, even for browsers that are not installed.
+- On this Mac on 2026-11-13, 1Password's manifest was in the user folders of Chrome, Microsoft Edge with its Beta, Dev, and Canary channels, and Vivaldi, which 1Password created for browsers that are not installed, and Apple's iCloud Passwords manifest was in Chrome's system folder as a link into the system's App cryptex. Chromium's user folder was empty.
 
 ## Files
 
