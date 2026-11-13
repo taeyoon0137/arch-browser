@@ -17,6 +17,7 @@
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
+#include "include/cef_keyboard_handler.h"
 #include "include/cef_permission_handler.h"
 #include "include/cef_picture_in_picture_handler.h"
 #include "include/cef_request_context.h"
@@ -424,6 +425,7 @@ class BridgeClient : public CefClient,
                      public CefFindHandler,
                      public CefDownloadHandler,
                      public CefJSDialogHandler,
+                     public CefKeyboardHandler,
                      public CefPermissionHandler,
                      public CefRequestHandler,
                      public CefContextMenuHandler,
@@ -444,6 +446,7 @@ public:
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
     CefRefPtr<CefFrameHandler> GetFrameHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
@@ -452,6 +455,12 @@ public:
     CefRefPtr<CefPictureInPictureHandler> GetPictureInPictureHandler() override { return this; }
 
     void OnFrameCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) override { [owner_ handleFrameCreated:frame]; }
+
+    // A key that the page leaves unhandled comes here before CEF offers it to the app's main menu. CEF builds the AppKit event of a key that `sendKeyEvent:…` sent without a window, while AppKit's keys carry the key window's number, so a key the bridge sent stops here and never runs a menu item.
+    bool OnKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent &event, CefEventHandle os_event) override {
+        NSEvent *nsEvent = CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event);
+        return nsEvent && nsEvent.windowNumber == 0;
+    }
 
     // The app shows its own menu once CEF's current work returns, so Chromium's menu never shows. CEF's model is left as it is, because CEF asks only when the model has items.
     bool RunContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefContextMenuParams> params,
@@ -1365,6 +1374,83 @@ private:
     if (_browser) {
         _browser->GetHost()->ReplaceMisspelling(CefString(word.UTF8String));
     }
+}
+
+/// CEF's event flags for the modifiers.
+static uint32_t InputEventFlags(ARCHCEFInputModifiers modifiers) {
+    uint32_t flags = EVENTFLAG_NONE;
+    if (modifiers & ARCHCEFInputModifierShift) {
+        flags |= EVENTFLAG_SHIFT_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierControl) {
+        flags |= EVENTFLAG_CONTROL_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierOption) {
+        flags |= EVENTFLAG_ALT_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierCommand) {
+        flags |= EVENTFLAG_COMMAND_DOWN;
+    }
+    return flags;
+}
+
+static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
+    CefMouseEvent event;
+    event.x = (int)lround(point.x);
+    event.y = (int)lround(point.y);
+    event.modifiers = flags;
+    return event;
+}
+
+- (BOOL)sendMouseMoveTo:(NSPoint)point modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    _browser->GetHost()->SendMouseMoveEvent(InputMouseEvent(point, InputEventFlags(modifiers)), false);
+    return YES;
+}
+
+/// A press carries the pressed button among its flags, as AppKit's presses do, so the page reads it from the event's `buttons`.
+- (BOOL)sendMouseClickAt:(NSPoint)point mouseUp:(BOOL)mouseUp clickCount:(NSInteger)clickCount modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    uint32_t flags = InputEventFlags(modifiers) | (mouseUp ? 0 : EVENTFLAG_LEFT_MOUSE_BUTTON);
+    _browser->GetHost()->SendMouseClickEvent(InputMouseEvent(point, flags), MBT_LEFT, mouseUp, (int)clickCount);
+    return YES;
+}
+
+/// CEF's deltas follow AppKit's scrolling deltas, which are positive toward the top and the left.
+- (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    _browser->GetHost()->SendMouseWheelEvent(InputMouseEvent(point, InputEventFlags(modifiers)), (int)-deltaX, (int)-deltaY);
+    return YES;
+}
+
+- (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    CefKeyEvent event;
+    switch (kind) {
+    case ARCHCEFKeyEventKindDown:
+        event.type = KEYEVENT_RAWKEYDOWN;
+        break;
+    case ARCHCEFKeyEventKindCharacter:
+        event.type = KEYEVENT_CHAR;
+        break;
+    case ARCHCEFKeyEventKindUp:
+        event.type = KEYEVENT_KEYUP;
+        break;
+    }
+    event.modifiers = InputEventFlags(modifiers);
+    event.native_key_code = keyCode;
+    event.character = character;
+    event.unmodified_character = unmodifiedCharacter;
+    _browser->GetHost()->SendKeyEvent(event);
+    return YES;
 }
 
 - (void)handleAuthenticationForHost:(NSString *)host

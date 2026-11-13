@@ -436,6 +436,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser.tryClose(completion: completion)
     }
     public private(set) lazy var devTools: (any EngineDevTools)? = ChromiumDevTools(webContents: self)
+    public private(set) lazy var input: (any EngineInput)? = ChromiumInput(webContents: self)
 
     fileprivate var hasDevTools: Bool { browser?.hasDevTools == true }
     fileprivate func showDevTools() { browser?.showDevTools() }

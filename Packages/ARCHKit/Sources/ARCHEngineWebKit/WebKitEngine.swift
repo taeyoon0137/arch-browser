@@ -492,6 +492,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// The Web Inspector inside the app while its private API flags allow it; otherwise none.
     public var devTools: (any EngineDevTools)? { WebKitInspectorAPI.isAllowed ? inspector : nil }
     private lazy var inspector = WebKitDevTools(webView: webView)
+    public var input: (any EngineInput)? { webKitInput }
+    private lazy var webKitInput = WebKitInput(webView: webView)
 
     /// Lets the system's browser inspect the page, which keeps working when the Web Inspector inside the app is off.
     private func allowInspection() {

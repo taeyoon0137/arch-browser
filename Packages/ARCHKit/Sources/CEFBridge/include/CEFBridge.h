@@ -233,6 +233,22 @@ typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandSelectAll = 1 << 3,
 };
 
+/// Modifier keys held during input that the bridge sends to a page.
+typedef NS_OPTIONS(NSUInteger, ARCHCEFInputModifiers) {
+    ARCHCEFInputModifierShift = 1 << 0,
+    ARCHCEFInputModifierControl = 1 << 1,
+    ARCHCEFInputModifierOption = 1 << 2,
+    ARCHCEFInputModifierCommand = 1 << 3,
+};
+
+/// The parts of a key press that the bridge sends to a page.
+typedef NS_ENUM(NSInteger, ARCHCEFKeyEventKind) {
+    ARCHCEFKeyEventKindDown,
+    /// The character that a press types, which the page receives as a keypress and as text.
+    ARCHCEFKeyEventKindCharacter,
+    ARCHCEFKeyEventKindUp,
+};
+
 /// Where a page asked a popup to open, from Chromium's window open disposition.
 typedef NS_ENUM(NSInteger, ARCHCEFPopupDisposition) {
     /// A new tab in front, as for a link to a new browsing context.
@@ -464,6 +480,14 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
 /// Replaces the selected misspelled word with `word`.
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
+/// Input that reaches the page as the user's own, through `CefBrowserHost`'s input calls, which hand it to Chromium's input pipeline as AppKit's events go: points are in the browser view, in points from its top-left corner. Each method returns NO and sends nothing before CEF has created the browser or after it has closed. A key that the page leaves unhandled goes no further: unlike the user's keys, it never reaches the app's menus.
+- (BOOL)sendMouseMoveTo:(NSPoint)point modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseMove(to:modifiers:));
+/// A press, with the primary button down, or a release of that button. `clickCount` counts the presses of a double or triple click from 1.
+- (BOOL)sendMouseClickAt:(NSPoint)point mouseUp:(BOOL)mouseUp clickCount:(NSInteger)clickCount modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseClick(at:mouseUp:clickCount:modifiers:));
+/// `deltaX` and `deltaY` are in points, signed as DOM's `WheelEvent`: positive values scroll right and down.
+- (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseWheel(at:deltaX:deltaY:modifiers:));
+/// `keyCode` is the macOS virtual key code, and the characters are AppKit's, one UTF-16 unit each; CEF builds an AppKit key event from them. A character event alone types its character as an input method's text does, with a keypress.
+- (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendKeyEvent(_:keyCode:character:unmodifiedCharacter:modifiers:));
 @end
 
 NS_ASSUME_NONNULL_END

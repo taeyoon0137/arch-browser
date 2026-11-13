@@ -9,6 +9,23 @@ final class WebKitWebView: WKWebView {
     weak var contents: WebKitWebContents?
     /// What the script reported for the click that opens the next menu.
     var pendingElement: EngineContextMenuElement?
+    /// The latest key downs that `WebKitInput` sent. WebKit hands one that the page leaves unhandled back to the application, which sends it to this view again.
+    private(set) var sentKeyDowns: [NSEvent] = []
+
+    /// Sends a key event that `WebKitInput` made to WebKit. When WebKit hands the key down back, `keyDown(with:)` drops it, so it reaches neither the app's menus nor another view.
+    func sendKeyEvent(_ event: NSEvent) {
+        guard event.type == .keyDown else { return super.keyUp(with: event) }
+        sentKeyDowns = sentKeyDowns.suffix(7) + [event]
+        super.keyDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if let index = sentKeyDowns.firstIndex(where: { $0 === event }) {
+            sentKeyDowns.remove(at: index)
+            return
+        }
+        super.keyDown(with: event)
+    }
 
     // A new click clears the last report, so a menu never shows what an earlier click was on.
     override func rightMouseDown(with event: NSEvent) {
