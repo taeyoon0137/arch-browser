@@ -43,6 +43,8 @@ struct SpaceTabsView: View {
     @State private var listFrame = CGRect.zero
     /// Identifies this list as the owner of a drag it started, since each space and the floating card has its own list.
     @State private var dragOwner = UUID()
+    /// The height of the rows a folder dragged from this list hides, measured as the drag starts.
+    @State private var hiddenRowsHeight: CGFloat = 0
 
     /// How far a folder's folders and tabs sit in from its row.
     private static let folderIndent: CGFloat = 12
@@ -101,6 +103,8 @@ struct SpaceTabsView: View {
                     }
                 }
             }
+            // While a dragged folder hides its rows, the list keeps their height below its end, so that a list scrolled to its end does not scroll back and move other rows under the pointer.
+            .padding(.bottom, sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0)
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
             .environment(\.isDraggingTab, sidebarDrag.item?.isRow == true)
@@ -159,12 +163,23 @@ struct SpaceTabsView: View {
     private func continueDrag(of item: SidebarDragItem, _ value: DragGesture.Value) -> Bool {
         guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] else { return false }
         if sidebarDrag.item == nil {
+            if case .folder(let id) = item { hiddenRowsHeight = contentsHeight(ofFolder: id, below: frame) }
             sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
         sidebarDrag.move(to: value.location)
         return true
+    }
+
+    /// The height of the rows that follow a folder's row, from its bottom to the bottom of the last of them: the folder's rows, which its drag hides.
+    private func contentsHeight(ofFolder id: UUID, below folderFrame: CGRect) -> CGFloat {
+        let tree = session.folderTree
+        guard let folder = tree.folder(id) else { return 0 }
+        let rows = tree.rows(in: space.id, pinned: folder.isPinned) { $0.id == windowModel.selectedTabID }
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return 0 }
+        let bottom = rows[(index + 1)...].prefix { $0.depth > rows[index].depth }.compactMap { rowFrames[$0.id]?.maxY }.max()
+        return max(0, (bottom ?? folderFrame.maxY) - folderFrame.maxY)
     }
 
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
