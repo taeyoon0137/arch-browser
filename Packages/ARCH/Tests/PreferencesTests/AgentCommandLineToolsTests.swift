@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agents ▸ Command-Line Tools without its view: the links Install Command-Line Tools… plans and shows before writing, the links on PATH that the section lists and Remove removes, and the sentences it shows, in a temporary home folder with a scratch app bundle.
+// Settings ▸ AI ▸ Agents ▸ Command-Line Tools without its view: the links Install Command-Line Tools… plans and its confirmation's text, the links on PATH that the section lists and Remove removes, and the sentences it shows, in a temporary home folder with a scratch app bundle.
 import AgentControl
 import Darwin
 import Foundation
@@ -33,7 +33,19 @@ private final class ScratchHome {
     }
 
     func commandLineTools(_ folders: [URL]) -> AgentCommandLineTools {
-        AgentCommandLineTools(bundle: bundle, homeFolder: home, searchPath: folders.map(\.path).joined(separator: ":"))
+        commandLineTools(searchPath: folders.map(\.path).joined(separator: ":"))
+    }
+
+    func commandLineTools(searchPath: String) -> AgentCommandLineTools {
+        AgentCommandLineTools(bundle: bundle, homeFolder: home, searchPath: searchPath)
+    }
+
+    /// Writes a bundle's `arch-cli` as an executable script and `arch-mcp` as a relative link to it, as `scripts/bundle_app.sh` lays them out.
+    func makeHelpers(of bundle: AgentBundleLayout) throws {
+        try FileManager.default.createDirectory(at: bundle.helpersURL, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: bundle.cliExecutableURL)
+        chmod(bundle.cliExecutableURL.path, 0o755)
+        try FileManager.default.createSymbolicLink(atPath: bundle.mcpExecutableURL.path, withDestinationPath: AgentBundleLayout.cliName)
     }
 
     func contents(of folder: URL) -> [String] {
@@ -42,7 +54,7 @@ private final class ScratchHome {
 }
 
 @Suite struct AgentCommandLineToolsTests {
-    @Test func installPlansBothLinksInLocalBinAndShowsBothPathsBeforeWriting() throws {
+    @Test func installPlansBothLinksInLocalBinWithoutWritingAndItsConfirmationShowsBothPaths() throws {
         let scratch = try ScratchHome()
         let tools = scratch.commandLineTools([scratch.outside, scratch.bin, scratch.local])
         let links = try tools.plannedLinks()
@@ -53,7 +65,7 @@ private final class ScratchHome {
             \(scratch.local.path)/arch-cli \u{2192} \(scratch.bundle.cliExecutableURL.path)
             \(scratch.local.path)/arch-mcp \u{2192} \(scratch.bundle.mcpExecutableURL.path)
             """)
-        // Planning writes nothing; the confirmation comes first.
+        // Planning writes nothing. That the view shows the confirmation before Install writes is check 62's.
         #expect(scratch.contents(of: scratch.local).isEmpty)
         #expect(tools.installedLinks().isEmpty)
     }
@@ -82,6 +94,43 @@ private final class ScratchHome {
         #expect(try tools.removeLinks().isEmpty)
     }
 
+    @Test func aFolderThatPATHSpellsTwiceListsItsLinksOnce() throws {
+        let scratch = try ScratchHome()
+        // The same folder with a trailing slash, and through a link to it.
+        let alias = scratch.home.appendingPathComponent("lbin")
+        try FileManager.default.createSymbolicLink(atPath: alias.path, withDestinationPath: ".local/bin")
+        let tools = scratch.commandLineTools(searchPath: [scratch.local.path, scratch.local.path + "/", alias.path].joined(separator: ":"))
+        try tools.install(try tools.plannedLinks())
+        let installed = tools.installedLinks()
+        #expect(installed.map(\.location.path) == [scratch.local.appendingPathComponent("arch-cli").path, scratch.local.appendingPathComponent("arch-mcp").path])
+        #expect(Set(installed.map(\.location.path)).count == installed.count)
+        #expect(try tools.removeLinks().map(\.path) == installed.map(\.location.path))
+        #expect(scratch.contents(of: scratch.local).isEmpty)
+    }
+
+    @Test func installNamesAFileThatPATHReachesFirstByALinksName() throws {
+        let scratch = try ScratchHome()
+        try scratch.makeHelpers(of: scratch.bundle)
+        let other = AgentBundleLayout(bundleURL: scratch.home.appendingPathComponent("Old/Arch.app"))
+        try scratch.makeHelpers(of: other)
+        // An older bundle's arch-cli in a home folder before ~/.local/bin, which Remove removes, and an arch-mcp that is not Arch's outside the home folder.
+        try FileManager.default.createSymbolicLink(atPath: scratch.bin.appendingPathComponent("arch-cli").path, withDestinationPath: other.cliExecutableURL.path)
+        let foreign = scratch.outside.appendingPathComponent("arch-mcp")
+        try Data("#!/bin/sh\n".utf8).write(to: foreign)
+        chmod(foreign.path, 0o755)
+        let tools = scratch.commandLineTools([scratch.outside, scratch.bin, scratch.local])
+        let links = try tools.plannedLinks()
+        try tools.install(links)
+        #expect(tools.installedSentence(for: links) == "Linked arch-cli and arch-mcp into \(scratch.local.path). \(scratch.bin.path)/arch-cli comes first on your PATH and runs instead; Remove, then Install again, to replace it. \(foreign.path) comes first on your PATH and runs instead.")
+
+        // After Remove and Install, and with the file that is not Arch's gone, PATH reaches the bundle's tools; a link to this bundle earlier on PATH runs the same file.
+        _ = try tools.removeLinks()
+        try tools.install(links)
+        try FileManager.default.removeItem(at: foreign)
+        try FileManager.default.createSymbolicLink(atPath: scratch.bin.appendingPathComponent("arch-mcp").path, withDestinationPath: scratch.bundle.mcpExecutableURL.path)
+        #expect(tools.installedSentence(for: links) == "Linked arch-cli and arch-mcp into \(scratch.local.path).")
+    }
+
     @Test func aFileInTheWayLeavesBothPlacesAlone() throws {
         let scratch = try ScratchHome()
         let tools = scratch.commandLineTools([scratch.local])
@@ -89,15 +138,25 @@ private final class ScratchHome {
         let links = try tools.plannedLinks()
         #expect(throws: AgentLinkInstaller.Failure.foreignFile(scratch.local.appendingPathComponent("arch-mcp").path)) { try tools.install(links) }
         #expect(scratch.contents(of: scratch.local) == ["arch-mcp"])
-        #expect(AgentCommandLineTools.sentence(for: .foreignFile("/x")) == AgentLinkInstaller.Failure.foreignFile("/x").message)
+        #expect(AgentCommandLineTools.sentence(for: .foreignFile("/x"), bundle: scratch.bundle) == AgentLinkInstaller.Failure.foreignFile("/x").message)
     }
 
-    @Test func withoutAWritableFolderOnPATHTheSentenceSaysToReopenArch() throws {
+    @Test func withoutAWritableFolderOnPATHTheSentenceNamesTheBundlesCommandAndSaysToReopenArch() throws {
         let scratch = try ScratchHome()
         #expect(throws: AgentLinkInstaller.Failure.noFolder) { try scratch.commandLineTools([scratch.outside, URL(fileURLWithPath: "/usr/bin")]).plannedLinks() }
-        let sentence = AgentCommandLineTools.sentence(for: .noFolder)
-        #expect(sentence.hasPrefix(AgentLinkInstaller.Failure.noFolder.message))
+        let sentence = AgentCommandLineTools.sentence(for: .noFolder, bundle: scratch.bundle)
+        #expect(sentence.hasPrefix("No folder on your PATH inside your home folder is writable. Make one and add it to PATH"))
+        // Settings has no --dir of its own, so the sentence names the command that has it.
+        #expect(sentence.contains("or run \(scratch.bundle.cliExecutableURL.path) links install --dir <folder> in a terminal."))
+        #expect(!sentence.contains("name a folder with --dir"))
         #expect(sentence.hasSuffix("quit and reopen Arch after changing it."))
+    }
+
+    @Test func withoutTheLoginShellsPATHTheSentenceNamesBothCommands() throws {
+        let scratch = try ScratchHome()
+        let sentence = AgentCommandLineTools.unreadPathSentence(bundle: scratch.bundle)
+        #expect(sentence.contains("\(scratch.bundle.cliExecutableURL.path) links install links the tools"))
+        #expect(sentence.contains("\(scratch.bundle.cliExecutableURL.path) links remove removes Arch's links."))
     }
 
     @Test func onlyABundleWithItsCLIHasToolsToShow() throws {

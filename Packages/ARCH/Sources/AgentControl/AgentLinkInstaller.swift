@@ -34,10 +34,15 @@ public struct AgentLinkInstaller {
             case .insideAppBundle(let path): return "\(path) is inside an app bundle, whose signature covers its files, so arch-cli leaves it alone."
             case .notAFolder(let path): return "\(path) is not a folder."
             case .notWritable(let path): return "\(path) is not writable."
-            case .noFolder: return "No folder on your PATH inside your home folder is writable. Make one and add it to PATH, for example with mkdir -p ~/.local/bin and the line export PATH=\"$HOME/.local/bin:$PATH\" in ~/.zprofile, or name a folder with --dir."
+            case .noFolder: return Self.noFolderMessage(orElse: "name a folder with --dir")
             case .foreignFile(let path): return "\(path) is not a link into an Arch bundle, so it was left alone."
             case .system(let detail): return detail
             }
+        }
+
+        /// `noFolder`'s sentence, ending with the caller's own way to name a folder, such as `--dir` for `arch-cli`.
+        public static func noFolderMessage(orElse alternative: String) -> String {
+            "No folder on your PATH inside your home folder is writable. Make one and add it to PATH, for example with mkdir -p ~/.local/bin and the line export PATH=\"$HOME/.local/bin:$PATH\" in ~/.zprofile, or \(alternative)."
         }
 
         public var exitCode: AgentExitCode {
@@ -104,9 +109,10 @@ public struct AgentLinkInstaller {
         return searchFolders.contains { resolved($0) == target }
     }
 
-    /// PATH's existing folders inside the home folder and outside any app bundle.
+    /// PATH's existing folders inside the home folder and outside any app bundle, each once however PATH spells it, such as with a trailing slash or through a link to another of them.
     private var homeSearchFolders: [URL] {
-        searchFolders.filter { (try? check($0)) != nil }
+        var seen = Set<String>()
+        return searchFolders.filter { (try? check($0)) != nil && resolved($0).map { seen.insert($0).inserted } == true }
     }
 
     /// Throws unless the folder, with its links resolved, is a folder inside the home folder and outside any app bundle, so that a bundle on PATH, or Arch's own `Contents/Helpers`, keeps its sealed files.
@@ -137,6 +143,28 @@ public struct AgentLinkInstaller {
     public static func isArchLink(destination: String, in folder: URL) -> Bool {
         let target = URL(fileURLWithPath: destination, relativeTo: folder).standardizedFileURL
         return names.contains(target.lastPathComponent) && AgentBundleLayout.containing(helper: target) != nil
+    }
+
+    /// A file that a shell runs by a link's name instead of the link's destination.
+    public struct Shadow: Equatable, Sendable {
+        public var file: URL
+        /// Whether `remove` removes it: a link into an Arch bundle in one of PATH's folders inside the home folder.
+        public var isRemovable: Bool
+
+        public init(file: URL, isRemovable: Bool) {
+            self.file = file
+            self.isRemovable = isRemovable
+        }
+    }
+
+    /// The first executable of the link's name in PATH's folders when it is not the link's destination, so that a terminal runs it instead, such as an older bundle's link in a folder before the link's; nil when PATH reaches the destination or nothing.
+    public func shadow(of link: Link) -> Shadow? {
+        let name = link.location.lastPathComponent
+        guard let file = searchFolders.lazy.map({ $0.appendingPathComponent(name) }).first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }),
+              let target = resolved(file), target != resolved(link.destination) else { return nil }
+        let folder = file.deletingLastPathComponent()
+        let isArch = linkDestination(at: file).map { Self.isArchLink(destination: $0, in: folder) } ?? false
+        return Shadow(file: file, isRemovable: isArch && (try? check(folder)) != nil)
     }
 
     /// Writes the links, replacing earlier links into an Arch bundle. Each location is checked before any is written, so a file in the way leaves both alone.

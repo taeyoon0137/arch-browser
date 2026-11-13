@@ -87,6 +87,8 @@ private final class TemporaryHome {
         #expect(AgentLinkInstaller.Failure.noFolder.exitCode == .toolError)
         // Relative PATH entries are not folders anyone can rely on.
         #expect(AgentLinkInstaller(homeFolder: home.home, searchPath: "bin:.:\(home.bin.path):\(home.bin.path)").searchFolders.map(\.path) == [home.bin.path])
+        // A folder that PATH spells twice is looked in once.
+        #expect(try AgentLinkInstaller(homeFolder: home.home, searchPath: "\(home.local.path):\(home.local.path)/").removalFolders(named: nil).map(\.path) == [home.local.path])
     }
 
     @Test func aNamedFolderMustBeAWritableFolderInsideTheHome() throws {

@@ -238,7 +238,7 @@ struct AgentCommandLineTools {
         try installer.install(links)
     }
 
-    /// The links into an Arch bundle's `Contents/Helpers` in PATH's folders inside the home folder, each with where it points: what Remove removes.
+    /// The links into an Arch bundle's `Contents/Helpers` in PATH's folders inside the home folder, each folder once however PATH spells it, and each link with where it points: what Remove removes.
     func installedLinks() -> [AgentLinkInstaller.Link] {
         // Without a named folder, `removalFolders` does not throw.
         let folders = (try? installer.removalFolders(named: nil)) ?? []
@@ -267,10 +267,26 @@ struct AgentCommandLineTools {
         "\(link.location.path) \u{2192} \(link.destination.path)"
     }
 
-    /// The installer's sentence. Arch reads the login shell's PATH once per launch, so a folder added to PATH counts only after Arch is opened again.
-    static func sentence(for failure: AgentLinkInstaller.Failure) -> String {
+    /// What Install says after writing the links: the folder, and each file that PATH reaches first by a link's name and that a terminal runs instead, with Remove and Install again for one that Remove removes.
+    func installedSentence(for links: [AgentLinkInstaller.Link]) -> String {
+        let folder = links.first?.location.deletingLastPathComponent().path ?? ""
+        let shadows = links.compactMap(installer.shadow(of:)).map { shadow in
+            "\(shadow.file.path) comes first on your PATH and runs instead" + (shadow.isRemovable ? "; Remove, then Install again, to replace it." : ".")
+        }
+        return (["Linked arch-cli and arch-mcp into \(folder)."] + shadows).joined(separator: " ")
+    }
+
+    /// The installer's sentence. With no writable folder, Settings has no `--dir`, so the sentence names the bundle's `arch-cli links install --dir`; and Arch reads the login shell's PATH once per launch, so a folder added to PATH counts only after Arch is opened again.
+    static func sentence(for failure: AgentLinkInstaller.Failure, bundle: AgentBundleLayout) -> String {
         guard failure == .noFolder else { return failure.message }
-        return failure.message + " Arch reads PATH from your login shell once per launch, so quit and reopen Arch after changing it."
+        let command = AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", "install", "--dir"]) + " <folder>"
+        return AgentLinkInstaller.Failure.noFolderMessage(orElse: "run \(command) in a terminal") + " Arch reads PATH from your login shell once per launch, so quit and reopen Arch after changing it."
+    }
+
+    /// What the section says when it cannot read the login shell's PATH, and so cannot tell which links are there: the bundle's commands that link and unlink with a terminal's PATH.
+    static func unreadPathSentence(bundle: AgentBundleLayout) -> String {
+        let command = { (action: String) in AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", action]) }
+        return "Arch could not read PATH from your login shell. In a terminal, \(command("install")) links the tools with that shell's PATH, and \(command("remove")) removes Arch's links."
     }
 }
 
@@ -321,6 +337,8 @@ struct AgentCommandLineToolsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             if isReadingPath {
                 Text("Reading PATH from your login shell\u{2026}").foregroundStyle(.secondary)
+            } else if tools == nil {
+                Text("Arch could not check the links on your PATH.").foregroundStyle(.secondary)
             } else if installed.isEmpty {
                 Text("Not linked into a folder on your PATH.").foregroundStyle(.secondary)
             } else {
@@ -370,7 +388,7 @@ struct AgentCommandLineToolsSection: View {
             return
         }
         guard let searchPath = await AILoginShell.path() else {
-            problem = "Arch could not read PATH from your login shell. In a terminal, \(AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", "install"])) links the tools with that shell's PATH."
+            problem = AgentCommandLineTools.unreadPathSentence(bundle: bundle)
             return
         }
         let tools = AgentCommandLineTools(bundle: bundle, homeFolder: home, searchPath: searchPath)
@@ -388,18 +406,18 @@ struct AgentCommandLineToolsSection: View {
             pendingLinks = try tools.plannedLinks()
             isConfirmingInstall = true
         } catch {
-            problem = Self.sentence(for: error)
+            problem = sentence(for: error)
         }
     }
 
     private func install(_ links: [AgentLinkInstaller.Link]) {
-        guard let tools, let folder = links.first?.location.deletingLastPathComponent() else { return }
+        guard let tools, !links.isEmpty else { return }
         do {
             try tools.install(links)
-            outcome = "Linked arch-cli and arch-mcp into \(folder.path)."
+            outcome = tools.installedSentence(for: links)
             problem = nil
         } catch {
-            problem = Self.sentence(for: error)
+            problem = sentence(for: error)
         }
         installed = tools.installedLinks()
     }
@@ -412,12 +430,12 @@ struct AgentCommandLineToolsSection: View {
             let removed = try tools.removeLinks()
             outcome = removed.isEmpty ? "No links to Arch's tools were found." : "Removed \(removed.map(\.path).formatted(.list(type: .and)))."
         } catch {
-            problem = Self.sentence(for: error)
+            problem = sentence(for: error)
         }
         installed = tools.installedLinks()
     }
 
-    private static func sentence(for error: Error) -> String {
-        (error as? AgentLinkInstaller.Failure).map(AgentCommandLineTools.sentence(for:)) ?? error.localizedDescription
+    private func sentence(for error: Error) -> String {
+        (error as? AgentLinkInstaller.Failure).map { AgentCommandLineTools.sentence(for: $0, bundle: bundle) } ?? error.localizedDescription
     }
 }
