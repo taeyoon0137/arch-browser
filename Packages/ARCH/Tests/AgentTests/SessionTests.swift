@@ -1,4 +1,4 @@
-// In-app sessions (docs/agents.md, In-app sessions: tickets; In the browser; Site scope and navigation): a ticket binds `arch-mcp` only from the session's own process tree and only while the session lives, compared in constant time; the first message carries the task and tab handles but no page text; the session's calls wait for the model's first output and are refused after the wait; a mode change sends `tools/changed` and reports the next list to the runner; and `arch-cli task` starts a session capped at the grant's level and the Settings default, in the grant's Persona, with no scope from the client's text.
+// In-app sessions (docs/agents.md, In-app sessions: tickets; In the browser; Site scope and navigation): a ticket binds `arch-mcp` only from the session's own process tree and only while the session lives, compared in constant time; the first message carries the task and tab handles but no page text; the session's calls wait for the model's first output and are refused after the wait; a mode change sends `tools/changed` and reports the next list to the runner; a deleted space ends its sessions, whose place still reads "Persona / Space"; and `arch-cli task` starts a session capped at the grant's level and the Settings default, in the grant's Persona, with no scope from the client's text.
 import AgentControl
 import AI
 import Darwin
@@ -282,6 +282,21 @@ import Testing
         session.taskEvent = { events.append(($0, $1)) }
         await service.deleteSession(session.id)
         #expect(events.count == 1 && events[0].0 == .failed && events[0].1 == "The session was deleted.")
+    }
+
+    @Test func aDeletedSpaceEndsItsSessionsWhichKeepTheirPersonaSlashSpacePlace() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let (session, runner) = try start(service, harness)
+        #expect(service.place(of: session) == "Default / Home")
+        harness.host.spacesByPersona[FakeHost.defaultPersona.id]?.removeFirst()
+        harness.host.personasDidChange?()
+        try await waitUntil { session.hasEnded }
+        #expect(runner.endedKeepingThread == false)
+        #expect(service.sessions.map(\.id) == [session.id])
+        #expect(service.place(of: session) == "Default / Deleted Space")
     }
 
     @Test func revokingAGrantEndsTheSessionsItStarted() async throws {

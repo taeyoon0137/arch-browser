@@ -660,7 +660,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard let agents = session.agents else { return }
         var context = agentComposerContext(text: offer.task)
         do {
-            let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.settings.newSessionMode, allowsAI: AIService.shared.settings.allowsAI(on:)))
+            let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.newSessionMode, allowsAI: AIService.shared.settings.allowsAI(on:)))
             showAgentSession(started.id)
         } catch {
             context.problem = error.localizedDescription

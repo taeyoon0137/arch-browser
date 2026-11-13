@@ -156,6 +156,16 @@ import Foundation
         state == .ready || state == .replacedUnreadable
     }
 
+    /// The highest mode a new session starts in: Settings' mode, or Read Only while the seal is not checked, since the defaults then stand in for the user's choice and must not raise it.
+    public var newSessionMode: AgentAccessLevel {
+        canChangeSettings ? settings.newSessionMode : .readOnly
+    }
+
+    /// Whether a session's end keeps Codex's copy of its thread: Keep Codex's Copy of Agent Conversations, and always while the seal is not checked, since the setting is not known then and a deleted thread does not come back.
+    public var keepsCodexCopy: Bool {
+        settings.keepsCodexCopy || !canChangeSettings
+    }
+
     private func readSettings() async {
         switch await file.read() {
         case .none:
@@ -279,7 +289,7 @@ import Foundation
         for session in sessions where session.isFromOutsideClient && !session.hasEnded && (grantID == nil || session.grantID == grantID) {
             for connection in connections.values where connection.sessionID == session.id { endpoint?.close(connection.id) }
             Task {
-                await session.end(keepingThread: settings.keepsCodexCopy, because: reason)
+                await session.end(keepingThread: keepsCodexCopy, because: reason)
                 updateSessionsChannel()
             }
         }
@@ -556,10 +566,12 @@ import Foundation
             attached = []
         }
         guard host.spaces(in: personaID).contains(where: { $0.id == spaceID }) else { throw SessionError(message: "The session's space was deleted.") }
+        // While the seal is not checked, Settings' mode is not known, so the session starts in Read Only.
+        let mode = canChangeSettings ? start.mode : newSessionMode
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let tabs = host.tabs(withIDs: Set(attached)).filter { tab in tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } ?? false }
         tabs.compactMap(\.url).forEach { scope.add($0) }
-        let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: start.mode,
+        let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: mode,
                                    model: start.model, effort: start.effort, scope: scope, attachedTabIDs: tabs.map(\.id), tools: [])
         session.reportedTools = listedTools(for: session)
         let runner = try makeRunner(for: session)
@@ -638,11 +650,11 @@ import Foundation
         sessions.removeAll { $0.id == id }
         sessionObservers[id] = nil
         for connection in connections.values where connection.sessionID == id { endpoint?.close(connection.id) }
-        await session.end(keepingThread: settings.keepsCodexCopy)
+        await session.end(keepingThread: keepsCodexCopy)
         updateSessionsChannel()
     }
 
-    /// Stop All Agents: every session's turn stops and its queued messages go, and every outside client is disconnected; the grants stay. Plan task VII.13 also denies the pending approvals.
+    /// Stop All Agents: every session's turn stops and its queued messages go, and every outside client is disconnected; the grants stay. Plan task VII.17.1 also cancels running calls and denies the pending approvals.
     public func stopAllAgents() {
         for session in sessions where !session.hasEnded { session.stop() }
         for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
@@ -662,7 +674,7 @@ import Foundation
     public func endSessionsForQuit(within limit: Duration = .seconds(5)) async {
         let live = sessions.filter { !$0.hasEnded }
         guard !live.isEmpty else { return }
-        let keepsCopy = settings.keepsCodexCopy
+        let keepsCopy = keepsCodexCopy
         // The first of the endings and the time limit returns; an ending that has not finished by then ends its processes at `stop()`.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let once = Once(continuation)
@@ -688,7 +700,7 @@ import Foundation
         for session in sessions where personas.contains(session.personaID) && !session.hasEnded && !host.spaces(in: session.personaID).contains(where: { $0.id == session.spaceID }) {
             for connection in connections.values where connection.sessionID == session.id { endpoint?.close(connection.id) }
             Task {
-                await session.end(keepingThread: settings.keepsCodexCopy)
+                await session.end(keepingThread: keepsCodexCopy)
                 updateSessionsChannel()
             }
         }
@@ -706,11 +718,11 @@ import Foundation
         return "\(persona) / \(space)"
     }
 
-    /// "Persona / Space", as the interface names a session's place.
+    /// "Persona / Space", as the interface names a session's place, also once its space is deleted.
     public func place(of session: AgentSession) -> String {
         let persona = host.personas.first { $0.id == session.personaID }?.name ?? "Deleted Persona"
-        guard let space = host.spaces(in: session.personaID).first(where: { $0.id == session.spaceID }) else { return persona }
-        return "\(persona) / \(space.name)"
+        let space = host.spaces(in: session.personaID).first { $0.id == session.spaceID }?.name ?? "Deleted Space"
+        return "\(persona) / \(space)"
     }
 
     // MARK: Session settings
@@ -856,7 +868,7 @@ import Foundation
         }
         let plan: AgentTaskPlan
         do {
-            plan = try AgentTaskPlan.make(for: start, grant: grant, spaces: host.spaces(in: grant.personaID), models: dependencies.agentModels(), settingsDefault: settings.newSessionMode)
+            plan = try AgentTaskPlan.make(for: start, grant: grant, spaces: host.spaces(in: grant.personaID), models: dependencies.agentModels(), settingsDefault: newSessionMode)
         } catch {
             return replyError(connection, requestID, .invalidParams((error as? AgentTaskPlan.Refusal)?.message ?? "\(error)"))
         }

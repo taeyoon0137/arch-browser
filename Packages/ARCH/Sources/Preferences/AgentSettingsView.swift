@@ -57,11 +57,11 @@ struct AgentSettingsPage: View {
 
     private var sessionsSection: some View {
         Section {
-            Picker("New sessions start in", selection: Binding(get: { service.settings.newSessionMode }, set: service.setNewSessionMode)) {
+            Picker("New sessions start in", selection: Binding(get: { service.newSessionMode }, set: service.setNewSessionMode)) {
                 ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             Toggle("Let In-App Agents Search History", isOn: Binding(get: { service.settings.inAppAgentsSearchHistory }, set: service.setInAppAgentsSearchHistory))
-            Toggle("Keep Codex\u{2019}s Copy of Agent Conversations", isOn: Binding(get: { service.settings.keepsCodexCopy }, set: service.setKeepsCodexCopy))
+            Toggle("Keep Codex\u{2019}s Copy of Agent Conversations", isOn: Binding(get: { service.keepsCodexCopy }, set: service.setKeepsCodexCopy))
         } header: {
             Text("Agent Sessions")
         } footer: {
@@ -75,7 +75,7 @@ struct AgentSettingsPage: View {
         case .ready: return nil
         case .reading: return "Checking agent.json\u{2026}"
         case .replacedUnreadable: return "agent.json could not be verified, so Arch renamed it agent.json.unreadable and started with outside access off and no grants."
-        case .keyUnavailable(let reason): return "Arch could not read the key that protects its agent settings from the Keychain: \(reason) Until it can, outside access is off and no grant is used."
+        case .keyUnavailable(let reason): return "Arch could not read the key that protects its agent settings from the Keychain: \(reason) Until it can, outside access is off, no grant is used, new sessions start in Read Only, and Codex keeps its copy of agent conversations."
         }
     }
 
@@ -133,8 +133,7 @@ struct AgentSettingsPage: View {
         let persona = service.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
         let spaces = service.host.spaces(in: grant.personaID)
         let space = (spaces.first { $0.id == grant.spaceID } ?? spaces.first)?.name
-        var parts = [grant.level.title, "\(persona) Persona"]
-        if let space { parts.append("space \(space)") }
+        var parts = [grant.level.title, space.map { "\(persona) / \($0)" } ?? persona]
         if grant.scopes.searchHistory { parts.append("searches history") }
         if grant.scopes.startTasks { parts.append("starts agent tasks") }
         switch grant.expiry {

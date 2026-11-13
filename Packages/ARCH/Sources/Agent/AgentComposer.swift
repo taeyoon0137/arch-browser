@@ -151,7 +151,7 @@ public struct AgentComposer: View {
                 label("Mode")
                 // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
                 Picker("Mode", selection: Binding(get: { chosenMode }, set: { mode = $0 })) {
-                    ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.settings.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
                 .controlSize(.small)
@@ -194,7 +194,7 @@ public struct AgentComposer: View {
 
     /// The mode the user picked, at most Settings' mode.
     private var chosenMode: AgentAccessLevel {
-        let limit = service.settings.newSessionMode
+        let limit = service.newSessionMode
         guard let mode, mode.rank <= limit.rank else { return limit }
         return mode
     }

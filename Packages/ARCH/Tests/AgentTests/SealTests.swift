@@ -1,4 +1,4 @@
-// `agent.json`'s seal (docs/agents.md, Sealed settings): sealed settings read back; a file edited without the key, one that does not read, one whose key the Keychain no longer has, and an earlier copy put back after a Revoke are renamed `agent.json.unreadable` and ignored, with outside access off and the Agents Persona ordinary; a Keychain that does not give the key leaves the file untouched, keeps outside access off and every grant unused, and keeps the recorded Agents Persona agent-only until Try Again reads the key, and the app reads that Persona without the key; and members of a later build count in the seal.
+// `agent.json`'s seal (docs/agents.md, Sealed settings): sealed settings read back; a file edited without the key, one that does not read, one whose key the Keychain no longer has, and an earlier copy put back after a Revoke are renamed `agent.json.unreadable` and ignored, with outside access off and the Agents Persona ordinary; a Keychain that does not give the key leaves the file untouched, keeps outside access off and every grant unused, and keeps the recorded Agents Persona agent-only until Try Again reads the key, and the app reads that Persona without the key; until the seal is checked, new sessions start in Read Only and their end keeps Codex's copy; and members of a later build count in the seal.
 import AgentControl
 import CryptoKit
 import Foundation
@@ -130,6 +130,40 @@ import Testing
         #expect(service.state == .ready)
         #expect(service.settings.grants.map(\.id) == [written.grantID])
         #expect(harness.socketExists)
+    }
+
+    /// The defaults stand in for the settings until the seal is checked, so they must neither raise a new session's mode above the user's choice nor delete a Codex thread the user kept.
+    @Test func sessionsStartInReadOnlyAndKeepCodexsCopyUntilTheSealIsChecked() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let first = try await harness.makeOpenService()
+        first.setNewSessionMode(.actInAgentTabs)
+        first.stop()
+        harness.keys.failure = "The user canceled the operation."
+        let service = try harness.makeService()
+        #expect(service.state == .reading)
+        #expect(service.newSessionMode == .readOnly)
+        #expect(service.keepsCodexCopy)
+        try await harness.settled(service)
+        #expect(service.state == .keyUnavailable("The user canceled the operation."))
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let start = AgentService.SessionStart(task: "Summarize this tab", personaID: persona, spaceID: space.id, attachedTabIDs: [], mode: .actInAgentTabs, model: nil, effort: nil)
+        let unchecked = try service.startSession(start)
+        #expect(unchecked.mode == .readOnly)
+        await service.deleteSession(unchecked.id)
+        #expect(harness.runners.last?.endedKeepingThread == true)
+        // Try Again reads the user's choices.
+        harness.keys.failure = nil
+        service.retryReadingSettings()
+        try await harness.settled(service)
+        #expect(service.state == .ready)
+        #expect(service.newSessionMode == .actInAgentTabs)
+        #expect(!service.keepsCodexCopy)
+        let checked = try service.startSession(start)
+        #expect(checked.mode == .actInAgentTabs)
+        await service.deleteSession(checked.id)
+        #expect(harness.runners.last?.endedKeepingThread == false)
     }
 
     @Test func membersOfALaterBuildCountInTheSeal() async throws {
