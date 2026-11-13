@@ -677,29 +677,37 @@ public final class AIAgentSession {
 // MARK: - Starting sessions
 
 extension AIService {
-    /// Starts a session on the request's model or the feature's route, using only Claude Code and Codex presets (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off or no preset model can serve it.
+    /// Starts a session on the models `agentSessionCandidates(named:for:)` gives (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off or no preset model can serve it.
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
-        var candidates: [AIRouteModel]
         // A model the caller names does not bypass the feature's switch in Settings ▸ AI ▸ Features.
         guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
-        if let ref = request.model {
-            guard let provider = settings.providers.first(where: { $0.id == ref.provider }),
-                  let model = provider.models.first(where: { $0.name == ref.model }) else { throw AIError.notConfigured(.noUsableModel) }
-            candidates = [AIRouteModel(ref: ref, provider: provider, model: model)]
-        } else {
-            candidates = try settings.routeModels(for: feature)
-        }
-        candidates = candidates.filter { candidate in
-            guard case .commandLine(let tool) = candidate.provider.kind, tool.agent != nil else { return false }
-            return feature.requirements.isSubset(of: candidate.provider.capabilities(of: candidate.model))
-        }
-        guard !candidates.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
+        let candidates = try agentSessionCandidates(named: request.model, for: feature)
         do {
             return try AIAgentSession(request: request, feature: feature, candidates: candidates, service: self)
         } catch {
             throw AIError.providerUnavailable(candidates[0].provider.id, detail: "The session folder could not be made: \(error.localizedDescription)")
         }
+    }
+
+    /// The models a session starts on, in order, among the Claude Code and Codex preset models that meet the feature's requirements: the model `ref` names; or else the feature's route, with its fallback to the default route; or else, when the route has none of them, as when it lists only API models, the first preset model, which the composer's menu shows first (`agentSessionModels()`), so that a session starts wherever a model can run one. Throws `noUsableModel` when there is none.
+    func agentSessionCandidates(named ref: AIModelRef?, for feature: AIFeature) throws -> [AIRouteModel] {
+        func runsSessions(_ candidate: AIRouteModel) -> Bool {
+            guard case .commandLine(let tool) = candidate.provider.kind, tool.agent != nil else { return false }
+            return feature.requirements.isSubset(of: candidate.provider.capabilities(of: candidate.model))
+        }
+        let presets = settings.providers.flatMap { provider in
+            provider.models.map { AIRouteModel(ref: AIModelRef(provider: provider.id, model: $0.name), provider: provider, model: $0) }
+        }.filter(runsSessions)
+        let candidates: [AIRouteModel]
+        if let ref {
+            candidates = presets.first { $0.ref == ref }.map { [$0] } ?? []
+        } else {
+            let route = ((try? settings.routeModels(for: feature)) ?? []).filter(runsSessions)
+            candidates = route.isEmpty ? Array(presets.prefix(1)) : route
+        }
+        guard !candidates.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
+        return candidates
     }
 
     /// The models that can run an agent session on the user's CLI, for the composer's menu: the `agent` route's usable models first, then every other model of a Claude Code or Codex preset; none while Agent Tasks is off.

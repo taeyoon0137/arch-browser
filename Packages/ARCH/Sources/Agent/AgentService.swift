@@ -509,7 +509,7 @@ import Foundation
         /// Tabs shared with the session from the start, such as the selected tab; one on a site excluded from AI is left out.
         public var attachedTabIDs: [UUID]
         public var mode: AgentAccessLevel
-        /// Nil uses the `agent` route.
+        /// Nil uses the `agent` route, or the first preset model when the route has none (`AIService.startAgentSession(_:)`).
         public var model: AIModelRef?
         public var effort: String?
         /// The composer's Use the Agents Persona: the session goes to the Agents Persona's first space instead.

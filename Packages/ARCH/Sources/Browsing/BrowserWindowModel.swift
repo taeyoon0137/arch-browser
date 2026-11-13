@@ -640,10 +640,14 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Where a session started in this window goes and what it starts with: the window's current space, which for a small window is the space Move to Main Window would use, its Persona, and the selected tab unless an internal page or the preview covers it.
     @MainActor func agentComposerContext(text: String = "") -> AgentComposerContext {
-        let space = currentSpace
-        let persona = session.personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
-        let tab = isSelectedPageCovered ? nil : selectedTab.map(BrowserAgentHost.info(of:))
-        return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: tab, text: text)
+        Self.agentComposerContext(in: currentSpace, personas: session.personas, selectedTab: selectedTab.map(BrowserAgentHost.info(of:)),
+                                  isPageCovered: isSelectedPageCovered, text: text)
+    }
+
+    /// The context for `space` and its Persona among `personas`, named "Persona / Space", with `selectedTab` unless an internal page or the preview covers its page.
+    static func agentComposerContext(in space: Space, personas: [Persona], selectedTab: AgentTabInfo?, isPageCovered: Bool, text: String) -> AgentComposerContext {
+        let persona = personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
+        return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: isPageCovered ? nil : selectedTab, text: text)
     }
 
     /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
@@ -675,10 +679,14 @@ public final class BrowserWindowModel: ObservableObject {
         showAgentPanel(.session(id))
     }
 
-    /// A step's tab button: selects the tab here, or, since a small window shows only its own tab, in the main window, which comes forward.
+    /// A step's tab button: a small window's tab brings its small window forward, since another window that selected it would close that window and keep the tab out of every list; any other tab is selected here, or, since a small window shows only its own tab, in the main window, which comes forward. A tab that has closed shows nothing.
     @MainActor func showAgentTab(_ id: UUID) {
+        guard let tab = session.allTabs.first(where: { $0.id == id }) else { return }
+        guard !tab.isInSmallWindow else {
+            session.window(showing: tab)?.nsWindow?.makeKeyAndOrderFront(nil)
+            return
+        }
         guard kind == .small else { return selectTab(id) }
-        guard id != selectedTabID else { return }
         let target = session.sidebarTarget()
         target.selectTab(id)
         target.nsWindow?.makeKeyAndOrderFront(nil)

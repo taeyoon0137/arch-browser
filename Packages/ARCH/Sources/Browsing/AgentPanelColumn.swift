@@ -125,9 +125,10 @@ struct AgentWaitingDot: ViewModifier {
     let isCurrent: Bool
     let scale: CGFloat
 
+    /// Only `agents` chooses the branch, which stays the same for the app's life, so switching spaces keeps the symbol's identity and its size and color animate.
     @ViewBuilder func body(content: Content) -> some View {
-        if let agents, !isCurrent {
-            content.modifier(Mark(agents: agents, spaceID: spaceID, scale: scale))
+        if let agents {
+            content.modifier(Mark(agents: agents, spaceID: spaceID, isCurrent: isCurrent, scale: scale))
         } else {
             content
         }
@@ -136,10 +137,11 @@ struct AgentWaitingDot: ViewModifier {
     private struct Mark: ViewModifier {
         @ObservedObject var agents: AgentService
         let spaceID: UUID
+        let isCurrent: Bool
         let scale: CGFloat
 
         func body(content: Content) -> some View {
-            let isWaiting = agents.spacesWaitingForUser.contains(spaceID)
+            let isWaiting = !isCurrent && agents.spacesWaitingForUser.contains(spaceID)
             content
                 .overlay {
                     if isWaiting {

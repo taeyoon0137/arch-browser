@@ -738,6 +738,49 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(throws: AIError.self) { try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer)) }
     }
 
+    @Test func aSessionWithoutAChosenModelStartsOnTheRoutesPresetsOrElseOnTheComposersFirstModel() throws {
+        let directory = temporaryDirectory()
+        let keys = InMemoryKeys()
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
+        // An API model with tools comes first, so the default route lists it and it has the `agent` capability, but no CLI runs it.
+        let api = provider("API", models: [AIModelConfiguration(name: "m")])
+        var claude = AIAgentKind.claudeCode.preset(executable: URL(fileURLWithPath: "/usr/local/bin/claude"))
+        claude.models = [AIModelConfiguration(name: "haiku"), AIModelConfiguration(name: "sonnet")]
+        var codex = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/usr/local/bin/codex"))
+        codex.models = [AIModelConfiguration(name: "gpt-6-luna")]
+        settings.providers = [api, claude, codex]
+        let service = AIService(settings: settings, usage: AIUsageStore(fileURL: directory.appendingPathComponent("ai-usage.json")), keys: keys) { _, _ in fatalError("No requests") }
+        service.register(agentFeature)
+        let apiModel = AIModelRef(provider: api.id, model: "m")
+        let haiku = AIModelRef(provider: claude.id, model: "haiku")
+        let sonnet = AIModelRef(provider: claude.id, model: "sonnet")
+        let luna = AIModelRef(provider: codex.id, model: "gpt-6-luna")
+        func candidates(named ref: AIModelRef? = nil) throws -> [AIModelRef] {
+            try service.agentSessionCandidates(named: ref, for: agentFeature).map(\.ref)
+        }
+
+        // Agent Tasks without models falls back to the default route, which has no preset model: the session starts on the composer's first model.
+        settings.setRoute(AIRoute(isEnabled: true, models: []), for: .agent)
+        settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .defaultRoute)
+        #expect(try candidates() == [haiku])
+        #expect(service.agentSessionModels().first == haiku)
+        settings.setRoute(AIRoute(isEnabled: true, models: []), for: .defaultRoute)
+        #expect(try candidates() == [haiku])
+        settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .agent)
+        #expect(try candidates() == [haiku])
+        // A route with preset models keeps their order, as the composer's menu does, and its fallbacks.
+        settings.setRoute(AIRoute(isEnabled: true, models: [apiModel, luna, sonnet]), for: .agent)
+        #expect(try candidates() == [luna, sonnet])
+        #expect(Array(service.agentSessionModels().prefix(2)) == [luna, sonnet])
+        // A model the user picks serves alone; an API model cannot.
+        #expect(try candidates(named: haiku) == [haiku])
+        #expect(throws: AIError.self) { try candidates(named: apiModel) }
+        // Without a preset, nothing can run a session, and the palette and the reader offer none.
+        settings.providers = [api]
+        #expect(throws: AIError.self) { try candidates() }
+        #expect(service.agentSessionModels().isEmpty)
+    }
+
     @Test func aPresetsOrdinaryRequestGetsPageDataAndRunsWithoutTools() async throws {
         let cli = try FakeCLI.claude(turns: [], ordinary: try String(contentsOf: agentFixtures.appendingPathComponent("claude-ordinary.stdout.jsonl"), encoding: .utf8))
         let fixture = try AgentFixture(cli: cli, model: "haiku", feature: userFeature)

@@ -1,4 +1,4 @@
-// The entry points that start an in-app agent session (docs/agents.md, In the browser ▸ Starting a session): the palette's Ask Agent row, offered for two or more words while a model can run a session and starting one with no tab on an excluded site attached, and the question that Continue as Agent Task takes from the page reader and the question popover.
+// The entry points that start an in-app agent session (docs/agents.md, In the browser ▸ Starting a session): the window's place, named "Persona / Space", with its selected tab unless a covered page hides it; the palette's Ask Agent row, offered for two or more words while a model can run a session and starting one with no tab on an excluded site attached; and the question that Continue as Agent Task takes from the page reader and the question popover.
 import Agent
 import ARCHEngine
 import Foundation
@@ -22,6 +22,24 @@ import Testing
 
     @Test func askAgentNeedsAModelThatCanRunASession() {
         #expect(AskAgentOffer(text: "compare these two plans", canRunSession: false) == nil)
+    }
+
+    @Test func theWindowsPlaceNamesThePersonaAndSpaceAndLeavesOutACoveredPage() {
+        let work = Persona(name: "Work")
+        let research = Space(name: "Research", personaID: work.id)
+        let tab = Self.tab(url: Self.page)
+        let context = BrowserWindowModel.agentComposerContext(in: research, personas: [Persona(name: "Home"), work], selectedTab: tab, isPageCovered: false, text: "compare plans")
+        #expect(context.personaID == work.id)
+        #expect(context.spaceID == research.id)
+        #expect(context.place == "Work / Research")
+        #expect(context.tab == tab)
+        #expect(context.text == "compare plans")
+        // An internal page or the preview covers the tab's page, so no tab goes with the task.
+        #expect(BrowserWindowModel.agentComposerContext(in: research, personas: [work], selectedTab: tab, isPageCovered: true, text: "").tab == nil)
+        // A space from before Personas belongs to the default one.
+        let old = BrowserWindowModel.agentComposerContext(in: Space(name: "Inbox"), personas: [Persona(id: Persona.defaultID, name: "Default")], selectedTab: nil, isPageCovered: false, text: "")
+        #expect(old.personaID == Persona.defaultID)
+        #expect(old.place == "Default / Inbox")
     }
 
     @Test func askAgentStartsInTheWindowsPlaceWithItsTabAttached() throws {
