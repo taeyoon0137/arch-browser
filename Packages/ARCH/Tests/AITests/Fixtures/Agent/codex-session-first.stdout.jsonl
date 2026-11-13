@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000136"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"arch","tool":"session_info","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"arch","tool":"session_info","arguments":{},"result":{"content":[{"type":"text","text":"Session s1 in Read Only. Tabs: t1 (attached). Code word: KESTREL."}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"KESTREL ORCHID"}}
+{"type":"turn.completed","usage":{"input_tokens":24836,"cached_input_tokens":21888,"cache_write_input_tokens":0,"output_tokens":61,"reasoning_output_tokens":0}}

@@ -81,7 +81,8 @@ let package = Package(
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         // Needs no CEF framework: the bridge loads it at run time, and these tests start no engine.
         .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),
-        .testTarget(name: "AITests", dependencies: ["AI", "Plugins"], path: "Packages/ARCH/Tests/AITests"),
+        // `Fixtures/Agent` holds the Claude Code and Codex streams that the agent session decoders are written against.
+        .testTarget(name: "AITests", dependencies: ["AI", "Plugins"], path: "Packages/ARCH/Tests/AITests", resources: [.copy("Fixtures")]),
         .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
