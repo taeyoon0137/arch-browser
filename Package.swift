@@ -79,8 +79,8 @@ let package = Package(
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
         .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
-        // Needs no CEF framework: the bridge loads it at run time, and these tests start no engine.
-        .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),
+        // Needs no CEF framework: the bridge loads it at run time, and these tests start no engine. The WebKit adapter is there for the context menu parity tests.
+        .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium", "ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),
         .testTarget(name: "AITests", dependencies: ["AI", "Plugins"], path: "Packages/ARCH/Tests/AITests"),
         .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),

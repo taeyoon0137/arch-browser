@@ -292,6 +292,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var authenticationAttempts: [String: Int] = [:]
     /// The context menu while it tracks, so that a closing browser can end it.
     private var contextMenu: NSMenu?
+    /// Shows the context menu for Chromium's page view, so that AppKit adds its own items.
+    private let contextMenuPresenter = EngineContextMenuPresenter()
     /// The page scripts, which a page this one opens starts with.
     private var pageScripts: [EnginePageScript]
     /// The page's video in picture in picture, from the engine's start until AVKit has finished stopping.
@@ -561,29 +563,16 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return []
     }
 
-    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click.
+    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu for the page's text input view, so that AppKit adds its own items, as it does on WebKit.
     public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
         guard let uiDelegate, view.window != nil else { return completion() }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if !params.misspelledWord.isEmpty {
-            let suggestions = params.spellingSuggestions.isEmpty ? Self.systemSpellingSuggestions(for: params.misspelledWord) : params.spellingSuggestions
-            for word in suggestions {
-                let item = engineMenuItem(word, EngineContextMenuItem.spellingSuggestion, #selector(replaceMisspellingFromMenu(_:)), isEnabled: true)
-                item.representedObject = word
-                menu.addItem(item)
-            }
-            if suggestions.isEmpty {
-                menu.addItem(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
-            }
-        }
-        let commands: [(String, NSUserInterfaceItemIdentifier, ARCHCEFEditCommand)] = [
-            ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
-            ("Paste", EngineContextMenuItem.paste, .paste), ("Select All", EngineContextMenuItem.selectAll, .selectAll),
-        ]
-        for (title, identifier, command) in commands where params.isEditable || (command == .copy && !params.selectionText.isEmpty) {
-            let item = engineMenuItem(title, identifier, #selector(runEditCommandFromMenu(_:)), isEnabled: params.editCommands.contains(command))
-            item.tag = Int(command.rawValue)
+        let suggestions = params.misspelledWord.isEmpty || !params.spellingSuggestions.isEmpty ? params.spellingSuggestions
+            : Self.systemSpellingSuggestions(for: params.misspelledWord)
+        for item in Self.engineMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, isEditable: params.isEditable,
+                                         selectionText: params.selectionText, editCommands: params.editCommands) {
+            item.target = self
             menu.addItem(item)
         }
         let element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
@@ -593,15 +582,39 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu
-        // Not popUpContextMenu: by now the current event is no longer the click.
-        menu.popUp(positioning: nil, at: params.location, in: view)
+        contextMenuPresenter.show(menu, at: params.location, in: view, for: element)
         contextMenu = nil
         completion()
     }
 
-    private func engineMenuItem(_ title: String, _ identifier: NSUserInterfaceItemIdentifier, _ action: Selector?, isEnabled: Bool) -> NSMenuItem {
+    /// The spelling and editing items CEF can run, without a target, in WebKit's order: the misspelled word's suggestions, or No Guesses Found, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one. A suggestion carries its word, and an editing item its command as its tag.
+    static func engineMenuItems(misspelledWord: String, suggestions: [String], isEditable: Bool, selectionText: String,
+                                editCommands: ARCHCEFEditCommand) -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+        if !misspelledWord.isEmpty {
+            for word in suggestions {
+                let item = engineMenuItem(word, EngineContextMenuItem.spellingSuggestion, #selector(ChromiumWebContents.replaceMisspellingFromMenu(_:)), isEnabled: true)
+                item.representedObject = word
+                items.append(item)
+            }
+            if suggestions.isEmpty {
+                items.append(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
+            }
+        }
+        let commands: [(String, NSUserInterfaceItemIdentifier, ARCHCEFEditCommand)] = [
+            ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
+            ("Paste", EngineContextMenuItem.paste, .paste), ("Select All", EngineContextMenuItem.selectAll, .selectAll),
+        ]
+        for (title, identifier, command) in commands where isEditable || (command == .copy && !selectionText.isEmpty) {
+            let item = engineMenuItem(title, identifier, #selector(ChromiumWebContents.runEditCommandFromMenu(_:)), isEnabled: editCommands.contains(command))
+            item.tag = Int(command.rawValue)
+            items.append(item)
+        }
+        return items
+    }
+
+    private static func engineMenuItem(_ title: String, _ identifier: NSUserInterfaceItemIdentifier, _ action: Selector?, isEnabled: Bool) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
         item.identifier = identifier
         item.isEnabled = isEnabled
         return item

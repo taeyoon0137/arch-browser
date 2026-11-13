@@ -56,11 +56,9 @@ extension WebKitWebContents {
         WebKitContextMenuScript.install(in: webView.configuration.userContentController)
     }
 
-    /// Keeps WebKit's editing and spelling items, which WebKit runs itself, and lets the UI delegate build the rest. The menu is changed in place, because WebKit tracks the one it passed in.
+    /// Keeps WebKit's editing and spelling items, which WebKit runs itself, and lets the UI delegate build the rest. The menu is changed in place, because WebKit tracks the one it passed in. AppKit adds its own items, such as AutoFill and Services, because WebKit shows the menu as a context menu for the web view; they appear on Chromium's menu the same way.
     func prepareContextMenu(_ menu: NSMenu, for element: EngineContextMenuElement) {
         guard let uiDelegate, let kept = Self.keptContextMenuItems(of: menu, for: element) else { return }
-        // No Services items, which the Chromium engine's menu cannot show.
-        menu.allowsContextMenuPlugIns = false
         menu.removeAllItems()
         for item in kept {
             item.identifier = Self.contextMenuRoles[item.tag]
