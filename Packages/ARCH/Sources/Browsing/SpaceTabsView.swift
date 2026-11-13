@@ -41,6 +41,9 @@ struct SpaceTabsView: View {
     @State private var rowFrames: [UUID: CGRect] = [:]
     /// The visible part of the list in the window. Rows scrolled out of sight lie outside it.
     @State private var listFrame = CGRect.zero
+    /// The list's content in the scroll view's visible area, which tells how much is hidden above and below.
+    @State private var contentFrame = CGRect.zero
+    private static let scrollSpace = "SpaceTabsScroll"
     /// Identifies this list as the owner of a drag it started, since each space and the floating card has its own list.
     @State private var dragOwner = UUID()
 
@@ -89,24 +92,35 @@ struct SpaceTabsView: View {
                     .padding(.trailing, 4)
                     .padding(.bottom, 4)
                 ForEach(items) { item in
-                    switch item {
-                    case .folder(let folder):
-                        TabFolderRowView(session: session, folder: folder)
-                            .background(frameReader(for: folder.id))
-                    case .tab(let tab, let isInFolder):
-                        row(for: tab)
-                            .padding(.leading, isInFolder ? Self.folderIndent : 0)
-                    case .divider:
-                        Divider().padding(.vertical, 4).padding(.horizontal, 10)
-                            .background(frameReader(for: Self.pinnedListEndID))
-                    case .newTab:
-                        NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
-                            .background(frameReader(for: Self.openListEndID))
+                    Group {
+                        switch item {
+                        case .folder(let folder):
+                            TabFolderRowView(session: session, folder: folder)
+                                .background(frameReader(for: folder.id))
+                        case .tab(let tab, let isInFolder):
+                            row(for: tab)
+                                .padding(.leading, isInFolder ? Self.folderIndent : 0)
+                        case .divider:
+                            Divider().padding(.vertical, 4).padding(.horizontal, 10)
+                                .background(frameReader(for: Self.pinnedListEndID))
+                        case .newTab:
+                            NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
+                                .background(frameReader(for: Self.openListEndID))
+                        }
                     }
+                    .transition(Self.rowTransition)
                 }
             }
+            // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
+            .animation(.easeInOut(duration: 0.2), value: Set(items.map(\.id)))
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
+            .background(GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(Self.scrollSpace))
+                Color.clear
+                    .onAppear { contentFrame = frame }
+                    .onChange(of: frame) { contentFrame = $1 }
+            })
             .environment(\.isDraggingTab, sidebarDrag.tabID != nil)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
@@ -118,6 +132,9 @@ struct SpaceTabsView: View {
             }
         }
         .scrollIndicators(.never)
+        .coordinateSpace(name: Self.scrollSpace)
+        // Rows fade out under the address field and above the bottom bar instead of being cut off, at each end only while rows are hidden past it.
+        .mask(ScrollEdgeFade(hiddenAbove: -contentFrame.minY, hiddenBelow: contentFrame.maxY - listFrame.height))
         .background(GeometryReader { proxy in
             let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
             Color.clear
@@ -127,6 +144,9 @@ struct SpaceTabsView: View {
         // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
         .onDisappear { sidebarDrag.end(ownedBy: dragOwner) }
     }
+
+    /// A closing row fades and shrinks a little in place; a new row fades in.
+    private static let rowTransition = AnyTransition.asymmetric(insertion: .opacity, removal: .opacity.combined(with: .scale(scale: 0.96)))
 
     /// A dragged tab leaves an empty, dimmed slot in the list.
     private func row(for tab: Tab) -> some View {
@@ -349,5 +369,28 @@ struct SpaceMenuItems: View {
         Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(space.resolvedPersonaID) }
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
         PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
+    }
+}
+
+/// The mask of a scrolling list: each end fades out over `length` points, in proportion to how much content is hidden past it, so the list's ends stay crisp at rest and rows slide under softly once scrolled.
+struct ScrollEdgeFade: View {
+    static let length: CGFloat = 20
+
+    let hiddenAbove: CGFloat
+    let hiddenBelow: CGFloat
+
+    /// How strongly an end fades: 0 with nothing hidden past it, 1 once at least `length` points are.
+    static func strength(hidden: CGFloat) -> Double {
+        Double(min(1, max(0, hidden / length)))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.black.opacity(1 - Self.strength(hidden: hiddenAbove)), .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.length)
+            Color.black
+            LinearGradient(colors: [.black, .black.opacity(1 - Self.strength(hidden: hiddenBelow))], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.length)
+        }
     }
 }
