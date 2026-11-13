@@ -130,20 +130,20 @@ struct FolderTree {
 
     // MARK: Moves
 
-    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in a folder below the fourth level, or at the top of a list for nil. III.22 refuses live folders here, and VII.12 agent folders.
+    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in a folder below the fourth level, or at the top of a list for nil. III.22 refuses live folders here, and III.18.1 agent folders.
     func canAddFolder(inside id: UUID?) -> Bool {
         guard let id else { return true }
         return folder(id) != nil && level(of: id) < Self.maximumLevel
     }
 
-    /// Whether Move to Folder can move a folder into `parentID`: another folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. III.22 adds live folders to the refused targets, and VII.12 agent folders.
+    /// Whether Move to Folder can move a folder into `parentID`: another folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. III.22 adds live folders to the refused targets, and III.18.1 agent folders, as targets and as the moved folder.
     func canMoveFolder(_ id: UUID, into parentID: UUID) -> Bool {
         guard let moved = folder(id), let parent = folder(parentID), parentID != id, moved.parentID != parentID,
               parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned, !ancestors(of: parentID).contains(where: { $0.id == id }) else { return false }
         return level(of: parentID) + height(of: id) <= Self.maximumLevel
     }
 
-    /// Whether Move to Folder can move a tab into a folder: one of the tab's space, in either list, other than its own. The tab takes the folder's list.
+    /// Whether Move to Folder can move a tab into a folder: one of the tab's space, in either list, other than its own. The tab takes the folder's list. III.18.1 refuses agent folders.
     func canMoveTab(_ tab: Tab, into folderID: UUID) -> Bool {
         guard let target = folder(folderID) else { return false }
         return target.spaceID == tab.spaceID && tab.folderID != folderID
