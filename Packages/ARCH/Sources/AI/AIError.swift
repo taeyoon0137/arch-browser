@@ -23,6 +23,8 @@ public enum AINotConfiguredReason: Sendable {
     case noModel
     case noUsableModel
     case unknownFeature
+    /// The request named a tier that has no model in Settings ▸ AI ▸ Model Tiers.
+    case emptyTier(AIModelTier)
 }
 
 public enum AIPolicyReason: Sendable {
@@ -79,6 +81,8 @@ extension AIError: LocalizedError {
             return "None of this feature's models can serve it. Choose another in Settings \u{25B8} AI."
         case .notConfigured(.unknownFeature):
             return "This AI feature is not available."
+        case .notConfigured(.emptyTier(let tier)):
+            return "Assign a model to the \(tier.title) tier in Settings \u{25B8} AI."
         case .blockedByPolicy(.siteExcluded(let site)):
             return "AI is off for \(site)."
         case .blockedByPolicy(.dataNotDeclared(let kind)):

@@ -51,9 +51,14 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
+    /// The route the request names for itself (Routing); nil uses the feature's route.
+    public var route: AIRouteChoice?
+    /// false leaves the request's Activity entry without content. true by default.
+    public var recordsContent: Bool
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
-                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil)
+                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil,
+                route: AIRouteChoice? = nil, recordsContent: Bool = true)
 }
 
 public struct AIMessage: Sendable {
@@ -234,6 +239,8 @@ public struct AIFeature: Identifiable, Sendable {
     public var trigger: AITrigger
     public var data: AIDataScope
     public var requirements: Set<AIModelCapability>
+    /// `.stored` unless the feature says otherwise.
+    public var routing: AIFeatureRouting
 }
 
 public enum AITrigger: String, Codable, Sendable {
@@ -241,6 +248,13 @@ public enum AITrigger: String, Codable, Sendable {
     case user
     /// Requests start on their own, for example from a hook.
     case automatic
+}
+
+public enum AIFeatureRouting: String, Codable, Sendable {
+    /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits.
+    case stored
+    /// Each request names its route. Features does not list the feature; Usage lists it by name.
+    case perRequest
 }
 
 public enum AIModelCapability: String, Codable, Sendable {
@@ -265,8 +279,10 @@ public final class AIService: ObservableObject, AIClient {
 
     public func register(_ feature: AIFeature)
     public func unregister(_ id: AIFeatureID)
-    /// Whether the feature is on and has a usable route. Commands for a feature that is not available stay hidden.
-    public func isAvailable(_ id: AIFeatureID) -> Bool
+    /// Whether the feature is on and has a usable route, `route` when given. Commands for a feature that is not available stay hidden.
+    public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool
+    /// The models a request with `route` would try, in order, after Routing's step 3 without its page data rule; throws as that request would.
+    public func resolvedModels(for id: AIFeatureID, route: AIRouteChoice? = nil) throws -> [AIModelRef]
     nonisolated public func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error>
 }
 ```
@@ -284,7 +300,7 @@ The first features:
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
-- Each agent hook registers one automatic feature, `agentHook.<hook id>`, and runs started by outside programs use `agentRun`. Both use the route in each request (`docs/hooks.md`, Model choice and tiers).
+- Each agent hook registers one automatic feature, `agentHook.<hook id>`, and runs started by outside programs use `agentRun`. Both are `perRequest` features, which use the route in each request (Routing; `docs/hooks.md`, Model choice and tiers).
 
 ## Providers
 
@@ -449,13 +465,37 @@ public struct AIRoute: Codable, Sendable {
 }
 ```
 
-Model tiers (Fast, Standard, and Deep, stored as the routes `tier.fast`, `tier.standard`, and `tier.deep`) and routes supplied with requests are designed in `docs/hooks.md`, Model choice and tiers.
+A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Model Tiers, or models of its own.
+
+```swift
+public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
+    case fast, standard, deep
+    /// "Fast", "Standard", or "Deep".
+    public var title: String
+}
+
+/// `{"tier": "fast"}` or `{"models": [{"provider": …, "model": …}]}` in JSON.
+public enum AIRouteChoice: Codable, Hashable, Sendable {
+    case tier(AIModelTier)
+    /// A model and up to two fallbacks.
+    case models([AIModelRef])
+}
+
+extension AIFeatureID {
+    /// `tier.fast`, `tier.standard`, or `tier.deep`: the tier's route in `ai.json`, not a feature.
+    public static func tier(_ tier: AIModelTier) -> AIFeatureID
+}
+```
 
 The service resolves the route when a request starts and keeps it for the whole request:
 
-1. A feature with `isEnabled` off throws `notConfigured(.switchedOff)`.
-2. A route with models uses them. A route without models uses the `default` route when the feature's trigger is `user`. An automatic feature never uses the default route. Nothing runs on its own until the user assigns it a model; without one it throws `notConfigured(.noModel)`.
+1. A `perRequest` feature takes the request's route and throws `notConfigured(.noModel)` without one. A `stored` automatic feature refuses a request's route with `invalidRequest`, so Tab Names keeps the models the user chose for it. Otherwise a feature with `isEnabled` off throws `notConfigured(.switchedOff)`.
+2. A request's route is used when it names one: a tier's models, or the models it lists. An empty tier throws `notConfigured(.emptyTier(_:))` and never falls back to another tier or the default route, and a request that lists no model throws `notConfigured(.noModel)`. Without one, a route with models uses them. A route without models uses the `default` route when the feature's trigger is `user`. An automatic feature never uses the default route. Nothing runs on its own until the user assigns it a model; without one it throws `notConfigured(.noModel)`.
 3. The service drops models whose provider is gone or that lack a capability the feature requires. For requests with page, selection, file, or download parts, it also drops models that run on a command-line tool without `runsWithoutTools`. If none remain, it throws `notConfigured(.noUsableModel)`, or `blockedByPolicy(.commandLineToolWithPageData)` when only the last rule removed models.
+
+- A tier is a route in `ai.json` under `tier.fast`, `tier.standard`, or `tier.deep` with a model and up to two fallbacks. Its `isEnabled` is written true and not read. A tier lists any connected model; step 3 drops the unsuitable ones when a request resolves it.
+- `AIAgentSessionRequest.route` serves sessions under the same rules when the request names no `model`. A session makes no Activity entry, so it has no `recordsContent`.
+- A request with `recordsContent` false leaves its Activity entry without content: its part kinds and sizes, model, result, and usage stay, and Show Content does not appear. Budgets, rate limits, part checks, and usage apply to every request alike, so a `perRequest` automatic feature counts toward the daily limit for automatic requests and the monthly spending limit.
 
 | Feature | Default `isEnabled` | Default models |
 |---|---|---|
@@ -463,6 +503,7 @@ The service resolves the route when a request starts and keeps it for the whole 
 | `pageReader`, `pageQuestion`, `pluginComposer` | on | none (uses `default`) |
 | `hook.tabName`, `hook.downloadName` | off | none |
 | `plugin.<id>` | on once the user enables the plugin | none (uses `default` unless the plugin declares hooks, which makes it an automatic feature) |
+| `tier.fast`, `tier.standard`, `tier.deep` | on (not read) | none |
 
 ### Fallbacks
 
@@ -516,14 +557,15 @@ public final class AISettingsStore: ObservableObject {
   "routes": {
     "default": { "isEnabled": true, "models": [ { "provider": "6F1C…", "model": "model-a" } ] },
     "pageReader": { "isEnabled": true, "models": [] },
-    "hook.tabName": { "isEnabled": false, "models": [] }
+    "hook.tabName": { "isEnabled": false, "models": [] },
+    "tier.fast": { "isEnabled": true, "models": [ { "provider": "6F1C…", "model": "model-a" } ] }
   },
   "excludedSites": ["file:", "local-network"],
   "limits": { "automaticRequestsPerDay": 300 }
 }
 ```
 
-- A feature without an entry in `routes` uses the defaults in the table above. Removing a provider removes its models from every route; a route left empty falls back as described.
+- A feature without an entry in `routes` uses the defaults in the table above. Removing a provider removes its models from every route, the tiers' among them; a route left empty falls back as described, and a tier left empty fails.
 - A field missing from the file takes its default, and so do these fields of a provider or route written by hand: a provider's `models` (none) and `limits` (those of its kind), an HTTP provider's `headers` (none) and `hasKey` (false), a route's `models` (none), and `automaticRequestsPerDay` in `limits` (300). A provider still needs its `id`, `name`, and `kind`, and a route its `isEnabled`.
 - Arch renames a file that does not decode to `ai.json.unreadable`, replaces it with defaults, and reports this in Settings ▸ AI.
 
@@ -814,7 +856,7 @@ public enum AIError: Error, Sendable {
     case cancelled
 }
 
-public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature }
+public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature, emptyTier(AIModelTier) }
 public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String) }
 public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 ```
@@ -837,6 +879,8 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A preset that is not signed in, before a session starts | `authentication` |
 | A Claude Code `init` that fails the start check, or a Codex item or server that the watcher refuses | `blockedByPolicy(.agentUsedOwnTools(_:))` with a sentence such as "Codex ran a command." |
 | A reply cut by the length limit before any text or tool call, or a `.json` reply cut before its value was complete | `replyTooLong` |
+| A request that names a tier without a model | `notConfigured(.emptyTier(_:))`: "Assign a model to the Fast tier in Settings ▸ AI." |
+| A request that names a route for a stored automatic feature | `invalidRequest`, before any request goes out |
 
 The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, `budgetReached`, and `commandLineToolWithPageData`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; for `contextTooLong`, Start Over in the page reader when earlier questions went out with the question, which clears the conversation and asks it again on its own, and otherwise Open Settings ▸ AI for another model; and Retry for the rest except `cancelled`, which shows nothing.
 
@@ -904,10 +948,11 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request.
+- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes.
+- Model Tiers: a sentence on what a tier does, then Fast, Standard, and Deep, each with the Features rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for. Every connected model is listed.
 - Sites: the exclusion list.
-- Usage: the totals, the monthly spending limit, and the daily limit for automatic features.
-- Activity: the in-memory request list.
+- Usage: the totals, the monthly spending limit, and the daily limit for automatic features. Totals keep each feature's name, so a `perRequest` feature is listed by name.
+- Activity: the in-memory request list. Show Content appears only for an entry with content.
 
 ## Testing
 
@@ -916,5 +961,6 @@ public struct AIPrice: Codable, Sendable {
 - Command-line provider tests write a shell script to a temporary folder for each test and run it as a command-line tool. Each script prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone.
 - Agent session tests (`AgentSessionTests`) run shell scripts that answer as `claude` and `codex`, record each call's arguments, environment, and standard input, and replay the recorded streams in `Fixtures/Agent` (`docs/agents.md`, Tests). They check the exact arguments and environments, the start check and the watcher, the feature derivation and the configuration probe, the probes run again for a changed executable, the open input mode, Stop, also while a turn waits for a slot, the idle timer, fallbacks before `ready`, also at a usage limit, a message that starts with `/` refused with a skill folder, Codex's thread deletion, usage under `agent`, with a resumed Codex turn counted as what it added, the derived capability, and the presets' ordinary requests and Check. `PreferencesTests` check the presets' fields from a search path and the status read from fake status commands.
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, the per-minute bucket, the cool-down a freed slot's next request waits for, doubling only across cool-downs, and an expired wait after a cool-down has ended), the daily and monthly limits, the site and spending limit checks repeated once a waiting request has its slot, a key the Keychain does not give, a provider whose key stays, usage months after the clock goes back, the defaults of fields a hand-written `ai.json` lacks, and usage normalization.
+- Model tier tests (`ModelTierTests.swift`) cover a tier's models with fallbacks, an empty tier's error and sentence without a fallback to the default route, a tier's `isEnabled` written true and not read, capability drops after a tier, a removed provider leaving the tiers, a `perRequest` feature without a route or with an empty one, a user feature's own route and its switch, a stored automatic feature refusing a route before any request whether on or off, three models at most, a session started on a tier with only its presets kept, the daily and spending limits for a `perRequest` automatic feature and its name in usage, an Activity entry without content, the tier routes written to and read from `ai.json`, a hand-written tier, and `AIRouteChoice`'s JSON.
 - Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, also of a hook that does not stop when canceled, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
 - Composer tests (`PluginComposerTests`) run the composer against the scripted provider, one reply per request, and stage in temporary folders: a plugin staged without being installed, with the request and model as its origin and only text sent; a problem sent back and the corrected reply staged; each unusable reply, from the reply's form, sites, page scripts, file names, and text to the checks staging makes, ending after three; a reply over the size limit ending at once; a change sent with the last version and keeping its identifier; and a route without a JSON model. `PluginsTests` cover staging the files AI writes, a path that leaves the package, and installing, listing again at launch, and removing a plugin that AI wrote with its origin.

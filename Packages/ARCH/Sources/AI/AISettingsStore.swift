@@ -1,4 +1,4 @@
-// The AI settings in `ai.json`: providers, routes, site exclusions, and limits. The file holds no secrets; keys go to the Keychain. Personas share one file.
+// The AI settings in `ai.json`: providers, routes (the model tiers' among them), site exclusions, and limits. The file holds no secrets; keys go to the Keychain. Personas share one file.
 import Foundation
 
 @MainActor
@@ -74,9 +74,11 @@ public final class AISettingsStore: ObservableObject {
         return route
     }
 
+    /// A tier's route (`AIFeatureID.tier(_:)`) is written on, since a tier has no switch.
     public func setRoute(_ route: AIRoute, for feature: AIFeatureID) {
         var route = route
         route.models = Array(route.models.prefix(AIRoute.maximumModels))
+        if feature.isTierRoute { route.isEnabled = true }
         routes[feature.rawValue] = route
     }
 

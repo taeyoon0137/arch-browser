@@ -41,8 +41,10 @@ public struct AIAgentSkills: Sendable, Equatable {
 
 public struct AIAgentSessionRequest: Sendable {
     public var feature: AIFeatureID
-    /// The session's model; nil uses the feature's route, whose later models serve only when the earlier fail before `ready`, the first model output.
+    /// The session's model; nil uses `route`, or the feature's route without one, whose later models serve only when the earlier fail before `ready`, the first model output.
     public var model: AIModelRef?
+    /// The route the session names for itself when `model` is nil: a tier or models of its own, under the rules for `AIRequest.route`. A session makes no Activity entry, so it has no `recordsContent`.
+    public var route: AIRouteChoice?
     /// The static harness, which holds no session facts (agent decision 12).
     public var instructions: String
     public var toolServer: AIAgentToolServer
@@ -53,10 +55,11 @@ public struct AIAgentSessionRequest: Sendable {
     public var effort: String?
     public var skills: AIAgentSkills?
 
-    public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, instructions: String, toolServer: AIAgentToolServer,
+    public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, route: AIRouteChoice? = nil, instructions: String, toolServer: AIAgentToolServer,
                 id: UUID = UUID(), folder: URL? = nil, effort: String? = nil, skills: AIAgentSkills? = nil) {
         self.feature = feature
         self.model = model
+        self.route = route
         self.instructions = instructions
         self.toolServer = toolServer
         self.id = id
@@ -640,7 +643,7 @@ public final class AIAgentSession {
 // MARK: - Starting sessions
 
 extension AIService {
-    /// Starts a session on the request's model or the feature's route, using only Claude Code and Codex presets (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off or no preset model can serve it.
+    /// Starts a session on the request's model, its route, or the feature's route, using only Claude Code and Codex presets (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off, the route's tier is empty, or no preset model can serve it.
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
         var candidates: [AIRouteModel]
@@ -649,7 +652,7 @@ extension AIService {
                   let model = provider.models.first(where: { $0.name == ref.model }) else { throw AIError.notConfigured(.noUsableModel) }
             candidates = [AIRouteModel(ref: ref, provider: provider, model: model)]
         } else {
-            candidates = try settings.routeModels(for: feature)
+            candidates = try settings.routeModels(for: feature, route: request.route)
         }
         candidates = candidates.filter { candidate in
             guard case .commandLine(let tool) = candidate.provider.kind, tool.agent != nil else { return false }
