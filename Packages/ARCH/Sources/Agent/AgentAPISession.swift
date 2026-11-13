@@ -7,15 +7,19 @@ import Foundation
 @MainActor public protocol AgentSessionTools: AnyObject {
     /// The catalog tools the session may call now, in catalog order, as `tools/list` would name them. The session reads them at the start of each message.
     var tools: [AgentTool] { get }
-    /// Runs one call through the tool host and its rules.
+    /// Runs one call through the tool host and its rules. Stop and `end()` cancel the task that awaits the call: a call that waits, as on an approval card, withdraws the approval as denied and returns at once, and the session drops its result.
     func run(_ call: AgentToolCall) async -> AgentToolResult
 }
 
 @MainActor public final class AgentAPISession {
     /// Rounds of model requests per user message.
     public nonisolated static let roundsPerMessage = 50
+    /// The output tokens each round may use, in place of the interface's 4,096, which a reasoning model can spend on thinking before its first tool call. Current models with tools take at least this many.
+    public nonisolated static let outputTokensPerRound = 8192
+    /// The notice before `turnFinished` when the message's last reply stopped at `outputTokensPerRound`.
+    public nonisolated static let outputLimitNotice = "The reply reached the output limit."
 
-    /// `ready` with the model before the session's first text or tool call, then each message's text, its usage, and `turnFinished` (`completed`, `stopped`, or `turnLimit` after `roundsPerMessage` rounds) or `turnFailed`. A failed message leaves the session open; the stream ends, without an error, only at `end()`.
+    /// `ready` with the model before the session's first text or tool call, then each message's text, `outputLimitNotice` when its reply was cut, its usage, and `turnFinished` (`completed`, `stopped`, or `turnLimit` after `roundsPerMessage` rounds) or `turnFailed`. A failed message leaves the session open; the stream ends, without an error, only at `end()`.
     public nonisolated let events: AsyncThrowingStream<AIAgentEvent, any Error>
     public let id: UUID
     /// The model that holds the conversation: the one the session was made with, or from `ready` on the one that served its first round. Every later request is pinned to it.
@@ -59,7 +63,7 @@ import Foundation
         startNextTurn()
     }
 
-    /// Ends the running turn at once and drops the queued messages. The rounds that finished stay in the conversation; a call the tool host is running ends as the host decides.
+    /// Ends the running turn at once and drops the queued messages. The rounds that finished stay in the conversation; a call the tool host is running sees its task cancelled (`AgentSessionTools.run(_:)`).
     public func stop() {
         queuedMessages.removeAll()
         guard isTurnRunning else { return }
@@ -84,7 +88,7 @@ import Foundation
         turnUsage = nil
         conversation.append(AIMessage(role: .user, parts: [.text(message)]))
         let number = turn
-        let request = AIRequest(feature: feature, instructions: instructions, messages: conversation, pinnedModel: model)
+        let request = AIRequest(feature: feature, instructions: instructions, messages: conversation, maxOutputTokens: Self.outputTokensPerRound, pinnedModel: model)
         let handlers = tools.tools.map { handler(for: $0, turn: number) }
         turnTask = Task { await runTurn(number, request, handlers) }
     }
@@ -94,6 +98,7 @@ import Foundation
             await self?.keep(messages, turn: number)
         }
         var servingModel: AIModelRef?
+        var finishReason: AIFinishReason?
         let end: AIAgentEvent
         do {
             for try await event in stream {
@@ -108,7 +113,9 @@ import Foundation
                     becomeReady(servingModel)
                 case .usage(let usage):
                     turnUsage = turnUsage.map { $0 + usage } ?? usage
-                case .waiting, .finished:
+                case .finished(let reason):
+                    finishReason = reason
+                case .waiting:
                     break
                 }
             }
@@ -119,8 +126,11 @@ import Foundation
             end = .turnFailed(error as? AIError ?? .invalidRequest(error.localizedDescription))
         }
         guard isCurrent(number) else { return }
-        // A reply without text or tool calls holds the conversation too.
-        if case .turnFinished = end { becomeReady(servingModel) }
+        if case .turnFinished = end {
+            // A reply without text or tool calls holds the conversation too.
+            becomeReady(servingModel)
+            if finishReason == .lengthLimit { continuation.yield(.notice(Self.outputLimitNotice)) }
+        }
         finishTurn(end)
     }
 
@@ -178,7 +188,12 @@ import Foundation
 
     // MARK: Results
 
-    /// The host's result as the model reads it: a status line unless the call succeeded, then the content, with each untrusted block that names its page as a page part and each image as an image part. The note says what the result held, without page text. It is an error result unless it succeeded or waits for the user, as MCP marks it.
+    /// Tools whose results are Arch's own text with no page text, such as the guide, which quotes the untrusted marker.
+    nonisolated static let ownTextTools: Set<String> = ["guide"]
+    nonisolated static let unreadableResult = "Arch did not send this result: its page text could not be told apart from Arch's own."
+    nonisolated static let imageWithoutPage = "Arch did not send this image: the page it shows is not known."
+
+    /// The host's result as the model reads it: a status line unless the call succeeded, then the content, with each untrusted block that names its page as a page part (`AgentUntrusted.segments(in:)`) and each image as an image part whose source is the page it shows, so that the AI interface checks both sites. Text with an untrusted marker that does not parse makes the result refused, and an image whose page is not known goes as a note. The note says what the result held, without page text. It is an error result unless it succeeded or waits for the user, as MCP marks it.
     nonisolated static func result(_ result: AgentToolResult, of call: AgentToolCall, callID: String) -> AIToolResult {
         var parts: [AIPart] = []
         switch result.status {
@@ -189,20 +204,34 @@ import Foundation
         default:
             parts.append(.text("Status: \(result.status.rawValue)" + (result.code.map { " (\($0))" } ?? "") + "."))
         }
-        var pageCharacters = 0
+        // Each text part's segments; nil for an image, and for Arch's own text, which goes as it is.
+        var segmented: [[AgentUntrusted.Segment]?] = []
+        for item in result.content {
+            guard case .text(let text) = item, !ownTextTools.contains(call.name) else {
+                segmented.append(nil)
+                continue
+            }
+            guard let segments = AgentUntrusted.segments(in: text) else {
+                return AIToolResult(callID: callID, parts: [.text(unreadableResult)], isError: true)
+            }
+            segmented.append(segments)
+        }
+        let blocks = segmented.flatMap { $0 ?? [] }.compactMap { segment -> (text: String, url: URL)? in
+            guard case .page(let text, let url) = segment else { return nil }
+            return (text, url)
+        }
+        let source = Self.imageSource(of: result, pageURLs: Set(blocks.map(\.url)))
         var images = 0
-        for content in result.content {
-            switch content {
+        for (item, segments) in zip(result.content, segmented) {
+            switch item {
             case .text(let text):
-                for part in Self.parts(ofHostText: text) {
-                    if case .page(let page) = part { pageCharacters += page.text.count }
-                    parts.append(part)
-                }
+                parts += segments?.map(\.part) ?? [.text(text)]
             case .image(let data, let mimeType):
                 images += 1
-                parts.append(.file(AIFile(name: "screenshot", mediaType: mimeType, data: data)))
+                parts.append(source.map { .file(AIFile(name: "screenshot", mediaType: mimeType, data: data, sourceURL: $0)) } ?? .text(imageWithoutPage))
             }
         }
+        let pageCharacters = blocks.reduce(0) { $0 + $1.text.count }
         var held: [String] = []
         if pageCharacters > 0 { held.append("\(number(pageCharacters)) characters of page text") }
         if images > 0 { held.append(images == 1 ? "1 image" : "\(images) images") }
@@ -213,44 +242,23 @@ import Foundation
         return AIToolResult(callID: callID, parts: parts, isError: result.status != .ok && result.status != .approvalPending, note: note)
     }
 
-    /// The host's text with each untrusted block that names its page (`AgentUntrusted.wrap`) as a page part, so that the AI interface checks the page's site and strips its address; the text around the blocks, and a block without an address, stay text. The wrapper escapes every `</untrusted` inside a block, so the first closing tag ends it.
-    nonisolated static func parts(ofHostText text: String) -> [AIPart] {
-        let opening = "<untrusted source=\"page\""
-        let closing = "</untrusted>"
-        var parts: [AIPart] = []
-        var pending = ""
-        var rest = text[...]
-        while let start = rest.range(of: opening),
-              let tagEnd = rest[start.upperBound...].firstIndex(of: ">"),
-              let end = rest[tagEnd...].range(of: closing) {
-            if let url = pageURL(in: rest[start.upperBound..<tagEnd]) {
-                pending += rest[..<start.lowerBound]
-                if !pending.isEmpty { parts.append(.text(pending)) }
-                pending = ""
-                let content = rest[rest.index(after: tagEnd)..<end.lowerBound].replacingOccurrences(of: "<\\/untrusted", with: "</untrusted")
-                parts.append(.page(AIPageContent(url: url, title: "", text: content)))
-            } else {
-                pending += rest[..<end.upperBound]
-            }
-            rest = rest[end.upperBound...]
-        }
-        pending += rest
-        if !pending.isEmpty { parts.append(.text(pending)) }
-        return parts
-    }
-
-    /// The `url` attribute of an untrusted block's opening tag, unescaped.
-    private nonisolated static func pageURL(in attributes: Substring) -> URL? {
-        guard let start = attributes.range(of: " url=\""), let end = attributes[start.upperBound...].firstIndex(of: "\"") else { return nil }
-        let value = attributes[start.upperBound..<end]
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&amp;", with: "&")
-        return URL(string: value)
+    /// The page an image shows: the address in the result's `structured` `url`, as a tab's results carry it (VII.13's `screenshot` sets it to the tab's address), or else the one address of the result's page blocks.
+    private nonisolated static func imageSource(of result: AgentToolResult, pageURLs: Set<URL>) -> URL? {
+        if let address = result.structured?["url"]?.stringValue { return URL(string: address) }
+        return pageURLs.count == 1 ? pageURLs.first : nil
     }
 
     private nonisolated static func number(_ value: Int) -> String {
         value.formatted(.number.locale(Locale(identifier: "en_US")))
+    }
+}
+
+private extension AgentUntrusted.Segment {
+    /// The segment as the AI interface's part: a block with an address as a page part, whose site and address the interface checks.
+    var part: AIPart {
+        switch self {
+        case .text(let text): return .text(text)
+        case .page(let text, let url): return .page(AIPageContent(url: url, title: "", text: text))
+        }
     }
 }

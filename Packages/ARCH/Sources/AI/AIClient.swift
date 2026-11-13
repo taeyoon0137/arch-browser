@@ -258,10 +258,10 @@ public struct AIToolCall: Sendable {
 
 public struct AIToolResult: Sendable {
     public var callID: String
-    /// Text, page, selection, and image parts. The service checks them like any other part; a result the checks refuse goes to the model as an error result that says why, and an image goes only to a model with `images`.
+    /// Text, page, selection, and image parts. The service checks them like any other part; a result the checks refuse goes to the model as an error result that says why, and an image goes only to a model with `images` whose format carries images in tool results (`messages`). An image's `sourceURL` names the page it shows, so that site exclusions apply to it.
     public var parts: [AIPart]
     public var isError: Bool
-    /// One line that `run` sends in place of the result once it is more than `AIToolHistory.wholeRounds` rounds old, such as "Earlier read_text on t2: ok, 12,000 characters of page text." It must hold no page data. nil uses a line that names the tool.
+    /// One line sent in place of the result once it is more than `AIToolHistory.wholeRounds` rounds old, or older rounds do not fit the model's input limit, such as "Earlier read_text on t2: ok, 12,000 characters of page text." It must hold no page data. nil uses a line that names the tool.
     public var note: String?
 
     public init(callID: String, parts: [AIPart], isError: Bool = false, note: String? = nil) {
@@ -286,7 +286,7 @@ public struct AIToolHandler: Sendable {
 extension AIClient {
     /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`.
     ///
-    /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, so a long one stays within the model's input limit. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
+    /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
     public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8,
                     conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
@@ -367,40 +367,66 @@ extension AIClient {
     }
 }
 
-/// How `run` keeps a long tool conversation within a model's input limit (`docs/agents.md`, API-key sessions): results more than `wholeRounds` rounds old go as their one-line notes, and an image in a result goes only in the round right after its call.
+/// How a long tool conversation stays within a model's input limit (`docs/agents.md`, API-key sessions): before each round `run` sends results more than `wholeRounds` rounds old as their one-line notes, and an image in a result only until a reply follows a request that carried it; the service then sends older results as notes too while the request is over the serving model's limit.
 enum AIToolHistory {
     /// The rounds of tool results, counted back from the newest, that go whole.
     static let wholeRounds = 8
-    static let imageNote = "An image was here; it went to the model once, in the round after its call."
+    static let imageNote = "An image was here and is left out now; call the tool again to see it."
 
-    /// The conversation as the next round sends it. A user message with tool results counts as one round. Each result more than `wholeRounds` rounds back becomes its note, and each image in a result becomes `imageNote` unless the result is in the last message, which the next request is the first to carry. Applying it again changes nothing.
+    /// The conversation as the next round sends it. A user message with tool results counts as one round. Each result more than `wholeRounds` rounds back becomes its note, and each image in a result becomes `imageNote` once an assistant message follows the result's message, which means a request that carried the image was answered; a round that failed or was stopped leaves its image for the next request. Applying it again changes nothing.
     static func prepared(_ messages: [AIMessage]) -> [AIMessage] {
-        var toolNames: [String: String] = [:]
-        for message in messages {
-            for case .toolCall(let call) in message.parts { toolNames[call.id] = call.name }
-        }
+        let toolNames = toolNames(in: messages)
         var prepared = messages
         var rounds = 0
+        var isAnswered = false
         for index in prepared.indices.reversed() {
-            guard prepared[index].parts.contains(where: { if case .toolResult = $0 { return true } else { return false } }) else { continue }
+            if prepared[index].role == .assistant { isAnswered = true }
+            guard hasResults(prepared[index]) else { continue }
             rounds += 1
             let isOld = rounds > wholeRounds
-            let isLast = index == prepared.index(before: prepared.endIndex)
             prepared[index].parts = prepared[index].parts.map { part in
-                guard case .toolResult(var result) = part else { return part }
-                if isOld {
-                    let note = result.note ?? "Earlier result of \(toolNames[result.callID] ?? "a tool"), left out to save space."
-                    return .toolResult(AIToolResult(callID: result.callID, parts: [.text(note)], isError: result.isError, note: note))
-                }
-                if !isLast {
-                    result.parts = result.parts.map { part in
-                        if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNote) }
-                        return part
-                    }
+                if isOld { return noted(part, toolNames: toolNames) }
+                guard isAnswered, case .toolResult(var result) = part else { return part }
+                result.parts = result.parts.map { part in
+                    if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNote) }
+                    return part
                 }
                 return .toolResult(result)
             }
         }
         return prepared
+    }
+
+    /// The conversation with the results of the oldest rounds as their notes, one round after another and never the newest, until its parts fit `characterLimit` as `AIPartPolicy` counts them. Page text still over the limit is cut afterward, as in any request.
+    static func fitted(_ messages: [AIMessage], characterLimit: Int) -> [AIMessage] {
+        var total = AIPartPolicy.characterCount(of: messages)
+        guard total > characterLimit else { return messages }
+        let toolNames = toolNames(in: messages)
+        var fitted = messages
+        for index in fitted.indices.filter({ hasResults(fitted[$0]) }).dropLast() where total > characterLimit {
+            let before = AIPartPolicy.characterCount(of: [fitted[index]])
+            fitted[index].parts = fitted[index].parts.map { noted($0, toolNames: toolNames) }
+            total += AIPartPolicy.characterCount(of: [fitted[index]]) - before
+        }
+        return fitted
+    }
+
+    private static func toolNames(in messages: [AIMessage]) -> [String: String] {
+        var names: [String: String] = [:]
+        for message in messages {
+            for case .toolCall(let call) in message.parts { names[call.id] = call.name }
+        }
+        return names
+    }
+
+    private static func hasResults(_ message: AIMessage) -> Bool {
+        message.parts.contains { if case .toolResult = $0 { return true } else { return false } }
+    }
+
+    /// A tool result as its note.
+    private static func noted(_ part: AIPart, toolNames: [String: String]) -> AIPart {
+        guard case .toolResult(let result) = part else { return part }
+        let note = result.note ?? "Earlier result of \(toolNames[result.callID] ?? "a tool"), left out to save space."
+        return .toolResult(AIToolResult(callID: result.callID, parts: [.text(note)], isError: result.isError, note: note))
     }
 }

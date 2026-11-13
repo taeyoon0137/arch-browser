@@ -1,4 +1,4 @@
-// The API-key loop (docs/agents.md, Sessions on the user's CLI ▸ API-key sessions) through the scripted provider: the pinned model, tool requests only on models that take tools, results more than eight rounds old as notes, images only in the round after their call, results the part checks refuse, and the round limit with a conversation that can go on.
+// The API-key loop (docs/agents.md, Sessions on the user's CLI ▸ API-key sessions) through the scripted provider: the pinned model, tool requests only on HTTP models that take tools, results more than eight rounds old as notes, older results as notes while a request passes its model's input limit, images until a reply follows a request that carried them and only on the `messages` format, results the part checks refuse, and the round limit with a conversation that can go on.
 import Foundation
 import Testing
 @testable import AI
@@ -140,11 +140,35 @@ private final class ConversationLog: @unchecked Sendable {
             return
         }
     }
+
+    @Test func aCommandLineModelWithAToolCallsOverrideNeverServesARequestWithTools() async {
+        // Settings lets the user turn on Tool calls for a command-line model too.
+        let cli = AIProviderConfiguration(name: "Claude Code", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/cat"), agent: .claudeCode)),
+                                          models: [AIModelConfiguration(name: "sonnet", capabilities: [.jsonOutput, .tools])])
+        let http = provider("HTTP", models: [AIModelConfiguration(name: "capable")])
+        let log = ProviderLog()
+        let service = loopService([cli, http], log: log) { _, _ in replySteps }
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: cli.id, model: "sonnet"), AIModelRef(provider: http.id, model: "capable")]), for: loopFeature.id)
+        #expect(await collect(service.run(textRequest(loopFeature), tools: [handler { AIToolResult(callID: $0.id, parts: [.text("ok")]) }])).error == nil)
+        #expect(log.requests.map(\.model) == ["capable"])
+        var pinned = textRequest(loopFeature)
+        pinned.pinnedModel = AIModelRef(provider: cli.id, model: "sonnet")
+        pinned.tools = [AITool(name: "read", description: "", inputSchema: Data("{}".utf8))]
+        guard case .notConfigured(.noUsableModel) = await collect(service.stream(pinned)).error else {
+            Issue.record("Expected noUsableModel")
+            return
+        }
+        #expect(log.requests.count == 1)
+    }
 }
 
 @MainActor
 @Suite struct ToolHistoryTests {
     private let only = provider("Only", models: [AIModelConfiguration(name: "model-a")])
+    /// The format that carries images in tool results.
+    private let imaging = provider("Images", models: [AIModelConfiguration(name: "model-i")], format: .messages)
+    private let shot = handler("shot") { AIToolResult(callID: $0.id, parts: [.text("Took a screenshot."), .file(AIFile(name: "screenshot", mediaType: "image/jpeg", data: Data([0xFF, 0xD8])))]) }
+    private let read = handler { AIToolResult(callID: $0.id, parts: [.text("ok")]) }
 
     @Test func resultsMoreThanEightRoundsOldGoAsTheirNotes() async throws {
         let log = ProviderLog()
@@ -180,30 +204,88 @@ private final class ConversationLog: @unchecked Sendable {
         #expect(conversations.count == 11)
     }
 
-    @Test func imagesGoOnlyInTheRoundAfterTheirCall() async {
+    @Test func olderResultsGoAsNotesUntilTheRequestFitsTheModelsLimit() async throws {
+        let small = provider("Small", models: [AIModelConfiguration(name: "model-s", inputCharacterLimit: 1_000)])
         let log = ProviderLog()
-        let service = loopService([only], log: log) { _, request in
+        let service = loopService([small], log: log) { _, request in request <= 6 ? callSteps(call(request)) : replySteps }
+        let page = String(repeating: "p", count: 300)
+        let read = handler { call in
+            AIToolResult(callID: call.id, parts: [.page(AIPageContent(url: URL(string: "https://docs.example/\(call.id)")!, title: "", text: page))], note: "note \(call.id)")
+        }
+        #expect(await collect(service.run(textRequest(loopFeature), tools: [read])).error == nil)
+        try #require(log.requests.count == 7)
+        // Six results of 300 characters, all within eight rounds, pass the limit of 1,000: the oldest go as their notes until the request fits, and the newest go whole, none of their text cut.
+        let seventh = log.requests[6].messages
+        #expect(seventh.flatMap { results(in: $0) } == (1...3).map { "call_\($0):ok:text:note call_\($0)" } + (4...6).map { "call_\($0):ok:page:https://docs.example/call_\($0)" })
+        let pages = seventh.flatMap(\.parts).flatMap { part -> [AIPageContent] in
+            guard case .toolResult(let result) = part else { return [] }
+            return result.parts.compactMap { if case .page(let page) = $0 { return page } else { return nil } }
+        }
+        #expect(pages.count == 3 && pages.allSatisfy { $0.text == page && !$0.isTruncated })
+        #expect(AIPartPolicy.characterCount(of: seventh) <= 1_000)
+    }
+
+    @Test func resultsOfTextThatPassTheLimitStillLeaveARequest() async {
+        let small = provider("Small", models: [AIModelConfiguration(name: "model-s", inputCharacterLimit: 1_000)])
+        let log = ProviderLog()
+        let service = loopService([small], log: log) { _, request in request <= 6 ? callSteps(call(request)) : replySteps }
+        let text = String(repeating: "t", count: 300)
+        // Text the host wrote cannot be cut, so without the notes every request from the fourth on would be too long.
+        let read = handler { AIToolResult(callID: $0.id, parts: [.text(text)]) }
+        let result = await collect(service.run(textRequest(loopFeature), tools: [read]))
+        #expect(result.error == nil)
+        #expect(result.events.last == "finished:completed")
+        #expect(log.requests.last.map { $0.messages.flatMap { results(in: $0) } } == (1...4).map { "call_\($0):ok:text:Earlier result of read, left out to save space." } + (5...6).map { "call_\($0):ok:text:\(text)" })
+    }
+
+    @Test func imagesGoUntilAReplyFollowsTheRequestThatCarriedThem() async {
+        let log = ProviderLog()
+        let service = loopService([imaging], log: log) { _, request in
             switch request {
             case 1: return callSteps(call(1, "shot"))
             case 2: return callSteps(call(2))
             default: return replySteps
             }
         }
-        let shot = handler("shot") { AIToolResult(callID: $0.id, parts: [.text("Took a screenshot."), .file(AIFile(name: "screenshot", mediaType: "image/jpeg", data: Data([0xFF, 0xD8])))]) }
-        let read = handler { AIToolResult(callID: $0.id, parts: [.text("ok")]) }
         #expect(await collect(service.run(textRequest(loopFeature), tools: [shot, read])).error == nil)
         #expect(results(in: log.requests[1].messages.last) == ["call_1:ok:text:Took a screenshot.|file:image/jpeg"])
         let third = log.requests[2].messages.flatMap { results(in: $0) }
         #expect(third == ["call_1:ok:text:Took a screenshot.|text:\(AIToolHistory.imageNote)", "call_2:ok:text:ok"])
     }
 
-    @Test func aModelWithoutImagesGetsANoteInstead() async {
-        let textOnly = provider("Text", models: [AIModelConfiguration(name: "model-t", capabilities: [.tools])])
+    @Test func anImageStaysWhenTheRequestThatCarriedItFails() async throws {
         let log = ProviderLog()
-        let service = loopService([textOnly], log: log) { _, request in request == 1 ? callSteps(call(1, "shot")) : replySteps }
-        let shot = handler("shot") { AIToolResult(callID: $0.id, parts: [.text("Took a screenshot."), .file(AIFile(name: "screenshot", mediaType: "image/png", data: Data([0x89])))]) }
-        #expect(await collect(service.run(textRequest(loopFeature), tools: [shot])).error == nil)
-        #expect(results(in: log.requests[1].messages.last) == ["call_1:ok:text:Took a screenshot.|text:\(AIService.imageNotTakenNote)"])
+        let service = loopService([imaging], log: log) { _, request in
+            switch request {
+            case 1: return callSteps(call(1, "shot"))
+            case 2: return [.fail(.providerUnavailable(AIProviderID(), detail: "down"))]
+            case 3: return callSteps(call(2))
+            default: return replySteps
+            }
+        }
+        let conversations = ConversationLog()
+        guard case .providerUnavailable = await collect(service.run(textRequest(loopFeature), tools: [shot, read]) { conversations.record($0) }).error else {
+            Issue.record("Expected providerUnavailable")
+            return
+        }
+        // No reply followed the request that carried the image, so the next message's request carries it again.
+        var next = textRequest(loopFeature, "Go on.")
+        next.messages = try #require(conversations.last) + next.messages
+        #expect(await collect(service.run(next, tools: [shot, read])).error == nil)
+        #expect(log.requests[2].messages.flatMap { results(in: $0) } == ["call_1:ok:text:Took a screenshot.|file:image/jpeg"])
+        #expect(log.requests[3].messages.flatMap { results(in: $0) } == ["call_1:ok:text:Took a screenshot.|text:\(AIToolHistory.imageNote)", "call_2:ok:text:ok"])
+    }
+
+    @Test func aModelThatCannotTakeAnImageInAResultGetsANoteInstead() async {
+        let textOnly = provider("Text", models: [AIModelConfiguration(name: "model-t", capabilities: [.tools])])
+        // A chat-completions model with images still gets a tool result as text.
+        let chat = provider("Chat", models: [AIModelConfiguration(name: "model-c")])
+        for (configuration, note) in [(textOnly, AIService.imageNotTakenNote), (chat, AIService.imageNotInToolResultsNote)] {
+            let log = ProviderLog()
+            let service = loopService([configuration], log: log) { _, request in request == 1 ? callSteps(call(1, "shot")) : replySteps }
+            #expect(await collect(service.run(textRequest(loopFeature), tools: [shot])).error == nil)
+            #expect(results(in: log.requests[1].messages.last) == ["call_1:ok:text:Took a screenshot.|text:\(note)"])
+        }
     }
 
     @Test func aToolResultFromAnExcludedSiteIsRefused() async throws {
@@ -215,25 +297,41 @@ private final class ConversationLog: @unchecked Sendable {
             default: return replySteps
             }
         }
-        service.settings.excludedSites.append(AISitePattern("example.org"))
+        service.settings.excludedSites.append(AISitePattern("other.example.com"))
         let read = handler { [service] call in
             if call.id == "call_1" {
                 return AIToolResult(callID: call.id, parts: [.text("Read t1."), .page(AIPageContent(url: URL(string: "https://news.example.org/a?q=1")!, title: "", text: "secret page text"))])
             }
-            // Between the second round and the third, the user excludes the second result's site.
-            await MainActor.run { service.settings.excludedSites.append(AISitePattern("other.example.com")) }
+            // After the first result went whole, the user excludes its site.
+            await MainActor.run { service.settings.excludedSites.append(AISitePattern("example.org")) }
             return AIToolResult(callID: call.id, parts: [.page(AIPageContent(url: URL(string: "https://other.example.com/b#top")!, title: "", text: "other text"))])
         }
         let result = await collect(service.run(textRequest(loopFeature), tools: [read]))
         #expect(result.error == nil)
         #expect(result.events.last == "finished:completed")
+        #expect(results(in: log.requests[1].messages.last) == ["call_1:ok:text:Read t1.|page:https://news.example.org/a"])
+        try #require(service.activity.count == 3)
+        #expect(service.activity[1].content.contains("secret page text"))
+        // The first result's site was excluded after it was sent, and the second's before it arrived: the next request refuses both.
         let refused = "text:\(AIService.refusal(.siteExcluded("")))"
-        #expect(results(in: log.requests[1].messages.last) == ["call_1:error:\(refused)"])
         #expect(log.requests[2].messages.flatMap { results(in: $0) } == ["call_1:error:\(refused)", "call_2:error:\(refused)"])
-        let content = try #require(service.activity.last?.content)
+        let content = service.activity[2].content
         #expect(!content.contains("secret page text"))
         #expect(!content.contains("other text"))
         #expect(!content.contains("news.example.org"))
+    }
+
+    @Test func anImageFromASiteExcludedWhileItsCallRanIsRefused() async {
+        let log = ProviderLog()
+        let service = loopService([imaging], log: log) { _, request in request == 1 ? callSteps(call(1, "shot")) : replySteps }
+        let shot = handler("shot") { [service] call in
+            // The call waits, as on an approval card, and meanwhile the user excludes the page's site.
+            await MainActor.run { service.settings.excludedSites.append(AISitePattern("bank.example")) }
+            return AIToolResult(callID: call.id, parts: [.text("Took a screenshot of t1."),
+                                                         .file(AIFile(name: "screenshot", mediaType: "image/png", data: Data([0x89]), sourceURL: URL(string: "https://bank.example/account")!))])
+        }
+        #expect(await collect(service.run(textRequest(loopFeature), tools: [shot])).error == nil)
+        #expect(results(in: log.requests[1].messages.last) == ["call_1:error:text:\(AIService.refusal(.siteExcluded("")))"])
     }
 
     @Test func aResultOfAKindTheFeatureDoesNotSendIsRefused() async {

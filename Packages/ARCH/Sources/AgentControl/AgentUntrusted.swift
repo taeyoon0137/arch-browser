@@ -32,3 +32,68 @@ public enum AgentAddress {
         return components.url ?? url
     }
 }
+
+extension AgentUntrusted {
+    /// A piece of text that `wrap` wrote blocks into.
+    public enum Segment: Equatable, Sendable {
+        /// Text outside blocks, and a block without an address, tags included.
+        case text(String)
+        /// A block's text, unescaped, and the address its opening tag names.
+        case page(String, url: URL)
+    }
+
+    /// The text as the blocks with an address that `wrap` wrote and the text around them, so that a reader such as an API-key session can check each page's site. A block ends at the first closing tag, since `wrap` escapes every one inside it, or at the end of the text when it has none. Nil when the text holds `<untrusted` outside a block in any form `wrap` does not write, so that the caller refuses the text rather than send page text as text of its own.
+    public static func segments(in text: String) -> [Segment]? {
+        let opening = "<\(tag)"
+        let closing = "</\(tag)>"
+        var segments: [Segment] = []
+        var pending = ""
+        var rest = text[...]
+        while let start = rest.range(of: opening, options: .caseInsensitive) {
+            pending += rest[..<start.lowerBound]
+            guard rest[start] == opening, let tagEnd = rest[start.upperBound...].firstIndex(of: ">"),
+                  let kind = Opening(rest[start.upperBound..<tagEnd]) else { return nil }
+            let contentStart = rest.index(after: tagEnd)
+            let end = rest[contentStart...].range(of: closing)
+            let blockEnd = end?.upperBound ?? rest.endIndex
+            switch kind {
+            case .page(let url):
+                if !pending.isEmpty { segments.append(.text(pending)) }
+                pending = ""
+                let content = rest[contentStart..<(end?.lowerBound ?? rest.endIndex)]
+                segments.append(.page(content.replacingOccurrences(of: "<\\/\(tag)", with: "</\(tag)"), url: url))
+            case .withoutAddress:
+                pending += rest[start.lowerBound..<blockEnd]
+            }
+            rest = rest[blockEnd...]
+        }
+        pending += rest
+        if !pending.isEmpty { segments.append(.text(pending)) }
+        return segments
+    }
+
+    /// An opening tag's attributes as `wrap` writes them.
+    private enum Opening {
+        case withoutAddress
+        case page(URL)
+
+        init?(_ attributes: Substring) {
+            let source = " source=\"page\""
+            guard attributes.hasPrefix(source) else { return nil }
+            let rest = attributes.dropFirst(source.count)
+            if rest.isEmpty {
+                self = .withoutAddress
+                return
+            }
+            let prefix = " url=\""
+            guard rest.count > prefix.count, rest.hasPrefix(prefix), rest.hasSuffix("\"") else { return nil }
+            let value = rest.dropFirst(prefix.count).dropLast()
+            let unescaped = value.replacingOccurrences(of: "&quot;", with: "\"")
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .replacingOccurrences(of: "&amp;", with: "&")
+            guard !value.contains("\""), let url = URL(string: unescaped) else { return nil }
+            self = .page(url)
+        }
+    }
+}

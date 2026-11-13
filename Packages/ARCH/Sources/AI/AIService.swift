@@ -157,7 +157,7 @@ public final class AIService: ObservableObject, AIClient {
         throw lastError
     }
 
-    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, or the feature's route. A request with tools uses only models that take tools, so a tool loop never reaches a command-line tool. Throws as `routeModels(for:carryingPageData:)` does when none is left.
+    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:carryingPageData:)` does when none is left.
     private func models(for request: AIRequest, feature: AIFeature) throws -> [AIRouteModel] {
         let carriesPageData = AIPartText.carriesData(request.messages)
         var models: [AIRouteModel]
@@ -172,7 +172,10 @@ public final class AIService: ObservableObject, AIClient {
             models = try settings.routeModels(for: feature, carryingPageData: carriesPageData)
         }
         if !request.tools.isEmpty {
-            models = models.filter { $0.provider.capabilities(of: $0.model).contains(.tools) }
+            models = models.filter { candidate in
+                guard case .http = candidate.provider.kind else { return false }
+                return candidate.provider.capabilities(of: candidate.model).contains(.tools)
+            }
             guard !models.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
         }
         return models
@@ -247,11 +250,11 @@ public final class AIService: ObservableObject, AIClient {
         return try outcome.get()
     }
 
-    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit. The activity entry shows its parts and content.
+    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts and content.
     private func prepare(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, entry: inout AIActivityEntry) throws -> AIProviderRequest {
         let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
-        let takesImages = candidate.provider.capabilities(of: candidate.model).contains(.images)
-        let messages = try policy.prepare(Self.checkedToolResults(in: request.messages, policy: policy, takesImages: takesImages))
+        let checked = Self.checkedToolResults(in: request.messages, policy: policy, imageNote: Self.imageNote(for: candidate))
+        let messages = try policy.prepare(AIToolHistory.fitted(checked, characterLimit: policy.inputCharacterLimit))
         let providerRequest = AIProviderRequest(model: candidate.model.name,
                                                 instructions: AIPartText.instructions(request.instructions, for: messages),
                                                 messages: messages, tools: request.tools, output: request.output,
@@ -262,9 +265,17 @@ public final class AIService: ObservableObject, AIClient {
     }
 
     static let imageNotTakenNote = "An image was left out: this model does not take images."
+    static let imageNotInToolResultsNote = "An image was left out: this provider's format sends tool results as text."
 
-    /// The messages with each tool result as this attempt sends it. A result that the part checks refuse, as one carrying a page on an excluded site or a kind the feature does not declare, becomes an error result that says why without naming the site, so that a tool loop goes on without its data, also for a site excluded after the result arrived. A model without `images` gets a note in place of each image.
-    private static func checkedToolResults(in messages: [AIMessage], policy: AIPartPolicy, takesImages: Bool) -> [AIMessage] {
+    /// The note sent in place of each image in a tool result, or nil when the model takes them there: one with `images` on the `messages` format. The `chatCompletions` format sends a tool result as text.
+    private static func imageNote(for candidate: AIRouteModel) -> String? {
+        guard candidate.provider.capabilities(of: candidate.model).contains(.images) else { return imageNotTakenNote }
+        if case .http(let http) = candidate.provider.kind, http.format == .messages { return nil }
+        return imageNotInToolResultsNote
+    }
+
+    /// The messages with each tool result as this attempt sends it. A result that the part checks refuse, as one carrying a page or an image on an excluded site or a kind the feature does not declare, becomes an error result that says why without naming the site, so that a tool loop goes on without its data, also for a site excluded after the result arrived. With an `imageNote`, the note replaces each image.
+    private static func checkedToolResults(in messages: [AIMessage], policy: AIPartPolicy, imageNote: String?) -> [AIMessage] {
         // The probe only checks; the length limit applies to the whole request afterward.
         var probe = policy
         probe.inputCharacterLimit = .max
@@ -272,9 +283,9 @@ public final class AIService: ObservableObject, AIClient {
             var message = message
             message.parts = message.parts.map { part in
                 guard case .toolResult(var result) = part else { return part }
-                if !takesImages {
+                if let imageNote {
                     result.parts = result.parts.map { part in
-                        if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNotTakenNote) }
+                        if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNote) }
                         return part
                     }
                 }
