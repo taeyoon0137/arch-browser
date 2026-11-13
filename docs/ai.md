@@ -284,6 +284,7 @@ The first features:
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
+- Each agent hook registers one automatic feature, `agentHook.<hook id>`, and runs started by outside programs use `agentRun`. Both use the route in each request (`docs/hooks.md`, Model choice and tiers).
 
 ## Providers
 
@@ -448,6 +449,8 @@ public struct AIRoute: Codable, Sendable {
 }
 ```
 
+Model tiers (Fast, Standard, and Deep, stored as the routes `tier.fast`, `tier.standard`, and `tier.deep`) and routes supplied with requests are designed in `docs/hooks.md`, Model choice and tiers.
+
 The service resolves the route when a request starts and keeps it for the whole request:
 
 1. A feature with `isEnabled` off throws `notConfigured(.switchedOff)`.
@@ -598,6 +601,8 @@ public protocol AIPageSource: Sendable {
 ## Hooks
 
 Hooks let features act on browser events (row 54). The hook center lives in `AI`; `Browsing` posts the events and applies the actions.
+
+`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center).
 
 ### Events
 

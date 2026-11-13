@@ -21,6 +21,7 @@ Terms: "the user's CLI" is Claude Code's `claude` or OpenAI's Codex CLI `codex`,
 - In the browser: the user adds Claude Code or Codex in Settings ▸ AI ▸ Providers, signs in to it in the built-in terminal, and starts a session with File ▸ New Agent Task, the palette's Ask Agent row, or Continue as Agent Task in the page reader. The session opens its tabs in the background in an agent folder of the space. The agent panel beside the page shows the conversation, each step Arch performed, and the approvals Arch requests. An API-key model with tools serves the same sessions.
 - From Claude Code or Codex outside Arch: the user turns on Settings ▸ AI ▸ Agents ▸ Allow Outside Clients, runs `arch-cli setup claude` or `arch-cli setup codex`, and optionally `arch-cli skills install`. The tool then starts `arch-mcp`, and its first call shows a grant sheet in Arch.
 - From a script: `arch-cli tabs`, `arch-cli open https://example.org`, `arch-cli snapshot t1`, `arch-cli click t1 e5`, with `--json` for machine-readable output, under the same grant.
+- From a hook: a hook's script starts an agent run with a model or tier, a record level, tools such as `rename_tab`, and limits. Outside programs watch browser events and propose hooks. `docs/hooks.md` describes their design and additions here: the client kind `run`, rule P19, the tools `rename_tab` and `watch_events`, the Watch Browser Events scope, and the `arch-cli` commands `events`, `hooks`, `agent run`, and `rename`.
 
 ## Decisions
 

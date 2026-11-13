@@ -134,7 +134,7 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 | Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel will use one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
 | Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin will be able to add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
-| Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
+| Event | Not shown | Browser event bus kinds (`docs/hooks.md`, Browser events): `tabOpened`, `tabClosed`, `pageLoaded`, `addressChanged`, `titleChanged`, `tabSelected`, `downloadFinished`, and `spaceSwitched`; and the plugin's own `settingChanged` |
 
 ## Page scripts
 
@@ -154,6 +154,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 |---|---|---|
 | `tabs` | Titles and addresses of the Persona's tabs, in calls and events | Tabs and events carry identifiers, engines, and pinned state only, except for pages the site grant covers |
 | `tabs.manage` | Open, close, select, rename, and move tabs | Calls throw `permissionDenied` |
+| `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
 | `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
@@ -161,6 +162,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
 | `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own routing entry | No AI access |
+| `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
@@ -361,7 +363,8 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 ## AI hooks and plugins that AI writes
 
 - The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will register with the same center under its own feature.
-- The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
+- The plugin API has no other AI-specific part except `agent`, below. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
+- Hooks (`docs/hooks.md`) reuse the script runtime. A JavaScript hook script runs as a `ScriptPlugin` with a package the hook registry creates in memory and a `PluginContext` of its own, outside the plugin manager. Its `arch.agent.run` calls the agent run API through `runAgent(_:)` under the `agent` permission. Plugin events come from the same browser event bus.
 - The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites or page scripts and with its background script as its only file, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
 - A plugin that AI wrote uses the same review sheet, which also shows the requests it came from and every file's full source. Install installs it switched off and Install and Enable switched on, with the origin `generated`, and Settings says that AI wrote it.
 - Ask for Changes in the review has AI write a new version with the same identifier, which replaces the one under review. Changing an installed plugin with AI, with a review of what changed, is not built yet. Removing a plugin that AI wrote works like removing any plugin.
@@ -628,6 +631,10 @@ public protocol PluginContext: AnyObject {
     func selectTab(_ id: PluginTab.ID) throws
     /// nil restores the page's title.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws
+    /// One tab of the Persona, for `arch.tabs.get`.
+    func tab(_ id: PluginTab.ID) throws -> PluginTab?
+    /// An agent run (`docs/hooks.md`, Agent run API); needs `agent`. The options and the result are the run's JSON.
+    func runAgent(_ options: PluginValue) async throws -> PluginValue
 
     // Pages: the tab's page must match the grant.
     func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
@@ -725,20 +732,15 @@ public struct PluginPageMessage: Sendable {
     public var body: PluginValue
 }
 
-// Not built yet.
+// Not built yet. The bus's kinds (`docs/hooks.md`, Browser events) and the plugin's own setting changes.
 public enum PluginEventKind: String, Hashable, Codable, Sendable, CaseIterable {
-    case tabOpened, tabClosed, tabSelected, pageLoaded, downloadFinished, spaceChanged, settingChanged
+    case tabOpened, tabClosed, pageLoaded, addressChanged, titleChanged, tabSelected, downloadFinished, spaceSwitched, settingChanged
 }
 
 // Not built yet.
 public enum PluginEvent: Sendable {
-    case tabOpened(PluginTab)
-    case tabClosed(PluginTab.ID)
-    case tabSelected(PluginTab.ID)
-    /// After the main frame finishes loading.
-    case pageLoaded(PluginTab)
-    case downloadFinished(PluginDownload)
-    case spaceChanged(UUID)
+    /// A bus event through the plugin's grant (`BrowserEvent.view(_:)`).
+    case browser(BrowserEvent)
     case settingChanged(key: String)
 }
 
@@ -1093,7 +1095,8 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 |---|---|
 | `arch.commands.onRun(id, (invocation) => …)` | `Plugin.run(_:_:)` |
 | `arch.events.on(kind, (event) => …)` | `Plugin.handle(_:)`; `kind` must be in the manifest's `events` |
-| `arch.tabs.list()`, `selected()`, `open(url, options)`, `close(id)`, `select(id)`, `rename(id, name)` | The tab members of `PluginContext` |
+| `arch.tabs.list()`, `get(id)`, `selected()`, `open(url, options)`, `close(id)`, `select(id)`, `rename(id, name)` | The tab members of `PluginContext` |
+| `arch.agent.run(options)` | `runAgent(_:)` |
 | `arch.pages.run(tabId, file)`, `post(tabId, message)`, `onMessage((message) => reply)` | `runPageScript(.file(_:), in:)`, `postMessage(_:toTab:)`, `Plugin.receive(_:)` |
 | `arch.storage.get(key)`, `set(key, value)`, `keys()` | `PluginStorage` |
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
