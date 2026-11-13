@@ -152,7 +152,7 @@ struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let tab: Tab?
-    /// Closes the popover, so that it does not stay over the sheet it opens.
+    /// Closes the popover, so that it does not stay over the card it opens.
     var close: () -> Void = {}
 
     var body: some View {

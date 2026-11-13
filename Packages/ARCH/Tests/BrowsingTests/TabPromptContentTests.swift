@@ -1,4 +1,4 @@
-// What each kind of tab prompt says and offers, and what each answer means for the code that asked: page dialogs keep the page's words apart, a login keeps its fields and notes, Open and Allow wait to arm, Clear is destructive, and a prompt that ended without the user gives the safe answer.
+// What each kind of tab prompt says and offers, and what each answer means for the code that asked: page dialogs keep the page's words apart, a login keeps its fields and notes, Open and Allow wait to arm, Clear is destructive, a page's downloads question names its host or file, and a prompt that ended without the user gives the safe answer.
 import AppKit
 import ARCHEngine
 import Extensions
@@ -102,6 +102,24 @@ import Testing
         #expect(notice.messageStyle == .path && notice.message == "/Users/a/b.pdf")
         #expect(notice.buttons.map(\.id) == ["ok"] && notice.defaultButtonID == "ok" && notice.cancelButtonID == "ok")
         #expect(TabPromptContent.notice(title: "The page could not be captured.", detail: nil, identity: Self.site).messageStyle == .text)
+    }
+
+    @Test func aPagesDownloadsQuestionNamesItsHostOrFileAndWaitsToArm() throws {
+        let page = TabPromptContent.pageDownloads(pageURL: URL(string: "https://example.com/files"), identity: Self.site)
+        #expect(page.kind == .pageDownloads && page.identity == Self.site)
+        #expect(page.title == "Allow this website to download multiple files?")
+        #expect(page.message == "The page started another download without a click in it. If you allow it, it can download files until it loads another page.")
+        #expect(page.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"] && page.buttons.last?.needsArming == true)
+        #expect(page.defaultButtonID == "allow" && page.cancelButtonID == "deny")
+        #expect(TabPromptContent.pageDownloadsResult(Self.answered("allow")))
+        #expect(!TabPromptContent.pageDownloadsResult(Self.answered("deny")))
+        #expect(!TabPromptContent.pageDownloadsResult(.dismissed))
+
+        let file = try #require(URL(string: "file:///Users/a/Report.html"))
+        let filePage = TabPromptContent.pageDownloads(pageURL: file, identity: PromptSiteIdentity.make(for: file, tabURL: file, favicon: nil))
+        #expect(filePage.identity.name == "Report.html" && filePage.title == "Allow this page to download multiple files?")
+        let blank = TabPromptContent.pageDownloads(pageURL: nil, identity: PromptSiteIdentity.make(for: nil, tabURL: nil, favicon: nil))
+        #expect(blank.identity.name == "This page")
     }
 
     @Test func extensionsQuestionsNameTheExtensionAndWaitToArm() {

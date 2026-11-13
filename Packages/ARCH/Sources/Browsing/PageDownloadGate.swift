@@ -1,6 +1,6 @@
 // When a page may start a download without asking: its first download goes through, and so does one after a click in the page, as when the user clicks a file's link, or one that an address Arch loads for the user starts. Any other download waits until the user answers whether the page may download more files, so that a page cannot fill the downloads folder on its own. An Allow lasts until the tab commits another document. A refusal and the first download last until the gate starts over: at a document the user asked for, by a click in the page or through Arch, or one on another site. A document that the page loads on its own on its site, as by reloading or changing its address, keeps them, so that a page cannot reload itself for another first download.
 
-/// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a sheet when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
+/// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a card over the tab when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
 struct PageDownloadGate {
     enum Admission: Equatable {
         /// The download goes on at once.

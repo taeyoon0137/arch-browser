@@ -1,4 +1,4 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
+// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and the prompt cards of the tabs on its screen, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the prompts waiting for their tabs, the page reader's conversations, engines, and persistence.
 // Isolation: AppKit, SwiftUI, and the session use the model on the main thread only. The members that reach the main actor types of `AI` and `Plugins` (the page assistant, page conversations, and plugin managers) are marked `@MainActor`, so only main actor code can call them; the rest stays unmarked, because the session, which calls it, is not isolated yet (`docs/plan.md`, task I.18). A new member follows the same rule. `selectTab(_:)` reaches one of the marked members through `MainActor.assumeIsolated`, which stops the app if it ever runs off the main thread.
 import AI
 import AppKit
@@ -23,7 +23,7 @@ public final class BrowserWindowModel: ObservableObject {
     /// The window's identity in `session.json`, which it keeps across launches.
     let id: UUID
     public let kind: BrowserWindowKind
-    /// The AppKit window, set when it is created. Sheets, printing, export, sharing, and Clear Site Data use it.
+    /// The AppKit window, set when it is created. Window sheets, printing, export, and sharing use it.
     public weak var nsWindow: NSWindow?
     /// The window's frame outside full screen, in screen coordinates: the saved one, where the window opens, then the one the window controller records as the window moves and resizes. `nil` until the window opens, when the window has no saved frame.
     var restorableFrame: CGRect?
@@ -40,18 +40,10 @@ public final class BrowserWindowModel: ObservableObject {
     @Published private(set) var shownTabIDs: [UUID] = []
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
-    /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
-    @Published public private(set) var fullscreenTabID: UUID? {
-        didSet {
-            // The other panes of a split view leave the screen while the selected page fills the window, and their sheets wait until the panes return.
-            session.sheets.deferSheet(of: self)
-            session.sheets.showNext()
-        }
-    }
+    /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window. The other panes of a split view leave the screen meanwhile, and their prompts wait until the panes return.
+    @Published public private(set) var fullscreenTabID: UUID?
     /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
     @Published private(set) var preview: PagePreview?
-    /// The sheet the window shows for a tab on its screen. The session's sheet queue sets and clears it.
-    var visibleSheet: TabSheet?
     @Published public var isSidebarVisible = true
     /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
     @Published public var isLibraryVisible = false {
@@ -132,16 +124,15 @@ public final class BrowserWindowModel: ObservableObject {
     ///
     /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
     /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot, and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
-    /// 3. A sheet of a tab that left the screen waits, and the next sheet of a tab on screen shows.
-    /// 4. The session updates the focused tab.
-    /// 5. The docked developer tools follow the tab.
-    /// 6. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
+    /// 3. The session updates the focused tab.
+    /// 4. The docked developer tools follow the tab.
+    /// 5. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
     ///
-    /// Steps 1 and 3 can end a sheet, and ending a sheet runs the run loop (`TabSheetQueue.deferSheet(of:)`), so a click can select yet another tab before the later steps run. Every step therefore reads the selection as it is when the step runs, not `id`.
+    /// The prompts of the tabs that left the screen wait, and the panes that show a tab with a prompt show its card (`PanePromptLayer`). Step 1 can close another window, so every step reads the selection as it is when the step runs, not `id`.
     public func selectTab(_ id: UUID?) {
         let previousID = selectedTabID
         selectedTabID = id
-        // 1. The window shows its selected tab, and another window that shows the tab lets go of its sheet, page fullscreen, and docked tools before this window takes them.
+        // 1. The window shows its selected tab, and another window that shows the tab lets go of its page fullscreen and docked tools before this window takes them.
         updateShownTabs()
         session.release(selectedTab, except: self)
         // 2. Selecting a tab, even the one under the page, leaves an internal page.
@@ -166,14 +157,11 @@ public final class BrowserWindowModel: ObservableObject {
             // The question popover belongs to the page it opened over.
             MainActor.assumeIsolated { closePageQuestion() }
         }
-        // 3. Ending a sheet runs the run loop.
-        session.sheets.deferSheet(of: self)
-        session.sheets.showNext()
-        // 4.
+        // 3.
         session.windowDidSelect(self)
-        // 5.
+        // 4.
         devToolsDock.track(selectedTab)
-        // 6.
+        // 5.
         followSelectedTab()
         focusSelectedPane()
     }
@@ -687,7 +675,7 @@ public final class BrowserWindowModel: ObservableObject {
         SessionSnapshot.WindowRecord(id: id, frame: restorableFrame, currentSpaceID: currentSpaceID, selectedTabID: selectedTabID, isSidebarVisible: isSidebarVisible)
     }
 
-    /// Lets go of what the window shows as it closes, so that other windows can show its tabs, which stay open (window rule 5): the page reader's replies about them, the palette, find, region capture, page fullscreen, the preview panel, the question popover, the sheet, which shows again in the next window that shows its tab, and the docked developer tools.
+    /// Lets go of what the window shows as it closes, so that other windows can show its tabs, which stay open (window rule 5): the page reader's replies about them, the palette, find, region capture, page fullscreen, the preview panel, the question popover, and the docked developer tools. The tabs' prompts stay with them and show in the next window that shows them.
     @MainActor func prepareToClose() {
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         commandPaletteMode = nil
@@ -697,13 +685,12 @@ public final class BrowserWindowModel: ObservableObject {
         closePreview()
         closePageQuestion()
         shownTabIDs = []
-        session.sheets.deferSheet(of: self)
         devToolsDock.track(nil)
     }
 
-    /// Closes the window from code, as a small window does once its tab leaves or closes. AppKit would take an attached sheet away unanswered, so a sheet that the sheet queue does not show, such as the print panel or Export as PDF's save panel, ends first with Cancel. The queue's own sheet waits for its tab's next window (`prepareToClose()`).
+    /// Closes the window from code, as a small window does once its tab leaves or closes. AppKit would take an attached sheet away unanswered, so a sheet on the window, such as the print panel or Export as PDF's save panel, ends first with Cancel. The tab's prompts wait for its next window.
     func close() {
-        if let nsWindow, let sheet = nsWindow.attachedSheet, sheet !== visibleSheet?.alert.window {
+        if let nsWindow, let sheet = nsWindow.attachedSheet {
             nsWindow.endSheet(sheet, returnCode: .cancel)
         }
         nsWindow?.close()
@@ -863,16 +850,13 @@ public final class BrowserWindowModel: ObservableObject {
             panel.beginSheetModal(for: window) { response in
                 guard response == .OK, let url = panel.url else { return }
                 if !document.write(to: url) {
-                    let alert = NSAlert()
-                    alert.messageText = "The PDF could not be saved."
-                    alert.informativeText = url.path
-                    self?.session.enqueueSheet(alert, for: tab) { _ in }
+                    self?.showNotice("The PDF could not be saved.", detail: url.path, detailIsPath: true, for: tab)
                 }
             }
         }
     }
 
-    /// Renders the selected page as PDF and passes it on with the window while that tab is still selected; a tab the user left in the meantime drops the request. A failure shows a sheet on the tab.
+    /// Renders the selected page as PDF and passes it on with the window while that tab is still selected; a tab the user left in the meantime drops the request. A failure shows a notice card on the tab.
     private func renderSelectedPageAsPDF(failureMessage: String, then use: @escaping (Tab, PDFDocument, NSWindow) -> Void) {
         guard canPrint, let tab = selectedTab else { return }
         isRenderingPDF = true
@@ -883,9 +867,7 @@ public final class BrowserWindowModel: ObservableObject {
             if case .success(let data) = result, let document = PDFDocument(data: data) {
                 use(tab, document, window)
             } else {
-                let alert = NSAlert()
-                alert.messageText = failureMessage
-                self.session.enqueueSheet(alert, for: tab) { _ in }
+                self.showNotice(failureMessage, for: tab)
             }
         }
     }
@@ -933,7 +915,7 @@ public final class BrowserWindowModel: ObservableObject {
         focusPage()
     }
 
-    /// Writes a capture to the captures folder and shows the file in the Finder. Encoding a long page takes a moment, so it runs off the main thread. A capture that failed or could not be written shows a sheet on its tab, if the tab is still open.
+    /// Writes a capture to the captures folder and shows the file in the Finder. Encoding a long page takes a moment, so it runs off the main thread. A capture that failed or could not be written shows a notice card on its tab, if the tab is still open.
     private func saveCapture(_ image: NSImage?, of tab: Tab) {
         guard let image else { return showCaptureFailure("The page could not be captured.", for: tab) }
         let title = tab.displayTitle
@@ -951,10 +933,13 @@ public final class BrowserWindowModel: ObservableObject {
 
     private func showCaptureFailure(_ message: String, detail: String? = nil, for tab: Tab) {
         guard session.allTabs.contains(where: { $0 === tab }) else { return }
-        let alert = NSAlert()
-        alert.messageText = message
-        if let detail { alert.informativeText = detail }
-        session.enqueueSheet(alert, for: tab) { _ in }
+        showNotice(message, detail: detail, for: tab)
+    }
+
+    /// Arch's notice about the tab's page, as a card over the tab's pane.
+    private func showNotice(_ title: String, detail: String? = nil, detailIsPath: Bool = false, for tab: Tab) {
+        let content = TabPromptContent.notice(title: title, detail: detail, detailIsPath: detailIsPath, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        session.enqueuePrompt(content, for: tab) { _ in }
     }
 
     // MARK: Sharing and site controls
@@ -1043,19 +1028,15 @@ public final class BrowserWindowModel: ObservableObject {
         return nsWindow?.attachedSheet == nil
     }
 
-    /// Asks with a sheet on the selected tab before clearing the data of its page's host.
+    /// Asks with a card over the selected tab before clearing the data of its page's host. With several Personas, the card names the Persona and space, the tab's space or, for a favorite's tab, the window's current one, as "Work / Research". Only Clear clears.
     public func confirmClearSiteData() {
         guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
-        // With several Personas, the sheet names the one whose data goes.
-        let inPersona = session.displayedName(ofPersona: tab.personaID).map { " in the Persona \u{201C}\($0)\u{201D}" } ?? ""
-        let alert = NSAlert()
-        alert.messageText = "Clear the data stored by \u{201C}\(site.displayName)\u{201D}?"
-        alert.informativeText = "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again."
-        alert.addButton(withTitle: "Clear").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+        let space = tab.spaceID.flatMap { id in session.spaces.first { $0.id == id } } ?? currentSpace
+        let personaSpace = session.displayedName(ofPersona: tab.personaID).map { "\($0) / \(space.name)" }
+        let content = TabPromptContent.clearSiteData(siteName: site.displayName, personaSpace: personaSpace, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         let personaID = tab.personaID
-        session.enqueueSheet(alert, for: tab) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.session.clearSiteData(of: site, in: personaID) }
+        session.enqueuePrompt(content, for: tab) { [weak self] response in
+            if response.buttonID == "clear" { self?.session.clearSiteData(of: site, in: personaID) }
         }
     }
 
@@ -1094,7 +1075,7 @@ public final class BrowserWindowModel: ObservableObject {
     // - `splitOnScreen`: the selected tab's split view, or nil when the selected tab is in none. `isInSplitViewOnScreen(_:)` asks whether a tab is in it.
     // - `paneTabs`: the page area's panes, left to right: the tabs of `splitOnScreen`, or the selected tab alone.
     // - `shownTabIDs`: the panes whose pages this window shows. A pane that another window shows stays out, and the page area shows a placeholder in its place (window rule 1).
-    // - `tabsOnScreen`: the shown panes, the selected tab first, or the selected tab alone while its page fills the window. Their sheets can show on this window.
+    // - `tabsOnScreen`: the shown panes, the selected tab first, or the selected tab alone while its page fills the window. Their prompts show over their panes.
 
     /// The split view the page area shows: the selected tab's, if it is in one.
     private var splitOnScreen: [UUID]? {
@@ -1137,15 +1118,14 @@ public final class BrowserWindowModel: ObservableObject {
         panes.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
     }
 
-    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen, sheet, and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.
+    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen here first. The tab's prompt goes with it.
     func giveUp(_ tab: Tab) {
         shownTabIDs.removeAll { $0 == tab.id }
         if tab.id == selectedTabID {
             guard kind == .main else { return close() }
             selectTab(fallbackTab(excluding: tab.id)?.id)
-        } else {
-            if fullscreenTabID == tab.id { exitPageFullscreen() }
-            session.sheets.deferSheet(of: self)
+        } else if fullscreenTabID == tab.id {
+            exitPageFullscreen()
         }
     }
 
@@ -1154,7 +1134,7 @@ public final class BrowserWindowModel: ObservableObject {
         recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
     }
 
-    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their sheets can show on this window. None once the window has let go of its tabs as it closes.
+    /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their prompts show as cards over their panes. None once the window has let go of its tabs as it closes.
     var tabsOnScreen: [Tab] {
         guard let selected = selectedTab, shows(selected) else { return [] }
         if fullscreenTabID == selected.id { return [selected] }

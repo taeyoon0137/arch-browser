@@ -3,7 +3,7 @@ import AppKit
 
 /// What a prompt asks. VoiceOver names the card by it.
 enum PromptKind: Equatable {
-    case sitePermission, pageAlert, pageConfirm, pageTextInput, leavePage, signIn, openInApp, extensionAccess, extensionReload, clearSiteData, notice
+    case sitePermission, pageAlert, pageConfirm, pageTextInput, leavePage, signIn, openInApp, extensionAccess, extensionReload, clearSiteData, pageDownloads, notice
 
     /// A page's own `alert`, `confirm`, or `prompt`, which the engine cancels when a navigation the user starts goes ahead.
     var isPageDialog: Bool {
@@ -24,6 +24,7 @@ enum PromptKind: Equatable {
         case .extensionAccess: "Extension Access"
         case .extensionReload: "Reload Page"
         case .clearSiteData: "Clear Website Data"
+        case .pageDownloads: "Multiple Downloads"
         case .notice: "Notice"
         }
     }

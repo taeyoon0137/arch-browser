@@ -50,7 +50,7 @@ public final class Tab: ObservableObject, Identifiable {
     var didFinishLoad: (() -> Void)?
     /// Sends each time the main frame finishes loading a document, for the AI interface's hooks. Loads of frames inside the page and navigations within the document send nothing.
     let didLoadDocument = PassthroughSubject<Void, Never>()
-    /// The session sets this callback to end the prompts and sheets of a page whose dialogs no longer apply.
+    /// The session sets this callback to end the prompts of a page whose dialogs no longer apply.
     var didCancelDialogs: (() -> Void)?
     /// The session sets this callback to bring the tab forward, so that a prompt it needs can show.
     var requestSelection: (() -> Void)?

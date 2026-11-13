@@ -1,5 +1,4 @@
 // Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a card on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones.
-import AppKit
 import ARCHEngine
 import Combine
 import Foundation

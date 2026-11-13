@@ -1,7 +1,7 @@
 import AppKit
 import CEFBridge
 
-/// AppKit does not quit while a window shows a sheet, so the session answers its sheets before AppKit checks. The user confirms a quit that stops downloads or a terminal program first, while the sheets still show, so that Cancel keeps them.
+/// The session answers every tab's prompt before AppKit quits, so that each engine callback has its answer before the engines shut down at `NSApplicationWillTerminateNotification`. The user confirms a quit that stops downloads or a terminal program first, while the prompt cards still show, so that Cancel keeps them. AppKit itself still stops a quit while a window shows a sheet of its own with more than one button; the prompts then wait for answers again.
 final class ArchApplication: ARCHCEFApplication {
     override func terminate(_ sender: Any?) {
         // Inside CEF's work, as for ⌘Q in a Chromium page, the bridge runs the quit again once that work has returned, and the questions wait for that.

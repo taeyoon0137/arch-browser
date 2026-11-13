@@ -119,6 +119,25 @@ enum TabPromptContent {
                              defaultButtonID: "cancel", cancelButtonID: "cancel")
     }
 
+    // MARK: Downloads
+
+    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page's host, a file's name for a page without one, or else this page, never the page's own title. Allow waits for the card to arm.
+    static func pageDownloads(pageURL: URL?, identity: PromptIdentity) -> PromptContent {
+        var identity = identity
+        let hasHost = pageURL?.host?.isEmpty == false
+        if !hasHost, let pageURL, pageURL.isFileURL, !pageURL.lastPathComponent.isEmpty { identity.name = pageURL.lastPathComponent }
+        return PromptContent(kind: .pageDownloads, identity: identity, glyph: .symbol("arrow.down.circle.fill", tint: .accent, label: "Downloads"),
+                             title: "Allow \(hasHost ? "this website" : "this page") to download multiple files?",
+                             message: "The page started another download without a click in it. If you allow it, it can download files until it loads another page.",
+                             buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
+                             defaultButtonID: "allow", cancelButtonID: "deny")
+    }
+
+    /// Only Allow lets the page download more files; Don't Allow and a question that ended without the user refuse.
+    static func pageDownloadsResult(_ response: PromptResponse) -> Bool {
+        response.buttonID == "allow"
+    }
+
     // MARK: Notices
 
     /// Arch's notice about the tab's page, such as a capture that failed. A detail that is a file path truncates in the middle and shows whole in its tooltip.
