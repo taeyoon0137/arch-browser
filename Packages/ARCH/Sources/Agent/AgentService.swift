@@ -77,7 +77,8 @@ import Foundation
     private var declinedAt: [AgentClientIdentity.Key: Date] = [:]
     /// The grant sheet each client waits on, so that its calls share one sheet.
     private var questions: [AgentClientIdentity.Key: Task<AgentGrant?, Never>] = [:]
-    private var handles: [UUID: AgentGrantHandles] = [:]
+    /// What the tool host keeps for each grant in force since its first call this launch.
+    private var states: [UUID: AgentGrantState] = [:]
     private var usedThisLaunch: Set<UUID> = []
     private var expiryTimer: Timer?
     /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
@@ -128,6 +129,8 @@ import Foundation
         state = FileManager.default.fileExists(atPath: file.fileURL.path) ? .reading : .ready
         applyAgentOnlyPersona()
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
+        host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
+        host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
         expiryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.expireGrants() }
         }
@@ -338,12 +341,12 @@ import Foundation
         for grant in grants { end(grant, as: .revoked, telling: "The user revoked this client's access in Arch.") }
     }
 
-    /// Ends a grant: the client's connections get `revoked` and close, and its handles go.
+    /// Ends a grant: the client's connections get `revoked` and close, and its handles and events go. Its agent tabs stay in their folder, unsaved, until the user closes or keeps them or Arch quits.
     private func end(_ grant: AgentGrant, as event: AgentActivityEntry.Event, telling message: String, except connectionID: UUID? = nil) {
         let wasKept = settings.grants.contains { $0.id == grant.id }
         settings.grants.removeAll { $0.id == grant.id }
         launchGrants.removeAll { $0.id == grant.id }
-        handles[grant.id] = nil
+        states[grant.id] = nil
         if wasKept { save() }
         record(event, grant: grant)
         endClientSessions(of: grant.id, because: message)
@@ -1015,16 +1018,37 @@ import Foundation
             defer { connection.runningCalls -= 1 }
             guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
             updateConnectedGrants()
-            var grantHandles = handles[grant.id] ?? AgentGrantHandles()
-            let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: grant, handles: &grantHandles)
-            handles[grant.id] = grantHandles
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
+            let outcome = await AgentToolHost(host: host, allowsAI: dependencies.allowsAI, now: dependencies.now).run(call, for: grant, state: state(for: grant))
+            let result = outcome.result
             let tool = AgentToolCatalog.tool(named: call.name)
+            let refused = result.status == .refused
             activity.record(AgentActivityEntry(date: dependencies.now(), event: .toolCall, grantID: grant.id, clientName: identity.displayName, personaID: grant.personaID,
-                                               tool: tool?.name, toolClass: tool?.toolClass.rawValue, decision: .auto, outcome: result.status.rawValue))
+                                               tool: tool?.name, toolClass: tool?.toolClass.rawValue, site: outcome.site, decision: refused ? .refused : .auto,
+                                               rule: refused ? result.code : nil, outcome: result.status.rawValue))
             reply(connection, requestID, Self.json(result))
         }
+    }
+
+    // MARK: Agent tabs
+
+    /// The tool host's record of a grant, made at its first call this launch with today's calls from the activity log.
+    private func state(for grant: AgentGrant) -> AgentGrantState {
+        if let state = states[grant.id] { return state }
+        let state = AgentGrantState()
+        let now = dependencies.now()
+        state.seedCalls(activity.entries.filter { $0.grantID == grant.id && $0.event == .toolCall && Calendar.current.isDate($0.date, inSameDayAs: now) }.count, at: now)
+        states[grant.id] = state
+        return state
+    }
+
+    private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
+        AgentToolHost(host: host, allowsAI: dependencies.allowsAI).tab(tabID, of: ownerID, didReport: report, state: states[ownerID])
+    }
+
+    private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL) -> Bool {
+        AgentToolHost(host: host, allowsAI: dependencies.allowsAI).tab(tabID, mayLoad: url, state: states[ownerID])
     }
 
     private func reply(_ connection: ClientConnection, _ requestID: AgentRPCID, _ result: AgentJSON) {

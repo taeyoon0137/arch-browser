@@ -526,7 +526,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         return true
     }
-    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine. No other navigation asks the delegate.
+    /// Every main frame navigation reaches the navigation delegate, and each server redirect again before its request, as on the WebKit engine, so that a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
+    public func cefBrowserShouldBrowse(toURL url: String, isRedirect: Bool, userGesture: Bool) -> Bool {
+        guard let navigationDelegate, let target = URL(engineString: url) else { return true }
+        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture)) == .allow
+    }
+
+    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine; its load in place then asks again as a main frame navigation.
     public func cefBrowserShouldOpenNewWindow(withURL url: String) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow

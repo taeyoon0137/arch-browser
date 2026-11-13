@@ -1,4 +1,4 @@
-// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, and a window for the grant sheet. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`. Later tasks add agent tabs, dialogs, downloads, and permissions.
+// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, and the agent tabs with what happens in them. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`. Later tasks add shared tabs, snapshots, actions, and approvals.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -30,15 +30,85 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     public var title: String
     public var url: URL?
     public var isLoading: Bool
+    public var canGoBack: Bool
+    public var canGoForward: Bool
     public var engine: EngineKind
+    /// The agent session or outside client's grant whose agent folder holds the tab, or nil for a tab of the user's.
+    public var agentOwnerID: UUID?
 
-    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, engine: EngineKind) {
+    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil) {
         self.id = id
         self.spaceID = spaceID
         self.title = title
         self.url = url
         self.isLoading = isLoading
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
         self.engine = engine
+        self.agentOwnerID = agentOwnerID
+    }
+}
+
+/// Whose agent tabs these are: an outside client's grant, and in-app sessions with plan task VII.17 (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.
+public struct AgentTabOwner: Equatable, Sendable {
+    /// The grant's or session's ID, which the agent folder keeps as its `agentSessionID`.
+    public var id: UUID
+    public var spaceID: UUID
+    public var folderName: String
+
+    public init(id: UUID, spaceID: UUID, folderName: String) {
+        self.id = id
+        self.spaceID = spaceID
+        self.folderName = folderName
+    }
+}
+
+public enum AgentNavigation: Equatable, Sendable {
+    case load(URL)
+    case back
+    case forward
+    case reload
+}
+
+/// What `Browsing` reports from an agent tab for its agent's next result (docs/agents.md, Tools ▸ Results), including what rules P6 and P8 to P11 did there.
+public enum AgentTabReport: Equatable, Sendable {
+    /// The main frame finished loading a document, at this address and title.
+    case loaded(url: URL?, title: String)
+    /// The tab stopped loading, as when a load finished, failed, or was stopped. It is no event of its own; waits read it.
+    case stoppedLoading
+    /// A page in the tab opened the tab `tab`, which joined the agent folder in the opener's engine.
+    case opened(tab: UUID)
+    /// The tab closed other than through `closeAgentTab(_:)`: the user or its page closed it.
+    case closed
+    /// The user took the tab over, by moving it out of its agent folder or keeping the folder's tabs, so that it is the user's.
+    case takenOver
+    /// Rule P8 denied a permission request without asking.
+    case permissionDenied([EnginePermissionType])
+    /// Rule P9: a dialog waits for the user in Arch's own sheet, with the page's text, or the site for a sign-in.
+    case dialogWaiting(AgentDialogKind, message: String)
+    /// Rule P10 dismissed an alert, with its text.
+    case alertDismissed(message: String)
+    /// Rule P6 refused a download of a file with this name.
+    case downloadRefused(name: String)
+    /// Rule P11 refused a link with this scheme to another app.
+    case externalAppRefused(scheme: String)
+}
+
+public enum AgentDialogKind: String, Equatable, Sendable {
+    case confirm
+    case prompt
+    case leavePage
+    case signIn
+}
+
+/// A page of the browsing history.
+public struct AgentHistoryPage: Equatable, Sendable {
+    public var url: URL
+    public var title: String
+
+    public init(url: URL, title: String) {
+        self.url = url
+        self.title = title
     }
 }
 
@@ -49,6 +119,17 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     func spaces(in personaID: UUID) -> [AgentSpaceInfo]
     /// The tabs with these IDs that are open, in sidebar order (`BrowserSession.tabsInSidebarOrder`).
     func tabs(withIDs ids: Set<UUID>) -> [AgentTabInfo]
+    /// The open tabs of the agent folders whose `agentSessionID` is `ownerID`, in sidebar order.
+    func agentTabs(of ownerID: UUID) -> [AgentTabInfo]
+    /// Opens a tab at `url` in the background, in `engine` or the default engine, in the owner's agent folder, which it makes among the open tabs of the owner's space when there is none. It selects nothing and switches no window's space. Nil when the space is gone.
+    func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo?
+    func navigate(_ tabID: UUID, _ navigation: AgentNavigation)
+    /// Closes an agent tab without asking its page; it joins neither the closed list nor the tab close log, and reports nothing.
+    func closeAgentTab(_ tabID: UUID)
+    /// The tab's main frame text through `readableContent(limit:completion:)`, which may never answer while the page shows a dialog.
+    func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void)
+    /// The pages of the browsing history, shared by every Persona, whose address or title contains `query`, most visited first.
+    func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage]
     /// Adds the Agents Persona, empty and with no sign-ins, and returns its ID.
     func makeAgentsPersona() -> UUID
     /// The Persona whose profiles get no remembered permission answers and whose permission requests are denied without a sheet (agent decision 9), or nil for none.
@@ -59,8 +140,27 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     var personasDidChange: (() -> Void)? { get set }
     /// The search engine's results address, which every in-app session's site scope holds (docs/agents.md, Site scope and navigation).
     var searchResultsAddress: AgentSearchResultsAddress? { get }
+    /// Set by the service; the host calls it with what happened in an agent tab and the tab's owner, the owner before a take-over for `takenOver`.
+    var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)? { get set }
+    /// Set by the service; the host asks it before each main frame navigation of an agent tab, again before each redirect hop's request, and for the first address of a popup that joins an agent folder. False stops the navigation, or closes the popup.
+    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
 }
 
 public extension AgentBrowserHost {
     var searchResultsAddress: AgentSearchResultsAddress? { nil }
+}
+
+public extension EnginePermissionType {
+    /// The permission as an event names it.
+    var agentName: String {
+        switch self {
+        case .camera: return "camera"
+        case .microphone: return "microphone"
+        case .geolocation: return "location"
+        case .notifications: return "notifications"
+        case .clipboard: return "clipboard"
+        case .midi: return "MIDI devices"
+        case .screenCapture: return "screen recording"
+        }
+    }
 }

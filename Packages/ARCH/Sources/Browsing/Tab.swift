@@ -1,4 +1,5 @@
-// Each tab wraps an engine web contents instance. It publishes the state shown in the sidebar and command bar.
+// Each tab wraps an engine web contents instance. It publishes the state shown in the sidebar and command bar. A tab in an agent folder is an agent's (docs/agents.md, In the browser ▸ Agent folders): it records no visits, and it applies the rules of agent tabs to its page's requests and reports what they did.
+import Agent
 import AppKit
 import ARCHEngine
 import Combine
@@ -38,8 +39,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var hasCrashed = false
     /// How many times this tab's page process quit, kept for the tab close log.
     public private(set) var crashCount = 0
-    /// The session sets this callback so popups from this tab open as new tabs.
-    var openNewTab: ((any EngineWebContents) -> Void)?
+    /// The session sets this callback so popups from this tab open as new tabs, with the address the page opened when the engine reports one.
+    var openNewTab: ((any EngineWebContents, URL?) -> Void)?
     /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
     var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
@@ -88,6 +89,10 @@ public final class Tab: ObservableObject, Identifiable {
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private var isDownloadOnly = false
+    /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
+    var agentOwnerOfFolder: ((UUID) -> UUID?)?
+    /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
+    weak var agentMonitor: (any AgentTabMonitor)?
 
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
@@ -150,6 +155,27 @@ public final class Tab: ObservableObject, Identifiable {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }
+
+    /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
+    public var agentOwnerID: UUID? {
+        folderID.flatMap { agentOwnerOfFolder?($0) }
+    }
+
+    /// Reports to the agent monitor when the tab is an agent's.
+    private func reportToAgent(_ report: AgentTabReport) {
+        guard let owner = agentOwnerID else { return }
+        agentMonitor?.agentTab(self, owner: owner, didReport: report)
+    }
+}
+
+/// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
+protocol AgentTabMonitor: AnyObject {
+    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
+    /// What happened in an agent tab, for its agent's next result.
+    func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport)
+    /// The agent tab closed, before the session removes an agent folder it leaves empty.
+    func agentTabDidClose(_ tab: Tab, owner: UUID)
 }
 
 extension Tab: EngineWebContentsUIDelegate {
@@ -166,33 +192,47 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
+        let wasLoading = isLoading
         isLoading = webContents.isLoading
         // The Chromium engine reloads a page once after its first crash; any new load clears the notice.
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading { didFinishLoad?() }
-        // Record a page when it finishes loading, when its title is usually known.
-        if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
+        // Record a page when it finishes loading, when its title is usually known. An agent's tab records none (Persona rule 6).
+        if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }
     }
-    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }
+    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
+        didLoadDocument.send()
+        reportToAgent(.loaded(url: webContents.url, title: webContents.title))
+    }
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
-        openNewTab?(newWebContents)
+        openNewTab?(newWebContents, targetURL)
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
         guard webContents === self.webContents else { return }
         takeReplacement?(replacement)
     }
+    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user.
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
+        if agentOwnerID != nil {
+            reportToAgent(.permissionDenied(request.types))
+            return completion(false)
+        }
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads nothing (rule P6) until plan task VII.13 asks the user.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
+        if agentOwnerID != nil {
+            reportToAgent(.downloadRefused(name: url.lastPathComponent))
+            return false
+        }
         guard !hasPage else { return true }
         isDownloadOnly = true
         didOpenOnlyDownload?(!isRestored)
@@ -230,13 +270,20 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: JavaScript dialogs
 
+    /// An agent's tab dismisses its page's alert at once and reports its text (rule P10).
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
+        if agentOwnerID != nil {
+            reportToAgent(.alertDismissed(message: message))
+            return completion()
+        }
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         showAlert(alert, isPageDialog: true) { _ in completion() }
     }
 
+    /// In an agent's tab, as for `prompt`, the user answers in this sheet and the agent hears that it waits (rule P9).
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
+        reportToAgent(.dialogWaiting(.confirm, message: message))
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
@@ -244,6 +291,7 @@ extension Tab: EngineWebContentsUIDelegate {
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
+        reportToAgent(.dialogWaiting(.prompt, message: message))
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
@@ -254,9 +302,13 @@ extension Tab: EngineWebContentsUIDelegate {
         showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
-    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show.
+    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show; an agent's tab stays where it is, and the agent hears that the question waits for the user (rule P9).
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
-        requestSelection?()
+        if agentOwnerID != nil {
+            reportToAgent(.dialogWaiting(.leavePage, message: ""))
+        } else {
+            requestSelection?()
+        }
         let alert = NSAlert()
         alert.messageText = "Leave this page?"
         alert.informativeText = "Changes you made may not be saved."
@@ -346,7 +398,9 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Links for other apps
 
+    /// An agent's tab opens no other app (rule P11) until plan task VII.13 asks the user.
     public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
+        if agentOwnerID != nil { return reportToAgent(.externalAppRefused(scheme: url.scheme ?? "")) }
         if isUserInitiated { forgetExternalAppDecline() }
         offerExternalApp(for: url)
     }
@@ -387,9 +441,10 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: HTTP authentication
 
-    /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved.
+    /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved. In an agent's tab, the user answers and the agent hears that the question waits (rule P9).
     public func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) {
         let space = challenge.protectionSpace
+        reportToAgent(.dialogWaiting(.signIn, message: space.host))
         let alert = NSAlert()
         alert.messageText = space.isProxy() ? "Log In to the Proxy \u{201C}\(space.host)\u{201D}" : "Log In to \u{201C}\(space.host)\u{201D}"
         var details: [String] = []
@@ -441,11 +496,12 @@ extension Tab: EnginePageScriptDelegate {
     }
 }
 
-// MARK: Link previews
+// MARK: Navigation checks and link previews
 
 extension Tab: EngineWebContentsNavigationDelegate {
-    /// A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
+        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
         let url = action.url

@@ -52,9 +52,46 @@ import Testing
         #expect(try AgentCommandLine.parse(["sessions", "stop", id.uuidString.lowercased()]).command == .sessions(.stop(id)))
     }
 
+    /// The agent tab and reading commands each run one tool with the arguments the catalog names.
+    @Test func toolCommandsParseIntoTheirCalls() throws {
+        func call(_ arguments: [String]) throws -> AgentToolCall? {
+            guard case .tool(let call) = try AgentCommandLine.parse(arguments).command else { return nil }
+            return call
+        }
+        #expect(try call(["open", "https://example.org/a?b=c"]) == AgentToolCall(name: "open_tab", arguments: ["url": "https://example.org/a?b=c"]))
+        #expect(try call(["navigate", "t3", "https://example.org/"]) == AgentToolCall(name: "navigate", arguments: ["tab": "t3", "url": "https://example.org/"]))
+        for action in ["back", "forward", "reload"] {
+            #expect(try call([action, "t2"]) == AgentToolCall(name: "navigate", arguments: ["tab": "t2", "action": .string(action)]))
+        }
+        #expect(try call(["close", "t1"]) == AgentToolCall(name: "close_tab", arguments: ["tab": "t1"]))
+        #expect(try call(["text", "t1"]) == AgentToolCall(name: "read_text", arguments: ["tab": "t1"]))
+        #expect(try call(["text", "t1", "--offset", "20000"]) == AgentToolCall(name: "read_text", arguments: ["tab": "t1", "offset": 20_000]))
+        #expect(try call(["wait", "t1", "--load"]) == AgentToolCall(name: "wait_for", arguments: ["tab": "t1", "load": true]))
+        #expect(try call(["wait", "t1", "--text", "Sign in", "--timeout", "5000"]) == AgentToolCall(name: "wait_for", arguments: ["tab": "t1", "text": "Sign in", "timeout_ms": 5_000]))
+        #expect(try call(["wait", "--url", "/done", "t1"]) == AgentToolCall(name: "wait_for", arguments: ["tab": "t1", "url": "/done"]))
+        #expect(try call(["downloads"]) == AgentToolCall(name: "list_downloads"))
+        #expect(try call(["history", "release", "notes"]) == AgentToolCall(name: "search_history", arguments: ["query": "release notes"]))
+        #expect(try call(["call", "session_info"]) == AgentToolCall(name: "session_info"))
+        #expect(try call(["call", "read_text", #"{"tab": "t1", "offset": 5}"#]) == AgentToolCall(name: "read_text", arguments: ["tab": "t1", "offset": 5]))
+        #expect(try AgentCommandLine.parse(["--json", "open", "https://example.org/"]).json)
+    }
+
     @Test(arguments: [
         ([], "Name a command."),
-        (["open", "https://example.org"], "Unknown command open."),
+        (["click", "t1", "e1"], "Unknown command click."),
+        (["open"], "open takes <url>."),
+        (["navigate", "t1"], "navigate takes <tab> <url>."),
+        (["close", "t1", "t2"], "close takes <tab>."),
+        (["text", "t1", "--offset", "ten"], "--offset takes a whole number."),
+        (["text", "t1", "--offset"], "--offset needs a value."),
+        (["open", "https://example.org", "--offset", "1"], "Only text takes --offset."),
+        (["wait", "t1"], "wait takes one of --load, --text, or --url."),
+        (["wait", "t1", "--load", "--url", "x"], "wait takes one of --load, --text, or --url."),
+        (["text", "t1", "--load"], "Only wait takes --load."),
+        (["history"], "history needs a query."),
+        (["downloads", "now"], "downloads takes no arguments."),
+        (["call"], "call takes a tool's name and at most one JSON object."),
+        (["call", "read_text", "[1]"], "call's arguments must be one JSON object, such as '{\"tab\": \"t1\"}'."),
         (["status", "now"], "status takes no arguments."),
         (["tools", "all"], "tools takes no arguments."),
         (["guide", "cli", "browsing"], "guide takes at most one topic."),

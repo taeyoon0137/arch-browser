@@ -74,7 +74,7 @@ public struct EngineContextMenuElement: Sendable {
     }
 }
 
-/// Decides whether a navigation goes ahead. The WebKit engine asks about every navigation; the Chromium engine asks only about links the user clicked with Shift (`newWindow`).
+/// Decides whether a navigation goes ahead. Both engines ask about every main frame navigation, again at each server redirect with the redirect's address, and about each link the user clicked with Shift (`newWindow`); a frame inside the page asks about nothing else.
 public protocol EngineWebContentsNavigationDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy
 }

@@ -305,6 +305,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
                    client:(CefRefPtr<CefClient> &)client
                 extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
 - (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
@@ -600,10 +601,14 @@ public:
         return true;
     }
 
-    // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's.
+    // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's. The delegate decides every other main frame navigation, and CEF asks again before each server redirect's request, with `is_redirect` set, so a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool user_gesture,
                         bool is_redirect) override {
-        bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL()) userGesture:user_gesture];
+        NSString *url = ToNSString(request->GetURL());
+        bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:url userGesture:user_gesture];
+        if (!cancel && frame->IsMain() && owner_ != nil) {
+            cancel = ![owner_ handleShouldBrowse:url isRedirect:is_redirect userGesture:user_gesture];
+        }
         if (!cancel && frame->IsMain()) {
             [owner_ handleMainFrameNavigationPending:YES];
         }
@@ -1135,6 +1140,11 @@ private:
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
     return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url userGesture:userGesture];
+}
+
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    return delegate == nil || [delegate cefBrowserShouldBrowseToURL:url isRedirect:isRedirect userGesture:userGesture];
 }
 
 // Only a link the user clicked with Shift, which Chromium gives the new window disposition, asks the delegate. Every other link may open.

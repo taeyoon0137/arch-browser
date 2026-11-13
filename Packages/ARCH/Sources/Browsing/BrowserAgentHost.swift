@@ -1,6 +1,7 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, and the search engine's results address for the sessions' site scope. Later tasks add agent tabs and folders, dialogs, downloads, and permission requests here.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, passes on what happens in them, and asks the service about each of their navigations. Later tasks add shared tabs, snapshots, actions, and approvals here.
 import Agent
 import AppKit
+import ARCHEngine
 import Combine
 import Foundation
 
@@ -9,7 +10,13 @@ import Foundation
 
     private unowned let session: BrowserSession
     public var personasDidChange: (() -> Void)?
+    public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
+    public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
     private var cancellables: Set<AnyCancellable> = []
+    /// The agent tabs this host follows, each with its owner, until it closes or the user takes it over.
+    private var followed: [UUID: (owner: UUID, observer: AnyCancellable)] = [:]
+    /// The tab `closeAgentTab(_:)` is closing, whose close the agent asked for and so hears nothing of.
+    private var closingTabID: UUID?
 
     public init(session: BrowserSession) {
         self.session = session
@@ -19,6 +26,7 @@ import Foundation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.personasDidChange?() } }
             .store(in: &cancellables)
+        session.agentMonitor = self
     }
 
     public var personas: [AgentPersonaInfo] {
@@ -34,9 +42,14 @@ import Foundation
         return session.tabsInSidebarOrder.filter { ids.contains($0.id) }.map(Self.info(of:))
     }
 
+    public func agentTabs(of ownerID: UUID) -> [AgentTabInfo] {
+        session.tabsInSidebarOrder.filter { $0.agentOwnerID == ownerID }.map(Self.info(of:))
+    }
+
     /// A tab as the agents' service sees it.
     static func info(of tab: Tab) -> AgentTabInfo {
-        AgentTabInfo(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, isLoading: tab.isLoading, engine: tab.engineKind)
+        AgentTabInfo(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, isLoading: tab.isLoading, canGoBack: tab.canGoBack, canGoForward: tab.canGoForward,
+                     engine: tab.engineKind, agentOwnerID: tab.agentOwnerID)
     }
 
     /// The results page of the search engine chosen in Settings ▸ General, which takes the terms in `q`.
@@ -55,5 +68,82 @@ import Foundation
 
     public func windowForSheet() -> NSWindow? {
         session.sidebarTarget().nsWindow
+    }
+
+    // MARK: Agent tabs
+
+    public func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
+        guard let tab = session.openAgentTab(url: url, engine: engine, owner: owner.id, folderName: owner.folderName, in: owner.spaceID) else { return nil }
+        follow(tab, owner: owner.id)
+        return Self.info(tab)
+    }
+
+    public func navigate(_ tabID: UUID, _ navigation: AgentNavigation) {
+        guard let tab = agentTab(tabID) else { return }
+        let controller = tab.webContents.navigationController
+        switch navigation {
+        case .load(let url): controller.load(URLRequest(url: url))
+        case .back: controller.goBack()
+        case .forward: controller.goForward()
+        case .reload: controller.reload()
+        }
+    }
+
+    public func closeAgentTab(_ tabID: UUID) {
+        guard let tab = agentTab(tabID) else { return }
+        closingTabID = tabID
+        session.closeTab(tab, remember: false)
+        closingTabID = nil
+    }
+
+    public func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void) {
+        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        tab.webContents.readableContent(limit: limit, completion: completion)
+    }
+
+    public func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
+        await session.history.suggestions(for: query, limit: limit).map { AgentHistoryPage(url: $0.url, title: $0.title) }
+    }
+
+    /// An open tab that an agent folder holds.
+    private func agentTab(_ id: UUID) -> Tab? {
+        session.tabs.first { $0.id == id && $0.agentOwnerID != nil }
+    }
+
+    /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs.
+    private func follow(_ tab: Tab, owner: UUID) {
+        let observer = tab.$folderID.combineLatest(session.$folders)
+            .dropFirst()
+            .sink { [weak self, weak tab] _ in
+                // The published values come before the change is stored, so the check runs once both are in.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, let tab, self.followed[tab.id] != nil, tab.agentOwnerID != owner, self.session.allTabs.contains(where: { $0 === tab }) else { return }
+                        self.followed[tab.id] = nil
+                        self.agentTabDidReport?(owner, tab.id, .takenOver)
+                    }
+                }
+            }
+        followed[tab.id] = (owner, observer)
+    }
+}
+
+extension BrowserAgentHost: AgentTabMonitor {
+    nonisolated func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
+        MainActor.assumeIsolated { agentTabMayLoad?(owner, tab.id, url) ?? false }
+    }
+
+    nonisolated func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {
+        MainActor.assumeIsolated {
+            if case .opened(let openedID) = report, let opened = session.tabs.first(where: { $0.id == openedID }) { follow(opened, owner: owner) }
+            agentTabDidReport?(owner, tab.id, report)
+        }
+    }
+
+    nonisolated func agentTabDidClose(_ tab: Tab, owner: UUID) {
+        MainActor.assumeIsolated {
+            guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
+            agentTabDidReport?(owner, tab.id, .closed)
+        }
     }
 }

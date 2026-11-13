@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the agent tab and reading commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `text`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
 import AgentControl
 import Foundation
 
@@ -43,6 +43,8 @@ enum CLICommands {
             return task(start, json: request.json)
         case .sessions(let action):
             return sessions(action, json: request.json)
+        case .tool(let call):
+            return runTool(call, json: request.json)
         }
     }
 

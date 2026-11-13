@@ -41,9 +41,11 @@ import Testing
         _ = try await client.hello()
         // Before a grant, the list names every served tool, since the sheet may allow any of them.
         let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
-        #expect(names == ["session_info", "list_spaces", "list_tabs", "guide"])
-        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == ["session_info", "list_spaces", "list_tabs", "guide"])
-        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == ["session_info", "list_spaces", "list_tabs", "guide"])
+        let readOnly = ["session_info", "list_spaces", "list_tabs", "open_tab", "navigate", "close_tab", "read_text", "wait_for", "list_downloads"]
+        #expect(names == readOnly + ["search_history", "guide"])
+        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == readOnly + ["search_history", "guide"])
+        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == readOnly + ["guide"])
+        #expect(AgentToolHost.tools(for: .actInAgentTabs, scopes: AgentGrantScopes(searchHistory: true)).map(\.name) == readOnly + ["search_history", "guide"])
     }
 
     @Test func aGrantSendsToolsChangedToTheClientsConnections() async throws {
@@ -92,7 +94,7 @@ import Testing
         harness.now += AgentService.askInterval + 1
         harness.authenticator.answer = true
         let result = try await client.callTool("session_info")
-        #expect(result.text.hasPrefix("This client has Ask Before Acting access in the Work Persona, in the space Office (s1)."))
+        #expect(result.text.hasPrefix("This client has Ask Before Acting access in Work / Office (s1)."))
         #expect(harness.authenticator.count == 2)
         #expect(service.settings.grants.map(\.personaID) == [FakeHost.workPersona.id])
         #expect(service.settings.grants.first?.spaceID == work.id)

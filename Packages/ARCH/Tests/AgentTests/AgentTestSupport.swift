@@ -17,6 +17,24 @@ import Testing
     private(set) var agentOnlyPersonaID: UUID?
     private(set) var madeAgentsPersonas = 0
     var personasDidChange: (() -> Void)?
+    var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
+    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+
+    /// The pages the fake engine serves, by address, with their titles and text; any other address loads with an empty title and no text.
+    var pages: [URL: (title: String, text: String)] = [:]
+    /// Server redirects, by the address that answers with the next.
+    var redirects: [URL: URL] = [:]
+    /// Addresses whose load never finishes, as a page that keeps loading.
+    var hangingAddresses: Set<URL> = []
+    /// Addresses that fail to load, which leaves the tab on its page.
+    var failingAddresses: Set<URL> = []
+    /// Tabs whose page never answers a read, as while it shows a dialog.
+    var silentTabIDs: Set<UUID> = []
+    var history: [AgentHistoryPage] = []
+    private(set) var openedOwners: [AgentTabOwner] = []
+    private(set) var closedTabIDs: [UUID] = []
+    private(set) var navigations: [AgentNavigation] = []
+    private var backList: [UUID: [URL]] = [:]
 
     nonisolated static let defaultPersona = AgentPersonaInfo(id: UUID(uuidString: "D59DAF4B-E372-4AF9-890E-455B8B3860F3")!, name: "Default")
     nonisolated static let workPersona = AgentPersonaInfo(id: UUID(), name: "Work")
@@ -32,6 +50,108 @@ import Testing
     func spaces(in personaID: UUID) -> [AgentSpaceInfo] { spacesByPersona[personaID] ?? [] }
 
     func tabs(withIDs ids: Set<UUID>) -> [AgentTabInfo] { tabs.filter { ids.contains($0.id) } }
+
+    func agentTabs(of ownerID: UUID) -> [AgentTabInfo] { tabs.filter { $0.agentOwnerID == ownerID } }
+
+    func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
+        guard spacesByPersona.values.contains(where: { $0.contains { $0.id == owner.spaceID } }) else { return nil }
+        openedOwners.append(owner)
+        let tab = AgentTabInfo(id: UUID(), spaceID: owner.spaceID, title: "", url: nil, isLoading: true, engine: engine ?? .webKit, agentOwnerID: owner.id)
+        tabs.append(tab)
+        load(url, in: tab.id)
+        return tab
+    }
+
+    func navigate(_ tabID: UUID, _ navigation: AgentNavigation) {
+        navigations.append(navigation)
+        guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
+        switch navigation {
+        case .load(let url): load(url, in: tabID)
+        case .reload: if let url = tab.url { load(url, in: tabID, keepsHistory: true) }
+        case .back:
+            if let previous = backList[tabID]?.popLast() { load(previous, in: tabID, keepsHistory: true) }
+        case .forward: break
+        }
+    }
+
+    func closeAgentTab(_ tabID: UUID) {
+        closedTabIDs.append(tabID)
+        tabs.removeAll { $0.id == tabID }
+    }
+
+    func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void) {
+        guard !silentTabIDs.contains(tabID) else { return }
+        guard let tab = tabs.first(where: { $0.id == tabID }), let url = tab.url else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        let text = pages[url]?.text ?? ""
+        completion(.success(EngineReadableContent(url: url, title: tab.title, text: String(text.prefix(limit)), isTruncated: text.count > limit)))
+    }
+
+    func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
+        Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
+    }
+
+    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one and reports the document, or reports only the stop when a hop was refused or the load failed.
+    func load(_ url: URL, in tabID: UUID, keepsHistory: Bool = false) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        tabs[index].isLoading = true
+        let owner = tabs[index].agentOwnerID
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated {
+                var address = url
+                while true {
+                    if let owner, agentTabMayLoad?(owner, tabID, address) == false { return stop(tabID) }
+                    guard let next = redirects[address] else { break }
+                    address = next
+                }
+                guard !hangingAddresses.contains(address) else { return }
+                guard !failingAddresses.contains(address) else { return stop(tabID) }
+                guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+                if !keepsHistory, let current = tabs[index].url { backList[tabID, default: []].append(current) }
+                tabs[index].url = address
+                tabs[index].title = pages[address]?.title ?? ""
+                tabs[index].isLoading = false
+                tabs[index].canGoBack = !(backList[tabID] ?? []).isEmpty
+                if let owner {
+                    agentTabDidReport?(owner, tabID, .loaded(url: address, title: tabs[index].title))
+                    agentTabDidReport?(owner, tabID, .stoppedLoading)
+                }
+            }
+        }
+    }
+
+    private func stop(_ tabID: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        tabs[index].isLoading = false
+        if let owner = tabs[index].agentOwnerID { agentTabDidReport?(owner, tabID, .stoppedLoading) }
+    }
+
+    /// A page in `openerID` opens a tab at `url`, which joins the opener's folder, as `Browsing` reports it.
+    @discardableResult
+    func openPopup(from openerID: UUID, at url: URL) -> UUID? {
+        guard let opener = tabs.first(where: { $0.id == openerID }), let owner = opener.agentOwnerID else { return nil }
+        let popup = AgentTabInfo(id: UUID(), spaceID: opener.spaceID, title: "", url: nil, isLoading: true, engine: opener.engine, agentOwnerID: owner)
+        tabs.append(popup)
+        guard agentTabMayLoad?(owner, openerID, url) != false else {
+            tabs.removeAll { $0.id == popup.id }
+            return nil
+        }
+        agentTabDidReport?(owner, openerID, .opened(tab: popup.id))
+        load(url, in: popup.id)
+        return popup.id
+    }
+
+    /// The user drags the tab out of its agent folder.
+    func takeOver(_ tabID: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }), let owner = tabs[index].agentOwnerID else { return }
+        tabs[index].agentOwnerID = nil
+        agentTabDidReport?(owner, tabID, .takenOver)
+    }
+
+    /// What `Browsing` reports from an agent tab.
+    func report(_ report: AgentTabReport, in tabID: UUID) {
+        guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return }
+        agentTabDidReport?(owner, tabID, report)
+    }
 
     func makeAgentsPersona() -> UUID {
         madeAgentsPersonas += 1

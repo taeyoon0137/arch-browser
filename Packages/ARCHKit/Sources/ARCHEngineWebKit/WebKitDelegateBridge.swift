@@ -60,9 +60,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Downloads a link marked for download instead of navigating, if the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         var policy = allowed
-        if let url = navigationAction.request.url, let delegate = owner.navigationDelegate {
-            let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
-                                                isUserInitiated: navigationAction.navigationType == .linkActivated)
+        // The delegate hears of main frame navigations, each server redirect of one included, of navigations to a new web view, and of links clicked with Shift, as on Chromium; a frame inside the page loads without asking.
+        let disposition = Self.disposition(of: navigationAction)
+        if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
+           navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow {
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated)
             if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
         }
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }

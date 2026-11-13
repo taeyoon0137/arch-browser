@@ -766,9 +766,10 @@ public final class BrowserSession: ObservableObject {
     private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space.
-        tab.openNewTab = { [weak self, weak tab] popup in
+        tab.openNewTab = { [weak self, weak tab] popup, targetURL in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
+            if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
             let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false)
             opened.opener = tab.webContents
@@ -865,6 +866,9 @@ public final class BrowserSession: ObservableObject {
             let panel = FileChooserPanel.make(for: request)
             self.sheets.enqueue(panel, for: tab) { completion($0 == .OK ? FileChooserPanel.chosenURLs(of: panel) : nil) }
         }
+        // A tab is an agent's while an agent folder holds it.
+        tab.agentOwnerOfFolder = { [weak self] id in self?.folders.first { $0.id == id }?.agentSessionID }
+        tab.agentMonitor = agentMonitor
         // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.
         tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() }
         return tab
@@ -930,12 +934,13 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
+    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log. An agent's tab joins neither, and its agent folder goes once it is empty.
     public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return }
-        recordClose(of: tab, reason: reason)
+        let keeps = Self.closeKeeps(tab, remember: remember)
+        recordClose(of: tab, reason: reason, logs: keeps.closeLog)
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
         sheets.cancel(for: tab)
         if let index { tabs.remove(at: index) }
@@ -943,8 +948,12 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
-        if remember, let spaceID = tab.spaceID {
+        if keeps.closedList, let spaceID = tab.spaceID {
             addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
+        }
+        if let owner = tab.agentOwnerID {
+            agentMonitor?.agentTabDidClose(tab, owner: owner)
+            removeAgentFolderIfEmpty(tab.folderID)
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
@@ -958,6 +967,12 @@ public final class BrowserSession: ObservableObject {
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
         }
+    }
+
+    /// What closing `tab` keeps of it: a record in the closed list, which ⇧⌘T reopens, for a space's tab when `remember` holds, and an entry in the tab close log. An agent's tab leaves neither (docs/agents.md, In the browser ▸ Agent folders).
+    static func closeKeeps(_ tab: Tab, remember: Bool) -> (closedList: Bool, closeLog: Bool) {
+        guard tab.agentOwnerID == nil else { return (false, false) }
+        return (remember && tab.spaceID != nil, true)
     }
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
@@ -1027,11 +1042,12 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona leaves the tab where it is.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in an agent folder that does not hold the tab already, leaves the tab where it is, since a tab reaches an agent only when the agent opens it.
     public func moveTab(_ id: UUID, to target: Tab) {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
+        if target.agentOwnerID != nil, tab.folderID != target.folderID { return }
         let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
@@ -1049,11 +1065,11 @@ public final class BrowserSession: ObservableObject {
     /// The hours while nothing is saved under `archiveAfterHoursKey`.
     public static let archiveAfterHoursByDefault = 12
 
-    /// Closes unpinned listed tabs inactive for the hours saved under `archiveAfterHoursKey` (`archiveAfterHoursByDefault` while none are; 0 disables), so a small window's tab stays. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
+    /// Closes unpinned listed tabs inactive for the hours saved under `archiveAfterHoursKey` (`archiveAfterHoursByDefault` while none are; 0 disables), so a small window's tab stays, and so does an agent's tab, which closes with its agent or at quit. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
     public func archiveInactiveTabs() {
         guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
         windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = Date() }
-        for tab in tabs where tab.isListedInSidebar && !tab.isPinned && tab.lastActivatedAt < cutoff {
+        for tab in tabs where tab.isListedInSidebar && !tab.isPinned && tab.agentOwnerID == nil && tab.lastActivatedAt < cutoff {
             closeTab(tab, reason: .archive)
             undoableCloseCount = 0
         }
@@ -1219,10 +1235,10 @@ public final class BrowserSession: ObservableObject {
     /// Why each tab closed this launch, for the tab close log window.
     public let closeLog = TabCloseLog()
 
-    /// Logs a closing tab with its crash count and the engines' total, and drops it from each window's switcher order.
-    private func recordClose(of tab: Tab, reason: TabCloseReason) {
+    /// Drops a closing tab from each window's switcher order and, when `logs` holds, logs it with its crash count and the engines' total.
+    private func recordClose(of tab: Tab, reason: TabCloseReason, logs: Bool) {
         windows.forEach { $0.forgetActivation(of: tab.id) }
-        closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount))
+        if logs { closeLog.record(TabCloseLogEntry(reason: reason, tab: tab, sessionCrashCount: rendererCrashCount)) }
     }
 
     // MARK: Site data
@@ -1336,10 +1352,16 @@ public final class BrowserSession: ObservableObject {
         tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
-    /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list.
+    /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list. An agent folder takes none, since a tab reaches an agent only when the agent opens it.
     public func moveTab(_ id: UUID, toFolder folderID: UUID) {
-        guard let folder = folders.first(where: { $0.id == folderID }), let index = tabs.firstIndex(where: { $0.id == id }),
-              tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folderID else { return }
+        guard let folder = folders.first(where: { $0.id == folderID }), !folder.isAgentFolder else { return }
+        putTab(id, in: folder)
+    }
+
+    /// Moves a tab into a folder of its space, after the folder's own tabs, whatever the folder: also an agent folder, which only the agent's own tabs join.
+    private func putTab(_ id: UUID, in folder: TabFolder) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folder.id else { return }
+        let folderID = folder.id
         var reordered = tabs
         let tab = reordered.remove(at: index)
         tab.isPinned = folder.isPinned
@@ -1362,6 +1384,18 @@ public final class BrowserSession: ObservableObject {
     public func deleteFolder(_ id: UUID) {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
         takeOutOfFolder(tabs(in: folder))
+        folders.removeAll { $0.id == id }
+        windows.forEach { $0.endRenamingFolder(id) }
+    }
+
+    /// Keep Tabs: the agent folder becomes an ordinary folder, and its tabs the user's, which `session.json` keeps and which record visits from then on.
+    public func keepTabs(ofFolder id: UUID) {
+        updateFolder(id) { $0.agentSessionID = nil }
+    }
+
+    /// Removes an agent folder once its last tab has closed or left it.
+    private func removeAgentFolderIfEmpty(_ id: UUID?) {
+        guard let id, folders.contains(where: { $0.id == id && $0.isAgentFolder }), !tabs.contains(where: { $0.folderID == id }) else { return }
         folders.removeAll { $0.id == id }
         windows.forEach { $0.endRenamingFolder(id) }
     }
@@ -1392,6 +1426,43 @@ public final class BrowserSession: ObservableObject {
     /// `id` while it names a folder in that space's pinned or open list, so that a saved or closed tab returns to its folder unless the folder has gone or moved.
     private func existingFolderID(_ id: UUID?, spaceID: UUID, pinned: Bool) -> UUID? {
         folders.first { $0.id == id && $0.spaceID == spaceID && $0.isPinned == pinned }?.id
+    }
+
+    // MARK: Agent tabs
+
+    /// Where agent tabs ask about their navigations and report what their rules did: `BrowserAgentHost` sets itself.
+    weak var agentMonitor: (any AgentTabMonitor)? {
+        didSet { allTabs.forEach { $0.agentMonitor = agentMonitor } }
+    }
+
+    /// Opens an agent's tab at `url` in the background, in `engine` or the default engine, in the agent folder of `owner`, which it makes named `folderName` among the open tabs of the space `spaceID` when there is none (docs/agents.md, In the browser ▸ Agent folders). It selects nothing and switches no window's space. Nil when no space has that ID.
+    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID) -> Tab? {
+        let folder: TabFolder
+        if let existing = folders.first(where: { $0.agentSessionID == owner }) {
+            folder = existing
+        } else {
+            guard spaces.contains(where: { $0.id == spaceID }) else { return nil }
+            folder = TabFolder(spaceID: spaceID, name: folderName, isPinned: false, agentSessionID: owner)
+            folders.append(folder)
+        }
+        let tab = openTab(url: url, in: folder.spaceID, select: false, engine: engine)
+        putTab(tab.id, in: folder)
+        return tab
+    }
+
+    /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
+    private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
+        guard let folder = folders.first(where: { $0.id == opener.folderID }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
+        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false)
+        opened.opener = opener.webContents
+        putTab(opened.id, in: folder)
+        if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
+            DispatchQueue.main.async { [weak self, weak opened] in
+                if let self, let opened { self.closeTab(opened, remember: false) }
+            }
+            return
+        }
+        agentMonitor?.agentTab(opener, owner: owner, didReport: .opened(tab: opened.id))
     }
 
     // MARK: Browser import
@@ -1455,9 +1526,9 @@ public final class BrowserSession: ObservableObject {
         return ids.indices.contains(index) ? ids[index] : ids.last
     }
 
-    /// The split views for `session.json`, in the order of their spaces, each as indexes into the tab list.
-    private var splitViewRecords: [[Int]] {
-        spaces.compactMap { splitTabIDs[$0.id] }.map { ids in ids.compactMap { id in tabs.firstIndex { $0.id == id } } }
+    /// The split views for `session.json`, in the order of their spaces, each as indexes into `saved`, the tabs it keeps.
+    private func splitViewRecords(among saved: [Tab]) -> [[Int]] {
+        spaces.compactMap { splitTabIDs[$0.id] }.map { ids in ids.compactMap { id in saved.firstIndex { $0.id == id } } }
     }
 
     /// Rebuilds the split views `session.json` recorded from the tabs that reopened, keyed by their records' indexes. A split view returns while two to four of its tabs reopened in one space.
@@ -1535,17 +1606,18 @@ public final class BrowserSession: ObservableObject {
         CookieSync.finishWrites()
     }
 
-    /// The session as `session.json` keeps it. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
+    /// The session as `session.json` keeps it, without agent folders and their tabs, which are gone after quit unless the user kept them. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
     private func snapshot() -> SessionSnapshot {
         let mainWindows = windows.filter { $0.kind == .main }
         let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let front = windowRecords[0]
         let now = Date()
         let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
+        let kept = SessionSnapshot.keptSidebar(tabs: tabs, folders: folders)
         return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
-                               tabs: tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt) },
-                               folders: folders, selectedTabIndex: tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
-                               splitViews: splitViewRecords, favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
+                               tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt) },
+                               folders: kept.folders, selectedTabIndex: kept.tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
+                               splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.

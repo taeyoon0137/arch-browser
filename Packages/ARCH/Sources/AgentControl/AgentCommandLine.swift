@@ -32,6 +32,8 @@ public enum AgentCLICommand: Equatable, Sendable {
     case task(AgentTaskStart)
     /// The sessions this client started (`sessions/list`), or stopping one (`task/stop`).
     case sessions(AgentSessionsAction)
+    /// One tool call: `open`, `navigate`, `back`, `forward`, `reload`, `close`, `text`, `wait`, `downloads`, `history`, and `call` with any tool's name and arguments.
+    case tool(AgentToolCall)
 }
 
 public enum AgentSessionsAction: Equatable, Sendable {
@@ -95,6 +97,23 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "setup", arguments: "claude|codex", summary: "Shows the command that adds arch-mcp to Claude Code or Codex for your user, asks, and runs it.", needsArch: false),
         AgentCLICommandSpec(name: "links", arguments: "install|remove [--dir folder]", summary: "Links arch-cli and arch-mcp into a writable folder on your PATH inside your home folder, ~/.local/bin first, or removes those links.", needsArch: false),
         AgentCLICommandSpec(name: "skills", arguments: "list|install|remove [--target t] [--path folder]", summary: "Lists, installs, or removes the \(AgentHarness.entrySkillName) skill, which tells an agent how to use Arch, in Claude Code's skill folder (--target claude), Codex's (--target codex or codex-home), or a folder of skill folders (--path). Install and remove change only the places named.", needsArch: false),
+        AgentCLICommandSpec(name: "open", arguments: "<url>", summary: "Opens an agent tab in the background at an http or https address, waits for its page, and prints the tab's handle, title, and address.", needsArch: true),
+        AgentCLICommandSpec(name: "navigate", arguments: "<tab> <url>", summary: "Loads an address in one of this client's agent tabs and prints its title and address.", needsArch: true),
+        AgentCLICommandSpec(name: "back", arguments: "<tab>", summary: "Goes back in an agent tab.", needsArch: true),
+        AgentCLICommandSpec(name: "forward", arguments: "<tab>", summary: "Goes forward in an agent tab.", needsArch: true),
+        AgentCLICommandSpec(name: "reload", arguments: "<tab>", summary: "Reloads an agent tab.", needsArch: true),
+        AgentCLICommandSpec(name: "close", arguments: "<tab>", summary: "Closes one of this client's agent tabs.", needsArch: true),
+        AgentCLICommandSpec(name: "text", arguments: "<tab> [--offset n]", summary: "Prints a page's readable text, \(AgentLimits.readTextCharactersPerCall.formatted(.number.locale(Locale(identifier: "en_US")))) characters at a time from character n.", needsArch: true),
+        AgentCLICommandSpec(name: "wait", arguments: "<tab> --load|--text t|--url u [--timeout ms]", summary: "Waits until the page loads, shows the text t, or has an address containing u, for at most ms milliseconds, \((AgentLimits.toolWaitSeconds * 1000).formatted(.number.locale(Locale(identifier: "en_US")))) by default.", needsArch: true),
+        AgentCLICommandSpec(name: "downloads", arguments: "", summary: "Lists the downloads this client's agent tabs started.", needsArch: true),
+        AgentCLICommandSpec(name: "history", arguments: "<query>", summary: "Searches the browsing history for the query's words, when this client's grant includes the history scope.", needsArch: true),
+        AgentCLICommandSpec(name: "call", arguments: "<tool> [json]", summary: "Runs any tool, with its arguments as one JSON object.", needsArch: true),
+    ]
+
+    /// The options that take a value, and the commands that take each option.
+    private static let valueOptions: Set<String> = ["--offset", "--text", "--url", "--timeout"]
+    private static let optionCommands: [String: Set<String>] = [
+        "--shared": ["tabs"], "--offset": ["text"], "--load": ["wait"], "--text": ["wait"], "--url": ["wait"], "--timeout": ["wait"],
     ]
 
     /// Tells `arch-mcp` from `arch-cli` by the name the process was started under, which for the link in `Contents/Helpers` or on PATH is `arch-mcp`, and by an `mcp` first argument.
@@ -106,11 +125,11 @@ public enum AgentCommandLine {
         return .cli(rest)
     }
 
-    /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`; `--space`, `--mode`, and `--model` each take the next argument and, with `--deny-approvals`, belong to `task`.
+    /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. An option of `optionCommands` belongs to the commands it lists and takes the next argument when it takes a value; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`; `--space`, `--mode`, and `--model` each take the next argument and, with `--deny-approvals`, belong to `task`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
         var json = false
         var help = false
-        var shared = false
+        var options: [String: String] = [:]
         var folder: String?
         var taskOptions = TaskOptions()
         var places: [AgentSkillInstaller.Place] = []
@@ -120,7 +139,6 @@ public enum AgentCommandLine {
             switch argument {
             case "--json": json = true
             case "--help", "-h": help = true
-            case "--shared": shared = true
             case "--dir":
                 guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--dir needs a folder.") }
                 folder = value
@@ -142,6 +160,13 @@ public enum AgentCommandLine {
                 guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--model needs a model's name.") }
                 taskOptions.model = value
             case "--deny-approvals": taskOptions.deniesApprovals = true
+            case _ where optionCommands[argument] != nil:
+                if valueOptions.contains(argument) {
+                    guard let value = remaining.popFirst() else { throw AgentUsageError(message: "\(argument) needs a value.") }
+                    options[argument] = value
+                } else {
+                    options[argument] = ""
+                }
             case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "Unknown option \(argument).")
             default: words.append(argument)
             }
@@ -149,7 +174,12 @@ public enum AgentCommandLine {
         if help { return AgentCLIRequest(command: .help, json: json) }
         guard let name = words.first else { throw AgentUsageError(message: "Name a command.") }
         let operands = Array(words.dropFirst())
-        if shared, name != "tabs" { throw AgentUsageError(message: "Only tabs takes --shared.") }
+        for option in options.keys.sorted() {
+            guard let commands = optionCommands[option], commands.contains(name) else {
+                let takers = optionCommands[option]?.sorted().joined(separator: " and ") ?? ""
+                throw AgentUsageError(message: "Only \(takers) takes \(option).")
+            }
+        }
         let command: AgentCLICommand
         switch name {
         case "help":
@@ -165,7 +195,7 @@ public enum AgentCommandLine {
             command = .spaces
         case "tabs":
             try expectNoOperands(operands, for: name)
-            command = .tabs(shared: shared)
+            command = .tabs(shared: options["--shared"] != nil)
         case "release":
             try expectNoOperands(operands, for: name)
             command = .release
@@ -210,7 +240,7 @@ public enum AgentCommandLine {
         case "sessions":
             command = .sessions(try sessionsAction(operands))
         default:
-            throw AgentUsageError(message: "Unknown command \(name).")
+            command = .tool(try toolCall(name, operands, options))
         }
         if case .links = command {} else if folder != nil { throw AgentUsageError(message: "--dir belongs to links.") }
         if case .skills = command {} else if !places.isEmpty { throw AgentUsageError(message: "--target and --path belong to skills.") }
@@ -252,6 +282,60 @@ public enum AgentCommandLine {
         default:
             throw AgentUsageError(message: "arch-mcp takes no arguments other than --session.")
         }
+
+    /// The tool call of a command that runs one, from its operands and options.
+    private static func toolCall(_ name: String, _ operands: [String], _ options: [String: String]) throws -> AgentToolCall {
+        switch name {
+        case "open":
+            let url = try expectOperands(operands, ["url"], for: name)[0]
+            return AgentToolCall(name: "open_tab", arguments: ["url": .string(url)])
+        case "navigate":
+            let given = try expectOperands(operands, ["tab", "url"], for: name)
+            return AgentToolCall(name: "navigate", arguments: ["tab": .string(given[0]), "url": .string(given[1])])
+        case "back", "forward", "reload":
+            let tab = try expectOperands(operands, ["tab"], for: name)[0]
+            return AgentToolCall(name: "navigate", arguments: ["tab": .string(tab), "action": .string(name)])
+        case "close":
+            let tab = try expectOperands(operands, ["tab"], for: name)[0]
+            return AgentToolCall(name: "close_tab", arguments: ["tab": .string(tab)])
+        case "text":
+            var arguments: [String: AgentJSON] = ["tab": .string(try expectOperands(operands, ["tab"], for: name)[0])]
+            if let offset = options["--offset"] { arguments["offset"] = .number(Double(try whole(offset, for: "--offset"))) }
+            return AgentToolCall(name: "read_text", arguments: arguments)
+        case "wait":
+            var arguments: [String: AgentJSON] = ["tab": .string(try expectOperands(operands, ["tab"], for: name)[0])]
+            let conditions = ["--load", "--text", "--url"].filter { options[$0] != nil }
+            guard conditions.count == 1 else { throw AgentUsageError(message: "wait takes one of --load, --text, or --url.") }
+            if options["--load"] != nil { arguments["load"] = true }
+            if let text = options["--text"] { arguments["text"] = .string(text) }
+            if let url = options["--url"] { arguments["url"] = .string(url) }
+            if let timeout = options["--timeout"] { arguments["timeout_ms"] = .number(Double(try whole(timeout, for: "--timeout"))) }
+            return AgentToolCall(name: "wait_for", arguments: arguments)
+        case "downloads":
+            try expectNoOperands(operands, for: name)
+            return AgentToolCall(name: "list_downloads")
+        case "history":
+            guard !operands.isEmpty else { throw AgentUsageError(message: "history needs a query.") }
+            return AgentToolCall(name: "search_history", arguments: ["query": .string(operands.joined(separator: " "))])
+        case "call":
+            guard let tool = operands.first, operands.count <= 2 else { throw AgentUsageError(message: "call takes a tool's name and at most one JSON object.") }
+            guard let text = operands.dropFirst().first else { return AgentToolCall(name: tool) }
+            guard let arguments = (try? AgentJSON.decode(Data(text.utf8)))?.objectValue else { throw AgentUsageError(message: "call's arguments must be one JSON object, such as '{\"tab\": \"t1\"}'.") }
+            return AgentToolCall(name: tool, arguments: arguments)
+        default:
+            throw AgentUsageError(message: "Unknown command \(name).")
+        }
+    }
+
+    /// The operands of a command that takes exactly these, by name.
+    private static func expectOperands(_ operands: [String], _ names: [String], for name: String) throws -> [String] {
+        guard operands.count == names.count else { throw AgentUsageError(message: "\(name) takes \(names.map { "<\($0)>" }.joined(separator: " ")).") }
+        return operands
+    }
+
+    private static func whole(_ text: String, for option: String) throws -> Int {
+        guard let value = Int(text), value >= 0 else { throw AgentUsageError(message: "\(option) takes a whole number.") }
+        return value
     }
 
     private static func expectNoOperands(_ operands: [String], for name: String) throws {

@@ -446,10 +446,10 @@ public final class BrowserWindowModel: ObservableObject {
         if session.windows.count > 1 { nsWindow?.performClose(nil) }
     }
 
-    /// Closes other tabs in the selected tab's space, keeping pinned tabs and the tabs of small windows. A small window has no other tabs.
+    /// Closes other tabs in the selected tab's space, keeping pinned tabs, the tabs of small windows, and agents' tabs. A small window has no other tabs.
     public func closeOtherTabs() {
         guard kind == .main, let selected = selectedTab else { return }
-        for tab in session.tabs where tab.spaceID == selected.spaceID && tab.isListedInSidebar && !tab.isPinned && tab.id != selected.id {
+        for tab in session.tabs where tab.spaceID == selected.spaceID && tab.isListedInSidebar && !tab.isPinned && tab.agentOwnerID == nil && tab.id != selected.id {
             session.requestCloseTab(tab)
         }
     }

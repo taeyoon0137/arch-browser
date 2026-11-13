@@ -72,7 +72,8 @@ struct TabRowView: View {
             Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
             Divider()
             Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
-            let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []
+            // An agent folder takes only its agent's tabs.
+            let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID && !$0.isAgentFolder } } ?? []
             if !otherFolders.isEmpty {
                 Menu("Move to Folder") {
                     ForEach(otherFolders) { folder in
