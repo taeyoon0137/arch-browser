@@ -1,4 +1,4 @@
-// Saved pages (`docs/bookmarks.md`, Saved pages; bookmark rules 2 and 3): a tab saves its page as it becomes pinned and forgets it as it is unpinned, takes the first address its page reports when it had none, compares addresses as rule 3 says, keeps its saved page in its records, and returns to it, replaces it, or edits it; a favorite cannot take another favorite's address. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine.
+// Saved pages (`docs/bookmarks.md`, Saved pages; bookmark rules 2 and 3): a tab saves its page as it becomes pinned and forgets it as it is unpinned, takes the first address its page reports when it had none, compares addresses as rule 3 says, keeps its saved page in its records, and returns to it, replaces it, or edits it; a favorite takes its tab's page or an edited name and address, but not another favorite's address; an imported pinned tab is saved at its address, which keeps it out of the next import. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine.
 import ARCHEngine
 import Foundation
 import Testing
@@ -64,10 +64,24 @@ import Testing
         #expect(tab.savedPage == SavedPage(url: home, title: "Home"))
         page.report(url: home, title: "Home, Renamed")
         #expect(tab.savedPage == SavedPage(url: home, title: "Home"))
-        // A tab made pinned, as a reopened record without a saved page is, takes it the same way, and then the title its page shows there.
+        // A tab made pinned without a saved page, as one reopened from a record without an address, takes it the same way, and then the title its page shows there.
         let (reopened, reopenedPage) = self.tab(at: nil, pinned: true)
         reopenedPage.report(url: elsewhere, title: "Other")
         #expect(reopened.savedPage == SavedPage(url: elsewhere, title: "Other"))
+        // The title the tab still shows from the page before is not the new page's.
+        let (late, latePage) = self.tab(at: nil, title: "Previous", pinned: true)
+        latePage.report(url: elsewhere)
+        #expect(late.savedPage == SavedPage(url: elsewhere, title: ""))
+    }
+
+    @Test func aTabMadePinnedOnAPageThatHasItsAddressTakesItsSavedPageFromItsRecord() {
+        // A WebKit page reports the address it opens at before its tab exists, so the tab learns no address to save from its page. A reopened tab therefore takes its saved page from its record, which `normalized()` fills for closed records of files before version 13 as well.
+        let page = PageStub(engine: .webKit, url: home)
+        let reopened = Tab(id: UUID(), webContents: page, spaceID: spaceID, isPinned: true, personaID: personaID)
+        #expect(reopened.url == home)
+        #expect(reopened.savedPage == nil)
+        let record = SessionSnapshot.TabRecord(id: reopened.id, spaceID: spaceID, url: home, title: "Home", isPinned: true).repairingSavedPage()
+        #expect(record.savedPage == SavedPage(url: home, title: "Home"))
     }
 
     @Test(arguments: [
@@ -193,6 +207,60 @@ import Testing
         #expect(BrowserSession.canUse(first.url, asAddressOf: otherPersonas, among: favorites))
     }
 
+    @Test func aFavoriteTakesItsTabsPageUnlessAnotherFavoriteOfItsPersonaHasIt() throws {
+        let favorite = Favorite(url: home, title: "Home", personaID: personaID)
+        let other = Favorite(url: try #require(URL(string: "https://b.example")), title: "B", personaID: personaID)
+        let favorites = [favorite, other]
+        let (tab, page) = self.tab(at: elsewhere, title: "Other", pinned: false)
+        let moved = try #require(favorite.usingCurrentPage(of: tab, among: favorites))
+        #expect(moved.id == favorite.id)
+        #expect(moved.url == elsewhere && moved.title == "Other")
+        // A page without a title gives its host.
+        page.report(url: URL(string: "https://news.example/today"))
+        #expect(favorite.usingCurrentPage(of: tab, among: favorites)?.title == "news.example")
+        page.report(url: other.url, title: "B")
+        #expect(favorite.usingCurrentPage(of: tab, among: favorites) == nil)
+        page.report(url: nil)
+        #expect(favorite.usingCurrentPage(of: tab, among: favorites) == nil)
+    }
+
+    @Test func editFavoriteTakesANameAndAnAddressAndRefusesAnotherFavoritesAddress() throws {
+        let favorite = Favorite(url: home, title: "Home", personaID: personaID)
+        let other = Favorite(url: try #require(URL(string: "https://b.example")), title: "B", personaID: personaID)
+        let favorites = [favorite, other]
+        let edited = try #require(favorite.edited(name: " Start ", address: "news.example/today", among: favorites))
+        #expect(edited.id == favorite.id)
+        #expect(edited.title == "Start" && edited.url == URL(string: "https://news.example/today"))
+        // An empty name keeps the old one.
+        #expect(favorite.edited(name: "  ", address: "https://news.example", among: favorites)?.title == "Home")
+        // Text that is no address and another favorite's address change nothing.
+        for address in ["", "two words", "nodot", "https://b.example"] {
+            #expect(favorite.edited(name: "Start", address: address, among: favorites) == nil)
+        }
+    }
+
+    @Test func importedPinnedTabsAreSavedAtTheirAddressesAndKeepThemOutOfTheNextImport() throws {
+        let row = SidebarImport(profile: SidebarImport.Profile(source: "test.browser", folder: "Default"), profileName: "Profile", favorites: [], spaces: [
+            SidebarImport.SourceSpace(origin: .space("personal"), name: "Personal", tint: nil, pinnedItems: [SidebarImport.Item(sourceID: "home", url: home, title: "Home", customTitle: "Start")], folders: []),
+        ])
+        var sidebar = SidebarImport.Sidebar(personas: [Persona(id: Persona.defaultID, name: "Default")], spaces: [Space(id: spaceID, name: "Personal", personaID: Persona.defaultID)],
+                                            folders: [], favorites: [], tabs: [])
+        let pinned = try #require(SidebarImport.Plan(row, to: .persona(Persona.defaultID), entry: nil, in: sidebar).pinnedTabs.first)
+        // The session opens it pinned at its address, on a page that already has it.
+        let page = PageStub(engine: .webKit, url: pinned.url)
+        let tab = Tab(id: pinned.id, webContents: page, spaceID: pinned.spaceID, isPinned: true, personaID: Persona.defaultID)
+        tab.takeImport(pinned)
+        #expect(tab.savedPage == SavedPage(url: home, title: "Home"))
+        #expect(tab.customTitle == "Start")
+        #expect(tab.isRestored && tab.recordedURL == home)
+        // After its page went to another site, its saved page still counts as pinned, also without the record of the first import.
+        page.report(url: elsewhere, title: "Other")
+        let state = try #require(SidebarImport.Sidebar.TabState(tab))
+        #expect(state.url == elsewhere && state.savedURL == home)
+        sidebar.tabs = [state]
+        #expect(SidebarImport.Plan(row, to: .persona(Persona.defaultID), entry: nil, in: sidebar).pinnedTabs.isEmpty)
+    }
+
     @Test func recordsAndTheClosedListKeepTheSavedPage() {
         let (tab, _) = pinnedTabThatLeftHome()
         let record = SessionSnapshot.TabRecord(tab, spaceID: spaceID, lastActivatedAt: Date())
@@ -217,6 +285,6 @@ import Testing
         let closed = [record(pinned: true, savedPage: saved), record(pinned: true, savedPage: nil), record(pinned: false, savedPage: saved)]
         let snapshot = SessionSnapshot(spaces: [Space(id: spaceID, name: "Personal")], currentSpaceID: spaceID, favorites: [], tabs: open, closedTabs: closed).normalized()
         #expect(snapshot.tabs.map(\.savedPage) == [saved, SavedPage(url: elsewhere, title: "Other"), nil])
-        #expect(snapshot.closedTabs?.map(\.savedPage) == [saved, nil, nil])
+        #expect(snapshot.closedTabs?.map(\.savedPage) == [saved, SavedPage(url: elsewhere, title: "Other"), nil])
     }
 }

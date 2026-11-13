@@ -27,7 +27,7 @@ struct SessionSnapshot: Codable {
         var personaID: UUID?
         /// The name a hook gave the tab's document, or the user's refusal of it, with the document's address. `nil` without either, in closed-tab records, and in files before version 12.
         var suggestedTitle: SuggestedTitle?
-        /// A pinned tab's saved page (bookmark rule 2), which open and closed records keep, so that a reopened pinned tab returns with it. `nil` for unpinned tabs and in files before version 13; `normalized()` gives a pinned open record its address and title.
+        /// A pinned tab's saved page (bookmark rule 2), which open and closed records keep, so that a reopened pinned tab returns with it. `nil` for unpinned tabs and in files before version 13; `normalized()` gives a pinned record, open or closed, its address and title.
         var savedPage: SavedPage?
 
         /// The record as the closed list keeps it: without the activation date, page state, and hook's name, which a reopened tab does not use.
@@ -39,12 +39,12 @@ struct SessionSnapshot: Codable {
             return record
         }
 
-        /// The record under bookmark rule 2: an unpinned record keeps no saved page, and a pinned open record without one, as in files before version 13, takes its address and title. A closed record keeps what it has; a pinned tab reopened without a saved page takes the first address its page reports.
-        func repairingSavedPage(isOpen: Bool) -> TabRecord {
+        /// The record under bookmark rule 2: an unpinned record keeps no saved page, and a pinned record without one, open or closed as in files before version 13, takes its address and title. A closed record needs it as much as an open one: a WebKit page reports the address it opens at before its tab exists, so a pinned tab reopened without a saved page would take the next address it reports.
+        func repairingSavedPage() -> TabRecord {
             var record = self
             if !isPinned {
                 record.savedPage = nil
-            } else if isOpen, savedPage == nil, let url {
+            } else if savedPage == nil, let url {
                 record.savedPage = SavedPage(url: url, title: title)
             }
             return record
@@ -119,8 +119,8 @@ struct SessionSnapshot: Codable {
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
         // Earlier builds kept an archived tab's page state and activation date in its closed record, and more records than the list keeps.
         snapshot.closedTabs = snapshot.closedTabs.map { $0.suffix(Self.maximumClosedTabs).map(\.closed) }
-        snapshot.tabs = snapshot.tabs.map { $0.repairingSavedPage(isOpen: true) }
-        snapshot.closedTabs = snapshot.closedTabs.map { $0.map { $0.repairingSavedPage(isOpen: false) } }
+        snapshot.tabs = snapshot.tabs.map { $0.repairingSavedPage() }
+        snapshot.closedTabs = snapshot.closedTabs.map { $0.map { $0.repairingSavedPage() } }
         snapshot.assignPersonas()
         snapshot.repairWindows()
         // Only a Persona that is gone loses its stored data. The default Persona is always listed, so the engines' default storage is never removed.

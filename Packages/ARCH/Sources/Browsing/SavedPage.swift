@@ -109,6 +109,29 @@ extension Tab {
     }
 }
 
+// MARK: The favorite's side
+
+extension Favorite {
+    /// Use Current Page as Saved Page for the favorite's tab: the favorite at the tab's address with its page title, or nil while the tab has no address or another favorite of the Persona has it, since a Persona's favorites come once per address (`BrowserSession.addFavorite(_:)`).
+    func usingCurrentPage(of tab: Tab, among favorites: [Favorite]) -> Favorite? {
+        guard let url = tab.url, BrowserSession.canUse(url, asAddressOf: self, among: favorites) else { return nil }
+        var favorite = self
+        favorite.url = url
+        favorite.title = tab.pageTitle
+        return favorite
+    }
+
+    /// Edit Favorite…: the favorite at the address in `address`, read as the address field reads it, and named `name` unless it is empty. Nil for an address that `BrowserSession.url(forInput:)` rejects or that another favorite of the Persona has.
+    func edited(name: String, address: String, among favorites: [Favorite]) -> Favorite? {
+        guard let url = BrowserSession.url(forInput: address), BrowserSession.canUse(url, asAddressOf: self, among: favorites) else { return nil }
+        var favorite = self
+        favorite.url = url
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { favorite.title = name }
+        return favorite
+    }
+}
+
 // MARK: The session's side
 
 extension BrowserSession {
@@ -141,32 +164,23 @@ extension BrowserSession {
 
     /// Whether Use Current Page as Saved Page applies: the tab has an address and is pinned, or is a favorite's tab whose address no other favorite of its Persona has.
     public func canUseCurrentPageAsSavedPage(_ tab: Tab) -> Bool {
-        guard let url = tab.url else { return false }
+        guard tab.url != nil else { return false }
         if tab.isPinned { return true }
-        guard let favorite = favorite(ofTab: tab) else { return false }
-        return Self.canUse(url, asAddressOf: favorite, among: favorites)
+        return favorite(ofTab: tab)?.usingCurrentPage(of: tab, among: favorites) != nil
     }
 
     /// Use Current Page as Saved Page: a pinned tab's page becomes its saved page, and a favorite's tab's page, with its title, becomes the favorite's address and title.
     public func useCurrentPageAsSavedPage(_ tab: Tab) {
-        guard canUseCurrentPageAsSavedPage(tab), let url = tab.url else { return }
         if tab.isPinned { return tab.useCurrentPageAsSavedPage() }
-        guard let favorite = favorite(ofTab: tab) else { return }
-        updateFavorite(favorite.id) { favorite in
-            favorite.url = url
-            favorite.title = tab.pageTitle
-        }
+        guard let favorite = favorite(ofTab: tab), let moved = favorite.usingCurrentPage(of: tab, among: favorites) else { return }
+        updateFavorite(favorite.id) { $0 = moved }
     }
 
-    /// Edit Favorite…: the favorite takes the address in `address`, read as the address field reads it, and the name in `name`, unless it is empty. Returns false and changes nothing for an address that `url(forInput:)` rejects or that another favorite of the Persona has.
+    /// Edit Favorite…: the favorite takes the name and address that `Favorite.edited(name:address:among:)` gives it. Returns false and changes nothing when it gives none.
     @discardableResult
     func editFavorite(_ id: UUID, name: String, address: String) -> Bool {
-        guard let favorite = favorites.first(where: { $0.id == id }), let url = Self.url(forInput: address), Self.canUse(url, asAddressOf: favorite, among: favorites) else { return false }
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        updateFavorite(id) { favorite in
-            favorite.url = url
-            if !name.isEmpty { favorite.title = name }
-        }
+        guard let favorite = favorites.first(where: { $0.id == id }), let edited = favorite.edited(name: name, address: address, among: favorites) else { return false }
+        updateFavorite(id) { $0 = edited }
         return true
     }
 

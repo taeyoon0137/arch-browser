@@ -78,7 +78,7 @@ import Testing
         let plan = Self.plan(in: sidebar)
         #expect(plan.pinnedTabs.map(\.url) == [Self.url("d.example"), Self.url("e.example")])
         #expect(plan.pinnedTabs.map(\.spaceID).first == work.id)
-        // Each pinned tab the import opens is saved at its imported address and title.
+        // Each pinned tab carries its imported title, which the session saves with its address (`Tab.takeImport(_:)`, `SavedPageTests`).
         #expect(plan.pinnedTabs.map(\.title) == ["d.example", "e.example"])
     }
 

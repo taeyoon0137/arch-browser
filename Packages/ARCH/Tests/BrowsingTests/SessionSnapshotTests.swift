@@ -221,6 +221,10 @@ import Testing
         #expect(loaded.tabs.map(\.isPinned) == [true, false, false])
         #expect(loaded.tabs.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/a")!, title: "A"), nil, nil])
         #expect(loaded.closedTabs?.map(\.savedPage) == [nil])
+        // A closed pinned record gets one too, so that ⇧⌘T reopens the tab saved at the page it closed on.
+        try folder.write(version12File.replacingOccurrences(of: #""title": "Closed", "isPinned": false,"#, with: #""title": "Closed", "isPinned": true,"#))
+        let closedPinned = try #require(folder.store.load())
+        #expect(closedPinned.closedTabs?.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/closed")!, title: "Closed")])
     }
 
     @Test func savedPagesLoadAndSaveWithOpenAndClosedRecords() throws {

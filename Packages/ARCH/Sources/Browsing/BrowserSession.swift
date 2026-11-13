@@ -1401,12 +1401,8 @@ public final class BrowserSession: ObservableObject {
         addFavorites(plan.favorites, in: plan.personaID)
         for pinned in plan.pinnedTabs {
             let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
-            tab.folderID = pinned.folderID
-            tab.customTitle = pinned.customTitle
-            tab.savedPage = SavedPage(url: pinned.url, title: pinned.title)
-            // It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing. So it is marked before it joins the list that the hooks follow.
-            tab.isRestored = true
-            tab.recordedURL = pinned.url
+            // It opens as a restored tab does, so it is marked before it joins the list that the hooks follow.
+            tab.takeImport(pinned)
             tabs.append(tab)
         }
         record.update(plan.entry)
@@ -1416,9 +1412,7 @@ public final class BrowserSession: ObservableObject {
 
     /// The sidebar as the browser import's plan resolves a row against it.
     private var importSidebar: SidebarImport.Sidebar {
-        SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap { tab in
-            tab.spaceID.map { SidebarImport.Sidebar.TabState(id: tab.id, spaceID: $0, isPinned: tab.isPinned, url: tab.url, savedURL: tab.savedPage?.url) }
-        })
+        SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap(SidebarImport.Sidebar.TabState.init))
     }
 
     // MARK: Split view

@@ -135,6 +135,15 @@ public final class Tab: ObservableObject, Identifiable {
         recordedURL = record.url
     }
 
+    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    func takeImport(_ pinned: SidebarImport.Plan.PinnedTab) {
+        folderID = pinned.folderID
+        customTitle = pinned.customTitle
+        savedPage = SavedPage(url: pinned.url, title: pinned.title)
+        isRestored = true
+        recordedURL = pinned.url
+    }
+
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
@@ -165,12 +174,12 @@ extension Tab: EngineWebContentsUIDelegate {
         title = webContents.title
         if let saved = savedPage, saved.title.isEmpty, !title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) == true { savedPage?.title = title }
     }
-    /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2).
+    /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2), with an empty title: the tab's title is still the previous page's, and the new page's first title fills it.
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
-        if isPinned, savedPage == nil, let page = currentPage { savedPage = page }
+        if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
