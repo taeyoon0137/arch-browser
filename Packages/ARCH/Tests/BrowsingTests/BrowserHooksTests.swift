@@ -1,4 +1,4 @@
-// The AI hook center behind the bus: `BrowserHooks` maps page loads, new tabs, and finished downloads to the center's events as before, leaves agent tabs out, and ends a tab's hooks when it commits another document, ignoring the fragment, and when it closes. The service lives in a temporary folder with a provider that no request reaches.
+// The AI hook center behind the bus: `BrowserHooks` maps page loads, new tabs, and finished downloads to the center's events as before, leaves agent tabs out, and ends a tab's hooks when it commits another document, ignoring the fragment, but not for an address the tab leaves before it commits, and when it closes. The service lives in a temporary folder with a provider that no request reaches.
 import AI
 import ARCHEngine
 import Events
@@ -72,6 +72,35 @@ import Testing
         #expect(log.entries == ["load /wait restore:false"])
         bus.post(.addressChanged(tab: tab("/next", id: id), previousURL: URL(string: "https://example.org/wait#part")))
         #expect(await eventually { log.entries.last == "stop /wait" })
+    }
+
+    @Test func anAddressTheTabNeverCommitsLeavesItsHooksRunning() async {
+        let source = BrowserEventSource(bus: bus)
+        let page = EventTestPage(engine: .webKit, url: URL(string: "https://example.org/wait"))
+        let tab = Tab(id: UUID(), webContents: page, spaceID: UUID(), isPinned: false, personaID: UUID())
+        source.follow(tabs: [tab], postingNewTabs: false)
+        tab.webContentsDidFinishLoadingDocument(page)
+        #expect(await eventually { log.entries == ["load /wait restore:false"] })
+        // WebKit reports a navigation's address before it commits, and the earlier address once the navigation becomes a download.
+        page.isLoading = true
+        tab.webContentsDidChangeLoadingState(page)
+        page.url = URL(string: "https://example.org/file.dmg")
+        tab.webContentsDidChangeURL(page)
+        page.isLoading = false
+        page.url = URL(string: "https://example.org/wait")
+        tab.webContentsDidChangeURL(page)
+        tab.webContentsDidChangeLoadingState(page)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(log.entries == ["load /wait restore:false"])
+        // A navigation that commits ends them once its load ends.
+        page.isLoading = true
+        tab.webContentsDidChangeLoadingState(page)
+        page.url = URL(string: "https://example.org/next")
+        tab.webContentsDidChangeURL(page)
+        page.isLoading = false
+        tab.webContentsDidChangeLoadingState(page)
+        #expect(await eventually { log.entries.last == "stop /wait" })
+        withExtendedLifetime(source) {}
     }
 
     @Test func aCloseEndsTheTabsHooks() async {

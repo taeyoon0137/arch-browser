@@ -46,7 +46,7 @@ public enum AIHookStepOutcome: Sendable {
     case failed(any Error)
     /// It ran past its timeout, and the scheduler canceled it.
     case timedOut
-    /// It was canceled while it ran: its chain was replaced or canceled, its owner was canceled, or one of its routes changed.
+    /// It was canceled while it ran: its chain was replaced or canceled, its owner was canceled, or one of its routes changed, also after its work returned but before the scheduler took its end.
     case stopped
     /// It never started.
     case skipped(AIHookSkipReason)
@@ -147,7 +147,7 @@ public final class AIHookScheduler: ObservableObject {
     public func cancel(owner: String) {
         for chain in chains.values {
             chain.dropWaiting { $0.owner == owner }
-            if let running = chain.running, running.step.owner == owner { running.task.cancel() }
+            if let running = chain.running, running.step.owner == owner { running.stop() }
         }
     }
 
@@ -208,13 +208,28 @@ public final class AIHookScheduler: ObservableObject {
             guard !isCanceled else { return }
             isCanceled = true
             dropWaiting { _ in true }
+            running?.stop()
             task?.cancel()
         }
     }
 
-    private struct RunningStep {
-        var step: AIHookStep
-        var task: Task<Void, any Error>
+    /// The step a chain runs, and whether the scheduler stopped it.
+    @MainActor
+    private final class RunningStep {
+        let step: AIHookStep
+        let task: Task<Void, any Error>
+        /// Set when its chain is canceled or replaced, its owner is canceled, or one of its routes changes, also after its work returned.
+        private(set) var isStopped = false
+
+        init(step: AIHookStep, task: Task<Void, any Error>) {
+            self.step = step
+            self.task = task
+        }
+
+        func stop() {
+            isStopped = true
+            task.cancel()
+        }
     }
 
     /// Runs each step after its delay, once the owner's and the scheduler's checks pass.
@@ -235,10 +250,11 @@ public final class AIHookScheduler: ObservableObject {
             let owner = step.owner
             let requestDidEnd: @MainActor @Sendable ((any Error)?) -> Void = { [weak self] error in self?.recordRequest(endingWith: error, of: owner) }
             let task = Task { try await step.run(requestDidEnd) }
-            chain.running = RunningStep(step: step, task: task)
+            let running = RunningStep(step: step, task: task)
+            chain.running = running
             let outcome = await outcome(of: task, timeout: step.timeout)
             chain.running = nil
-            step.didEnd(outcome)
+            step.didEnd(Self.end(outcome, isStopped: running.isStopped))
             if Task.isCancelled { return }
         }
     }
@@ -277,6 +293,14 @@ public final class AIHookScheduler: ObservableObject {
             }
         }
         return await withTaskCancellationHandler { await wait.outcome() } onCancel: { task.cancel() }
+    }
+
+    /// A step stopped after its work returned or threw, but before its chain took the end, as when a close or a new document comes in between, counts as stopped.
+    private static func end(_ outcome: AIHookStepOutcome, isStopped: Bool) -> AIHookStepOutcome {
+        switch outcome {
+        case .finished, .failed: return isStopped ? .stopped : outcome
+        case .timedOut, .stopped, .skipped: return outcome
+        }
     }
 
     /// The first end of a step that the scheduler takes: its return or its timeout.
@@ -318,7 +342,7 @@ public final class AIHookScheduler: ObservableObject {
         routes = newRoutes
         guard !changed.isEmpty else { return }
         for chain in chains.values {
-            if let running = chain.running, !running.step.routes.isDisjoint(with: changed) { running.task.cancel() }
+            if let running = chain.running, !running.step.routes.isDisjoint(with: changed) { running.stop() }
         }
         for (owner, used) in ownerRoutes where !used.isDisjoint(with: changed) {
             resume(owner: owner)

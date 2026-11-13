@@ -752,15 +752,17 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Navigation
 
-    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it.
+    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. The user's navigation drops the cause of one that code started (`Tab.pendingCause`).
     public func goBack() {
         if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
+        selectedTab?.pendingCause = nil
         selectedTab?.webContents.navigationController.goBack()
     }
     public func goForward() {
         if let preview { return preview.webContents.navigationController.goForward() }
         internalPage = nil
+        selectedTab?.pendingCause = nil
         selectedTab?.webContents.navigationController.goForward()
     }
     /// The selected tab's earlier pages, most recent first, for the History menu.
@@ -773,11 +775,13 @@ public final class BrowserWindowModel: ObservableObject {
         guard let tab = selectedTab, tab.id == tabID else { return }
         closePreview()
         internalPage = nil
+        tab.pendingCause = nil
         tab.webContents.navigationController.go(to: item)
     }
     public func reload() {
         if let preview { return preview.webContents.navigationController.reload() }
         guard internalPage == nil else { return }
+        selectedTab?.pendingCause = nil
         selectedTab?.webContents.navigationController.reload()
     }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }

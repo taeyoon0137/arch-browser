@@ -83,7 +83,7 @@ public final class Tab: ObservableObject, Identifiable {
     var recordVisit: ((URL, String) -> Void)?
     /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens.
     var isRestored = false
-    /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded` and then clears (`docs/hooks.md`, Causes). The user's own navigation in the tab clears it.
+    /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded`, which uses it up (`docs/hooks.md`, Causes). A load that ends without a `pageLoaded` drops it, and so does a navigation the user starts in the tab from the app.
     var pendingCause: BrowserEventCause?
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
@@ -232,6 +232,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     /// Loads the crashed page's address again, which starts a new page process.
     public func reloadAfterCrash() {
+        pendingCause = nil
         guard let url else { return webContents.navigationController.reload() }
         webContents.navigationController.load(URLRequest(url: url))
     }
@@ -318,9 +319,18 @@ extension Tab: EngineWebContentsUIDelegate {
         sections.removeAll { $0.isEmpty }
         if sections.isEmpty {
             sections.append([
-                ActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak webContents] in webContents?.navigationController.goBack() },
-                ActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak webContents] in webContents?.navigationController.goForward() },
-                ActionMenuItem("Reload") { [weak webContents] in webContents?.navigationController.reload() },
+                ActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.goBack()
+                },
+                ActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.goForward()
+                },
+                ActionMenuItem("Reload") { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.reload()
+                },
             ])
         }
         for (index, section) in sections.enumerated() {

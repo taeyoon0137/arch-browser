@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, title changes from each source but none when the shown name stays, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load.
+// The browser event source on fake web contents: a new tab but no restored tabs, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -126,12 +126,47 @@ import Testing
         tab.webContentsDidChangeTitle(page)
         page.url = URL(string: "https://example.com/")
         tab.webContentsDidChangeURL(page)
+        // A hook names the tab, and the user turns the name down.
+        tab.suggestedTitle = SuggestedTitle(title: "Hook 2", url: URL(string: "https://example.com/")!)
+        tab.suggestedTitle = SuggestedTitle(title: nil, url: URL(string: "https://example.com/")!)
         #expect(recorder.events.map(Self.describe) == [
             "titleChanged page", "titleChanged user", "titleChanged user",
-            "addressChanged", "titleChanged suggested",
+            "addressChanged", "titleChanged page",
             "titleChanged page", "addressChanged", "titleChanged page",
+            "titleChanged suggested", "titleChanged user",
         ])
         #expect(tab.displayTitle == "example.com")
+    }
+
+    @Test func anAddressThatChangesWhileThePageLoadsPostsOnceItCommits() {
+        let (tab, page) = makeTab(space: space, engine: .webKit)
+        source.follow(tabs: [tab], postingNewTabs: false)
+        // WebKit reports a navigation's address before it commits, and the earlier address once the navigation becomes a download.
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/file.dmg")
+            tab.webContentsDidChangeURL(page)
+            page.isLoading = false
+            page.url = URL(string: "https://example.org/a")
+            tab.webContentsDidChangeURL(page)
+        }
+        // A navigation that redirects and commits posts its last address once its document loads, before the load, as Chromium reports it.
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/b")
+            tab.webContentsDidChangeURL(page)
+            page.url = URL(string: "https://example.org/c")
+            tab.webContentsDidChangeURL(page)
+            tab.webContentsDidFinishLoadingDocument(page)
+        }
+        // WebKit ends a load just before its document's load.
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/d")
+            tab.webContentsDidChangeURL(page)
+        }
+        tab.webContentsDidFinishLoadingDocument(page)
+        #expect(recorder.events.map(Self.describeAddress) == [
+            "addressChanged https://example.org/a > https://example.org/c", "pageLoaded https://example.org/c",
+            "addressChanged https://example.org/c > https://example.org/d", "pageLoaded https://example.org/d",
+        ])
     }
 
     @Test func selectionsAndSpaceSwitchesPostWithThePersonaChangeButNotWhileWindowsAreRestored() {
@@ -205,6 +240,52 @@ import Testing
         #expect(recorder.events.map(\.cause) == [cause, cause, nil, nil, run, run])
     }
 
+    @Test func aLoadThatEndsWithoutADocumentDropsThePendingCause() async {
+        let cause = BrowserEventCause(origin: .agentSession(id: UUID()))
+        let (tab, page) = makeTab(space: space)
+        source.follow(tabs: [tab], postingNewTabs: false)
+        tab.pendingCause = cause
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/file.dmg")
+            tab.webContentsDidChangeURL(page)
+            page.isLoading = false
+            page.url = URL(string: "https://example.org/a")
+            tab.webContentsDidChangeURL(page)
+        }
+        #expect(await eventually { tab.pendingCause == nil })
+        // The user's next navigation carries no cause.
+        page.url = URL(string: "https://example.org/b")
+        tab.webContentsDidChangeURL(page)
+        tab.webContentsDidFinishLoadingDocument(page)
+        // A document that loads just after its load ends, as on WebKit, still takes the cause.
+        tab.pendingCause = cause
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/c")
+            tab.webContentsDidChangeURL(page)
+        }
+        tab.webContentsDidFinishLoadingDocument(page)
+        #expect(tab.pendingCause == nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(recorder.events.map { "\($0.kind.rawValue) \($0.cause == cause)" } == ["addressChanged false", "pageLoaded false", "addressChanged true", "pageLoaded true"])
+    }
+
+    /// Runs `body` while the page loads, and ends the load after it.
+    private func load(_ tab: Tab, _ page: EventTestPage, _ body: () -> Void) {
+        page.isLoading = true
+        tab.webContentsDidChangeLoadingState(page)
+        body()
+        page.isLoading = false
+        tab.webContentsDidChangeLoadingState(page)
+    }
+
+    private static func describeAddress(_ event: BrowserEvent) -> String {
+        switch event.payload {
+        case .addressChanged(let tab, let previousURL): return "addressChanged \(previousURL?.absoluteString ?? "") > \(tab.url?.absoluteString ?? "")"
+        case .pageLoaded(let tab, _, _): return "pageLoaded \(tab.url?.absoluteString ?? "")"
+        default: return event.kind.rawValue
+        }
+    }
+
     private static func describe(_ event: BrowserEvent) -> String {
         guard case .titleChanged(_, let source) = event.payload else { return event.kind.rawValue }
         return "titleChanged \(source.rawValue)"
@@ -264,7 +345,7 @@ final class EventTestPage: EngineWebContents {
     }
 
     let favicon: NSImage? = nil
-    let isLoading = false
+    var isLoading = false
     let canGoBack = false
     let canGoForward = false
     let restorableState: Data? = nil

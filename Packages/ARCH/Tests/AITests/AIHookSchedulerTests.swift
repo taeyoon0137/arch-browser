@@ -76,6 +76,30 @@ import Testing
         #expect(log.entries == ["start running", "waiting skipped canceled", "stop running", "running stopped", "start other", "other finished"])
     }
 
+    @Test func aStepStoppedAfterItsWorkReturnedButBeforeTheChainTookItsEndCountsAsStopped() async {
+        // The cancel waits for a few turns of the main actor, so that for some counts it comes after the work returned but before the chain takes the step's end.
+        for turns in 0..<6 {
+            let subject = UUID()
+            let name = "returned \(turns)"
+            let log = log
+            let scheduler = scheduler
+            scheduler.post([step(name, work: { @MainActor _ in
+                Task { @MainActor in
+                    for _ in 0..<turns { await Task.yield() }
+                    log.record("cancel \(name)")
+                    scheduler.cancel(subject: subject)
+                }
+            })], kind: "pageLoaded", subject: subject, event: UUID(), document: page("/a"))
+            #expect(await eventually { log.entries.contains("cancel \(name)") && log.entries.contains { $0 == "\(name) finished" || $0 == "\(name) stopped" } })
+        }
+        for turns in 0..<6 {
+            let name = "returned \(turns)"
+            let entries = log.entries
+            guard let cancel = entries.firstIndex(of: "cancel \(name)"), let end = entries.firstIndex(where: { $0 == "\(name) finished" || $0 == "\(name) stopped" }) else { continue }
+            #expect(entries[end] == (cancel < end ? "\(name) stopped" : "\(name) finished"))
+        }
+    }
+
     @Test func threeAuthenticationOrProviderErrorsPauseTheOwnerUntilARouteOfItsStepsChanges() async {
         let owner = "hook.paused"
         let failing: Work = { requestDidEnd in await requestDidEnd(AIError.authentication(AIProviderID())) }

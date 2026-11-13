@@ -70,9 +70,9 @@ public enum BrowserTabCloseReason: String, Codable, Hashable, Sendable {
 }
 
 public enum BrowserTitleSource: String, Codable, Hashable, Sendable {
-    /// The page's own title, or the host that stands in for a page without one.
+    /// The page's own title, or the host that stands in for a page without one, also when another address drops a hook's name.
     case page
-    /// The user named the tab or cleared its name (`Tab.customTitle`).
+    /// The user named the tab or cleared its name (`Tab.customTitle`), or turned down a hook's name.
     case user
     /// A hook, plugin, or agent named the tab (`Tab.suggestedTitle`).
     case suggested

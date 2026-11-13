@@ -43,6 +43,8 @@ final class BrowserEventSource {
         var observers: Set<AnyCancellable> = []
         /// The inputs of the tab's shown name and its address as last published.
         var shown: Shown
+        /// The address of the tab's last `addressChanged`, or its address when the source began to follow it.
+        var address: URL?
         /// Set at the tab's `tabOpened` until its first load of a web address.
         var awaitsFirstLoadAfterOpen = false
         var hasLoaded = false
@@ -50,6 +52,7 @@ final class BrowserEventSource {
         init(_ tab: Tab) {
             self.tab = tab
             shown = Shown(title: tab.title, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, url: tab.url)
+            address = tab.url
         }
     }
 
@@ -122,6 +125,14 @@ final class BrowserEventSource {
                 }
             }
             .store(in: &followed.observers)
+        // The tab publishes its loading state on every progress report, so only a change counts.
+        tab.$isLoading.removeDuplicates().dropFirst().filter { !$0 }
+            .sink { [weak self, weak tab] _ in
+                MainActor.assumeIsolated {
+                    if let self, let tab { self.tabDidStopLoading(tab) }
+                }
+            }
+            .store(in: &followed.observers)
         // A published value reaches its subscribers before the tab holds it, so the change comes with its new value.
         Publishers.CombineLatest4(tab.$title, tab.$customTitle, tab.$suggestedTitle, tab.$url).dropFirst()
             .sink { [weak self, weak tab] title, customTitle, suggestedTitle, url in
@@ -132,22 +143,49 @@ final class BrowserEventSource {
             .store(in: &followed.observers)
     }
 
-    /// A new address posts `addressChanged` with the tab's pending cause; a new shown name posts `titleChanged` with the input that changed it.
+    /// A new address posts `addressChanged` at once while the page is not loading; a new shown name posts `titleChanged` with the input that supplies it.
     private func tab(_ tab: Tab, didChangeTo shown: Shown) {
         guard let followed = tabs[tab.id], followed.shown != shown else { return }
         let previous = followed.shown
         followed.shown = shown
-        if shown.url != previous.url {
-            bus.post(.addressChanged(tab: ref(tab, url: shown.url), previousURL: previous.url), cause: tab.pendingCause)
-        }
+        if shown.url != previous.url, !tab.webContents.isLoading { settleAddress(of: tab, followed, at: shown.url) }
         guard shown.name != previous.name else { return }
-        let source: BrowserTitleSource = shown.customTitle != previous.customTitle ? .user : shown.suggestedTitle != previous.suggestedTitle ? .suggested : .page
-        bus.post(.titleChanged(tab: ref(tab, url: shown.url), source: source))
+        bus.post(.titleChanged(tab: ref(tab, url: shown.url), source: Self.titleSource(of: shown, after: previous)))
     }
 
-    /// Posts the load of a tab that has an address, with its pending cause, which the load uses up. The first load of a restored tab is a restore.
+    /// The input that supplies a new shown name: the user's name or its removal, and the user turning down a hook's name, are `user`; a hook's name is `suggested`; the page's title or host, also once another address drops a hook's name, is `page`.
+    private static func titleSource(of shown: Shown, after previous: Shown) -> BrowserTitleSource {
+        if shown.customTitle != previous.customTitle { return .user }
+        guard shown.suggestedTitle != previous.suggestedTitle, let suggested = shown.suggestedTitle else { return .page }
+        return suggested.title == nil ? .user : .suggested
+    }
+
+    /// Posts `addressChanged` with the tab's pending cause for an address the tab committed and has not posted. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails or becomes a download, so an address that changes while the page loads waits for the end of the load or its document's load, as Chromium reports an address only once it commits.
+    private func settleAddress(of tab: Tab, _ followed: FollowedTab, at url: URL?) {
+        guard url != followed.address else { return }
+        let previousURL = followed.address
+        followed.address = url
+        bus.post(.addressChanged(tab: ref(tab, url: url), previousURL: previousURL), cause: tab.pendingCause)
+    }
+
+    /// The tab's load ended, whether it committed or not. A pending cause that no `pageLoaded` uses up by the end of the update goes, since its navigation failed or became a download; WebKit reports the end of a load just before its document's load.
+    private func tabDidStopLoading(_ tab: Tab) {
+        guard let followed = tabs[tab.id] else { return }
+        settleAddress(of: tab, followed, at: tab.url)
+        guard let cause = tab.pendingCause else { return }
+        DispatchQueue.main.async { [weak tab] in
+            MainActor.assumeIsolated {
+                guard let tab, !tab.webContents.isLoading, tab.pendingCause == cause else { return }
+                tab.pendingCause = nil
+            }
+        }
+    }
+
+    /// Posts the load of a tab that has an address, after its address, with its pending cause, which the load uses up. The first load of a restored tab is a restore.
     private func tabDidLoadDocument(_ tab: Tab) {
-        guard let followed = tabs[tab.id], let url = tab.url else { return }
+        guard let followed = tabs[tab.id] else { return }
+        settleAddress(of: tab, followed, at: tab.url)
+        guard let url = tab.url else { return }
         let isFirstLoad = !followed.hasLoaded
         followed.hasLoaded = true
         let isWebAddress = ["http", "https"].contains(url.scheme?.lowercased() ?? "")
