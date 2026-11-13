@@ -254,7 +254,7 @@ It answers AppleScript through `Arch.sdef`: the standard suite, `open location`,
 
 ### Documentation
 
-Engine design in `docs/engine-protocol.md`, the sync design in `docs/sync.md`, the plugin system design in `docs/plugins.md`, the AI interface design in `docs/ai.md`, the agents design in `docs/agents.md` (not built), the design for multiple windows, the small window, and Personas in `docs/windows-personas.md`, the browser import design in `docs/import-browsers.md`, the bookmarks and live folders design in `docs/bookmarks.md` (saved pages, unloading, and nested folders built, the rest not yet), the feature list in `docs/features.md`, and `README.md` generated from `resources/README.preset.md` with the hero image from `resources/assets`.
+Engine design in `docs/engine-protocol.md`, the sync design in `docs/sync.md`, the plugin system design in `docs/plugins.md`, the AI interface design in `docs/ai.md`, the agents design in `docs/agents.md` (not built), the design for multiple windows, the small window, and Personas in `docs/windows-personas.md`, the browser import design in `docs/import-browsers.md`, the bookmarks and live folders design in `docs/bookmarks.md` (saved pages, unloading, nested folders with their dragging, and the Bookmarks menu built, live folders not yet), the feature list in `docs/features.md`, and `README.md` generated from `resources/README.preset.md` with the hero image from `resources/assets`.
 
 ## Repository Layout
 
