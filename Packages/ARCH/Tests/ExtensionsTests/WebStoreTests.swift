@@ -109,18 +109,19 @@ import Testing
             #expect(url.query?.contains("x=id%3D\(batch.first!)%26v%3D") == true)
             #expect(request.value(forHTTPHeaderField: "Accept-Language") == "")
         }
-        // The answers of both requests come back together, for the identifiers asked about, and a cookie that a response sets never goes back.
+        // The answers of both requests come back together, for the identifiers asked about.
         StoreStub.answer { request in
             let asked = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.filter { $0.name == "x" }.compactMap { $0.value?.dropFirst(3).prefix(32) } ?? []
-            return StoreStub.Reply(headers: ["Set-Cookie": "NID=1; Domain=.\(request.url!.host!); Path=/"],
-                                   body: updateResponse(asked.map { #"<app appid="\#($0)" status="ok"><updatecheck status="noupdate"/></app>"# } + [#"<app appid="\#(String(repeating: "a", count: 32))" status="error-unknownApplication"/>"#]))
+            return StoreStub.Reply(body: updateResponse(asked.map { #"<app appid="\#($0)" status="ok"><updatecheck status="noupdate"/></app>"# } + [#"<app appid="\#(String(repeating: "a", count: 32))" status="error-unknownApplication"/>"#]))
         }
         let answers = try await client().releases(of: queries)
         #expect(answers.count == 30 && answers.values.allSatisfy { $0 == .noUpdate })
         let sent = StoreStub.requests
-        #expect(sent.count == 2 && sent.allSatisfy { $0.value(forHTTPHeaderField: "Cookie") == nil && $0.value(forHTTPHeaderField: "Accept-Language") == "" })
+        #expect(sent.count == 2 && sent.allSatisfy { $0.value(forHTTPHeaderField: "Accept-Language") == "" })
+        // Through a `URLProtocol`, URLSession neither stores nor sends cookies, also with cookie storage, so the session's configuration is what keeps them out; a check of the cookies themselves would need a listener on the loopback address.
         let configuration = StoreStub.session().configuration
-        #expect(configuration.httpCookieStorage == nil && !configuration.httpShouldSetCookies && configuration.urlCache == nil && configuration.urlCredentialStorage == nil)
+        #expect(configuration.httpCookieStorage == nil && !configuration.httpShouldSetCookies && configuration.httpCookieAcceptPolicy == .never)
+        #expect(configuration.urlCache == nil && configuration.urlCredentialStorage == nil)
     }
 
     @Test func mapsTheAnswersStatuses() async throws {
@@ -310,20 +311,79 @@ import Testing
     }
 
     @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
-    func cancellingStopsTheDownloadAndDeletesTheFile() async throws {
+    func cancellingThrowsCancellationErrorAtEveryStepAndLeavesNothing() async throws {
         let manager = launch()
         let installer = WebStoreInstaller(client: client())
         let package = try crx("published", signedBy: [CRXFile.developer, CRXFile.publisher])
+        // While the endpoint has not answered, which URLSession ends with its own error for a cancelled request.
+        StoreStub.answer { _ in StoreStub.Reply(staysOpen: true) }
+        let asking = StagingRun { try await installer.stage(extensionID, in: manager) }
+        #expect(await eventually { StoreStub.requests.count == 1 })
+        asking.task.cancel()
+        await asking.expectCancellation()
+        #expect(StoreStub.requests.count == 1 && !FileManager.default.fileExists(atPath: stagingURL.path))
+        // During the download, which stops and leaves no file.
         StoreStub.answer { [extensionID] request in
             guard request.url?.host == WebStore.updateEndpoint.host else { return StoreStub.Reply(body: package.prefix(100), staysOpen: true) }
             return StoreStub.Reply(body: updateResponse([#"<app appid="\#(extensionID)" status="ok"><updatecheck codebase="https://packages.example.test/p.crx" size="\#(package.count)" status="ok" version="2"/></app>"#]))
         }
-        let staging = Task { try await installer.stage(extensionID, in: manager) }
+        let downloading = StagingRun { try await installer.stage(extensionID, in: manager) }
         #expect(await eventually { StoreStub.requests.count == 2 && !downloadsInStaging.isEmpty })
-        staging.cancel()
-        await #expect(throws: CancellationError.self) { try await staging.value }
+        downloading.task.cancel()
+        await downloading.expectCancellation()
         #expect(downloadsInStaging.isEmpty && manager.plugins.isEmpty)
+        // While the engines check the downloaded package, which staging finishes and the installer then discards.
+        let engine = try #require(host.engines[.webKit] as? RecordingEngine)
+        offer(package)
+        let staging = StagingRun { try await installer.stage(extensionID, in: manager) }
+        // The task starts once the test waits, so the engine's first check of the package cancels it.
+        engine.onCheck = { staging.task.cancel() }
+        await staging.expectCancellation()
+        #expect(engine.checkCount > 0 && StoreStub.requests.count == 2)
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: stagingURL.path)) ?? []).isEmpty && manager.plugins.isEmpty)
         manager.close()
+    }
+
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func asksAndDownloadsNothingForADeletedPersona() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        let package = try crx("published", signedBy: [CRXFile.developer, CRXFile.publisher])
+        // Deleting the Persona while the endpoint answers downloads nothing.
+        StoreStub.answer { [extensionID] request in
+            guard request.url?.host == WebStore.updateEndpoint.host else { return StoreStub.Reply(body: package) }
+            DispatchQueue.main.sync { MainActor.assumeIsolated { manager.close() } }
+            return StoreStub.Reply(body: updateResponse([#"<app appid="\#(extensionID)" status="ok"><updatecheck codebase="https://packages.example.test/p.crx" status="ok" version="2"/></app>"#]))
+        }
+        await #expect(throws: PluginError.closed) { try await installer.stage(extensionID, in: manager) }
+        #expect(manager.isClosed && StoreStub.requests.count == 1 && !FileManager.default.fileExists(atPath: stagingURL.path))
+        // Once the Persona is deleted, nothing is asked.
+        offer(package)
+        await #expect(throws: PluginError.closed) { try await installer.stage(extensionID, in: manager) }
+        #expect(StoreStub.requests.isEmpty && !FileManager.default.fileExists(atPath: stagingURL.path))
+    }
+}
+
+/// A staging task that notes when it ends, so that a test waits for it with a limit and reads its value only then.
+@MainActor
+final class StagingRun {
+    private(set) var task: Task<PluginPackage, any Error>!
+    private var hasEnded = false
+
+    init(_ stage: @escaping @MainActor () async throws -> PluginPackage) {
+        task = Task {
+            defer { self.hasEnded = true }
+            return try await stage()
+        }
+    }
+
+    /// Expects the task to end with `CancellationError` within ten seconds, reading its value only once it has ended, so that a cancellation that never arrives fails the test instead of stopping the run.
+    func expectCancellation() async {
+        guard await eventually({ hasEnded }) else {
+            Issue.record("Staging did not end after its task was cancelled.")
+            return
+        }
+        await #expect(throws: CancellationError.self) { try await self.task.value }
     }
 }
 

@@ -119,8 +119,8 @@ public final class PluginManager: ObservableObject {
     private var storages: [PluginID: PluginStorageFile] = [:]
     /// When each script plugin's background script failed in the last `failureWindow`.
     private var failures: [PluginID: [Date]] = [:]
-    /// Whether the session closed the manager as it deleted the Persona, after which it stages, installs, and stores nothing.
-    private var isClosed = false
+    /// Whether the session closed the manager as it deleted the Persona, after which it stages, installs, and stores nothing, and callers that fetch a package for it stop before they ask for or download one.
+    public private(set) var isClosed = false
 
     /// A started plugin, its context, and its activation, which its commands, panels, and page script values wait for.
     private struct RunningPlugin {

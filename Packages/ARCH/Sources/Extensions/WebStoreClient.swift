@@ -116,13 +116,19 @@ public final class WebStoreClient: Sendable {
 
     // MARK: Asking
 
-    /// Asks about each identifier with its installed version, or `0.0.0.0` for nil, at most `identifiersPerRequest` to a request, one request after another, and gives the store's answer for each identifier it answered.
+    /// Asks about each identifier with its installed version, or `0.0.0.0` for nil, at most `identifiersPerRequest` to a request, one request after another, and gives the store's answer for each identifier it answered. Cancelling the task stops the request and throws `CancellationError`, not the system's error for a cancelled request.
     func releases(of queries: [(id: String, version: String?)]) async throws -> [String: WebStoreAnswer] {
         guard !productVersion.isEmpty else { throw WebStoreError.noEngineVersion }
         let asked = Set(queries.map(\.id))
         var answers: [String: WebStoreAnswer] = [:]
         for request in requests(for: queries) {
-            let (data, response) = try await session.data(for: request)
+            let (data, response): (Data, URLResponse)
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                try Task.checkCancellation()
+                throw error
+            }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200 else { throw WebStoreError.httpStatus(status) }
             let answered = try Self.answers(in: data)

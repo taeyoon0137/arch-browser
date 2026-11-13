@@ -135,10 +135,13 @@ final class RecordingEngine: EngineExtensions {
     var actionsWantSiteAccess = false
     var refusedNames: Set<String> = []
     var refused: Set<String> = []
+    /// Runs as each check starts, for a test that acts while a package is checked.
+    var onCheck: (@MainActor () -> Void)?
 
     @MainActor
     func check(_ packageURL: URL) async throws {
         checkCount += 1
+        onCheck?()
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: packageURL.appendingPathComponent("manifest.json"))) as? [String: Any]
         if let name = manifest?["name"] as? String, refusedNames.contains(name) { throw RecordingEngineError.refused }
     }
