@@ -116,7 +116,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 4. Cookies copy between the engines only within a Persona: each Persona has its own `CookieSync`.
 5. A Persona's stored data is removed only through an explicit list in the snapshot, at the next launch, before any engine starts. Removal is never inferred from a missing Persona.
 6. History, remembered permissions, zoom, site search, the search engine, the download settings, and `ai.json` stay app-wide (open decisions 2 and 3).
-7. When the interface names a Persona with one of its spaces, it shows "Persona / Space": the Persona's name, a slash with a space on each side, and the space's name, as in "Work / Research". Interface elements that cover a whole Persona rather than one space, such as its favorites, site data, plugins, and the New, Rename, and Delete Persona sheets, show the Persona's name alone. With only the default Persona, the interface does not name Personas, so a space shows only its name. `BrowserSession.label(ofSpace:)` gives the first label and `displayedName(ofPersona:)` the second. III.15 applies this rule to the space header and window title, and every later feature follows it, as `docs/bookmarks.md` does.
+7. When the interface names a Persona with one of its spaces, it shows "Persona / Space": the Persona's name, a slash with a space on each side, and the space's name, as in "Work / Research". Interface elements that cover a whole Persona rather than one space, such as its favorites, site data, plugins, and the New, Rename, and Delete Persona sheets, show the Persona's name alone. With only the default Persona, the interface does not name Personas, so a space shows only its name. `BrowserSession.label(ofSpace:)` gives the first label and `displayedName(ofPersona:)` the second. III.15 applies this rule to the space header, the window title, and the bottom bar symbols' tooltips and accessibility labels, and every later feature follows it, as `docs/bookmarks.md` does.
 
 ## Risks and mitigations
 
@@ -640,7 +640,7 @@ Preference
 
 - With one Persona, nothing visible changes. That is the state after the migration.
 - With two or more Personas:
-  - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking.
+  - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking. From III.15, each symbol's tooltip and accessibility label give the space's label (Persona rule 7), since two Personas can each have a space named Personal.
   - `SpaceHeaderView` shows the space's label under Persona rule 7, "Work / Research", with the Persona's name and slash in secondary text. Double-clicking still renames only the space. Until III.15 lands, it shows the Persona's name above the space name in small secondary text.
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
   - The window title ends with " — " and the current space's label, "Work / Research", or shows that label alone when no tab is selected (Persona rule 7; until III.15 lands, it adds the Persona's name alone).

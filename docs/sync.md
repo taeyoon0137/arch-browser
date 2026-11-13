@@ -16,7 +16,7 @@
 | Spaces | Name, symbol, tint, order, Persona | Which space is current |
 | Favorites | Address, title, order, Persona | The favorite's live tab (III.13) |
 | Pinned tabs | Saved page (address and title, `docs/bookmarks.md`), the user's tab name, engine, order, space, folder | The current page, restorable page state, the live page; live folders' item tabs |
-| Live folders | Source, item limit, and refresh interval with their folder | Items, read state, dismissed items, fetch state (`live-folders.json`) |
+| Live folders | Source, item limit, and refresh interval with their folder | Items, read state, dismissed items, fetch state (`live-folders.json`); a feed folder whose address has a query, which the Keychain keeps (`docs/bookmarks.md`, live folder rule 8) |
 | Settings | The keys in the settings list below | Every other key |
 
 Open (unpinned) tabs stay on each Mac. They archive after the archive delay and change with every page. Syncing them would open and close tabs on one Mac while the user browses on another.
