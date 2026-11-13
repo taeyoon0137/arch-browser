@@ -1,4 +1,4 @@
-// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups and sheets in its windows, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
+// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups in its windows and their questions as cards over their tabs, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -168,10 +168,11 @@ final class SessionWebExtensionHost: WebExtensionHost {
         completion(window.id)
     }
 
-    /// Without a tab, the sheet is for the tab of the window that last became main. A sheet for a tab that has closed, or without any tab, gets the safe answer.
-    func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab } else { return completion(.cancel) }
-        session.enqueueSheet(alert, for: tab, completion: completion)
+    /// Shows the question as a card over the tab, or without a tab over the tab of the window that last became main. A question for a tab that has closed, or without any tab, gets the safe answer. The extension's own icon is not known to the plugins, so the card shows the extension symbol.
+    func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void) {
+        guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab } else { return completion(false) }
+        let content = TabPromptContent.extensionQuestion(question, icon: nil, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        session.enqueuePrompt(content, for: tab) { completion(TabPromptContent.extensionAnswer($0)) }
     }
 
     /// The open tab whose web contents `webContents` is.

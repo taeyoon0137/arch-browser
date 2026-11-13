@@ -58,7 +58,7 @@ extension PluginManager {
     }
 }
 
-/// A browser that gives the runtime its engines and records the popups and sheets the runtime asks it to show and the tabs and windows it asks it to open. Sheets get the answer the test chose; a tab opens as `openedTab`, and a window as `openedWindow`.
+/// A browser that gives the runtime its engines and records the popups it asks it to show, the questions it asks the user, and the tabs and windows it asks it to open. Questions get the answer the test chose; a tab opens as `openedTab`, and a window as `openedWindow`.
 @MainActor
 final class RecordingHost: WebExtensionHost {
     var engines: [EngineKind: any EngineExtensions] = [:]
@@ -71,8 +71,9 @@ final class RecordingHost: WebExtensionHost {
     private(set) var popups: [NSPopover] = []
     /// The popup pages that a popover of the app's would show.
     private(set) var popupPages: [any EngineExtensionPopupView] = []
-    private(set) var sheets: [NSAlert] = []
-    var sheetAnswer = NSApplication.ModalResponse.alertFirstButtonReturn
+    private(set) var questions: [WebExtensionQuestion] = []
+    /// Whether the user agrees to each question.
+    var answer = true
     /// Each tab request: the address, engine, Persona, window, whether active, and the index.
     private(set) var openedTabs: [(url: URL?, engine: EngineKind, persona: PersonaID, window: UUID?, active: Bool, index: Int?)] = []
     var openedTab: (any EngineWebContents)?
@@ -109,9 +110,9 @@ final class RecordingHost: WebExtensionHost {
         completion(openedWindow)
     }
 
-    func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        sheets.append(alert)
-        completion(sheetAnswer)
+    func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void) {
+        questions.append(question)
+        completion(answer)
     }
 }
 

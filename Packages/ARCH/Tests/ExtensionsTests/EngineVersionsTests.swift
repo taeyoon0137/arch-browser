@@ -183,9 +183,9 @@ struct EngineVersionsTests {
         #expect(throws: NativeMessagingError.notFound("org.example.echo")) { try reply?.get() }
         // A request at run time names the pair and the version that asks.
         runtime.extensions(chromium, extension: keyID, requests: [.permission("cookies")], in: nil) { _ in }
-        #expect(host.sheets.last?.messageText == "Allow the Chromium version of \u{201C}Reader\u{201D} more access?")
+        #expect(host.questions.last?.extensionName == "Reader" && host.questions.last?.version == .chromium)
         runtime.extensions(webKit, extension: keyID, requests: [.permission("cookies")], in: nil) { _ in }
-        #expect(host.sheets.last?.messageText == "Allow the WebKit version of \u{201C}Reader\u{201D} more access?")
+        #expect(host.questions.last?.extensionName == "Reader" && host.questions.last?.version == .webKit)
         manager.close()
 
         // A new manager lists both versions and the pair.
