@@ -74,7 +74,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
     }
 }
 
-/// The tool host behind an outside client's grant, standing in for the session binding that plan task VII.17 adds.
+/// The tool host behind an outside client's grant, standing in for the session binding that plan task VII.17.1 adopts.
 @MainActor final class GrantSessionTools: AgentSessionTools {
     let toolHost: AgentToolHost
     let grant: AgentGrant
@@ -114,6 +114,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
     static func describe(_ event: AIAgentEvent) -> String {
         switch event {
         case .ready(let model): return "ready:\(model.model)"
+        case .processReady: return "processReady"
         case .text(let text): return "text:\(text)"
         case .thinking: return "thinking"
         case .usage(let usage): return "usage:\(usage.inputTokens)/\(usage.outputTokens)"
