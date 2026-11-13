@@ -440,7 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     @objc private func deletePersona() {
         let target = frontSidebarTarget()
-        target.confirmDeletePersona(target.personaID)
+        target.confirmDeletePersona(ofSpace: target.currentSpace)
     }
     @objc private func moveToMainWindow() {
         guard let window = session.activeWindow, window.kind == .small else { return }

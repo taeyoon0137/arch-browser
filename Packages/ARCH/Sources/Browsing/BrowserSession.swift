@@ -549,9 +549,20 @@ public final class BrowserSession: ObservableObject {
         personas.first { $0.id == id }
     }
 
-    /// The Persona's name where the interface shows it, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one.
+    /// The Persona's name alone, where the interface names a Persona without a space, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one.
     func displayedName(ofPersona id: Persona.ID) -> String? {
-        personas.count > 1 ? persona(withID: id)?.name : nil
+        displayedPlace(ofPersona: id, space: nil)
+    }
+
+    /// How the interface names a Persona from a place (Persona rule 7 in `docs/windows-personas.md`): "Work / Research" for the Persona and `space`, the Persona's name alone without a space, as for a favorite's tab, or nil while the default Persona is the only one.
+    func displayedPlace(ofPersona id: Persona.ID, space: Space?) -> String? {
+        Self.displayedPlace(ofPersona: id, space: space, among: personas)
+    }
+
+    /// `displayedPlace(ofPersona:space:)` for the session's `personas`, also nil for a Persona that is no longer listed.
+    static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+        guard personas.count > 1, let persona = personas.first(where: { $0.id == id }) else { return nil }
+        return space.map { "\(persona.name) / \($0.name)" } ?? persona.name
     }
 
     /// The space a tab of the Persona joins when no space of the Persona is given: the last main window's current space while it belongs to the Persona, else the Persona's first space. Every listed Persona has a space; for one that is gone, the first space.

@@ -100,12 +100,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return CGRect(x: area.midX - fitted.width / 2, y: area.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
     }
 
-    /// The title bar hides the title. The Window menu and Mission Control show it: the selected tab's title, or the space's name with no tab selected, followed with several Personas by the window's Persona.
+    /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it.
     private func updateTitle() {
         guard let window else { return }
-        let name = model.selectedTab?.displayTitle ?? model.currentSpace.name
-        let title = model.session.displayedName(ofPersona: model.personaID).map { "\(name) \u{2014} \($0)" } ?? name
+        let space = model.currentSpace
+        let title = Self.title(tabTitle: model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
         if window.title != title { window.title = title }
+    }
+
+    /// A window's title: the selected tab's title followed by `place`, the window's Persona and current space, as "Example Domain — Work / Research", or with no tab selected `place` alone. With one Persona, `place` is nil, and the title is the tab's title or the space's name.
+    nonisolated static func title(tabTitle: String?, spaceName: String, place: String?) -> String {
+        guard let tabTitle else { return place ?? spaceName }
+        return place.map { "\(tabTitle) \u{2014} \($0)" } ?? tabTitle
     }
 
     func windowDidBecomeMain(_ notification: Notification) {
