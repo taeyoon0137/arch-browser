@@ -42,6 +42,8 @@ import Foundation
         var step: String?
         /// How the user decided, for the activity log, when a card asked.
         var decision: AgentActivityEntry.Decision?
+        /// For `approvalPending`, the call that goes on, whose outcome the service records when it comes.
+        var waitingCall: AgentCallBox?
     }
 
     /// Every served tool in catalog order, for `tools/list` before a grant, since the grant sheet may allow any of them.
@@ -62,17 +64,29 @@ import Foundation
         }
     }
 
-    /// Runs a call for the grant. A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result.
+    /// Runs a call for the grant, as a task the grant's state keeps until it ends, so that Stop, Stop All Agents, revocation, expiry, and the connection's close cancel it (`AgentGrantState.cancelCalls(onConnection:)`). A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result.
     func run(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         if call.name == "approval_wait" { return await approvalWait(call, for: grant, state: state) }
-        let box = AgentCallBox()
-        Task { box.outcome = await runNow(call, for: grant, state: state, box: box) }
+        let box = AgentCallBox(connectionID: connectionID)
+        state.runningCalls.append(box)
+        box.task = Task {
+            let outcome = await runNow(call, for: grant, state: state, box: box)
+            state.runningCalls.removeAll { $0 === box }
+            box.finish(outcome)
+        }
         while true {
             if await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome { return outcome }
+            // A caller that was cancelled stops the call too.
+            if Task.isCancelled {
+                box.task?.cancel()
+                return Self.ended
+            }
             guard let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
             let handle = state.handles.approvals.handle(for: approvalID)
             state.pendingCalls[handle] = box
-            return Self.pending(handle, tool: call.name)
+            var pending = Self.pending(handle, tool: call.name)
+            pending.waitingCall = box
+            return pending
         }
     }
 
@@ -84,6 +98,11 @@ import Foundation
         guard await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome else { return Self.pending(handle, tool: "approval_wait") }
         state.pendingCalls[handle] = nil
         return outcome
+    }
+
+    /// The answer of a call that the client's work ending cancelled: Stop, Deny and Stop, Stop All Agents, a revocation, expiry, or its connection's close. Such a call runs no further step and opens no card.
+    static var ended: Outcome {
+        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."))
     }
 
     /// The answer of a call that waits for the user.
@@ -240,7 +259,7 @@ import Foundation
 
     /// The client's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI, or on a page agents do not read, is listed without its title or address (rule P16).
     private func listTabs(shared: Bool, _ grant: AgentGrant, state: AgentGrantState) -> AgentToolResult {
-        let tabs = shared ? host.tabs(withIDs: Set(state.handles.sharedTabIDs)) : host.agentTabs(of: grant.id)
+        let tabs = shared ? host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { access(to: $0, grant, state: state) != .notTheClients } : host.agentTabs(of: grant.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for tab in tabs {
@@ -330,6 +349,7 @@ import Foundation
         let handle = state.handles.tabs.handle(for: tab.id)
         let before = AgentTabActivity()
         let loaded = await waitForLoad(of: tab.id, grant, state: state, since: before)
+        if Task.isCancelled { return Self.ended }
         var outcome = loadOutcome(of: tab.id, handle: handle, grant, state: state, since: before, didLoad: loaded, opened: true)
         outcome.site = AgentActivityEntry.site(of: url)
         return outcome
@@ -369,6 +389,7 @@ import Foundation
         let before = state.activity(of: tab.id)
         host.navigate(tab.id, navigation)
         let loaded = await waitForLoad(of: tab.id, grant, state: state, since: before)
+        if Task.isCancelled { return Self.ended }
         var outcome = loadOutcome(of: tab.id, handle: handle, grant, state: state, since: before, didLoad: loaded, opened: false, history: navigation == .back || navigation == .forward)
         if case .load(let url) = navigation { outcome.site = AgentActivityEntry.site(of: url) }
         return outcome
@@ -400,9 +421,9 @@ import Foundation
         return .value(url)
     }
 
-    /// The tab's latest snapshot while the tab still shows its document.
+    /// The tab's latest snapshot while the tab still shows its page.
     func currentSnapshot(of tab: AgentTabInfo, state: AgentGrantState) -> AgentSnapshotRecord? {
-        guard let record = state.snapshots[tab.id], record.document == state.activity(of: tab.id).documents, record.url == tab.url else { return nil }
+        guard let record = state.snapshots[tab.id], record.document == state.activity(of: tab.id).pages, record.url == tab.url else { return nil }
         return record
     }
 
@@ -535,9 +556,9 @@ import Foundation
         }
     }
 
-    /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it.
+    /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it that is still the user's.
     func mayStillRead(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
-        tab.agentOwnerID == grant.id || state.handles.sharedTabIDs.contains(tab.id)
+        access(to: tab, grant, state: state) != .notTheClients
     }
 
     private func waitFor(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
@@ -558,16 +579,17 @@ import Foundation
         if let ref = arguments["ref"]?.stringValue {
             waited = "\(ref) to appear"
             guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref], let target = AgentRefTarget(ref, fingerprint: entry.fingerprint) else { return Self.stale(handle) }
+            // Watching scrolls nothing, so that a wait leaves the user's shared tab where it is.
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
                 guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
                 if case .refused(let rule, let sentence) = AgentPolicy.mayRead(current.url, allowsAI: allowsAI) {
                     return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle), site: site)
                 }
-                if case .value(let reply) = await pageScript(.element(target), in: current, as: AgentElementReply.self) {
+                if case .value(let reply) = await pageScript(.element(target, scroll: false), in: current, as: AgentElementReply.self) {
                     isMet = reply.facts != nil && !["notFound", "stale", "hidden", "detached"].contains(reply.problem ?? "")
                 }
-                if isMet || Date() >= deadline { break }
+                if isMet || Date() >= deadline || Task.isCancelled { break }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         } else if let text = arguments["text"]?.stringValue {
@@ -579,7 +601,7 @@ import Foundation
                 case .outcome(let failure) where failure.result.status == .refused: return Outcome(result: failure.result, site: site)
                 case .outcome: break
                 }
-                if isMet || Date() >= deadline { break }
+                if isMet || Date() >= deadline || Task.isCancelled { break }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         } else {
@@ -595,6 +617,7 @@ import Foundation
             guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
             guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
         }
+        if Task.isCancelled { return Self.ended }
         let structured: AgentJSON = ["tab": .string(handle), "met": .bool(isMet)]
         if isMet { return Outcome(result: AgentToolResult(status: .ok, text: "\(handle): the wait for \(waited) is over; it happened.", structured: structured), site: site) }
         return Outcome(result: AgentToolResult(status: .timeout, text: "\(handle): the wait for \(waited) timed out after \(Self.seconds(seconds)).", structured: structured), site: site)
@@ -654,10 +677,24 @@ import Foundation
         return .value((tab, handle))
     }
 
-    /// A tab the client may read: one of its agent tabs, or one the user shared with it.
+    /// A tab the client may read: one of its agent tabs, or one the user shared with it that is still the user's, by the tab's current owner.
     func readableTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
-        if let id = state.handles.tabs.id(for: handle), state.handles.sharedTabIDs.contains(id), let tab = host.tabs(withIDs: [id]).first { return .value((tab, handle)) }
-        return agentTab(handle, grant, state: state)
+        guard let id = state.handles.tabs.id(for: handle) else { return .outcome(Self.error("tabNotFound", "This client has no tab \(handle).")) }
+        guard let tab = host.tabs(withIDs: [id]).first else { return .outcome(Self.error("tabNotFound", "\(handle) is closed.")) }
+        guard mayStillRead(tab, grant, state: state) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
+        return .value((tab, handle))
+    }
+
+    /// How the client may use the tab as it is now, on every call: its own agent tab while the tab is in its agent folder, and a tab the user shared while the tab is the user's. A shared tab that has moved into an agent folder is no longer shared, and leaves the shared list. A tab never changes Persona, and the user shared one of the grant's Persona.
+    func access(to tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> AgentTabAccess {
+        let isShared = state.handles.sharedTabIDs.contains(tab.id)
+        if isShared, tab.agentOwnerID != nil {
+            state.handles.sharedTabIDs.removeAll { $0 == tab.id }
+            state.handles.actingSharedTabIDs.remove(tab.id)
+        }
+        if tab.agentOwnerID == grant.id { return .agentTab }
+        guard isShared, tab.agentOwnerID == nil else { return .notTheClients }
+        return .shared(acting: state.handles.actingSharedTabIDs.contains(tab.id))
     }
 
     private static func tabJSON(_ tab: AgentTabInfo, handle: String) -> [String: AgentJSON] {
@@ -682,7 +719,7 @@ import Foundation
 
     // MARK: Events
 
-    /// Keeps what happened in an agent tab for its client's next result, in `state`, which a grant has from its first call. A tab that a page opened beyond the limit of agent tabs closes again, on the next turn of the run loop, since the engine is still in the callback that made it. A new document withdraws the cards about the tab's earlier one, and a tab that closed or left the client withdraws all of its cards. A download or a link to another app that a page started asks the user on a card of its own (P6, P11).
+    /// Keeps what happened in an agent tab for its client's next result, in `state`, which a grant has from its first call. A tab that a page opened beyond the limit of agent tabs closes again, on the next turn of the run loop, since the engine is still in the callback that made it. A new page, which an address change counts before its document finishes loading, withdraws the cards about the tab's earlier one, and a tab that closed or left the client withdraws all of its cards. A download or a link to another app that a page started asks the user on a card of its own (P6, P11), one at a time per tab.
     func tab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport, state: AgentGrantState?, client: String = "") {
         if case .opened(let openedID) = report, host.agentTabs(of: ownerID).count > AgentLimits.agentTabs {
             let host = host
@@ -690,9 +727,14 @@ import Foundation
             state?.record(.closedOverLimit, tab: tabID)
             return
         }
+        // One download card per tab waits at a time, so that a page cannot pile them up; a page's further downloads meanwhile do not start, and the agent hears so.
+        if case .downloadAsked = report, let state, approvals.pending.contains(where: { $0.tabID == tabID && $0.kind == .download }) {
+            state.record(.decided("A page in \(state.handles.tabs.handle(for: tabID)) started another download while one waits for the user, so Arch did not start it."), tab: tabID)
+            return
+        }
         state?.record(.report(report), tab: tabID)
         switch report {
-        case .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).documents ?? Int.max)
+        case .addressChanged, .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).pages ?? Int.max)
         case .closed, .takenOver: approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
         case .downloadAsked(let url): if let state { askAboutDownload(url, in: tabID, of: ownerID, state: state, client: client) }
         case .externalAppAsked(let url): if let state { askAboutExternalApp(url, in: tabID, of: ownerID, state: state, client: client) }
@@ -758,7 +800,7 @@ import Foundation
             } else {
                 line = "\(handle) loaded a page that agents do not read."
             }
-        case .report(.stoppedLoading):
+        case .report(.stoppedLoading), .report(.addressChanged):
             return nil
         case .report(.opened(let openedID)):
             let opened = state.handles.tabs.handle(for: openedID)
@@ -847,11 +889,11 @@ import Foundation
                                structured: .object(structured))
     }
 
-    /// Polls `condition` on the main actor every 50 milliseconds until it holds or `seconds` pass, and says whether it held.
+    /// Polls `condition` on the main actor every 50 milliseconds until it holds, `seconds` pass, or the task is cancelled, and says whether it held.
     static func poll(for seconds: TimeInterval, until condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition() {
-            guard Date() < deadline else { return false }
+            guard Date() < deadline, !Task.isCancelled else { return false }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return true

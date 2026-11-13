@@ -1,4 +1,4 @@
-// What the tool host keeps for one grant for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, and the calls that wait for the user past the first answer.
+// What the tool host keeps for one grant for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, and the calls that wait for the user past the first answer.
 import AgentControl
 import Foundation
 
@@ -12,7 +12,7 @@ struct AgentGrantHandles {
     var actingSharedTabIDs: Set<UUID> = []
 }
 
-/// A tab's latest snapshot: the document it read, by address and by the tab's count of documents, its refs with their fingerprints and, for links, their full addresses, and its lines, which the next snapshot's diff compares.
+/// A tab's latest snapshot: the page it read, by address and by the tab's count of pages (`AgentTabActivity.pages`), its refs with their fingerprints and, for links, their full addresses, and its lines, which the next snapshot's diff compares.
 struct AgentSnapshotRecord {
     struct Ref: Equatable {
         var fingerprint: String
@@ -25,11 +25,31 @@ struct AgentSnapshotRecord {
     var lines: [String]
 }
 
-/// A call that answered `approvalPending` and still runs; `approval_wait` takes its outcome.
+/// A call that runs: its task, which Stop, Stop All Agents, revocation, expiry, and its connection's close cancel, and once it answered `approvalPending`, the outcome that `approval_wait` takes and the service records when it comes.
 @MainActor final class AgentCallBox {
-    var outcome: AgentToolHost.Outcome?
+    /// The connection the call came on.
+    let connectionID: UUID?
+    var task: Task<Void, Never>?
+    private(set) var outcome: AgentToolHost.Outcome?
     /// The card the call waits on.
     var approvalID: UUID?
+    private var finished: [(AgentToolHost.Outcome) -> Void] = []
+
+    init(connectionID: UUID?) {
+        self.connectionID = connectionID
+    }
+
+    func finish(_ outcome: AgentToolHost.Outcome) {
+        self.outcome = outcome
+        let handlers = finished
+        finished = []
+        handlers.forEach { $0(outcome) }
+    }
+
+    /// Calls `handler` with the call's outcome once it has one, at once if it has.
+    func whenFinished(_ handler: @escaping (AgentToolHost.Outcome) -> Void) {
+        if let outcome { handler(outcome) } else { finished.append(handler) }
+    }
 }
 
 struct AgentHandleTable {
@@ -78,7 +98,12 @@ struct AgentEvent: Equatable {
 
 /// What one agent tab has reported this launch, which waits compare before and after a step.
 struct AgentTabActivity: Equatable {
+    /// The documents the main frame finished loading, which navigations wait for.
     var documents = 0
+    /// The pages the tab showed: one more at each change of the main frame's address other than in its fragment, which comes as a navigation starts or commits, before its document finishes loading, and at each finished document, as after a reload. Snapshots, Allow on This Page, cards, and the forms the client typed into belong to one page.
+    var pages = 0
+    /// The address the last page counted, without its fragment.
+    var address: URL?
     var stops = 0
     var refusals = 0
     var isGone = false
@@ -95,17 +120,19 @@ struct AgentTabActivity: Equatable {
     /// Each tab's latest snapshot, and how many it had this launch.
     var snapshots: [UUID: AgentSnapshotRecord] = [:]
     var snapshotCounts: [UUID: Int] = [:]
-    /// Allow on This Page: the tab's document count when the user allowed it, which lasts until the tab loads another document.
+    /// Allow on This Page: the tab's page count when the user allowed it, which lasts until the tab shows another page.
     var pageAllowances: [UUID: Int] = [:]
     /// Allow on <site> for This Session, and Allow Downloads from This Site for This Session, by host.
     var siteAllowances: Set<String> = []
     var downloadSites: Set<String> = []
     /// Downloads the user allowed once, by address, until they start.
     var allowedDownloads: Set<URL> = []
-    /// The forms the client typed into, per tab, in the document of that count (P5).
-    var typedForms: [UUID: (document: Int, keys: Set<String>)] = [:]
+    /// The forms the client typed into, per tab, on the page of that count (P5).
+    var typedForms: [UUID: (page: Int, keys: Set<String>)] = [:]
     /// Calls that answered `approvalPending`, by their handle.
     var pendingCalls: [String: AgentCallBox] = [:]
+    /// The calls that still run.
+    var runningCalls: [AgentCallBox] = []
     /// When the latest actions ran, for the limit of actions a second.
     var actionTimes: [Date] = []
 
@@ -115,14 +142,26 @@ struct AgentTabActivity: Equatable {
     func record(_ kind: AgentEvent.Kind, tab tabID: UUID) {
         var tab = activity[tabID] ?? AgentTabActivity()
         switch kind {
-        case .report(.loaded): tab.documents += 1
+        case .report(.addressChanged(let url)):
+            let address = url.map(Self.withoutFragment)
+            if address != tab.address {
+                tab.pages += 1
+                tab.address = address
+            }
+        case .report(.loaded(let url, _)):
+            tab.documents += 1
+            tab.pages += 1
+            tab.address = url.map(Self.withoutFragment)
         case .report(.stoppedLoading): tab.stops += 1
         case .report(.closed), .report(.takenOver): tab.isGone = true
         case .refused: tab.refusals += 1
         case .report, .closedOverLimit, .decided: break
         }
         activity[tabID] = tab
-        if case .report(.stoppedLoading) = kind { return }
+        switch kind {
+        case .report(.stoppedLoading), .report(.addressChanged): return
+        default: break
+        }
         sequence += 1
         events.append(AgentEvent(sequence: sequence, tabID: tabID, kind: kind))
         if events.count > Self.keptEvents { events.removeFirst(events.count - Self.keptEvents) }
@@ -130,6 +169,17 @@ struct AgentTabActivity: Equatable {
 
     func activity(of tabID: UUID) -> AgentTabActivity {
         activity[tabID] ?? AgentTabActivity()
+    }
+
+    private static func withoutFragment(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.fragment != nil else { return url }
+        components.fragment = nil
+        return components.url ?? url
+    }
+
+    /// Cancels the calls that still run, or those of one connection: each answers that the client's work ended at its next step, and opens no card.
+    func cancelCalls(onConnection connectionID: UUID? = nil) {
+        for call in runningCalls where connectionID == nil || call.connectionID == connectionID { call.task?.cancel() }
     }
 
     /// The last event's sequence number, from which a call tells the events it caused.

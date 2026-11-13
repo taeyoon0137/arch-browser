@@ -1,4 +1,4 @@
-// The agents' page script (docs/agents.md, Page snapshots and refs): one JavaScript function written for Arch, which the host runs with an operation object through `executeJavaScript(_:inWorld:completion:)` in the world `arch.agent` and which answers with JSON text. WebKit runs it in a content world of its own; Chromium runs every world in the page's main world, where a page can replace the built-ins it calls (Risks 2). It keeps nothing in the page between calls (agent decision 13): a ref is an element's index in the script's walk, and the host keeps each ref's fingerprint with the document's address, so that an action walks again and fails as stale when the element at that index differs. The walk follows open shadow roots and same-origin frames, lists other sites' frames without reading them, and leaves out extension frames, hidden elements, `aria-hidden` subtrees, and scripts. A field whose value is secret (P1's class) or personal never gives its value, nor any field of a tab the user shared.
+// The agents' page script (docs/agents.md, Page snapshots and refs): one JavaScript function written for Arch, which the host runs with an operation object through `executeJavaScript(_:inWorld:completion:)` in the world `arch.agent` and which answers with JSON text. WebKit runs it in a content world of its own; Chromium runs every world in the page's main world, where a page can replace the built-ins it calls (Risks 2). It keeps nothing in the page between calls (agent decision 13): a ref is an element's index in the script's walk, and the host keeps each ref's fingerprint with the document's address, so that an action walks again and fails as stale when the element at that index differs. The walk follows open shadow roots and same-origin frames, lists other sites' frames without reading them, and leaves out extension frames, hidden elements, `aria-hidden` and `inert` subtrees, and scripts; the boxes that screenshots paint over come from every subtree that shows on the screen. A field whose value is secret (P1's class) or personal never gives its value, nor any field of a tab the user shared, where screenshots paint every field over.
 import AgentControl
 import Foundation
 
@@ -49,12 +49,16 @@ public struct AgentElementFacts: Codable, Equatable, Sendable {
     /// Names the element's form within the document, so that the host can tell which forms the session typed into (P5).
     public var formKey: String?
     public var formFields: [AgentFormFieldKind]
+    /// The host the form sends to: a submit control's own `formaction` when it has one, and for a field the `formaction` of the button that Enter submits with, else the form's action.
     public var formActionHost: String?
+    /// For a field of a form, the name and value of the button that Enter submits the form with, its first enabled submit button, which P4 reads for a submission by Enter.
+    public var submitterName: String?
+    public var submitterValue: String?
     public var box: AgentBox?
 
     public init(tag: String, role: String, name: String, inputType: String? = nil, autocomplete: String? = nil, valueClass: AgentValueClass? = nil, value: String? = nil,
                 isEditable: Bool = false, isFileInput: Bool = false, isSelect: Bool = false, submitsForm: Bool = false, formKey: String? = nil, formFields: [AgentFormFieldKind] = [],
-                formActionHost: String? = nil, box: AgentBox? = nil) {
+                formActionHost: String? = nil, submitterName: String? = nil, submitterValue: String? = nil, box: AgentBox? = nil) {
         self.tag = tag
         self.role = role
         self.name = name
@@ -69,6 +73,8 @@ public struct AgentElementFacts: Codable, Equatable, Sendable {
         self.formKey = formKey
         self.formFields = formFields
         self.formActionHost = formActionHost
+        self.submitterName = submitterName
+        self.submitterValue = submitterValue
         self.box = box
     }
 }
@@ -95,13 +101,13 @@ public struct AgentRefTarget: Codable, Equatable, Sendable {
 enum AgentPageOperation: Encodable {
     /// The outline: `interactive` or `full`, optionally only the subtree of `ref`, without any field's value in a shared tab.
     case snapshot(full: Bool, ref: AgentRefTarget?, shared: Bool)
-    /// The facts and actionability of an element, or of the focused element without a ref, after it scrolls into view.
-    case element(AgentRefTarget?)
-    /// The boxes a screenshot paints over, and the viewport and page sizes.
-    case boxes
+    /// The facts of an element, or of the focused element without a ref, and whether an action can reach it. With `scroll`, it scrolls into view first and must be on top at its center; without, the page stays where it is and only a detached, hidden, or disabled element is named.
+    case element(AgentRefTarget?, scroll: Bool)
+    /// The boxes a screenshot paints over, and the viewport and page sizes; in a tab the user shared, every field's box too.
+    case boxes(shared: Bool)
     case act(AgentPageAction)
 
-    private enum Keys: String, CodingKey { case op, full, ref, shared, action, words }
+    private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: Keys.self)
@@ -112,11 +118,13 @@ enum AgentPageOperation: Encodable {
             try container.encode(full, forKey: .full)
             try container.encodeIfPresent(ref, forKey: .ref)
             try container.encode(shared, forKey: .shared)
-        case .element(let ref):
+        case .element(let ref, let scroll):
             try container.encode("element", forKey: .op)
             try container.encodeIfPresent(ref, forKey: .ref)
-        case .boxes:
+            try container.encode(scroll, forKey: .scroll)
+        case .boxes(let shared):
             try container.encode("boxes", forKey: .op)
+            try container.encode(shared, forKey: .shared)
         case .act(let action):
             try container.encode("act", forKey: .op)
             try container.encode(action, forKey: .action)
@@ -196,7 +204,7 @@ struct AgentBoxesReply: Decodable, Equatable {
         var y: Double
         var w: Double
         var h: Double
-        /// `hidden`, `personal`, `frame` (another site's), or `extension`.
+        /// `hidden`, `personal`, `frame` (another site's), `extension`, or `shared` (any other field of a tab the user shared).
         var kind: String
     }
 
@@ -378,11 +386,13 @@ enum AgentPageScripts {
       return null;
     }
 
+    /// The kinds of the fields a person fills in a form, for P3: text fields, text areas, and selects, never hidden inputs or buttons, whose values no person types.
     function formFieldsOf(form) {
       const kinds = new Set();
       if (!form) return [];
       for (const field of form.elements) {
-        const type = typeOf(field);
+        const tag = tagOf(field), type = typeOf(field);
+        if (!(tag === "textarea" || tag === "select" || (tag === "input" && TEXT_TYPES.has(type)))) continue;
         const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
         if (type === "password" || tokens.includes("current-password") || tokens.includes("new-password")) kinds.add("password");
         else if (tokens.includes("one-time-code")) kinds.add("oneTimeCode");
@@ -401,6 +411,18 @@ enum AgentPageScripts {
       const tag = tagOf(el), type = typeOf(el);
       if (tag === "button") return (el.getAttribute("type") || "submit").toLowerCase() === "submit";
       return type === "submit" || type === "image";
+    }
+
+    /// The button that Enter in one of the form's fields submits with: its first submit button, unless that one is disabled.
+    function defaultSubmitterOf(form) {
+      if (!form) return null;
+      const button = Array.from(form.elements).find((e) => submitsForm(e));
+      return button && !button.matches(":disabled") ? button : null;
+    }
+
+    /// Where a submission goes: the submitter's own `formaction` when it has one, else the form's action.
+    function actionOf(form, submitter) {
+      return submitter && submitter.hasAttribute("formaction") ? submitter.formAction : form.action;
     }
 
     function formKeyOf(el, frame) {
@@ -432,8 +454,8 @@ enum AgentPageScripts {
       return Array.from(node.childNodes);
     }
 
-    /// Walks the main frame's document and its same-origin frames in document order and calls the visitor's methods. Refs count the visible interactive elements of each frame from 1; frames count from 1 in the order the walk reaches them. Every operation walks the same way, so that a ref names the same element in each.
-    function walk(visitor) {
+    /// Walks the main frame's document and its same-origin frames in document order and calls the visitor's methods. Refs count the visible interactive elements of each frame from 1; frames count from 1 in the order the walk reaches them. Every operation that names refs walks the same way, so that a ref names the same element in each. `everyRendered` also enters `aria-hidden` and `inert` subtrees, which still show on the screen, for the boxes a screenshot paints over.
+    function walk(visitor, everyRendered) {
       const counters = [0];
       const offsets = [{ x: 0, y: 0 }];
       const visit = (node, depth, frame, inRef) => {
@@ -441,7 +463,7 @@ enum AgentPageScripts {
         if (node.nodeType === 3) { if (visitor.text && !inRef) visitor.text(node, depth); return; }
         if (node.nodeType !== 1) return;
         const el = node, tag = tagOf(el);
-        if (SKIPPED.has(tag) || el.getAttribute("aria-hidden") === "true" || el.hasAttribute("inert")) return;
+        if (SKIPPED.has(tag) || (!everyRendered && (el.getAttribute("aria-hidden") === "true" || el.hasAttribute("inert")))) return;
         const style = styleOf(el);
         if (style.display === "none") return;
         if (tag === "iframe" || tag === "frame") {
@@ -491,11 +513,16 @@ enum AgentPageScripts {
       const type = typeOf(el);
       const tokens = el.getAttribute("autocomplete");
       const isButton = tagOf(el) === "button" || ["submit", "button", "reset", "image"].includes(type);
+      const submits = submitsForm(el);
+      // A submit control sends the form itself; Enter in a field sends it with the form's default button.
+      const submitter = submits ? el : defaultSubmitterOf(el.form);
       return {
         tag: tagOf(el), role, name, inputType: type, autocomplete: tokens || null, valueClass: valueClassOf(el, name),
         value: isButton ? cut(el.getAttribute("value") || "", MAX_NAME) || null : null,
-        isEditable: isEditable(el), isFileInput: type === "file", isSelect: tagOf(el) === "select", submitsForm: submitsForm(el),
-        formKey: formKeyOf(el, frame), formFields: formFieldsOf(el.form), formActionHost: el.form ? hostOf(el.form.action, el.ownerDocument.baseURI) : null,
+        isEditable: isEditable(el), isFileInput: type === "file", isSelect: tagOf(el) === "select", submitsForm: submits,
+        formKey: formKeyOf(el, frame), formFields: formFieldsOf(el.form), formActionHost: el.form ? hostOf(actionOf(el.form, submitter), el.ownerDocument.baseURI) : null,
+        submitterName: !submits && submitter ? nameOf(submitter, "button") || null : null,
+        submitterValue: !submits && submitter ? cut(submitter.getAttribute("value") || "", MAX_NAME) || null : null,
         box: { x: rect.left + offset.x, y: rect.top + offset.y, w: rect.width, h: rect.height },
       };
     }
@@ -589,11 +616,18 @@ enum AgentPageScripts {
       return false;
     }
 
-    /// Why an action cannot reach the element, after it scrolls into view, or null when it can: it must be connected, visible, enabled, and on top at its center.
-    function blocked(el) {
+    /// Why no action can reach the element wherever the page is scrolled: it must be connected, visible, and enabled.
+    function unusable(el) {
       if (!el.isConnected) return { problem: "detached" };
       if (!isVisible(el)) return { problem: "hidden" };
       if (el.matches(":disabled") || el.getAttribute("aria-disabled") === "true") return { problem: "disabled" };
+      return null;
+    }
+
+    /// Why an action cannot reach the element, after it scrolls into view, or null when it can: it must be usable and on top at its center.
+    function blocked(el) {
+      const reason = unusable(el);
+      if (reason) return reason;
       scrollIntoView(el);
       const rect = el.getBoundingClientRect();
       const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
@@ -622,7 +656,7 @@ enum AgentPageScripts {
       const resolved = resolve(op.ref);
       if (!resolved.found) return { url: location.href, problem: resolved.problem };
       const { el, role, frame } = resolved.found;
-      const reason = blocked(el);
+      const reason = op.scroll ? blocked(el) : unusable(el);
       const facts = factsOf(el, role, frame, offsetOf(el));
       return Object.assign({ url: location.href, facts, viewport: { w: innerWidth, h: innerHeight } }, reason || {});
     }
@@ -632,11 +666,16 @@ enum AgentPageScripts {
       const add = (el, offset, kind) => {
         for (const rect of el.getClientRects()) if (rect.width > 0 && rect.height > 0) list.push({ x: rect.left + offset.x, y: rect.top + offset.y, w: rect.width, h: rect.height, kind });
       };
+      // Every subtree that shows on the screen, `aria-hidden` and `inert` ones too, as when a dialog's library hides the page behind it from assistive apps.
       walk({
-        field(el, frame, offset) { const cls = valueClassOf(el, nameOf(el, roleOf(el))); if (cls) add(el, offset, cls); },
+        field(el, frame, offset) {
+          const cls = valueClassOf(el, nameOf(el, roleOf(el)));
+          if (cls) add(el, offset, cls);
+          else if (op.shared && (isEditable(el) || tagOf(el) === "select")) add(el, offset, "shared");
+        },
         otherFrame(el, depth, frame, offset) { add(el, offset, "frame"); },
         extensionFrame(el, frame, offset) { add(el, offset, "extension"); },
-      });
+      }, true);
       const root = document.documentElement;
       return { url: location.href, viewport: { w: innerWidth, h: innerHeight }, page: { w: Math.max(root.scrollWidth, innerWidth), h: Math.max(root.scrollHeight, innerHeight) },
         scrollX, scrollY, boxes: list };
@@ -670,7 +709,8 @@ enum AgentPageScripts {
       const proceed = el.dispatchEvent(new win.KeyboardEvent("keydown", init));
       if (proceed && (key.length === 1 || key === "Enter")) el.dispatchEvent(new win.KeyboardEvent("keypress", init));
       el.dispatchEvent(new win.KeyboardEvent("keyup", init));
-      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) el.form.requestSubmit();
+      // Enter submits with the form's default button, the one whose name and `formaction` the policy read.
+      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) el.form.requestSubmit(defaultSubmitterOf(el.form) || undefined);
     }
 
     function typeInto(el, text, replace) {

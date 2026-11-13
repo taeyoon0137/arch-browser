@@ -1,4 +1,4 @@
-// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, denial on timeout, Touch ID for outside clients' sensitive Allow, the warning line on cards whose text names a secret, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download or link to another app opens, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit.
+// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download or link to another app opens, one download card per tab, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
 import AgentControl
 import AppKit
 import Foundation
@@ -55,8 +55,22 @@ import Testing
         #expect(await handedTask.value == .withdrawn)
         #expect(await lateTask.value == .timedOut)
         #expect(approvals.pending.isEmpty)
-        // An answer after the end counts for nothing.
+        // An answer after the end counts for nothing, and an ended card, with its capture, leaves memory.
         #expect(!(await approvals.answer(late.id, with: .allowOnce)))
+        #expect(approvals.approval(page.id) == nil && approvals.approval(late.id) == nil)
+    }
+
+    @Test func endedCardsKeepOnlyTheLatestOutcomes() async {
+        let approvals = AgentApprovals()
+        var ids: [UUID] = []
+        for _ in 0 ..< AgentApprovals.keptOutcomes + 5 {
+            let card = Self.card()
+            ids.append(card.id)
+            _ = approvals.open(card)
+        }
+        approvals.end(because: "Arch quit.")
+        #expect(approvals.outcomes.count == AgentApprovals.keptOutcomes)
+        #expect(approvals.outcomes[ids[0]] == nil && approvals.outcomes[ids.last!] == .ended("Arch quit."))
     }
 
     @Test func sensitiveAllowOfAnOutsideClientNeedsTouchID() async {
@@ -155,7 +169,7 @@ import Testing
         await fixture.toolHost.approvals.answer(question.id, with: .answer("I will type it myself"))
         #expect(await asked.text == "The user answered: I will type it myself")
 
-        // request_tab shares the tab the user picks, for reading or acting, and it is listed as shared.
+        // request_tab shares the tab the user picks, for reading or acting, and it is listed as shared. An outside client's Share counts only after Touch ID or the login password.
         let userTab = AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox?id=9"), isLoading: false, engine: .webKit)
         fixture.host.tabs.append(userTab)
         fixture.host.userTabIDs = [userTab.id]
@@ -163,7 +177,14 @@ import Testing
         async let requested = fixture.call("request_tab", ["reason": "To read the latest message", "access": "read"])
         let pick = try await fixture.waitForCard()
         #expect(pick.kind == .requestTab([AgentTabChoice(id: userTab.id, title: "Inbox", host: "mail.example")], acting: false))
-        await fixture.toolHost.approvals.answer(pick.id, with: .tab(userTab.id))
+        #expect(pick.needsAuthentication(for: .tab(userTab.id)) && !pick.needsAuthentication(for: .deny))
+        let authenticator = try #require(fixture.toolHost.approvals.authenticator as? FakeAuthenticator)
+        authenticator.answer = false
+        #expect(!(await fixture.toolHost.approvals.answer(pick.id, with: .tab(userTab.id))))
+        #expect(fixture.toolHost.approvals.isPending(pick.id))
+        authenticator.answer = true
+        #expect(await fixture.toolHost.approvals.answer(pick.id, with: .tab(userTab.id)))
+        #expect(authenticator.count == 2)
         let shared = await requested
         #expect(shared.status == .ok && shared.structured?["tab"] == "t1" && shared.structured?["access"] == "read")
         #expect(await fixture.call("list_tabs", ["scope": "shared"]).text.contains("t1  <untrusted"))
@@ -202,9 +223,16 @@ import Testing
         try await waitUntil { fixture.host.navigations.contains(.load(file)) }
         #expect(fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
         #expect(!fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
-        // Allow Downloads from This Site covers the next one from it.
+        // Allow Downloads from This Site covers the next one from it. While a download card waits, the page's further downloads get no card of their own and do not start.
         fixture.host.report(.downloadAsked(file), in: tabID)
-        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .allowDownloadsFromSite)
+        let waiting = try await fixture.waitForCard()
+        for number in 1 ... 3 { fixture.host.report(.downloadAsked(URL(string: "https://docs.example/files/file?n=\(number)")!), in: tabID) }
+        #expect(fixture.toolHost.approvals.pending.map(\.id) == [waiting.id])
+        // The agent hears of each card and of each answer, and of the downloads that got none.
+        let downloads = await fixture.call("list_tabs")
+        #expect(downloads.text.contains("which waits for the user in Arch (P6)") && downloads.text.contains("The user allowed the download in \(handle). It starts again."))
+        #expect(downloads.text.contains("A page in \(handle) started another download while one waits for the user, so Arch did not start it."))
+        await fixture.toolHost.approvals.answer(waiting.id, with: .allowDownloadsFromSite)
         try await waitUntil { fixture.state.downloadSites.contains("docs.example") }
         #expect(fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://docs.example/other.zip")!, state: fixture.state))
         #expect(!fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://elsewhere.example/other.zip")!, state: fixture.state))
@@ -219,15 +247,14 @@ import Testing
         #expect(fixture.host.openedExternally.isEmpty)
         await fixture.toolHost.approvals.answer(external.id, with: .allowOnce)
         try await waitUntil { fixture.host.openedExternally == [mail] }
-        // The agent hears of each card and of each answer, never the full addresses.
+        // Never the full addresses.
         let events = await fixture.call("list_tabs")
-        #expect(events.text.contains("which waits for the user in Arch (P6)") && events.text.contains("The user allowed the download in \(handle). It starts again."))
         #expect(events.text.contains("The user opened the link from \(handle) in Mail."))
-        #expect(!events.text.contains("token=1") && !events.text.contains("dana@example.org"))
+        #expect(!events.text.contains("token=1") && !events.text.contains("dana@example.org") && !downloads.text.contains("token=1"))
     }
 
-    @Test func anActionInAskBeforeActingAsksAndTheAnswerDecides() async throws {
-        // The fake host has no page script, so the action's card is about the page: scroll changes no data, while click needs a ref, which needs a snapshot; request_approval stands in for a card the page withdraws.
+    @Test func aRequestedApprovalEndsWhenThePageChangesOnDenyAndStopAndOnAReply() async throws {
+        // Actions in Ask Before Acting are tested on the page script's fixtures (PageScriptTests); here request_approval about a tab stands in for a card the page withdraws.
         let fixture = Fixture()
         fixture.toolHost.answerWait = 10
         let opened = await fixture.call("open_tab", ["url": "https://docs.example/guide"])
@@ -235,10 +262,14 @@ import Testing
         let tabID = try #require(fixture.state.handles.tabs.id(for: handle))
         async let approval = fixture.call("request_approval", ["summary": "Submit the form", "kind": "submit", "tab": .string(handle)])
         let card = try await fixture.waitForCard()
-        #expect(card.tabID == tabID && card.document == 1)
-        // The page moves on: the card goes, and the call is stale.
-        fixture.host.navigate(tabID, .load(URL(string: "https://docs.example/other")!))
+        // The tab's address changed when its document committed, and again when it finished loading.
+        #expect(card.tabID == tabID && card.document == 2 && fixture.state.activity(of: tabID).documents == 1)
+        // The page moves on to a document that commits and never finishes: the card goes, and the call is stale.
+        let next = URL(string: "https://docs.example/other")!
+        fixture.host.committingAddresses.insert(next)
+        fixture.host.navigate(tabID, .load(next))
         #expect(await approval.status == .stale)
+        #expect(fixture.state.activity(of: tabID).documents == 1)
         // Deny and Stop stops the client.
         var stopped: [UUID] = []
         fixture.toolHost.stopClient = { stopped.append($0) }
@@ -305,29 +336,91 @@ import Testing
         try await waitUntil { service.activity.entries.filter { $0.tool == "request_approval" }.count == 3 }
         #expect(service.activity.entries.filter { $0.tool == "request_approval" }.allSatisfy { $0.decision == .denied && $0.outcome == "denied" })
     }
+
+    @Test func aCallThatGoesOnAfterApprovalPendingRecordsItsOwnEntryAndStep() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        harness.answerWait = 0.3
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let first = try await client.callTool("request_approval", ["summary": "Send the reply", "kind": "send"])
+        #expect(first.status == .approvalPending)
+        let grant = try #require(service.grants.first)
+        let card = try #require(service.approvals.pending.first)
+        #expect(await service.approvals.answer(card.id, with: .allowOnce))
+        // The call records what it did when it ends, with the user's decision, whether or not the client asks for its result.
+        try await waitUntil { service.activity.entries.contains { $0.tool == "request_approval" && $0.outcome == "ok" } }
+        let entries = service.activity.entries.filter { $0.tool == "request_approval" }
+        #expect(entries.map(\.decision) == [.pending, .approvedWithTouchID] && entries.map(\.outcome) == ["approvalPending", "ok"])
+        #expect(service.panel.steps[grant.id]?.last?.sentence == "You approved: Send the reply")
+        // approval_wait takes the result, and the log has it as a plain read.
+        #expect(try await client.callTool("approval_wait", ["approval": "a1"]).status == .ok)
+        try await waitUntil { service.activity.entries.contains { $0.tool == "approval_wait" } }
+        #expect(service.activity.entries.last { $0.tool == "approval_wait" }?.decision == .auto)
+        #expect(service.activity.entries.filter { $0.tool == "request_approval" }.count == 2 && service.panel.steps[grant.id]?.count == 1)
+    }
 }
 
-/// The click check on sensitive cards' and the grant sheet's Allow (docs/agents.md, Approval interface): a click that another program of this user posted names that program as its source, which Arch refuses unless it is part of the system; a click whose source is the system, or no process, counts.
-@Suite struct PointerCheckTests {
-    @Test func clicksPostedByOtherProgramsAreRefused() {
-        let paths: [pid_t: String] = [
-            501: "/opt/homebrew/bin/cliclick", 502: "/Users/someone/.local/bin/agent-helper", 503: "/usr/bin/osascript",
-            504: "/System/Library/CoreServices/System Events.app/Contents/MacOS/System Events", 505: "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
-            510: "/System/Library/CoreServices/UniversalControl.app/Contents/MacOS/UniversalControl", 511: "/usr/libexec/hidd", 512: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+/// The click check on sensitive cards' Allow, Share, Done, and the grant sheet's Allow (docs/agents.md, Approval interface): a click that another program of this user posted names that program as its source, which Arch reads by its running code and refuses unless it is one of the system's programs that click for a person; a click whose source is no process, Arch, or another user's process counts; and only the click the button tracks counts, never an accessibility press or `performClick`, whatever event came last.
+@MainActor @Suite struct PointerCheckTests {
+    @Test func clicksPostedByOtherProgramsAreRefusedByTheirRunningCode() {
+        let me = getuid()
+        let sources: [pid_t: AgentPointerCheck.Source] = [
+            // Programs of this user: one Apple did not sign, whatever path it was started with, Apple's scripting hosts, and the system's own programs that click for a person.
+            501: .init(userID: me, appleIdentifier: nil), 502: .init(userID: me, appleIdentifier: "com.apple.osascript"), 503: .init(userID: me, appleIdentifier: "com.apple.systemevents"),
+            504: .init(userID: me, appleIdentifier: "com.apple.ScriptEditor2"), 505: .init(userID: me, appleIdentifier: "com.apple.automatorCLI"),
+            510: .init(userID: me, appleIdentifier: "com.apple.universalcontrol"), 511: .init(userID: me, appleIdentifier: "com.apple.VoiceOver"),
+            // Another user's processes, such as the window server's and the HID service's.
+            520: .init(userID: 88, appleIdentifier: nil), 521: .init(userID: 0, appleIdentifier: nil),
         ]
-        let path: (pid_t) -> String? = { paths[$0] }
-        for source in [501, 502, 503, 504, 505] as [pid_t] { #expect(AgentPointerCheck.isPostedByAnotherProgram(source: source, path: path), "\(source)") }
-        for source in [510, 511, 512] as [pid_t] { #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: source, path: path), "\(source)") }
-        // No source, Arch itself, and a process whose path Arch cannot read, as another user's, such as the window server's.
-        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 0, path: path))
-        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: getpid(), path: { _ in "/opt/homebrew/bin/cliclick" }))
-        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 600, path: path))
-        // Only a pointer click counts: no event, as an accessibility press gives, and a key press do not.
-        #expect(!AgentPointerCheck.isPointerClick(nil))
-        let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
-                                   isARepeat: false, keyCode: 36)
-        #expect(!AgentPointerCheck.isPointerClick(key))
-        let click = NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
-        #expect(AgentPointerCheck.isPointerClick(click))
+        let read: (pid_t) -> AgentPointerCheck.Source? = { sources[$0] }
+        for source in [501, 502, 503, 504, 505] as [pid_t] { #expect(AgentPointerCheck.isPostedByAnotherProgram(source: source, read: read), "\(source)") }
+        for source in [510, 511, 520, 521] as [pid_t] { #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: source, read: read), "\(source)") }
+        // No source and Arch itself count; a source that cannot be read, as one that exited after it posted, does not.
+        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 0, read: read))
+        let anyProgram: (pid_t) -> AgentPointerCheck.Source? = { _ in .init(userID: me, appleIdentifier: nil) }
+        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: getpid(), read: anyProgram))
+        #expect(AgentPointerCheck.isPostedByAnotherProgram(source: 600, read: read))
+    }
+
+    @Test func theSystemsReaderReadsTheRunningCode() throws {
+        // This test process: this user's, and not signed by Apple. A process of another user, launchd, gives its owner only.
+        let own = try #require(AgentPointerCheck.readSource(getpid()))
+        #expect(own.userID == getuid() && own.appleIdentifier == nil)
+        #expect(AgentPointerCheck.readSource(1)?.userID == 0)
+        #expect(AgentPointerCheck.readSource(pid_t(Int32.max)) == nil)
+    }
+
+    @Test func onlyTheClickTheButtonTracksCounts() async throws {
+        // The button reads the app's current event; its tracking loop, which takes events from the window server, is regression check 61's.
+        _ = NSApplication.shared
+        var pressed = 0
+        let button = AgentPointerButton(title: "Allow", requiresPointer: true) { pressed += 1 }
+        let coordinator = button.makeCoordinator()
+        let view = AgentPointerNSButton(title: "Allow", target: coordinator, action: #selector(AgentPointerButton.Coordinator.press(_:)))
+        // A window that never shows, which the events name.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(view)
+        view.frame = NSRect(x: 20, y: 20, width: 100, height: 30)
+        // An accessibility press and performClick send the action without a mouse-down the button tracks, so they press nothing, whatever event the app handled last, such as a mouse-up from a real click elsewhere in Arch.
+        view.performClick(nil)
+        _ = view.accessibilityPerformPress()
+        #expect(pressed == 0 && !view.isPressedByPointer)
+        // A click counts only as the mouse-down the button tracks, in its window and within its bounds, with its mouse-up.
+        let up = try #require(NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: 50, y: 30), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0))
+        let down = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 50, y: 30), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let outside = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 190, y: 90), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let own: (pid_t) -> AgentPointerCheck.Source? = { _ in .init(userID: getuid(), appleIdentifier: nil) }
+        #expect(AgentPointerCheck.isPointerClick(down: down, up: up, in: view, read: own))
+        #expect(!AgentPointerCheck.isPointerClick(down: outside, up: up, in: view, read: own))
+        #expect(!AgentPointerCheck.isPointerClick(down: nil, up: up, in: view, read: own))
+        #expect(!AgentPointerCheck.isPointerClick(down: up, up: up, in: view, read: own))
+        withExtendedLifetime(coordinator) {}
     }
 }

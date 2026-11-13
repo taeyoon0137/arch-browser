@@ -152,6 +152,13 @@ public struct AgentApproval: Identifiable {
     /// Whether Allow on this card asks for Touch ID or the login password first: a sensitive card of an outside client, so that a program driving the interface cannot approve.
     public var needsAuthentication: Bool { isSensitive && isOutsideClient }
 
+    /// Whether an answer counts only after Touch ID or the login password: Allow on a sensitive card of an outside client, and Share on an outside client's `request_tab`, which hands it one of the user's own tabs.
+    public func needsAuthentication(for answer: AgentApprovalAnswer) -> Bool {
+        guard isOutsideClient else { return false }
+        if case .tab = answer { return true }
+        return answer.allows && isSensitive
+    }
+
     /// The buttons of a step card: a sensitive one's, or with the allowances the policy offers.
     static func offers(for ask: AgentAsk) -> [AgentApprovalAnswer] {
         if ask.isSensitive { return [.allowOnce, .deny, .denyAndStop, .reply(""), .takeOver] }
@@ -166,21 +173,26 @@ public struct AgentApproval: Identifiable {
 @MainActor public final class AgentApprovals: ObservableObject {
     /// The cards waiting, oldest first.
     @Published public private(set) var pending: [AgentApproval] = []
-    /// How each card that is no longer waiting ended, for the panel.
+    /// How the latest cards that are no longer waiting ended, at most `keptOutcomes`, for a call that asks after its card ended.
     @Published public private(set) var outcomes: [UUID: AgentApprovalAnswer] = [:]
+    static let keptOutcomes = 100
     /// Called with each new card, so that the service shows it.
     var didAdd: ((AgentApproval) -> Void)?
     /// Touch ID or the login password, for the sensitive cards of outside clients.
     var authenticator: any AgentAuthenticating = AgentDeviceOwnerAuthentication()
 
     private var waiters: [UUID: CheckedContinuation<AgentApprovalAnswer, Never>] = [:]
+    /// The waiting cards by ID; a card leaves once it ends, with its capture.
     private var cards: [UUID: AgentApproval] = [:]
     private var waiting: Set<UUID> = []
+    /// The ended cards whose outcomes are kept, oldest first.
+    private var endedOrder: [UUID] = []
 
     public init() {}
 
-    /// Shows a card and waits until it ends.
+    /// Shows a card and waits until it ends. A call whose task was cancelled, as when its client's work ended while it prepared the card, opens none.
     func request(_ approval: AgentApproval) async -> AgentApprovalAnswer {
+        if Task.isCancelled { return .ended("The client's work in Arch ended.") }
         show(approval)
         return await answer(of: approval.id)
     }
@@ -233,7 +245,8 @@ public struct AgentApproval: Identifiable {
     @discardableResult
     public func answer(_ id: UUID, with answer: AgentApprovalAnswer) async -> Bool {
         guard let approval = cards[id], isPending(id) else { return false }
-        if answer.allows, approval.needsAuthentication {
+        if approval.needsAuthentication(for: answer) {
+            // The sentence's page names stand in quotes whose closing quote inside is doubled (`AgentToolHost.actionSentence`), so a name cannot end the quote and add words of its own.
             guard await authenticator.authenticate(reason: "allow \(approval.clientName) to \(approval.action.prefix(1).lowercased() + approval.action.dropFirst())") else { return false }
             guard isPending(id) else { return false }
         }
@@ -276,7 +289,10 @@ public struct AgentApproval: Identifiable {
     private func finish(_ id: UUID, _ answer: AgentApprovalAnswer) {
         guard waiting.remove(id) != nil else { return }
         pending.removeAll { $0.id == id }
+        cards[id] = nil
         outcomes[id] = answer
+        endedOrder.append(id)
+        if endedOrder.count > Self.keptOutcomes { outcomes[endedOrder.removeFirst()] = nil }
         waiters.removeValue(forKey: id)?.resume(returning: answer)
     }
 }

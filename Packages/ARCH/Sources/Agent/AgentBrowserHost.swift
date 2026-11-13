@@ -72,6 +72,8 @@ public enum AgentNavigation: Equatable, Sendable {
 
 /// What `Browsing` reports from an agent tab for its agent's next result (docs/agents.md, Tools ▸ Results), including what rules P6 and P8 to P11 did there.
 public enum AgentTabReport: Equatable, Sendable {
+    /// The main frame's address changed: a navigation started or committed a document there, before it finishes loading, or the page changed its address within the document. It is no event of its own; the tool host counts a new page from it.
+    case addressChanged(URL?)
     /// The main frame finished loading a document, at this address and title.
     case loaded(url: URL?, title: String)
     /// The tab stopped loading, as when a load finished, failed, or was stopped. It is no event of its own; waits read it.

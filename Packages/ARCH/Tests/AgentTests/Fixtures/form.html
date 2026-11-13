@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- The checkout page the agents' page script tests run on in WebKit, and regression check 61 serves over HTTP: fields of each class, a submit control that asks, frames of the same origin, another site, and an extension, hidden elements, an open shadow root, a covered control, a framework-style controlled input, and the download, camera, and confirm controls that check 61 uses. -->
+<!-- The checkout page the agents' page script tests run on in WebKit, and regression check 61 serves over HTTP: fields of each class, a submit control that asks, frames of the same origin, another site, and an extension, hidden elements, an open shadow root, a covered control, a framework-style controlled input, a search form with a hidden input, a comment form whose button posts to another site, the user activation the page's handlers see, and the download, camera, and confirm controls that check 61 uses. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -51,8 +51,9 @@
     <div id="banner" role="dialog" aria-label="Cookie banner">We use cookies. <button>Accept</button></div>
   </div>
   <label>Nickname <input id="controlled" name="nickname"></label>
-  <form id="find" action="/search"><input name="q" aria-label="Find"></form>
+  <form id="find" action="/search"><input type="hidden" name="source" value="header"><input name="q" aria-label="Find"></form>
   <p><a href="files/report.pdf" download>Download the report</a> <button id="camera">Use camera</button> <button id="ask">Remove item</button></p>
+  <form id="comment" action="/comments"><input name="comment" aria-label="Comment"> <button formaction="https://post.other.example/comments">Post comment</button></form>
 </main>
 <script>
   // An open shadow root, which the walk follows.
@@ -60,6 +61,10 @@
   // Submissions stay on the page and are recorded for the tests.
   document.getElementById("checkout").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.checkout = "submitted"; });
   document.getElementById("find").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.found = new FormData(event.target).get("q"); });
+  document.getElementById("comment").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.posted = event.submitter ? event.submitter.textContent : "without its button"; });
+  // Whether the page's handlers run with the user's activation, which the agents' events must never give.
+  document.addEventListener("click", () => { document.body.dataset.clickActivation = String(navigator.userActivation.isActive); }, true);
+  document.addEventListener("mouseover", () => { document.body.dataset.hoverActivation = String(navigator.userActivation.isActive); }, true);
   document.querySelector("select").addEventListener("change", (event) => { document.body.dataset.shipping = event.target.value; });
   document.getElementById("under").addEventListener("click", () => { document.body.dataset.covered = "clicked"; });
   document.getElementById("camera").addEventListener("click", () => navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {}));

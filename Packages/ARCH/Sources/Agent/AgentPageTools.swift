@@ -1,4 +1,4 @@
-// The tools that run the agents' page script (docs/agents.md, Page snapshots and refs): `snapshot` with the host's diff, `screenshot` with its limits and the boxes painted over, and the actions `click`, `type`, `press`, `select_option`, `scroll`, and `hover`, each classified by the policy from the element's facts and asked about on a card when a rule or the mode says so. Each script call has `scriptWait`; a page that does not answer gets `timeout`. Actions use DOM events and say so (`inputKind: dom`).
+// The tools that run the agents' page script (docs/agents.md, Page snapshots and refs): `snapshot` with the host's diff, `screenshot` with its limits and the boxes painted over, and the actions `click`, `type`, `press`, `select_option`, `scroll`, and `hover`, each classified by the policy from the element's facts and asked about on a card when a rule or the mode says so. Each script call and capture has `scriptWait`; a page that does not answer gets `timeout`, and a card whose capture does not answer opens without one. Actions use DOM events and say so (`inputKind: dom`).
 import AgentControl
 import AppKit
 import Foundation
@@ -41,7 +41,7 @@ extension AgentToolHost {
 
     /// After a script ran: the tab's page may have moved on to one agents do not read, and the user may have taken the tab over.
     private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, _ grant: AgentGrant, state: AgentGrantState) -> Outcome? {
-        if let current = host.tabs(withIDs: [tab.id]).first, !(current.agentOwnerID == grant.id || state.handles.sharedTabIDs.contains(current.id)) {
+        if let current = host.tabs(withIDs: [tab.id]).first, !mayStillRead(current, grant, state: state) {
             return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))
         }
         if case .refused(let rule, let sentence) = AgentPolicy.mayRead(URL(string: reportedURL), allowsAI: allowsAI) {
@@ -50,8 +50,20 @@ extension AgentToolHost {
         return nil
     }
 
-    private func isShared(_ tab: AgentTabInfo, state: AgentGrantState) -> Bool {
-        tab.agentOwnerID == nil && state.handles.sharedTabIDs.contains(tab.id)
+    private func isShared(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
+        if case .shared = access(to: tab, grant, state: state) { return true }
+        return false
+    }
+
+    /// The engine's capture of the tab, `.some(nil)` when the engine gives no image, and nil when it does not answer within `scriptWait`, as a busy page or a tab no window shows may not.
+    private func capture(_ tab: AgentTabInfo, fullPage: Bool) async -> NSImage?? {
+        let host = host
+        let wait = scriptWait
+        return await withCheckedContinuation { continuation in
+            let once = AgentOnce<NSImage?>(continuation)
+            host.capture(tab.id, fullPage: fullPage) { once.resume(with: .some($0)) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { once.resume(with: nil) }
+        }
     }
 
     // MARK: snapshot
@@ -72,7 +84,9 @@ extension AgentToolHost {
             }
             target = resolved
         }
-        let shared = isShared(tab, state: state)
+        let shared = isShared(tab, grant, state: state)
+        // The page count before the script, so that a page that changes while the script reads leaves a record already stale.
+        let pages = state.activity(of: tab.id).pages
         let reply: AgentSnapshotReply
         switch await pageScript(.snapshot(full: full, ref: target, shared: shared), in: tab, as: AgentSnapshotReply.self, handle: handle) {
         case .value(let value): reply = value
@@ -84,9 +98,8 @@ extension AgentToolHost {
         if reply.stale == true { return Self.stale(handle) }
         guard let url = URL(string: reply.url) else { return Self.error("unreadable", "\(handle) has no document Arch can read.") }
         let lines = outline(reply.nodes, full: full, shared: shared, pageURL: url)
-        // A new document's snapshot starts the record again; a subtree's adds its refs to the record of the same document.
-        let documents = state.activity(of: tab.id).documents
-        var record = state.snapshots[tab.id].flatMap { $0.url == url && $0.document == documents ? $0 : nil } ?? AgentSnapshotRecord(url: url, document: documents, refs: [:], lines: [])
+        // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
+        var record = state.snapshots[tab.id].flatMap { $0.url == url && $0.document == pages ? $0 : nil } ?? AgentSnapshotRecord(url: url, document: pages, refs: [:], lines: [])
         if target == nil { record.refs = [:] }
         for node in reply.nodes {
             guard let ref = node.ref, let fingerprint = node.fingerprint else { continue }
@@ -212,18 +225,23 @@ extension AgentToolHost {
         }
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let area = arguments["area"]?.stringValue ?? "viewport"
+        let shared = isShared(tab, grant, state: state)
         var element: AgentBox?
         if area != "viewport", area != "full" {
             guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[area], let target = AgentRefTarget(area, fingerprint: entry.fingerprint) else {
                 return AgentRefTarget(area) == nil ? Self.error("invalidArguments", "area must be viewport, full, or a ref such as e5.") : Self.stale(handle)
             }
-            switch await pageScript(.element(target), in: tab, as: AgentElementReply.self, handle: handle) {
+            // An agent tab scrolls the element into view; a tab the user shared stays where the user left it.
+            switch await pageScript(.element(target, scroll: !shared), in: tab, as: AgentElementReply.self, handle: handle) {
             case .outcome(var failure):
                 failure.site = site
                 return failure
             case .value(let reply):
                 if reply.problem == "stale" || reply.problem == "notFound" { return Self.stale(handle) }
                 element = reply.facts?.box
+                if shared, let box = element, let viewport = reply.viewport, box.x + box.w <= 0 || box.y + box.h <= 0 || box.x >= viewport.w || box.y >= viewport.h {
+                    return Self.error("notInteractable", "\(area) in \(handle) is outside the viewport, and Arch does not scroll a tab the user shared for a screenshot. Take one of the viewport, or scroll there first, which asks the user.")
+                }
             }
         }
         let full = area == "full"
@@ -231,7 +249,7 @@ extension AgentToolHost {
         // The boxes are read before and after each capture; a page whose private fields moved meanwhile gets one more capture, then no screenshot.
         for _ in 0 ..< 2 {
             let before: AgentBoxesReply
-            switch await pageScript(.boxes, in: tab, as: AgentBoxesReply.self, handle: handle) {
+            switch await pageScript(.boxes(shared: shared), in: tab, as: AgentBoxesReply.self, handle: handle) {
             case .value(let reply): before = reply
             case .outcome(var failure):
                 failure.result.content.append(.text("A tab whose page does not answer gets no screenshot."))
@@ -239,12 +257,15 @@ extension AgentToolHost {
                 return failure
             }
             if let refusal = stillReadable(tab, handle: handle, reportedURL: before.url, grant, state: state) { return refusal }
-            let image: NSImage? = await withCheckedContinuation { continuation in host.capture(tab.id, fullPage: full) { continuation.resume(returning: $0) } }
-            guard let image, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil), !AgentScreenshot.isBlank(cgImage) else {
+            guard let answer = await self.capture(tab, fullPage: full) else {
+                return Outcome(result: AgentToolResult(status: .timeout, code: "notResponding", text: "\(handle) does not respond to Arch's capture, so it gives no screenshot. Read it with snapshot.",
+                                                       structured: ["tab": .string(handle)]), site: site)
+            }
+            guard let image = answer, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil), !AgentScreenshot.isBlank(cgImage) else {
                 return Outcome(result: AgentToolResult(status: .error, code: "notVisible", text: "\(handle) cannot be captured while no window shows it. Read it with snapshot.",
                                                        structured: ["tab": .string(handle)]), site: site)
             }
-            guard case .value(let after) = await pageScript(.boxes, in: tab, as: AgentBoxesReply.self, handle: handle) else { break }
+            guard case .value(let after) = await pageScript(.boxes(shared: shared), in: tab, as: AgentBoxesReply.self, handle: handle) else { break }
             if after == before {
                 capture = AgentScreenshot.Capture(image: cgImage, boxes: before, fullPage: full)
                 break
@@ -278,15 +299,18 @@ extension AgentToolHost {
         if tool == "scroll", (arguments["ref"] == nil) == (arguments["direction"] == nil) { return Self.error("invalidArguments", "scroll takes ref or direction.") }
         if tool == "scroll", arguments["amount"] != nil, arguments["direction"] == nil { return Self.error("invalidArguments", "scroll takes amount only with direction.") }
         await keepActionRate(state)
+        if Task.isCancelled { return Self.ended }
         var target: AgentRefTarget?
         if let ref = arguments["ref"]?.stringValue {
             guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref], let resolved = AgentRefTarget(ref, fingerprint: entry.fingerprint) else { return Self.stale(handle) }
             target = resolved
         }
-        // The element's facts, which the policy reads; `press` without a ref reads the focused element.
+        let access = self.access(to: tab, grant, state: state)
+        let shared = access != .agentTab
+        // The element's facts, which the policy reads; `press` without a ref reads the focused element. An agent tab scrolls the element into view to check that nothing covers it; a tab the user shared does not move before the user decides, and the action checks the cover once allowed.
         var facts: AgentElementFacts?
         if target != nil || tool == "press" {
-            switch await pageScript(.element(target), in: tab, as: AgentElementReply.self, handle: handle) {
+            switch await pageScript(.element(target, scroll: !shared), in: tab, as: AgentElementReply.self, handle: handle) {
             case .outcome(var failure):
                 failure.site = site
                 return failure
@@ -299,17 +323,20 @@ extension AgentToolHost {
                 facts = reply.facts
             }
         }
+        if Task.isCancelled { return Self.ended }
         let text = tool == "type" ? arguments["text"]?.stringValue : tool == "press" ? arguments["keys"]?.stringValue : nil
         let keys = arguments["keys"]?.stringValue ?? ""
         let submits = (tool == "click" && facts?.submitsForm == true) || (tool == "type" && arguments["submit"] == .bool(true) && facts?.tag == "input" && facts?.formKey != nil)
             || (tool == "press" && keys == "Enter" && facts?.tag == "input" && facts?.formKey != nil)
-        let documents = state.activity(of: tab.id).documents
-        let typed = state.typedForms[tab.id].flatMap { $0.document == documents ? $0.keys : nil } ?? []
-        let shared = isShared(tab, state: state)
-        let access: AgentTabAccess = shared ? .shared(acting: state.handles.actingSharedTabIDs.contains(tab.id)) : .agentTab
-        let step = AgentInteraction(tool: tool, tab: access, element: facts, text: text, submits: submits, typedIntoForm: facts?.formKey.map(typed.contains) ?? false, pageHost: tab.url?.host)
-        let allowances = AgentAllowances(page: state.pageAllowances[tab.id] == documents, site: site.map(state.siteAllowances.contains) ?? false)
-        let sentence = Self.actionSentence(tool, arguments: arguments, facts: facts, site: site)
+        // The page the policy decides for: its count and address, which must still hold when the step runs after a card.
+        let pages = state.activity(of: tab.id).pages
+        let address = tab.url
+        let typed = state.typedForms[tab.id].flatMap { $0.page == pages ? $0.keys : nil } ?? []
+        // `type` with `submit` sends what it types itself.
+        let typedIntoForm = (tool == "type" && submits) || (facts?.formKey.map(typed.contains) ?? false)
+        let step = AgentInteraction(tool: tool, tab: access, element: facts, text: text, submits: submits, typedIntoForm: typedIntoForm, pageHost: tab.url?.host)
+        let allowances = AgentAllowances(page: state.pageAllowances[tab.id] == pages, site: site.map(state.siteAllowances.contains) ?? false)
+        let sentence = Self.actionSentence(tool, arguments: arguments, facts: facts, site: site, submits: submits && tool != "click")
         var decision: AgentActivityEntry.Decision = .auto
         switch AgentPolicy.decide(.interaction(step), client: clientKind, mode: grant.level, allowances: allowances) {
         case .allow: break
@@ -332,12 +359,13 @@ extension AgentToolHost {
                 return outcome
             }
             decision = card.needsAuthentication ? .approvedWithTouchID : .approved
-            if answer == .allowOnPage { state.pageAllowances[tab.id] = documents }
+            if answer == .allowOnPage { state.pageAllowances[tab.id] = pages }
             if answer == .allowOnSite, let site { state.siteAllowances.insert(site) }
-            // The page may have moved on, or the user taken the tab over, while the card waited.
+            if Task.isCancelled { return Self.ended }
+            // The page may have moved on, or the user taken the tab over, while the card waited: the step runs only on the page the user allowed it on.
             guard case .value(let current) = pageTab(handle, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
             tab = current.0
-            if state.activity(of: tab.id).documents != documents { return Self.stale(handle) }
+            if state.activity(of: tab.id).pages != pages || tab.url != address { return Self.stale(handle) }
         }
         let action = AgentPageAction(kind: tool == "select_option" ? "select" : tool, ref: target, text: arguments["text"]?.stringValue, replace: arguments["replace"] == .bool(true) ? true : nil,
                                      submit: arguments["submit"] == .bool(true) ? true : nil, keys: arguments["keys"]?.stringValue,
@@ -356,7 +384,7 @@ extension AgentToolHost {
             outcome.site = site
             return outcome
         }
-        if tool == "type", let key = facts?.formKey { state.typedForms[tab.id] = (documents, typed.union([key])) }
+        if tool == "type", let key = facts?.formKey { state.typedForms[tab.id] = (pages, typed.union([key])) }
         await settle(tab.id)
         return actionOutcome(tool, reply: reply, handle: handle, ref: target?.ref, tab: tab, site: site, step: sentence, decision: decision)
     }
@@ -396,15 +424,16 @@ extension AgentToolHost {
         }
     }
 
-    /// The step in a sentence for the card and the panel, from the facts the host has: the element as the page names it, and the site.
-    static func actionSentence(_ tool: String, arguments: [String: AgentJSON], facts: AgentElementFacts?, site: String?) -> String {
-        let element = facts.map { $0.name.isEmpty ? $0.role : "\u{201C}\($0.name)\u{201D}" } ?? "the page"
+    /// The step in a sentence for the card, the Touch ID prompt, and the panel, from the facts the host has: the element as the page names it, in quotes whose closing quote inside is doubled, the site, and whether the step submits the element's form by Enter.
+    static func actionSentence(_ tool: String, arguments: [String: AgentJSON], facts: AgentElementFacts?, site: String?, submits: Bool = false) -> String {
+        let element = facts.map { $0.name.isEmpty ? $0.role : "\u{201C}\(quoted($0.name))\u{201D}" } ?? "the page"
         let place = site.map { " on \($0)" } ?? ""
+        let submission = submits ? " and submit the form" : ""
         switch tool {
         case "click": return "Click \(element)\(place)"
-        case "type": return "Type into \(element)\(place)"
-        case "press": return "Press \(arguments["keys"]?.stringValue ?? "keys") in \(element)\(place)"
-        case "select_option": return "Choose \((strings(arguments["values"]) ?? []).map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ")) in \(element)\(place)"
+        case "type": return "Type into \(element)\(place)\(submission)"
+        case "press": return "Press \u{201C}\(quoted(arguments["keys"]?.stringValue ?? ""))\u{201D} in \(element)\(place)\(submission)"
+        case "select_option": return "Choose \((strings(arguments["values"]) ?? []).map { "\u{201C}\(quoted($0))\u{201D}" }.joined(separator: ", ")) in \(element)\(place)"
         case "scroll": return facts == nil ? "Scroll \(arguments["direction"]?.stringValue ?? "the page")\(place)" : "Scroll to \(element)\(place)"
         default: return "Hover over \(element)\(place)"
         }
@@ -448,18 +477,19 @@ extension AgentToolHost {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         var exact = exactText
         if typing, !ask.isSensitive, let text = exactText { exact = text + "\n\nAllow on This Page or Allow on \(site ?? "this site") lets the site receive whatever the agent types there without asking again." }
+        // The page the card is about, as before the capture, so that a page that moves on meanwhile withdraws it.
+        let pages = state.activity(of: tab.id).pages
         let capture = await markedCapture(of: tab, element: element)
         return AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: kind, rules: ask.rules, isSensitive: ask.isSensitive,
                              offers: AgentApproval.offers(for: ask), action: sentence, tabID: tab.id, tabHandle: handle, site: site, exactText: exact, agentSays: agentSays,
-                             capture: capture, connectionID: connectionID, document: state.activity(of: tab.id).documents, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
+                             capture: capture, connectionID: connectionID, document: pages, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
     }
 
-    /// The viewport with the element's box marked, for the user's card only, so nothing is painted over; nil when the tab cannot be captured.
+    /// The viewport with the element's box marked, for the user's card only, so nothing is painted over; nil when the tab cannot be captured or does not answer in time, and the card then opens without one.
     private func markedCapture(of tab: AgentTabInfo, element: AgentBox?) async -> NSImage? {
-        let image: NSImage? = await withCheckedContinuation { continuation in host.capture(tab.id, fullPage: false) { continuation.resume(returning: $0) } }
-        guard let image, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil), !AgentScreenshot.isBlank(cgImage) else { return nil }
+        guard let answer = await capture(tab, fullPage: false), let image = answer, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil), !AgentScreenshot.isBlank(cgImage) else { return nil }
         var viewport: AgentSize?
-        if element != nil, case .value(let boxes) = await pageScript(.boxes, in: tab, as: AgentBoxesReply.self) { viewport = boxes.viewport }
+        if element != nil, case .value(let boxes) = await pageScript(.boxes(shared: false), in: tab, as: AgentBoxesReply.self) { viewport = boxes.viewport }
         return AgentScreenshot.marked(cgImage, element: element, viewport: viewport)
     }
 
@@ -485,7 +515,7 @@ extension AgentToolHost {
     }
 }
 
-/// Screenshots as agents get them (docs/agents.md, Fields the script never reveals; Tools ▸ Limits): the boxes of hidden and personal fields, other sites' frames, and extension frames painted over before scaling and encoding, a full page cut at `AgentLimits.screenshotFullPageCSSHeight` CSS pixels, the longest side at most `AgentLimits.screenshotLongestSide` pixels, and JPEG at `AgentLimits.screenshotJPEGQuality` within `AgentLimits.screenshotBytes`, lower in quality and then in size when needed. The capture on a card, which only the user sees, is marked instead.
+/// Screenshots as agents get them (docs/agents.md, Fields the script never reveals; Tools ▸ Limits): the boxes of hidden and personal fields, other sites' frames, and extension frames, and in a tab the user shared every field's, painted over before scaling and encoding, a full page cut at `AgentLimits.screenshotFullPageCSSHeight` CSS pixels, the longest side at most `AgentLimits.screenshotLongestSide` pixels, and JPEG at `AgentLimits.screenshotJPEGQuality` within `AgentLimits.screenshotBytes`, lower in quality and then in size when needed. The capture on a card, which only the user sees, is marked instead.
 enum AgentScreenshot {
     struct Capture {
         var image: CGImage

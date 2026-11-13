@@ -184,6 +184,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
+        reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }

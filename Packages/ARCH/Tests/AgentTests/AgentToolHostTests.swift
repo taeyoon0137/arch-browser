@@ -294,6 +294,24 @@ import Testing
         #expect(huge.text == "open_tab's result would pass 48 KB of text, the most a result carries, as a page's very long address can make it.")
     }
 
+    @Test func aSharedTabsAccessFollowsTheTabAsItIsNow() async {
+        let fixture = Fixture()
+        let userTab = AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Inbox", url: Fixture.guide, isLoading: false, engine: .webKit)
+        fixture.host.tabs.append(userTab)
+        let handle = fixture.state.handles.tabs.handle(for: userTab.id)
+        fixture.state.handles.sharedTabIDs.append(userTab.id)
+        #expect(await fixture.call("read_text", ["tab": .string(handle)]).status == .ok)
+        // The user drags the shared tab into another client's agent folder: it is neither this client's agent tab nor shared any more.
+        fixture.host.tabs[fixture.host.tabs.count - 1].agentOwnerID = UUID()
+        let refused = await fixture.call("read_text", ["tab": .string(handle)])
+        #expect(refused.status == .refused && refused.code == "P17")
+        #expect(fixture.state.handles.sharedTabIDs.isEmpty)
+        #expect(await fixture.call("list_tabs", ["scope": "shared"]).text == "The user has shared no tabs with this client.")
+        // Back in the user's hands, it stays unshared until the user shares it again.
+        fixture.host.tabs[fixture.host.tabs.count - 1].agentOwnerID = nil
+        #expect(await fixture.call("read_text", ["tab": .string(handle)]).code == "P17")
+    }
+
     @Test func aWaitEndsWhenTheUserTakesTheTabOver() async {
         let fixture = Fixture()
         let handle = await fixture.open()

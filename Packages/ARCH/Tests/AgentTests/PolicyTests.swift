@@ -137,6 +137,15 @@ import Testing
         // P5 compares sites: a form posting to another host of the same site does not ask.
         let sameSite = Self.click(Self.button("Continue", submits: true, action: "checkout.shop.example"), typed: true)
         #expect(AgentPolicy.decide(sameSite, client: .outside, mode: .actInAgentTabs) == .allow)
+        // Enter, by type with submit or by press, submits with the form's default button, whose name P4 reads as a click on it would, and whose formaction P5 reads.
+        var comment = Self.field(name: "Comment", action: "post.other.example")
+        comment.submitterName = "Post comment"
+        for tool in ["type", "press"] {
+            let enter = AgentStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "Enter", submits: true, typedIntoForm: true, pageHost: "shop.example"))
+            #expect(Expected(AgentPolicy.decide(enter, client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p4, .p5]), "\(tool)")
+            let plain = AgentStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "a", pageHost: "shop.example"))
+            #expect(AgentPolicy.decide(plain, client: .outside, mode: .actInAgentTabs) == .allow, "\(tool)")
+        }
     }
 
     @Test func writtenAddressesAndRedirectHopsInTheScope() {

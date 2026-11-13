@@ -25,6 +25,8 @@ import Testing
     var webContents: [UUID: any EngineWebContents] = [:]
     /// What the fake engine captures for a tab in place of its web contents' capture; a tab with neither captures nothing, as Chromium may for a tab no window shows.
     var captures: [UUID: NSImage] = [:]
+    /// Tabs whose capture never answers, as a busy page's or one no window shows may not.
+    var hangingCaptureTabIDs: Set<UUID> = []
     /// The apps that open links, by scheme.
     var appNames: [String: String] = ["mailto": "Mail"]
     var userTabIDs: Set<UUID> = []
@@ -39,6 +41,8 @@ import Testing
     var redirects: [URL: URL] = [:]
     /// Addresses whose load never finishes, as a page that keeps loading.
     var hangingAddresses: Set<URL> = []
+    /// Addresses whose document commits, so that the tab's address changes, but never finishes loading, as a page that keeps one image request open.
+    var committingAddresses: Set<URL> = []
     /// Addresses that fail to load, which leaves the tab on its page.
     var failingAddresses: Set<URL> = []
     /// Tabs whose page never answers a read, as while it shows a dialog.
@@ -106,6 +110,7 @@ import Testing
     }
 
     func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
+        guard !hangingCaptureTabIDs.contains(tabID) else { return }
         if let image = captures[tabID] { return completion(image) }
         guard let contents = webContents[tabID] else { return completion(nil) }
         if fullPage { contents.captureFullPage(completion: completion) } else { contents.captureViewport(completion: completion) }
@@ -127,7 +132,7 @@ import Testing
         Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
     }
 
-    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one and reports the document, or reports only the stop when a hop was refused or the load failed.
+    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.
     func load(_ url: URL, in tabID: UUID, keepsHistory: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         tabs[index].isLoading = true
@@ -145,6 +150,8 @@ import Testing
                 guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
                 if !keepsHistory, let current = tabs[index].url { backList[tabID, default: []].append(current) }
                 tabs[index].url = address
+                if let owner { agentTabDidReport?(owner, tabID, .addressChanged(address)) }
+                guard !committingAddresses.contains(address) else { return }
                 tabs[index].title = pages[address]?.title ?? ""
                 tabs[index].isLoading = false
                 tabs[index].canGoBack = !(backList[tabID] ?? []).isEmpty
@@ -398,6 +405,8 @@ final class Shared<Value>: @unchecked Sendable {
     private(set) var runners: [FakeRunner] = []
     private(set) var requests: [AIAgentSessionRequest] = []
     var agentModels = [AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), AIModelRef(provider: AIProviderID(rawValue: "codex"), model: "gpt-6")]
+    /// How long the services' calls wait for the user before they answer `approvalPending`, when not the default.
+    var answerWait: TimeInterval?
     var services: [AgentService] = []
 
     init(keys: MemoryKeys = MemoryKeys()) throws {
@@ -426,7 +435,7 @@ final class Shared<Value>: @unchecked Sendable {
         let starts = processStarts
         let records = processRecords
         let sessionsFolder = folder.appendingPathComponent("sessions", isDirectory: true)
-        let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: AgentService.Dependencies(
+        var dependencies = AgentService.Dependencies(
             location: location,
             keys: keys,
             peerChecks: try checks ?? self.checks(expectedHash: ownCodeHash()),
@@ -447,7 +456,9 @@ final class Shared<Value>: @unchecked Sendable {
             mcpExecutable: URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-mcp"),
             sessionFolder: { sessionsFolder.appendingPathComponent($0.uuidString, isDirectory: true) },
             agentModels: { [unowned self] in self.agentModels },
-            toolName: { $0.rawValue == "codex" ? "Codex" : "Claude Code" }))
+            toolName: { $0.rawValue == "codex" ? "Codex" : "Claude Code" })
+        if let answerWait { dependencies.answerWait = answerWait }
+        let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: dependencies)
         services.append(service)
         return service
     }

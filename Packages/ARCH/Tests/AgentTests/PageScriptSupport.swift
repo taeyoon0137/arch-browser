@@ -92,6 +92,14 @@ import Testing
         return String(line[match.range].dropFirst().dropLast())
     }
 
+    /// Changes the page's address without a new document, as `history.pushState` does, and reports it as `Browsing` reports an agent tab's address, so that the host sees a page that changed before any document finished loading.
+    func changeAddress(to path: String) async throws {
+        _ = try await page.evaluate("history.pushState(null, '', '\(path)'); 0")
+        let url = try #require(URL(string: path, relativeTo: page.url)?.absoluteURL)
+        if let index = host.tabs.firstIndex(where: { $0.id == tabID }) { host.tabs[index].url = url }
+        toolHost.tab(tabID, of: grant.id, didReport: .addressChanged(url), state: state)
+    }
+
     /// Answers the next card that waits, as the user would.
     func answerNextCard(_ answer: AgentApprovalAnswer) async throws -> AgentApproval {
         try await waitUntil { !self.toolHost.approvals.pending.isEmpty }

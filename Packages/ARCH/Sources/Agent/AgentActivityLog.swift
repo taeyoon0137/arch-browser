@@ -26,6 +26,8 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         case denied
         case refused
         case timedOut
+        /// The call answered `approvalPending` and went on; its own entry follows when it ends.
+        case pending
     }
 
     public var id: UUID

@@ -185,7 +185,7 @@ public enum AgentPolicy {
         AgentRuleEntry(rule: .p2, trigger: "Typing into a personal-data field", effect: .asks(sensitive: true), sentence: "Typing into a field for personal data asks the user, who sees the exact text."),
         AgentRuleEntry(rule: .p3, trigger: "Submitting a form that contains password, one-time-code, payment, or personal fields", effect: .asks(sensitive: true),
                        sentence: "Submitting a form with password, code, payment, or personal fields asks the user."),
-        AgentRuleEntry(rule: .p4, trigger: "Clicking a control whose name or value reads as an irreversible step", effect: .asks(sensitive: true),
+        AgentRuleEntry(rule: .p4, trigger: "Clicking a control whose name or value reads as an irreversible step, or submitting by Enter a form whose default button reads so", effect: .asks(sensitive: true),
                        sentence: "A control that reads as a step that cannot be undone, such as buying, sending, or deleting, asks the user."),
         AgentRuleEntry(rule: .p5, trigger: "Submitting a form whose action is on a different site from the page, after the session typed into it", effect: .asks(sensitive: true),
                        sentence: "Submitting what the agent typed to another site asks the user."),
@@ -266,6 +266,8 @@ public enum AgentPolicy {
             if step.tool == "type", element.valueClass == .personal { rules.append(.p2) }
             if step.submits, !Set(element.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]) { rules.append(.p3) }
             if step.tool == "click", readsAsIrreversible(element.name) || readsAsIrreversible(element.value ?? "") { rules.append(.p4) }
+            // Enter, by `type` with `submit` or by `press`, submits with the form's default button, as a click on it would.
+            if step.tool != "click", step.submits, readsAsIrreversible(element.submitterName ?? "") || readsAsIrreversible(element.submitterValue ?? "") { rules.append(.p4) }
             if step.submits, step.typedIntoForm, let action = element.formActionHost, let page = step.pageHost, site(ofHost: action) != site(ofHost: page) { rules.append(.p5) }
         }
         if case .shared = step.tab { rules.append(.p12) }

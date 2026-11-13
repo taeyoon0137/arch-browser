@@ -27,8 +27,9 @@ extension AgentToolHost {
             structured["title"] = .string(Self.pageName(tab.title, url: tab.url))
             structured["host"] = tab.url?.host.map(AgentJSON.string) ?? .null
         }
+        // An outside client's Share counted only after Touch ID or the login password (`AgentApproval.needsAuthentication(for:)`).
         return Outcome(result: AgentToolResult(status: .ok, text: text, structured: .object(structured)), site: tab.url.flatMap(AgentActivityEntry.site(of:)),
-                       step: "You shared \(handle) for \(acting ? "reading and acting" : "reading")", decision: .approved)
+                       step: "You shared \(handle) for \(acting ? "reading and acting" : "reading")", decision: card.needsAuthentication(for: answer) ? .approvedWithTouchID : .approved)
     }
 
     func askUser(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
@@ -139,16 +140,14 @@ extension AgentToolHost {
 
     // MARK: Cards a page starts
 
-    /// P6: a card about a download a page in an agent tab started. Allow Once lets that address download once, and Allow Downloads from This Site for the session; the tab then asks for the address again, which a link's plain download repeats.
+    /// P6: a card about a download a page in an agent tab started, while no other download card of the tab waits (`tab(_:of:didReport:state:client:)`). Allow Once lets that address download once, and Allow Downloads from This Site for the session; the tab then asks for the address again, which a link's plain download repeats.
     func askAboutDownload(_ url: URL, in tabID: UUID, of ownerID: UUID, state: AgentGrantState, client: String) {
-        // A page that asks again while its card waits gets no second card.
-        guard let tab = host.tabs(withIDs: [tabID]).first,
-              !approvals.pending.contains(where: { $0.tabID == tabID && $0.kind == .download && $0.exactText == url.absoluteString }) else { return }
+        guard let tab = host.tabs(withIDs: [tabID]).first else { return }
         let handle = state.handles.tabs.handle(for: tabID)
         let site = url.host?.lowercased()
         let name = url.lastPathComponent.isEmpty ? (url.host ?? "a file") : url.lastPathComponent
         let card = AgentApproval(ownerID: ownerID, clientName: client, isOutsideClient: clientKind == .outside, kind: .download, rules: [.p6], isSensitive: false,
-                                 offers: [.allowOnce, .allowDownloadsFromSite, .deny], action: "Download \u{201C}\(name)\u{201D}\(site.map { " from \($0)" } ?? "") in \(handle)",
+                                 offers: [.allowOnce, .allowDownloadsFromSite, .deny], action: "Download \u{201C}\(Self.quoted(name))\u{201D}\(site.map { " from \($0)" } ?? "") in \(handle)",
                                  tabID: tabID, tabHandle: handle, site: site, exactText: url.absoluteString, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         let host = host
         let waiting = approvals.open(card)

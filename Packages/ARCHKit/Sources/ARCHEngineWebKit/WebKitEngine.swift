@@ -51,8 +51,10 @@ public final class WebKitApplication: EngineApplication {
     public weak var delegate: (any EngineApplicationDelegate)?
     let configuration: EngineApplicationConfiguration
 
+    /// Registers the private member that page scripts run through without a user gesture, so that the flags page lists it before the first web contents.
     init(configuration: EngineApplicationConfiguration) {
         self.configuration = configuration
+        MainActor.assumeIsolated { WebKitUserGestureAPI.register() }
     }
 
     private var rendererCrashCount = 0
