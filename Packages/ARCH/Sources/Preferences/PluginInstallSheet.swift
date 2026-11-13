@@ -1,4 +1,4 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. An update from another place than the installed plugin's comes with a warning, as identifiers are not signed and such a package takes over the plugin's data. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. The subtitle names where the package came from: a file, the Web Store, or AI. An update from another place than the installed plugin's comes with a warning, as only the signatures of a `.crx` file prove an identifier and such a package takes over the plugin's data, and an unsigned update of a plugin whose package was signed adds another. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
 import ARCHEngine
 import LocalAuthentication
 import Plugins
@@ -144,6 +144,10 @@ private struct PluginReviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let target, let warning = otherSourceWarning(for: target) {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+                if let target, let warning = package.proofWarning(updating: target) {
                     Label(warning, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
@@ -304,6 +308,7 @@ private struct PluginReviewView: View {
         switch package.origin {
         case .bundled: return "built into Arch"
         case let .file(url): return "from \(url.lastPathComponent)"
+        case .webStore: return "from the Web Store"
         case let .generated(composition): return "written by AI with \(composition.model)"
         }
     }

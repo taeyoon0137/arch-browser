@@ -11,6 +11,8 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var kind: PluginKind = .builtIn
     public var manifest: PluginManifest
     public var origin: PluginOrigin = .bundled
+    /// What the signatures of the installed package's `.crx` file proved, as its install entry records it (`docs/web-store.md`, Package proof). Nil for other packages, for a `.crx` file installed before Arch checked signatures, and for a proof this build does not know.
+    public var proof: PluginProof?
     /// The folder of the installed package; nil for a built-in plugin.
     public var packageURL: URL?
     public var grant: PluginGrant
@@ -109,6 +111,8 @@ public final class PluginManager: ObservableObject {
     private var pairRecords: [[String: String]]
     private let secretStore: any PluginSecretStore
     private let scriptLimits: ScriptPluginLimits
+    /// The SHA-256 digest of the key whose proof in a `.crx` file shows that the Web Store published it: the store's, or a test's own.
+    private let publisherKeyDigest: Data
     /// Plugins whose code has started. Each starts at its first command, panel, or page script value and runs until it stops: when the user switches it off, updates it, removes it, or deletes the Persona, or the app quits, and a script plugin also when it stops on its own.
     private var running: [PluginID: RunningPlugin] = [:]
     /// The storage of each plugin, made when the plugin starts or its settings are first read. It outlives a failed activation, so the plugin's next start finds the changes that have not reached the file.
@@ -133,12 +137,13 @@ public final class PluginManager: ObservableObject {
     }
 
     init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], secretStore: any PluginSecretStore,
-         scriptLimits: ScriptPluginLimits = .standard) {
+         scriptLimits: ScriptPluginLimits = .standard, publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest) {
         self.persona = persona
         self.directory = Self.folder(ofPersona: persona, in: directory)
         self.runtimes = Dictionary(runtimes.map { ($0.kind, $0) }) { first, _ in first }
         self.secretStore = secretStore
         self.scriptLimits = scriptLimits
+        self.publisherKeyDigest = publisherKeyDigest
         let list = PluginFile.read(PluginListFile.self, at: self.directory.appendingPathComponent(PluginListFile.name))
         let choices = list?.choices ?? []
         let installs = list?.installed ?? []
@@ -153,7 +158,7 @@ public final class PluginManager: ObservableObject {
         var packages: [PluginID: PluginPackage] = [:]
         for case let .readable(install) in installs {
             guard let id = PluginID(rawValue: install.id), types[id] == nil, packages[id] == nil,
-                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin, runtimes: runtimes),
+                  let package = try? PluginPackage(at: Self.packageFolder(of: id, in: self.directory), origin: install.origin, proof: install.proof, runtimes: runtimes),
                   Self.isEntry(id, of: package.manifest.id) else { continue }
             packages[id] = package
             plugins.append(Self.installedPlugin(package, id: id, install: install, isEnabled: choices.first { $0.id == install.id }?.isEnabled ?? false,
@@ -182,9 +187,9 @@ public final class PluginManager: ObservableObject {
         runEnabledPlugins()
     }
 
-    /// The installed package as the list shows it under its entry's identifier, with the part of the entry's grant that its manifest asks for, with why its runtime cannot run it, if it cannot, with the current answers of the engines that checked it, and with the engines whose note asking for a version the user dismissed.
+    /// The installed package as the list shows it under its entry's identifier, with the entry's proof, with the part of the entry's grant that its manifest asks for, with why its runtime cannot run it, if it cannot, with the current answers of the engines that checked it, and with the engines whose note asking for a version the user dismissed.
     private static func installedPlugin(_ package: PluginPackage, id: PluginID, install: PluginListFile.Install, isEnabled: Bool, runtime: (any PluginRuntime)?) -> InstalledPlugin {
-        InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, packageURL: package.rootURL, grant: install.grant.limited(to: package.manifest),
+        InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, proof: install.proof, packageURL: package.rootURL, grant: install.grant.limited(to: package.manifest),
                         isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtime?.unavailability,
                         engineChecks: currentChecks(install.engineChecks, engines: runtime?.engines ?? [:]), entryID: id == package.manifest.id ? nil : id,
                         dismissedVersionNotes: Set((install.dismissedVersionNotes ?? []).compactMap(EngineKind.init(rawValue:))))
@@ -353,10 +358,20 @@ public final class PluginManager: ObservableObject {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 
-    /// Copies a folder, `.zip` archive, or `.crx` file the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. The engines that run the kind on this Mac check the package, and the installed plugins it could update or join as a version, in the engines that have no current answer for them; the package then names what the review offers (see `PluginPackage`). Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, for one whose identifier `checkInstallable(_:of:)` refuses, and, with the first engine's reason, for one that every engine refuses. A staged package ends with `install(_:grant:isEnabled:asVersionOf:for:)` or `discard(_:)`.
+    /// Copies a folder, `.zip` archive, or `.crx` file the user chose into the staging folder and reads its package there for the install sheet, without running any of it: a script plugin's, or one of a kind that a runtime reads. A `.crx` file's signatures must hold and give the package its proof (`CRXArchive`). The engines that run the kind on this Mac check the package, and the installed plugins it could update or join as a version, in the engines that have no current answer for them; the package then names what the review offers (see `PluginPackage`). Throws `PluginError.invalidPackage` or `.unsupportedAPIVersion` for a package Arch cannot install, for one whose identifier `checkInstallable(_:of:)` refuses, and, with the first engine's reason, for one that every engine refuses. A staged package ends with `install(_:grant:isEnabled:asVersionOf:for:)` or `discard(_:)`.
     public func stage(_ url: URL) async throws -> PluginPackage {
-        let runtimes = Array(runtimes.values)
-        return try await stage { root in try PluginPackage.stage(url, at: root, runtimes: runtimes) }
+        let (runtimes, digest) = (Array(runtimes.values), publisherKeyDigest)
+        return try await stage { root in try PluginPackage.stage(url, at: root, runtimes: runtimes, publisherKeyDigest: digest) }
+    }
+
+    /// Stages a `.crx` file that Arch downloaded with its origin, `file` for the place it stands for or `webStore` for the Web Store, as `stage(_:)` stages a file the user chose. With the origin `webStore`, it refuses a package without the store's proof, one whose identifier differs from the origin's, and a theme. The downloaded file stays where it is, for the caller to delete. Throws `PluginError.invalidPackage` for another origin, which no download has.
+    public func stage(_ file: URL, origin: PluginOrigin) async throws -> PluginPackage {
+        switch origin {
+        case .file, .webStore: break
+        case .bundled, .generated: throw PluginError.invalidPackage("Only a file or a Web Store package installs from a download.")
+        }
+        let (runtimes, digest) = (Array(runtimes.values), publisherKeyDigest)
+        return try await stage { root in try PluginPackage.stage(file, at: root, origin: origin, runtimes: runtimes, publisherKeyDigest: digest) }
     }
 
     /// Writes the files of a plugin that AI wrote, `plugin.json` among them, at their package paths in the staging folder and reads its package there, as `stage(_:)` does for a folder.
@@ -487,7 +502,7 @@ public final class PluginManager: ObservableObject {
         let installed = package.moved(to: move.installedURL)
         let runtime = runtimes[installed.kind]
         let checks = Self.fileChecks(package.engineChecks, engines: runtime?.engines ?? [:])
-        var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, grant: grant.limited(to: package.manifest), installedAt: Date(),
+        var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, proof: package.proof, grant: grant.limited(to: package.manifest), installedAt: Date(),
                                              engineChecks: checks.isEmpty ? nil : checks)
         if !isNew, let index = installs.firstIndex(where: { $0.id == install.id }) {
             if case let .readable(old) = installs[index] { install.dismissedVersionNotes = old.dismissedVersionNotes }
@@ -1082,12 +1097,16 @@ struct PluginListFile: Codable {
         var isEnabled: Bool
     }
 
-    /// An installed plugin, whose manifest its package in `<id>/package/` holds. The file names its origin with `source`, the folder or archive the user installed it from, or with `generated`, how AI wrote it.
+    /// An installed plugin, whose manifest its package in `<id>/package/` holds. The file names its origin with `source`, the folder or archive the user installed it from, with `generated`, how AI wrote it, or, for a package whose `.crx` signatures proved its identifier, with `proof` and either `signedSource`, the file, or `webStore`, the store's identifier. Builds before package proofs read only `source` and `generated`, so they keep a proven entry as one they cannot read instead of writing it again without its proof (`docs/web-store.md`, Package proof).
     struct Install: Codable {
         /// The plugin's identifier as `PluginID` writes it.
         var id: String
-        /// A file or AI, never the app: built-in plugins are not installed.
+        /// A file, the Web Store, or AI, never the app: built-in plugins are not installed.
         var origin: PluginOrigin
+        /// The entry's `proof` as the file holds it: a `PluginProof` value, or one this build does not know, which counts as none and stays in the file.
+        var proofValue: String?
+        /// Whether the entry names its file with `signedSource` rather than `source`.
+        var namesSignedSource = false
         var grant: PluginGrant
         var installedAt: Date
         /// What each engine that checked the package found, by engine name as `EngineKind` writes it. Names stay text, so that the answers of engines this build does not know survive its writes. Absent from entries of builds before engine checks and of kinds that run alike on every engine.
@@ -1096,15 +1115,27 @@ struct PluginListFile: Codable {
         var dismissedVersionNotes: [String]?
 
         private enum CodingKeys: String, CodingKey {
-            case id, source, generated, grant, installedAt, engineChecks, dismissedVersionNotes
+            case id, source, signedSource, webStore, generated, proof, grant, installedAt, engineChecks, dismissedVersionNotes
         }
 
-        init(id: String, origin: PluginOrigin, grant: PluginGrant, installedAt: Date, engineChecks: [String: EngineCheck]?) {
+        /// A proven package's entry names its file with `signedSource`.
+        init(id: String, origin: PluginOrigin, proof: PluginProof? = nil, grant: PluginGrant, installedAt: Date, engineChecks: [String: EngineCheck]?) {
             self.id = id
             self.origin = origin
+            proofValue = proof?.rawValue
+            namesSignedSource = proof != nil
             self.grant = grant
             self.installedAt = installedAt
             self.engineChecks = engineChecks
+        }
+
+        /// What proves the package's identifier: the known `proof` of an entry with `signedSource` or `webStore`. An entry with `source` has none, whatever its `proof` says, as a `.crx` file installed before Arch checked signatures has.
+        var proof: PluginProof? {
+            switch origin {
+            case .webStore: return proofValue.flatMap(PluginProof.init(rawValue:))
+            case .file where namesSignedSource: return proofValue.flatMap(PluginProof.init(rawValue:))
+            case .file, .generated, .bundled: return nil
+            }
         }
 
         init(from decoder: any Decoder) throws {
@@ -1112,9 +1143,15 @@ struct PluginListFile: Codable {
             id = try container.decode(String.self, forKey: .id)
             if let composition = try container.decodeIfPresent(PluginComposition.self, forKey: .generated) {
                 origin = .generated(composition)
+            } else if let storeID = try container.decodeIfPresent(String.self, forKey: .webStore) {
+                origin = .webStore(storeID)
+            } else if let file = try container.decodeIfPresent(URL.self, forKey: .signedSource) {
+                origin = .file(file)
+                namesSignedSource = true
             } else {
                 origin = .file(try container.decode(URL.self, forKey: .source))
             }
+            proofValue = try container.decodeIfPresent(String.self, forKey: .proof)
             grant = try container.decode(PluginGrant.self, forKey: .grant)
             installedAt = try container.decode(Date.self, forKey: .installedAt)
             engineChecks = try container.decodeIfPresent([String: EngineCheck].self, forKey: .engineChecks)
@@ -1125,11 +1162,13 @@ struct PluginListFile: Codable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(id, forKey: .id)
             switch origin {
-            case let .file(url): try container.encode(url, forKey: .source)
+            case let .file(url): try container.encode(url, forKey: namesSignedSource ? .signedSource : .source)
+            case let .webStore(storeID): try container.encode(storeID, forKey: .webStore)
             case let .generated(composition): try container.encode(composition, forKey: .generated)
             // Nothing installs a built-in plugin.
             case .bundled: break
             }
+            try container.encodeIfPresent(proofValue, forKey: .proof)
             try container.encode(grant, forKey: .grant)
             try container.encode(installedAt, forKey: .installedAt)
             try container.encodeIfPresent(engineChecks, forKey: .engineChecks)

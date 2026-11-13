@@ -404,8 +404,11 @@ private struct JoinSheet: View {
 
     /// The plugin's name with its version and where it came from, so that two plugins of one name differ.
     private func title(of plugin: InstalledPlugin) -> String {
-        guard case let .file(url) = plugin.origin else { return plugin.manifest.name }
-        return "\(plugin.manifest.name) \(plugin.manifest.version) (\(url.lastPathComponent))"
+        switch plugin.origin {
+        case let .file(url): return "\(plugin.manifest.name) \(plugin.manifest.version) (\(url.lastPathComponent))"
+        case .webStore: return "\(plugin.manifest.name) \(plugin.manifest.version) (Web Store)"
+        case .bundled, .generated: return plugin.manifest.name
+        }
     }
 }
 
@@ -417,6 +420,8 @@ private func origin(of plugin: InstalledPlugin) -> String {
         return "built into Arch"
     case let .file(url):
         return "installed from \(url.lastPathComponent)\(installDate)"
+    case .webStore:
+        return "installed from the Web Store\(installDate)"
     case let .generated(composition):
         return "written by AI with \(composition.model)\(installDate) from \(composition.requests.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", then "))"
     }

@@ -1,4 +1,4 @@
-// A plugin's identity and manifest: what it declares before any of its code runs, and what the user grants it. `docs/plugins.md` describes the whole plugin system.
+// A plugin's identity and manifest: what it declares before any of its code runs, where it came from and what its signatures prove, and what the user grants it. `docs/plugins.md` describes the whole plugin system.
 import Foundation
 
 /// Identifies a Persona, which owns its installed plugins.
@@ -84,6 +84,16 @@ public enum PluginOrigin: Hashable, Sendable {
     case file(URL)
     /// Written by AI through the AI interface, from what the user asked for.
     case generated(PluginComposition)
+    /// Downloaded from the Web Store for the extension identifier, 32 letters from `a` to `p` (`docs/web-store.md`).
+    case webStore(String)
+}
+
+/// What a package's signatures prove about its identifier (`docs/web-store.md`, Package proof). Folders, `.zip` archives, and packages that AI writes have no proof.
+public enum PluginProof: String, Hashable, Sendable {
+    /// A `.crx` file with a valid proof by the key whose digest the extension's identifier is: its developer's.
+    case developer
+    /// A `.crx` file with a developer proof and a valid proof by the Web Store's publisher key, as the store publishes packages.
+    case webStore
 }
 
 /// How AI wrote a plugin, which the review and Settings show.

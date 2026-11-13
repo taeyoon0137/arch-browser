@@ -5,6 +5,7 @@ import CryptoKit
 @testable import Extensions
 import Foundation
 @testable import Plugins
+import Security
 import Testing
 
 @MainActor
@@ -61,13 +62,14 @@ struct EngineRequestsTests {
     @Test func stagesACRXFileWithItsKey() async throws {
         let package = try folder.package("crx", ["manifest.json": #"{"manifest_version": 3, "name": "Packed", "version": "2"}"#, "background.js": ""])
         let archive = folder.url.appendingPathComponent("packed.zip")
-        try zip(package, to: archive)
-        let publicKey = Data("a developer's public key".utf8)
+        try compress(package, to: archive)
+        let publicKey = CRXFile.developer.publicKey
         let crx = folder.url.appendingPathComponent("Packed.crx")
-        try CRXFile.data(publicKey: publicKey, archive: Data(contentsOf: archive)).write(to: crx)
+        try CRXFile.data(archive: Data(contentsOf: archive)).write(to: crx)
         let staged = try await manager.stage(crx)
-        // The extension has the identifier of the file's key, which its manifest now carries.
+        // The extension has the identifier of the file's key, which its manifest now carries, and the developer's signature proves it.
         #expect(staged.manifest.id.rawValue == "extension." + WebExtensionManifest.extensionID(ofBytes: publicKey))
+        #expect(staged.proof == .developer)
         #expect(staged.files == ["background.js", "manifest.json"])
         let manifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: staged.rootURL.appendingPathComponent("manifest.json"))) as? [String: Any])
         #expect(manifest["key"] as? String == publicKey.base64EncodedString())
@@ -76,9 +78,9 @@ struct EngineRequestsTests {
         // The header's key replaces another key in the manifest, as Chromium writes it.
         let keyedPackage = try folder.package("keyed crx", ["manifest.json": #"{"manifest_version": 3, "name": "Keyed", "version": "2", "key": "b3RoZXIga2V5"}"#])
         let keyedArchive = folder.url.appendingPathComponent("keyed.zip")
-        try zip(keyedPackage, to: keyedArchive)
+        try compress(keyedPackage, to: keyedArchive)
         let keyedCRX = folder.url.appendingPathComponent("Keyed.crx")
-        try CRXFile.data(publicKey: publicKey, archive: Data(contentsOf: keyedArchive)).write(to: keyedCRX)
+        try CRXFile.data(archive: Data(contentsOf: keyedArchive)).write(to: keyedCRX)
         let keyed = try await manager.stage(keyedCRX)
         #expect(keyed.manifest.id == staged.manifest.id && keyed.manifest.name == "Keyed")
         let keyedManifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: keyed.rootURL.appendingPathComponent("manifest.json"))) as? [String: Any])
@@ -91,14 +93,6 @@ struct EngineRequestsTests {
         await #expect(throws: PluginError.invalidPackage("Packed.crx is a .crx file of format version 2, which Chromium no longer installs.")) { try await manager.stage(crx) }
     }
 
-    private func zip(_ folder: URL, to archive: URL) throws {
-        let ditto = Process()
-        ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        ditto.arguments = ["-c", "-k", folder.path, archive.path]
-        try ditto.run()
-        ditto.waitUntilExit()
-        #expect(ditto.terminationStatus == 0)
-    }
 
     // MARK: Launch
 
@@ -227,21 +221,105 @@ struct EngineRequestsTests {
     }
 }
 
-/// Writes `.crx` files of format version 3, as Chromium packs extensions.
+/// Writes the `.zip` archive of the package folder, as the Finder's Compress makes it.
+func compress(_ folder: URL, to archive: URL) throws {
+    let ditto = Process()
+    ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+    ditto.arguments = ["-c", "-k", folder.path, archive.path]
+    try ditto.run()
+    ditto.waitUntilExit()
+    #expect(ditto.terminationStatus == 0)
+}
+
+/// Writes `.crx` files of format version 3, as Chromium packs extensions, signed by the keys a test chooses, and the parts of such a file, which a test may change after signing.
 enum CRXFile {
-    static func data(publicKey: Data, archive: Data) -> Data {
-        let identifier = Data(SHA256.hash(data: publicKey).prefix(16))
-        let proof = field(1, publicKey) + field(2, Data("signature".utf8))
-        let header = field(2, proof) + field(10000, field(1, identifier))
-        return Data("Cr24".utf8) + littleEndian(3) + littleEndian(UInt32(header.count)) + header + archive
+    /// A key that signs `.crx` files: RSA, as Chromium's packer makes, or P-256, as the Web Store's publisher key is. Security and CryptoKit keys are safe to share across threads.
+    struct Key: @unchecked Sendable {
+        /// DER `SubjectPublicKeyInfo`.
+        let publicKey: Data
+        /// Whether the proof goes into the header's RSA proofs (field 2) rather than its ECDSA proofs (field 3).
+        let isRSA: Bool
+        private let sign: (Data) -> Data
+
+        /// The SHA-256 digest of the public key, as the verifier takes a publisher key.
+        var digest: Data { Data(SHA256.hash(data: publicKey)) }
+
+        /// The same key filed among the RSA proofs, as a damaged file could have a P-256 key.
+        var filedAsRSA: Key { Key(publicKey: publicKey, isRSA: true, sign: sign) }
+
+        /// The PKCS #1 v1.5 or DER ECDSA signature of `message` over its SHA-256 digest.
+        func signature(of message: Data) -> Data { sign(message) }
+
+        /// A new 2048-bit RSA key, which stays out of the Keychain.
+        static func rsa() -> Key {
+            let attributes = [kSecAttrKeyType as String: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits as String: 2048] as CFDictionary
+            let privateKey = SecKeyCreateRandomKey(attributes, nil)!
+            let pkcs1 = SecKeyCopyExternalRepresentation(SecKeyCopyPublicKey(privateKey)!, nil)! as Data
+            // SubjectPublicKeyInfo: the algorithm rsaEncryption with no parameters, then the PKCS #1 key as a bit string without unused bits.
+            let algorithm = der(0x30, der(0x06, Data([0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01])) + der(0x05, Data()))
+            return Key(publicKey: der(0x30, algorithm + der(0x03, Data([0]) + pkcs1)), isRSA: true) { message in
+                SecKeyCreateSignature(privateKey, .rsaSignatureMessagePKCS1v15SHA256, message as CFData, nil)! as Data
+            }
+        }
+
+        /// A new P-256 key.
+        static func p256() -> Key {
+            let privateKey = P256.Signing.PrivateKey()
+            return Key(publicKey: privateKey.publicKey.derRepresentation, isRSA: false) { message in
+                try! privateKey.signature(for: message).derRepresentation
+            }
+        }
+
+        /// A DER element with a length of one, two, or three bytes, enough for these keys.
+        private static func der(_ tag: UInt8, _ contents: Data) -> Data {
+            let count = contents.count
+            let length: [UInt8] = count < 0x80 ? [UInt8(count)] : count < 0x100 ? [0x81, UInt8(count)] : [0x82, UInt8(count >> 8), UInt8(count & 0xFF)]
+            return Data([tag] + length) + contents
+        }
     }
 
-    private static func littleEndian(_ value: UInt32) -> Data {
+    /// The developer's key of the tests' files, made once for the run, as RSA keys take a moment.
+    static let developer = Key.rsa()
+    /// A publisher key that tests pass as the Web Store's.
+    static let publisher = Key.p256()
+
+    /// A file's header and archive, with the signatures made when the parts were.
+    struct Parts {
+        var proofs: [(key: Key, signature: Data)]
+        /// The `SignedData` message, with the identifier.
+        var signedHeader: Data
+        var archive: Data
+
+        /// What each proof signs: the context, the signed header's length as a 32-bit little-endian number, the signed header, and the archive.
+        var message: Data { Data("CRX3 SignedData\0".utf8) + littleEndian(UInt32(signedHeader.count)) + signedHeader + archive }
+
+        /// The file: `Cr24`, the version, and the header's length, then the header and the archive.
+        var data: Data {
+            let proofFields = proofs.map { field($0.key.isRSA ? 2 : 3, field(1, $0.key.publicKey) + field(2, $0.signature)) }
+            let header = proofFields.reduce(Data(), +) + field(10000, signedHeader)
+            return Data("Cr24".utf8) + littleEndian(3) + littleEndian(UInt32(header.count)) + header + archive
+        }
+    }
+
+    /// The parts of a file whose identifier is that of the first key's, or `crxID`, signed by each key.
+    static func parts(archive: Data, signedBy keys: [Key] = [developer], crxID: Data? = nil) -> Parts {
+        let identifier = crxID ?? Data(SHA256.hash(data: keys[0].publicKey).prefix(16))
+        var parts = Parts(proofs: [], signedHeader: field(1, identifier), archive: archive)
+        parts.proofs = keys.map { ($0, $0.signature(of: parts.message)) }
+        return parts
+    }
+
+    /// A file whose identifier is that of the first key's, signed by each key.
+    static func data(archive: Data, signedBy keys: [Key] = [developer]) -> Data {
+        parts(archive: archive, signedBy: keys).data
+    }
+
+    fileprivate static func littleEndian(_ value: UInt32) -> Data {
         Data((0..<4).map { UInt8((value >> (8 * $0)) & 0xFF) })
     }
 
     /// A length-delimited protocol buffer field.
-    private static func field(_ number: Int, _ value: Data) -> Data {
+    static func field(_ number: Int, _ value: Data) -> Data {
         varint(UInt64(number << 3 | 2)) + varint(UInt64(value.count)) + value
     }
 

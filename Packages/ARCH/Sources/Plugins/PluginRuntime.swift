@@ -16,7 +16,7 @@ public protocol PluginRuntime: AnyObject, Sendable {
     nonisolated var kind: PluginKind { get }
     /// The file at the top of a package of the kind, such as `manifest.json`, by which staging tells a package's kind.
     nonisolated var manifestFileName: String { get }
-    /// Reads the manifest of the package folder at `root`, which came from the folder or archive at `source`, without running any of it. Called off the main thread. Throws `PluginError.invalidPackage` for a package that Arch cannot install.
+    /// Reads the manifest of the package folder at `root`, which came from the folder or archive at `source`; for a Web Store package, whose manifest carries its `.crx` file's key, `source` is `root`. Reads without running any of it. Called off the main thread. Throws `PluginError.invalidPackage` for a package that Arch cannot install.
     nonisolated func manifest(forPackageAt root: URL, source: URL) throws -> PluginManifest
     /// Why plugins of the kind cannot run on this Mac, as Settings says it, or nil while they can. The manager leaves out their contributions meanwhile.
     var unavailability: String? { get }
