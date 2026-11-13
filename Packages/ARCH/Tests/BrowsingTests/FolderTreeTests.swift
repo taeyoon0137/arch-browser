@@ -1,4 +1,4 @@
-// Nested folders (`docs/bookmarks.md`, Nested folders; bookmark rule 6): the parents that `session.json` repairs, the sidebar's rows with their depths, collapsed folders at any level, the moves that Move to Folder allows and refuses, Move Out of Folder, and Delete Folder keeping what a folder held. Tabs run on `PageStub`, without a session or an engine, so the menus, the indented rows, and the session's calls are regression check 70.
+// Nested folders (`docs/bookmarks.md`, Nested folders; bookmark rule 6): the parents that `session.json` repairs, the sidebar's rows with their depths, collapsed folders at any level, the moves that Move to Folder allows and refuses, Move Out of Folder, Delete Folder keeping what a folder held, and where a dragged folder goes (`dropTarget(for:at:)`, a drop on another space's symbol, and the dragged folder's hidden rows). Tabs run on `PageStub`, without a session or an engine, so the menus, the indented rows, the drags, and the session's calls are regression check 70.
 import ARCHEngine
 import Foundation
 import Testing
@@ -210,5 +210,161 @@ import Testing
         tree.deleteFolder(parent.id)
         #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["Kept", "  kept tab", "Sibling", "one", "two", "parent tab", "mail"])
         #expect(tree.folders.allSatisfy { $0.parentID == nil })
+    }
+
+    // MARK: Dragging
+
+    @Test func dropTargetPlacesAFolderBetweenRowsAtEachLevel() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let c = folder("C", in: b)
+        let x = folder("X")
+        let y = folder("Y")
+        let open = folder("Open", pinned: false)
+        let inA = tab("a", in: a)
+        let inB = tab("b", in: b)
+        let inC = tab("c", in: c)
+        let mail = tab("mail")
+        let news = tab("news", pinned: false)
+        var tree = FolderTree(folders: [a, b, c, x, y, open], tabs: [inA, inB, inC, mail, news])
+        // Above a folder's row, Y goes before that folder at its level.
+        #expect(tree.dropTarget(for: y.id, at: .aboveFolder(a.id)) == .between(parentID: nil, beforeID: a.id))
+        #expect(tree.dropTarget(for: y.id, at: .aboveFolder(b.id)) == .between(parentID: a.id, beforeID: b.id))
+        #expect(tree.dropTarget(for: y.id, at: .aboveFolder(c.id)) == .between(parentID: b.id, beforeID: c.id))
+        // On a tab's row, it goes last among the folders of the tab's folder, which in C is the fourth level.
+        #expect(tree.dropTarget(for: y.id, at: .onTab(inC.id)) == .between(parentID: c.id, beforeID: nil))
+        #expect(tree.dropTarget(for: y.id, at: .onTab(inB.id)) == .between(parentID: b.id, beforeID: nil))
+        #expect(tree.dropTarget(for: y.id, at: .onTab(inA.id)) == .between(parentID: a.id, beforeID: nil))
+        // Outside folders and on the list's closing row, it goes last at the top of the list, which changes nothing for Y, already there, nor for X above Y.
+        #expect(tree.dropTarget(for: x.id, at: .onTab(mail.id)) == .between(parentID: nil, beforeID: nil))
+        #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: true)) == .between(parentID: nil, beforeID: nil))
+        #expect(tree.dropTarget(for: y.id, at: .onTab(mail.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(y.id)) == nil)
+        // The open list and another space's list refuse it.
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(open.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(open.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onTab(news.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: false)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: otherSpaceID, pinned: true)) == nil)
+
+        tree.moveFolder(y.id, to: .between(parentID: a.id, beforeID: b.id))
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["A", "  Y", "  B", "    C", "      c", "    b", "  a", "X", "mail"])
+        tree.moveFolder(y.id, to: .between(parentID: c.id, beforeID: nil))
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["A", "  B", "    C", "      Y", "      c", "    b", "  a", "X", "mail"])
+        #expect(tree.level(of: y.id) == 4)
+        tree.moveFolder(y.id, to: .between(parentID: nil, beforeID: a.id))
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["Y", "A", "  B", "    C", "      c", "    b", "  a", "X", "mail"])
+    }
+
+    @Test func dropTargetOnAFolderRowPutsTheFolderLastInsideIt() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let c = folder("C", in: a)
+        let x = folder("X")
+        var tree = FolderTree(folders: [a, b, c, x], tabs: [])
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(b.id)) == .into(b.id))
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(a.id)) == .into(a.id))
+        // Its own parent's row takes it while another folder follows it there, which puts it last.
+        #expect(tree.dropTarget(for: b.id, at: .onFolder(a.id)) == .into(a.id))
+        #expect(tree.dropTarget(for: c.id, at: .onFolder(a.id)) == nil)
+        tree.moveFolder(x.id, to: .into(a.id))
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["A", "  B", "  C", "  X"])
+        tree.moveFolder(b.id, to: .into(a.id))
+        #expect(tree.subfolders(of: a.id).map(\.name) == ["C", "X", "B"])
+        // A refused target changes nothing.
+        tree.moveFolder(a.id, to: .into(b.id))
+        #expect(tree.folder(a.id)?.parentID == nil)
+    }
+
+    @Test func dropTargetRefusesTheDraggedFoldersOwnTree() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let c = folder("C", in: b)
+        let inC = tab("c", in: c)
+        let tree = FolderTree(folders: [a, b, c], tabs: [inC])
+        let positions: [FolderTree.DropPosition] = [.aboveFolder(a.id), .onFolder(a.id), .aboveFolder(b.id), .onFolder(b.id), .aboveFolder(c.id), .onFolder(c.id), .onTab(inC.id)]
+        for position in positions {
+            #expect(tree.dropTarget(for: a.id, at: position) == nil)
+        }
+        // B can still leave A for the top of the list, taking C along.
+        #expect(tree.dropTarget(for: b.id, at: .aboveFolder(a.id)) == .between(parentID: nil, beforeID: a.id))
+        #expect(tree.dropTarget(for: b.id, at: .onFolder(c.id)) == nil)
+    }
+
+    @Test func dropTargetKeepsAFolderAndTheFoldersItHoldsWithinTheFourthLevel() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let c = folder("C", in: b)
+        let d = folder("D", in: c)
+        let x = folder("X")
+        let y = folder("Y", in: x)
+        let z = folder("Z")
+        let inC = tab("c", in: c)
+        let inD = tab("d", in: d)
+        let tree = FolderTree(folders: [a, b, c, d, x, y, z], tabs: [inC, inD])
+        // Z fits at the fourth level, beside D, but not inside D.
+        #expect(tree.dropTarget(for: z.id, at: .aboveFolder(d.id)) == .between(parentID: c.id, beforeID: d.id))
+        #expect(tree.dropTarget(for: z.id, at: .onTab(inC.id)) == .between(parentID: c.id, beforeID: nil))
+        #expect(tree.dropTarget(for: z.id, at: .onFolder(c.id)) == .into(c.id))
+        #expect(tree.dropTarget(for: z.id, at: .onFolder(d.id)) == nil)
+        #expect(tree.dropTarget(for: z.id, at: .onTab(inD.id)) == nil)
+        // X takes Y along, so it fits only where Y stays within the fourth level.
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(c.id)) == .between(parentID: b.id, beforeID: c.id))
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(b.id)) == .into(b.id))
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(d.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(c.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onTab(inC.id)) == nil)
+    }
+
+    @Test func dropTargetKeepsTheDraggedRowOutOfCollapsedFolders() {
+        var a = folder("A")
+        a.isCollapsed = true
+        let b = folder("B", in: a)
+        let inA = tab("a", in: a)
+        let inB = tab("b", in: b)
+        let x = folder("X")
+        let tree = FolderTree(folders: [a, b, x], tabs: [inA, inB])
+        // A collapsed folder's row takes the folder, but the tabs it still shows, as the selected tab, and the folders it hides place nothing.
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(a.id)) == .into(a.id))
+        #expect(tree.dropTarget(for: x.id, at: .onTab(inA.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onTab(inB.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(b.id)) == nil)
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(b.id)) == nil)
+    }
+
+    @Test func aDraggedFolderShowsItsRowAlone() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let selected = tab("selected", in: b)
+        let other = tab("other", in: a)
+        let mail = tab("mail")
+        let tree = FolderTree(folders: [a, b], tabs: [selected, other, mail])
+        // Its folders and tabs hide, the selected tab among them.
+        #expect(outline(tree.rows(in: spaceID, pinned: true, hidingContentsOf: a.id) { $0.id == selected.id }) == ["A", "mail"])
+        #expect(outline(tree.rows(in: spaceID, pinned: true, hidingContentsOf: b.id)) == ["A", "  B", "  other", "mail"])
+    }
+
+    @Test func aFolderDroppedOnAnotherSpaceCarriesWhatItHolds() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        let c = folder("C", in: b)
+        let later = folder("Later", pinned: false)
+        let there = folder("There", space: otherSpaceID)
+        let inA = tab("a", in: a)
+        let inB = tab("b", in: b)
+        let inC = tab("c", in: c)
+        let inLater = tab("later", in: later)
+        var tree = FolderTree(folders: [a, b, c, later, there], tabs: [inA, inB, inC, inLater])
+        tree.moveFolder(b.id, toSpace: otherSpaceID)
+        // B leaves A for the top of the other space's pinned list, after its folders, with C and the tabs inside them.
+        #expect(outline(tree.rows(in: otherSpaceID, pinned: true)) == ["There", "B", "  C", "    c", "  b"])
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["A", "  a"])
+        #expect(tree.folder(c.id)?.parentID == b.id)
+        #expect([inB, inC].allSatisfy { $0.spaceID == otherSpaceID && $0.isPinned })
+        #expect(inA.spaceID == spaceID)
+        // An open folder stays among the open tabs.
+        tree.moveFolder(later.id, toSpace: otherSpaceID)
+        #expect(outline(tree.rows(in: otherSpaceID, pinned: false)) == ["Later", "  later"])
+        #expect(inLater.spaceID == otherSpaceID && !inLater.isPinned)
     }
 }

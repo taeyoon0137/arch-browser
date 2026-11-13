@@ -1,7 +1,7 @@
-// A folder's row in a space's tab list, above the folder's indented folders and tabs, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row and reports its frame, so a dragged tab can find it.
+// A folder's row in a space's tab list, above the folder's indented folders and tabs, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row, drags it, and reports its frame, so a dragged tab or folder can find it.
 import SwiftUI
 
-/// Clicking the row collapses or expands the folder, Rename Folder in its context menu edits the name in place, and the menu's folder items nest it (bookmark rule 6). The row lights up while a dragged tab is over it, as a space's symbol does.
+/// Clicking the row collapses or expands the folder, Rename Folder in its context menu edits the name in place, and the menu's folder items nest it (bookmark rule 6). The row lights up while a dragged tab or folder is over it and would go into the folder, as a space's symbol does.
 struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -14,7 +14,7 @@ struct TabFolderRowView: View {
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
     private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
 
-    /// Rows ignore the pointer while a tab is dragged over them; the folder under it lights up instead.
+    /// Rows ignore the pointer while a tab or folder is dragged over them; the folder under it lights up instead.
     private var fill: Color {
         if isDropTarget { return Color.accentColor.opacity(0.15) }
         return isHovering && !isDraggingTab ? SidebarFill.hover.color(in: colorScheme) : .clear
@@ -63,9 +63,9 @@ struct TabFolderRowView: View {
         .accessibilityAction { toggleCollapsed() }
     }
 
-    /// A click in the name field while renaming edits the name instead.
+    /// A click in the name field while renaming edits the name instead, and the release that ends a drag of the row leaves the folder as it was.
     private func toggleCollapsed() {
-        guard !isRenaming else { return }
+        guard !isRenaming, sidebarDrag.item == nil else { return }
         withAnimation(.easeInOut(duration: 0.2)) { session.toggleCollapsed(ofFolder: folder.id) }
     }
 }

@@ -1,4 +1,4 @@
-// How folders nest in a space's pinned and open lists (bookmark rule 6, `docs/bookmarks.md`, Nested folders): which folder holds which, the sidebar's rows with their depths, the moves that Move to Folder and Move Out of Folder make, Delete Folder, and the repairs that `session.json` gets. The session and the views ask a `FolderTree` instead of walking `TabFolder.parentID`.
+// How folders nest in a space's pinned and open lists (bookmark rule 6, `docs/bookmarks.md`, Nested folders): which folder holds which, the sidebar's rows with their depths, the moves that Move to Folder, Move Out of Folder, and a folder row's drag make, Delete Folder, and the repairs that `session.json` gets. The session and the views ask a `FolderTree` instead of walking `TabFolder.parentID`.
 import Foundation
 
 /// The session's folders and tabs as the sidebar nests them. A folder sits at the top of its space's pinned or open list or in another folder of that list, at most `maximumLevel` levels deep, and lists its folders before its tabs, as each list does. It is built from the session's lists for each use; its mutating methods change its copies of the lists and the moved tabs' folders, and the session takes the lists back.
@@ -112,11 +112,12 @@ struct FolderTree {
         }
     }
 
-    /// A space's pinned or open list as the sidebar shows it: each folder's row followed by the rows of its folders and its tabs, then the tabs outside folders. A collapsed folder hides everything inside it but the tabs that `shows` picks, such as the selected tab, which show one level in from the folder.
-    func rows(in spaceID: UUID, pinned: Bool, showingInCollapsedFolders shows: (Tab) -> Bool = { _ in false }) -> [Row] {
+    /// A space's pinned or open list as the sidebar shows it: each folder's row followed by the rows of its folders and its tabs, then the tabs outside folders. A collapsed folder hides everything inside it but the tabs that `shows` picks, such as the selected tab, which show one level in from the folder. The folder `hiddenID`, a dragged folder, shows its row alone.
+    func rows(in spaceID: UUID, pinned: Bool, hidingContentsOf hiddenID: UUID? = nil, showingInCollapsedFolders shows: (Tab) -> Bool = { _ in false }) -> [Row] {
         var rows: [Row] = []
         func add(_ folder: TabFolder, depth: Int) {
             rows.append(.folder(folder, depth: depth))
+            if folder.id == hiddenID { return }
             if folder.isCollapsed {
                 rows += tabs(inside: folder.id).filter(shows).map { .tab($0, depth: depth + 1) }
             } else {
@@ -138,8 +139,16 @@ struct FolderTree {
 
     /// Whether Move to Folder can move a folder into `parentID`: another folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. III.22 adds live folders to the refused targets, and III.18.1 agent folders, as targets and as the moved folder.
     func canMoveFolder(_ id: UUID, into parentID: UUID) -> Bool {
-        guard let moved = folder(id), let parent = folder(parentID), parentID != id, moved.parentID != parentID,
-              parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned, !ancestors(of: parentID).contains(where: { $0.id == id }) else { return false }
+        guard let moved = folder(id), moved.parentID != parentID else { return false }
+        return canHold(id, in: parentID)
+    }
+
+    /// Whether a folder can sit in `parentID`, or at the top of its list for nil: in a folder of its space and list that is not the folder itself or a folder inside it, where the folder and the folders it holds stay within the fourth level. Move to Folder and a folder's drag both ask it.
+    private func canHold(_ id: UUID, in parentID: UUID?) -> Bool {
+        guard let moved = folder(id) else { return false }
+        guard let parentID else { return true }
+        guard let parent = folder(parentID), parentID != id, parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned,
+              !ancestors(of: parentID).contains(where: { $0.id == id }) else { return false }
         return level(of: parentID) + height(of: id) <= Self.maximumLevel
     }
 
@@ -179,6 +188,71 @@ struct FolderTree {
         return topFolders(in: spaceID, pinned: pinned).compactMap { target($0) }
     }
 
+    // MARK: Dragging
+
+    /// Where a dragged folder's pointer is among the rows of a space's list, which `SpaceTabsView` finds from the rows' frames.
+    enum DropPosition: Equatable {
+        /// The upper part of a folder's row.
+        case aboveFolder(UUID)
+        /// The rest of a folder's row.
+        case onFolder(UUID)
+        /// A tab's row.
+        case onTab(UUID)
+        /// The row that ends a space's pinned or open list: the divider or the new tab row.
+        case listEnd(spaceID: UUID, pinned: Bool)
+    }
+
+    /// Where a dragged folder goes.
+    enum DropTarget: Equatable {
+        /// Last among a folder's folders. The folder's row lights up, and the dragged folder goes there on release.
+        case into(UUID)
+        /// Among the folders of `parentID`, or at the top of the dragged folder's list for nil: right before `beforeID`, or last for nil. The rows make room for the dragged folder there while it is dragged.
+        case between(parentID: UUID?, beforeID: UUID?)
+    }
+
+    /// Where a folder dragged to `position` goes, or nil where the drop is refused or would leave the folder where it is, so that nothing moves and its row returns to its slot on release. Above a folder's row, it goes before that folder, at that folder's level; on a folder's row, into that folder; on a tab's row, last among the folders of the tab's folder, or at the top of the list for a tab outside folders, since a folder lists its folders before its tabs; on the row that ends its list, last at the top of the list. A folder stays in its space's list (another space takes it through its symbol, which the session decides), never goes into itself or a folder inside it, never takes the folders it holds past the fourth level, and never goes where a collapsed folder would hide its row. III.22 adds live folders to the refused targets, and III.18.1 agent folders, as targets and as the dragged folder.
+    func dropTarget(for id: UUID, at position: DropPosition) -> DropTarget? {
+        guard let moved = folder(id) else { return nil }
+        let target: DropTarget
+        switch position {
+        case .aboveFolder(let nextID):
+            guard let next = folder(nextID) else { return nil }
+            target = .between(parentID: next.parentID, beforeID: nextID)
+        case .onFolder(let parentID):
+            target = .into(parentID)
+        case .onTab(let tabID):
+            guard let tab = tabs.first(where: { $0.id == tabID }), tab.spaceID == moved.spaceID, tab.isPinned == moved.isPinned else { return nil }
+            target = .between(parentID: tab.folderID, beforeID: nil)
+        case .listEnd(let spaceID, let pinned):
+            guard spaceID == moved.spaceID, pinned == moved.isPinned else { return nil }
+            target = .between(parentID: nil, beforeID: nil)
+        }
+        return canMoveFolder(id, to: target) ? target : nil
+    }
+
+    /// Whether a dragged folder can go to `target` and would change its place there. Into a folder includes its own parent while another folder follows it there, which puts it last.
+    func canMoveFolder(_ id: UUID, to target: DropTarget) -> Bool {
+        guard let moved = folder(id) else { return false }
+        switch target {
+        case .into(let parentID):
+            return canHold(id, in: parentID) && !isHidden(parentID) && subfolders(of: parentID).last?.id != id
+        case .between(let parentID, let beforeID):
+            guard canHold(id, in: parentID), beforeID != id else { return false }
+            // A place inside a collapsed folder would hide the dragged row.
+            if let parentID, folder(parentID)?.isCollapsed == true || isHidden(parentID) { return false }
+            let siblings = parentID.map(subfolders(of:)) ?? topFolders(in: moved.spaceID, pinned: moved.isPinned)
+            if let beforeID, !siblings.contains(where: { $0.id == beforeID }) { return false }
+            guard let index = siblings.firstIndex(where: { $0.id == id }) else { return true }
+            let next = siblings.index(after: index) < siblings.endIndex ? siblings[siblings.index(after: index)].id : nil
+            return next != beforeID
+        }
+    }
+
+    /// Whether a collapsed folder holds the folder, which hides its row.
+    private func isHidden(_ id: UUID) -> Bool {
+        ancestors(of: id).contains(where: \.isCollapsed)
+    }
+
     // MARK: Changes
 
     /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place among its parent's folders, or at the top of its list, and its tabs go first among the tabs there.
@@ -214,12 +288,39 @@ struct FolderTree {
         self = FolderTree(folders: folders, tabs: Self.placingFirst([tab], in: folder.parentID, among: tabs))
     }
 
-    /// Gives a folder its new parent and places it after `siblingID`, or last for nil. The folders inside it keep their places, since they follow it by `parentID`.
-    private mutating func reparent(_ id: UUID, to parentID: UUID?, after siblingID: UUID?) {
+    /// A folder's drag: moves it, with everything it holds, to `target` when `canMoveFolder(_:to:)` allows it.
+    mutating func moveFolder(_ id: UUID, to target: DropTarget) {
+        guard canMoveFolder(id, to: target) else { return }
+        switch target {
+        case .into(let parentID): reparent(id, to: parentID)
+        case .between(let parentID, let beforeID): reparent(id, to: parentID, before: beforeID)
+        }
+    }
+
+    /// A folder dropped on another space's symbol: moves it, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind, so its tabs keep their pinned state. The folders inside it keep their parents, and everything moved goes after the space's own folders and tabs. The session checks that the space belongs to the folder's Persona.
+    mutating func moveFolder(_ id: UUID, toSpace spaceID: UUID) {
+        guard let moved = folder(id), moved.spaceID != spaceID else { return }
+        let carriedIDs = Set([id] + descendants(of: id).map(\.id))
+        let carriedTabIDs = Set(tabs(inside: id).map(\.id))
+        let carried = folders.filter { carriedIDs.contains($0.id) }.map { folder in
+            var folder = folder
+            folder.spaceID = spaceID
+            if folder.id == id { folder.parentID = nil }
+            return folder
+        }
+        let carriedTabs = tabs.filter { carriedTabIDs.contains($0.id) }
+        carriedTabs.forEach { $0.spaceID = spaceID }
+        self = FolderTree(folders: folders.filter { !carriedIDs.contains($0.id) } + carried, tabs: tabs.filter { !carriedTabIDs.contains($0.id) } + carriedTabs)
+    }
+
+    /// Gives a folder its new parent and places it right after `afterID` or right before `beforeID`, or last for nil. The folders inside it keep their places, since they follow it by `parentID`.
+    private mutating func reparent(_ id: UUID, to parentID: UUID?, after afterID: UUID? = nil, before beforeID: UUID? = nil) {
         guard var moved = folder(id) else { return }
         moved.parentID = parentID
         var reordered = folders.filter { $0.id != id }
-        let index = siblingID.flatMap { sibling in reordered.firstIndex { $0.id == sibling }.map { $0 + 1 } } ?? reordered.endIndex
+        let index = afterID.flatMap { sibling in reordered.firstIndex { $0.id == sibling }.map { $0 + 1 } }
+            ?? beforeID.flatMap { sibling in reordered.firstIndex { $0.id == sibling } }
+            ?? reordered.endIndex
         reordered.insert(moved, at: index)
         self = FolderTree(folders: reordered, tabs: tabs)
     }

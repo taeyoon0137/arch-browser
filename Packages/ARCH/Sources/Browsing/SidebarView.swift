@@ -335,7 +335,7 @@ extension EnvironmentValues {
         set { self[SidebarIsFloatingKey.self] = newValue }
     }
 
-    /// Set in a space's tab list while one of its tabs is dragged.
+    /// Set in a space's tab list while one of its tab or folder rows is dragged, and on the lifted row.
     var isDraggingTab: Bool {
         get { self[IsDraggingTabKey.self] }
         set { self[IsDraggingTabKey.self] = newValue }

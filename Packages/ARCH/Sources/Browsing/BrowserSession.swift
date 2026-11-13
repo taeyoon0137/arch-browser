@@ -1403,6 +1403,28 @@ public final class BrowserSession: ObservableObject {
         changeFolderTree { $0.moveFolderOut(id) }
     }
 
+    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it.
+    func moveFolder(_ id: UUID, to target: FolderTree.DropTarget) {
+        changeFolderTree { $0.moveFolder(id, to: target) }
+    }
+
+    /// The guard of a folder's drop on another space's symbol: a space of the folder's Persona other than its own, to which every tab inside the folder can move (Persona rule 3).
+    func canMoveFolder(_ id: UUID, toSpace spaceID: UUID) -> Bool {
+        guard let folder = folders.first(where: { $0.id == id }), folder.spaceID != spaceID,
+              let from = spaces.first(where: { $0.id == folder.spaceID }), let to = spaces.first(where: { $0.id == spaceID }),
+              from.resolvedPersonaID == to.resolvedPersonaID else { return false }
+        return folderTree.tabs(inside: id).allSatisfy { canMoveTab($0.id, toSpace: spaceID) }
+    }
+
+    /// Moves a folder dropped on another space's symbol, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind (`FolderTree.moveFolder(_:toSpace:)`). As for a dropped tab, its tabs leave the split view of the space they leave, and a window that selects one of them follows it to the space.
+    public func moveFolder(_ id: UUID, toSpace spaceID: UUID) {
+        guard canMoveFolder(id, toSpace: spaceID) else { return }
+        let carried = folderTree.tabs(inside: id)
+        carried.forEach { leaveSplitView($0) }
+        changeFolderTree { $0.moveFolder(id, toSpace: spaceID) }
+        for window in windows where carried.contains(where: { $0.id == window.selectedTabID }) { window.currentSpaceID = spaceID }
+    }
+
     public func toggleCollapsed(ofFolder id: UUID) {
         updateFolder(id) { $0.isCollapsed.toggle() }
     }

@@ -1,20 +1,29 @@
-// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab row above the sidebar and the page. Tab rows start their drags in `SpaceTabsView.swift`, favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
+// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
 import SwiftUI
 
 /// What a drag in the sidebar lifts.
 enum SidebarDragItem: Equatable {
     case tab(UUID)
+    case folder(UUID)
     case favorite(UUID)
     case space(UUID)
 
     var id: UUID {
         switch self {
-        case .tab(let id), .favorite(let id), .space(let id): return id
+        case .tab(let id), .folder(let id), .favorite(let id), .space(let id): return id
+        }
+    }
+
+    /// Whether the item is a row of a space's list, which `TabDragLayer` draws.
+    var isRow: Bool {
+        switch self {
+        case .tab, .folder: return true
+        case .favorite, .space: return false
         }
     }
 }
 
-/// A drag in the window's sidebar: the tab row, favorite, or space symbol it lifts, its drop target, and the frames of the space symbols and the page area's panes that a dragged tab's targets are found in. The window draws the lifted item above the sidebar and the page, so it can follow the pointer out of the list.
+/// A drag in the window's sidebar: the tab row, folder row, favorite, or space symbol it lifts, its drop target, and the frames of the space symbols and the page area's panes that a dragged row's targets are found in. The window draws the lifted item above the sidebar and the page, so it can follow the pointer out of the list.
 final class SidebarDragState: ObservableObject {
     /// How long a lifted item's shadow and its slot's dimming take to appear and disappear.
     static let liftDuration = 0.4
@@ -27,11 +36,11 @@ final class SidebarDragState: ObservableObject {
     @Published var isSettling = false
     /// Shows the lifted row's shadow and backing and the slot's dimming.
     @Published var isLifted = false
-    /// The other space whose symbol is under a dragged tab. Releasing the tab there moves it to that space.
+    /// The other space whose symbol is under a dragged tab or folder. Releasing the row there moves it to that space.
     @Published var targetSpaceID: UUID?
-    /// The folder whose row is under a dragged tab. Releasing the tab there adds it to the folder.
+    /// The folder whose row is under a dragged tab or folder. Releasing the row there moves it into the folder.
     @Published var targetFolderID: UUID?
-    /// Set while a tab released over a space's symbol or a folder's row shrinks into it.
+    /// Set while a row released over a space's symbol or a folder's row shrinks into it.
     @Published var isEntering = false
     /// Where a tab released over the page area opens in split view.
     @Published var splitDrop: SplitDrop?
@@ -48,6 +57,12 @@ final class SidebarDragState: ObservableObject {
     /// The dragged tab.
     var tabID: UUID? {
         if case .tab(let id) = item { return id }
+        return nil
+    }
+
+    /// The dragged folder.
+    var folderID: UUID? {
+        if case .folder(let id) = item { return id }
         return nil
     }
 
@@ -92,12 +107,12 @@ final class SidebarDragState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.liftDuration) { self.end(ownedBy: owner) }
     }
 
-    /// A tab released over a space's symbol shrinks into it while the symbol's highlight fades.
+    /// A row released over a space's symbol shrinks into it while the symbol's highlight fades.
     func settle(intoSpace spaceID: UUID, ownedBy owner: UUID) {
         settle(shrinkingInto: spaceSymbolFrames[spaceID] ?? frame, ownedBy: owner)
     }
 
-    /// A tab released over a drop target, such as a folder's row, shrinks into the target's frame while its highlight fades.
+    /// A row released over a drop target, such as a folder's row, shrinks into the target's frame while its highlight fades.
     func settle(shrinkingInto target: CGRect, ownedBy owner: UUID) {
         withAnimation(.easeIn(duration: 0.25)) {
             isSettling = true
@@ -110,28 +125,41 @@ final class SidebarDragState: ObservableObject {
     }
 }
 
-/// Draws the lifted tab row at the pointer.
+/// Draws the lifted tab or folder row at the pointer.
 struct TabDragLayer: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var sidebarDrag: SidebarDragState
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if let id = sidebarDrag.tabID, let tab = session.tabs.first(where: { $0.id == id }) {
-            // Over the page the row needs a backing of its own.
-            TabRowView(session: session, tab: tab)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(sidebarDrag.isLifted ? 1 : 0))
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
-                .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
-                // A tab released over a space's symbol or a folder's row shrinks into it.
-                .scaleEffect(sidebarDrag.isEntering ? 0.2 : 1)
-                .opacity(sidebarDrag.isEntering ? 0 : 1)
-                .environment(\.isDraggingTab, true)
-                .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
-                .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+        switch sidebarDrag.item {
+        case .tab(let id):
+            if let tab = session.tabs.first(where: { $0.id == id }) {
+                lifted(TabRowView(session: session, tab: tab))
+            }
+        case .folder(let id):
+            if let folder = session.folders.first(where: { $0.id == id }) {
+                lifted(TabFolderRowView(session: session, folder: folder))
+            }
+        case .favorite, .space, nil:
+            EmptyView()
         }
+    }
+
+    private func lifted(_ row: some View) -> some View {
+        // Over the page the row needs a backing of its own.
+        row
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(sidebarDrag.isLifted ? 1 : 0))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
+            .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+            // A row released over a space's symbol or a folder's row shrinks into it.
+            .scaleEffect(sidebarDrag.isEntering ? 0.2 : 1)
+            .opacity(sidebarDrag.isEntering ? 0 : 1)
+            .environment(\.isDraggingTab, true)
+            .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
+            .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
