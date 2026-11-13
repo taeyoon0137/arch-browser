@@ -95,7 +95,7 @@ git config core.hooksPath .githooks
 - [`docs/agents.md`](../docs/agents.md): the agents design (not built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](../docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 - [`docs/web-store.md`](../docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
-- [`docs/password-managers.md`](../docs/password-managers.md): the 1Password and iCloud Passwords plugins (not built): finding native apps, the proof gate, installing Arch in `/Applications`, and the user's steps.
+- [`docs/password-managers.md`](../docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps and the proof gate (built), and installing Arch in `/Applications`, the status in Settings, and the user's steps (not built).
 
 <a id="scripts"></a>
 

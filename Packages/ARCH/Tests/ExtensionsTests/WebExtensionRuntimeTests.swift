@@ -76,13 +76,13 @@ struct WebExtensionRuntimeTests {
     @Test func stopsWhatAnEarlierLaunchRunsInAProfileThatStartsWhileNoExtensionIsEnabled() async throws {
         let installed = try await manager.installEverything(from: sampleExtensionFolder, isEnabled: false)
         let profile = RecordingEngine()
-        runtime.profileDidStart(with: profile)
+        runtime.profileDidStart(with: profile, of: .webKit)
         #expect(profile.stopsWhileLoaded == [[]])
         manager.setEnabled(true, for: installed.id)
         #expect(await eventually { engine.loaded[sampleID] != nil })
         // With an extension enabled, the pass that loads it stops the rest once its loads end.
         let later = RecordingEngine()
-        runtime.profileDidStart(with: later)
+        runtime.profileDidStart(with: later, of: .webKit)
         #expect(later.stopsWhileLoaded.isEmpty)
     }
 

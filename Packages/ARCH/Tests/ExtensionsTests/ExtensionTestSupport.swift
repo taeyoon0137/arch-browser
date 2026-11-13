@@ -135,6 +135,10 @@ final class RecordingEngine: EngineExtensions {
     private(set) var performed: [String] = []
     /// The identifiers that the user allowed on a tab's site, in order.
     private(set) var grantedSiteAccess: [String] = []
+    /// The identifiers unloaded, in order, whether or not they were loaded.
+    private(set) var unloads: [String] = []
+    /// Called with each identifier as it unloads, for a test that checks what is true at that moment.
+    var onUnload: ((String) -> Void)?
     /// For each call of `stopUnloadedExtensions()`, the identifiers loaded at that moment.
     private(set) var stopsWhileLoaded: [Set<String>] = []
     /// Whether the actions say that the engine kept the extension from the tab's site.
@@ -162,6 +166,8 @@ final class RecordingEngine: EngineExtensions {
 
     func unload(_ id: String) {
         loaded[id] = nil
+        unloads.append(id)
+        onUnload?(id)
     }
 
     @MainActor

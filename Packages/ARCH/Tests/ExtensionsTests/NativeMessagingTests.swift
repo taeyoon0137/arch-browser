@@ -8,6 +8,8 @@ import Testing
 @Suite struct NativeMessagingTests {
     private let folder = TemporaryFolder()
     private let extensionID = "jpignaibiiemhngfjkcpokkamffknabf"
+    /// The calling extension, without proof, which no link of Arch's gates in these tests.
+    private var caller: NativeMessagingCaller { NativeMessagingCaller(extensionID: extensionID, isProven: false) }
 
     /// A host manifest for `name` that names a shell script with `body`, which accepts the extensions in `origins`.
     private func installApp(_ name: String, script body: String, origins: [String]? = nil) throws -> NativeMessaging {
@@ -25,7 +27,7 @@ import Testing
     /// The app's answer, which arrives on the main thread. It fails the test when none comes within ten seconds, so that an app that never ends fails instead of stopping the run.
     private func reply(to message: String, from app: String, through messaging: NativeMessaging) async throws -> Result<Data, any Error> {
         var result: Result<Data, any Error>?
-        messaging.send(Data(message.utf8), to: app, from: extensionID) { result = $0 }
+        messaging.send(Data(message.utf8), to: app, from: caller) { result = $0 }
         _ = await eventually { result != nil }
         return try #require(result)
     }
@@ -46,10 +48,10 @@ import Testing
 
     @Test func refusesAppsAndExtensionsTheManifestsDoNotAllow() throws {
         let messaging = try installApp("org.example.echo", script: "exec cat", origins: ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"])
-        #expect(throws: NativeMessagingError.notAllowed("org.example.echo")) { try messaging.executable(of: "org.example.echo", for: extensionID) }
-        #expect(throws: NativeMessagingError.invalidName("../escape")) { try messaging.executable(of: "../escape", for: extensionID) }
-        #expect(throws: NativeMessagingError.invalidName("Org.Example")) { try messaging.executable(of: "Org.Example", for: extensionID) }
-        #expect(throws: NativeMessagingError.notFound("org.example.missing")) { try messaging.executable(of: "org.example.missing", for: extensionID) }
+        #expect(throws: NativeMessagingError.notAllowed("org.example.echo")) { try messaging.executable(of: "org.example.echo", for: caller) }
+        #expect(throws: NativeMessagingError.invalidName("../escape")) { try messaging.executable(of: "../escape", for: caller) }
+        #expect(throws: NativeMessagingError.invalidName("Org.Example")) { try messaging.executable(of: "Org.Example", for: caller) }
+        #expect(throws: NativeMessagingError.notFound("org.example.missing")) { try messaging.executable(of: "org.example.missing", for: caller) }
     }
 
     @Test func failsAnAppThatEndsWithoutReplyingOrBreaksTheFormat() async throws {
@@ -69,7 +71,7 @@ import Testing
         #expect(throws: (any Error).self) { try result.get() }
         weak var released: NativeMessagingConnection?
         do {
-            let connection = NativeMessagingConnection(executable: try messaging.executable(of: "org.example.gone", for: extensionID), origin: "")
+            let connection = NativeMessagingConnection(executable: try messaging.executable(of: "org.example.gone", for: caller), origin: "")
             released = connection
             #expect(throws: (any Error).self) { try connection.start() }
         }
@@ -79,7 +81,7 @@ import Testing
     @Test func connectsAPortBothWays() async throws {
         let messaging = try installApp("org.example.echo", script: "exec cat")
         let port = RecordingPort(application: "org.example.echo")
-        try messaging.connect(port, from: extensionID)
+        try messaging.connect(port, from: caller)
         port.onMessage?(Data("1".utf8))
         port.onMessage?(Data(#"["two"]"#.utf8))
         #expect(await eventually { port.received.count == 2 })

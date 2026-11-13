@@ -1,21 +1,28 @@
-// Native messaging: what web extensions send to apps on the Mac. Arch finds an app through its host manifest in `NativeMessagingHosts/` in the app's Application Support folder, in the format Chromium reads, starts the executable that the manifest names for each message or connection with the calling extension's origin as its argument, and exchanges JSON with it over its standard input and output: each message is a 32-bit length in the Mac's byte order followed by that many bytes of UTF-8 JSON.
+// Native messaging: what web extensions send to apps on the Mac. Arch finds an app through its host manifest in `NativeMessagingHosts/` in the app's Application Support folder, in the format Chromium reads, starts the executable that the manifest names for each message or connection with the calling extension's origin as its argument, and exchanges JSON with it over its standard input and output: each message is a 32-bit length in the Mac's byte order followed by that many bytes of UTF-8 JSON. Under one of Arch's links to another browser's host manifest, only a version whose identifier Arch can prove reaches the app (`NativeMessagingHostLinks`).
 import ARCHEngine
 import Foundation
 
-/// The native apps that the extensions of one Persona reach.
+/// The native apps that the extensions of one Persona reach on WebKit, which leaves native messaging to the app; Chromium reads the same folder itself.
 @MainActor
 final class NativeMessaging {
+    /// Arch's links in its folder, which the gate reads.
+    private let links: NativeMessagingHostLinks
     /// `NativeMessagingHosts/` in the app's Application Support folder.
-    private let directory: URL
+    private var directory: URL { links.directory }
 
-    init(directory: URL) {
-        self.directory = directory
+    init(links: NativeMessagingHostLinks) {
+        self.links = links
+    }
+
+    /// Native messaging through the host manifests in `directory`, with no listed folders, so that nothing there is one of Arch's links.
+    convenience init(directory: URL) {
+        self.init(links: NativeMessagingHostLinks(directory: directory, folders: []))
     }
 
     /// Sends one message to the app that `application` names and answers with the app's first message, then ends the app.
-    func send(_ message: Data, to application: String?, from extensionID: String, reply: @escaping (Result<Data, any Error>) -> Void) {
+    func send(_ message: Data, to application: String?, from caller: NativeMessagingCaller, reply: @escaping (Result<Data, any Error>) -> Void) {
         do {
-            let connection = try open(application, from: extensionID)
+            let connection = try open(application, from: caller)
             connection.onMessage = { [weak connection] message in
                 connection?.close()
                 reply(.success(message))
@@ -28,8 +35,8 @@ final class NativeMessaging {
     }
 
     /// Connects the extension's port to the app it names, until either side ends the connection. Throws when the app cannot be reached.
-    func connect(_ port: any EngineNativeMessagingPort, from extensionID: String) throws {
-        let connection = try open(port.application, from: extensionID)
+    func connect(_ port: any EngineNativeMessagingPort, from caller: NativeMessagingCaller) throws {
+        let connection = try open(port.application, from: caller)
         connection.onMessage = { port.send($0) }
         connection.onEnd = { port.disconnect($0) }
         port.onMessage = { [weak connection] in connection?.send($0) }
@@ -37,34 +44,42 @@ final class NativeMessaging {
     }
 
     /// Starts the app that `application` names for the extension.
-    private func open(_ application: String?, from extensionID: String) throws -> NativeMessagingConnection {
-        let connection = NativeMessagingConnection(executable: try executable(of: application, for: extensionID), origin: Self.origin(of: extensionID))
+    private func open(_ application: String?, from caller: NativeMessagingCaller) throws -> NativeMessagingConnection {
+        let connection = NativeMessagingConnection(executable: try executable(of: application, for: caller), origin: Self.origin(of: caller.extensionID))
         try connection.start()
         return connection
     }
 
     /// The origin that Chromium gives the extension and that host manifests list, which the app receives as its argument.
-    private static func origin(of extensionID: String) -> String {
+    nonisolated static func origin(of extensionID: String) -> String {
         "chrome-extension://\(extensionID)/"
     }
 
-    /// The executable of the app that `application` names, whose host manifest lets the extension reach it. Names are dot-separated runs of lowercase letters, digits, and `_`, as Chromium requires, so that a name cannot lead out of the folder.
-    func executable(of application: String?, for extensionID: String) throws -> URL {
-        guard let application, application.split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ part in
+    /// Whether `name` can name a native app: dot-separated runs of lowercase letters, digits, and `_`, as Chromium requires, so that a name cannot lead out of the folder.
+    nonisolated static func isValidName(_ name: String) -> Bool {
+        name.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { part in
             !part.isEmpty && part.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "_") }
-        }) else { throw NativeMessagingError.invalidName(application ?? "") }
+        }
+    }
+
+    /// The executable of the app that `application` names, whose host manifest lets the extension reach it. Under one of Arch's links, the caller needs proof of its identifier (`NativeMessagingHostLinks`, the gate).
+    func executable(of application: String?, for caller: NativeMessagingCaller) throws -> URL {
+        guard let application, Self.isValidName(application) else { throw NativeMessagingError.invalidName(application ?? "") }
+        if let refusal = links.refusal(of: caller, underHostNamed: application) { throw NativeMessagingError.unproven(refusal) }
         let file = directory.appendingPathComponent(application + ".json")
         guard let data = try? Data(contentsOf: file) else { throw NativeMessagingError.notFound(application) }
         guard let manifest = try? JSONDecoder().decode(NativeMessagingHostManifest.self, from: data), manifest.name == application, manifest.type == "stdio",
               manifest.path.hasPrefix("/") else { throw NativeMessagingError.invalidManifest(application) }
-        guard manifest.allowedOrigins.contains(Self.origin(of: extensionID)) else { throw NativeMessagingError.notAllowed(application) }
+        guard manifest.allowedOrigins.contains(Self.origin(of: caller.extensionID)) else { throw NativeMessagingError.notAllowed(application) }
         return URL(fileURLWithPath: manifest.path)
     }
 }
 
 /// A host manifest, as Chromium reads one.
-private struct NativeMessagingHostManifest: Decodable {
+struct NativeMessagingHostManifest: Decodable {
     let name: String
+    /// What the native app is, such as "1Password BrowserSupport", which Settings and the gate's sentence show.
+    let description: String?
     /// The app's executable, an absolute path.
     let path: String
     /// Always `stdio`.
@@ -73,7 +88,7 @@ private struct NativeMessagingHostManifest: Decodable {
     let allowedOrigins: [String]
 
     enum CodingKeys: String, CodingKey {
-        case name, path, type
+        case name, description, path, type
         case allowedOrigins = "allowed_origins"
     }
 }
@@ -83,6 +98,8 @@ enum NativeMessagingError: LocalizedError, Equatable {
     case notFound(String)
     case invalidManifest(String)
     case notAllowed(String)
+    /// The gate's sentence for a version without proof under one of Arch's links.
+    case unproven(String)
     case messageTooLarge
     case noReply
 
@@ -92,6 +109,7 @@ enum NativeMessagingError: LocalizedError, Equatable {
         case let .notFound(name): return "No native app named \(name) is set up for Arch."
         case let .invalidManifest(name): return "The host manifest of the native app \(name) does not read."
         case let .notAllowed(name): return "The native app \(name) does not accept this extension."
+        case let .unproven(sentence): return sentence
         case .messageTooLarge: return "The native app sent a message larger than 1 MB."
         case .noReply: return "The native app ended without replying."
         }

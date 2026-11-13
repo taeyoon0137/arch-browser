@@ -1,4 +1,4 @@
-// Detection and the permission check on sources defined over temporary folders, so that no browser's own data is read.
+// Detection and the permission check on sources defined over temporary folders, so that no browser's own data is read, and the host manifest folders that the native app links read, checked by their paths alone.
 import Foundation
 import Testing
 @testable import Import
@@ -33,5 +33,14 @@ import Testing
         let userData = localState.deletingLastPathComponent()
         #expect(BrowserSource.detected(among: [Self.source(userData: userData)]).map(\.access) == [.notPermitted])
         #expect(throws: ImportError.notPermitted(localState)) { try ChromiumProfile.profiles(in: userData) }
+    }
+
+    @Test func nativeMessagingHostFoldersListSystemFoldersBeforeUserFolders() {
+        let folders = BrowserSource.nativeMessagingHostFolders
+        let userSupport = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support").standardizedFileURL.path + "/"
+        #expect(folders.count == 8 && Set(folders).count == 8)
+        #expect(folders.allSatisfy { $0.lastPathComponent == "NativeMessagingHosts" && $0.isFileURL })
+        #expect(folders.prefix(3).allSatisfy { $0.path.hasPrefix("/Library/") })
+        #expect(folders.dropFirst(3).allSatisfy { $0.standardizedFileURL.path.hasPrefix(userSupport) })
     }
 }

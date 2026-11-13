@@ -72,6 +72,8 @@ public final class BrowserSession: ObservableObject {
     public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
     /// Downloads extensions from the Web Store and stages them in any Persona's plugins, and keeps each Persona's update check for the run (`docs/web-store.md`).
     public let webStore: WebStoreInstaller
+    /// `NativeMessagingHosts/` in `userDataDirectory`, which every Persona's web extensions reach native apps through, with Arch's links to the host manifests that native app vendors install for other browsers, and the proof gate on them (`docs/password-managers.md`).
+    public let nativeMessagingHosts: NativeMessagingHostLinks
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
@@ -102,12 +104,16 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships. `cefVersion` is the CEF version of Arch's Chromium engine, whose Chromium version `webStore` asks the Web Store with, or nil without that engine.
-    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?) throws {
+    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships. `cefVersion` is the CEF version of Arch's Chromium engine, whose Chromium version `webStore` asks the Web Store with, or nil without that engine. `nativeMessagingHostFolders` are the folders where native app vendors install host manifests for other browsers, which `nativeMessagingHosts` reads without changing them.
+    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = []) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
         webStore = WebStoreInstaller(client: WebStoreClient(productVersion: cefVersion.flatMap(WebStoreClient.chromiumVersion(inCEFVersion:)) ?? ""))
+        // The app makes the session on the main thread.
+        nativeMessagingHosts = MainActor.assumeIsolated {
+            NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders)
+        }
         store = SessionStore(directory: userDataDirectory)
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
@@ -140,6 +146,9 @@ public final class BrowserSession: ObservableObject {
         closedTabs = snapshot.closedTabs ?? []
         sheets.windows = { [weak self] in self?.windows ?? [] }
         start(primary)
+        MainActor.assumeIsolated {
+            nativeMessagingHosts.willChangeLinks = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
+        }
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
         restoreTabs(snapshot)
@@ -438,7 +447,7 @@ public final class BrowserSession: ObservableObject {
         let browser = application.createBrowser(context: context)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
-        if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions) } }
+        if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions, of: kind) } }
         context.downloads.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context)
@@ -1093,23 +1102,30 @@ public final class BrowserSession: ObservableObject {
     /// Hosts each Persona's web extensions in the windows and tabs.
     private let webExtensionHost = SessionWebExtensionHost()
 
-    /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `NativeMessagingHosts/` there name.
+    /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `nativeMessagingHosts` name, under the proof gate that staging and the review also follow.
     @MainActor public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
         if let plugins = engines.plugins { return plugins }
-        let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost,
-                                                nativeMessagingHosts: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
+        let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost, hostLinks: nativeMessagingHosts)
         // The host knows the session before the manager asks the runtime which engines run extensions.
         webExtensionHost.follow(webExtensions, of: personaID, in: self)
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
+        plugins.nativeAppGate = nativeMessagingHosts
         engines.plugins = plugins
         engines.webExtensions = webExtensions
         // Profiles that started before the runtime, as the default Persona's in the primary engine at launch.
         for runtime in engines.runtimes.values {
-            if let extensions = runtime.context.extensions { webExtensions.profileDidStart(with: extensions) }
+            if let extensions = runtime.context.extensions { webExtensions.profileDidStart(with: extensions, of: runtime.kind) }
         }
         pluginPages.follow(plugins, of: personaID)
         return plugins
+    }
+
+    /// Has every Persona's web extension runtime take out of Chromium the versions that the proof gate refuses under the links a pass is about to make (`NativeMessagingHostLinks.willChangeLinks`). A Persona whose runtime the session has not made yet does so when it makes it, as its profiles' starts reach the runtime.
+    @MainActor private func takeGatedVersionsOutOfChromium() async {
+        for runtime in personaEngines.values.compactMap(\.webExtensions) {
+            await runtime.takeGatedVersionsOutOfChromium()
+        }
     }
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
