@@ -32,6 +32,8 @@ public enum AIPolicyReason: Sendable {
     case commandLineToolWithPageData
     /// Claude Code or Codex showed a tool, server, skill, or item that Arch did not ask for, so Arch ended it. The text says what, in a sentence.
     case agentUsedOwnTools(String)
+    /// A message that starts with `/` in a session where Claude Code loads Arch's skills, which Claude Code would run as one of its own commands.
+    case agentMessageIsCommand
 }
 
 public enum AIBudget: Sendable {
@@ -85,6 +87,8 @@ extension AIError: LocalizedError {
             return "This command-line tool may run its own tools, so it gets no page data."
         case .blockedByPolicy(.agentUsedOwnTools(let detail)):
             return detail
+        case .blockedByPolicy(.agentMessageIsCommand):
+            return "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it."
         case .budgetReached(.automaticRequestsPerDay):
             return "This feature reached its daily limit of automatic requests."
         case .budgetReached(.monthlySpending):

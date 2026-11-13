@@ -284,14 +284,26 @@ struct AICommandLineEditor: View {
         }
     }
 
-    /// The tool's name when the login shell finds this executable by it, or else its quoted path, then its sign-in arguments.
+    /// The tool's name when the login shell finds this executable by it, or else its quoted path, then its sign-in arguments, after the preset's variables, so the tool signs in where its status is read, as with `CODEX_HOME` or `CLAUDE_CONFIG_DIR`.
     private func signIn(_ agent: AIAgentKind) async {
         guard let executable = draft.executableURL, let type = PreferencesWindowController.openTerminalTyping else { return }
         let found = await AICommandLineConfiguration.locateExecutable(named: agent.executableName)
-        let program = found?.resolvingSymlinksInPath() == executable.resolvingSymlinksInPath()
-            ? agent.executableName
-            : "'" + executable.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        type(([program] + agent.signInArguments).joined(separator: " "))
+        let program = found?.resolvingSymlinksInPath() == executable.resolvingSymlinksInPath() ? agent.executableName : Self.shellQuoted(executable.path)
+        type(Self.signInCommand(program: program, arguments: agent.signInArguments, environment: AINameValue.dictionary(draft.environment)))
+    }
+
+    /// `NAME='value' … <program> <arguments>`, with each variable whose name the shell accepts, in name order. The variables are not secret (Environment's footnote).
+    nonisolated static func signInCommand(program: String, arguments: [String], environment: [String: String]) -> String {
+        let assignments = environment.keys.sorted()
+            .filter { name in
+                name.first.map { $0 == "_" || $0.isASCII && $0.isLetter } == true && name.allSatisfy { $0 == "_" || $0.isASCII && ($0.isLetter || $0.isNumber) }
+            }
+            .map { "\($0)=\(shellQuoted(environment[$0] ?? ""))" }
+        return (assignments + [program] + arguments).joined(separator: " ")
+    }
+
+    nonisolated static func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     // MARK: Arguments and output

@@ -26,7 +26,7 @@ public struct AIAgentToolServer: Sendable, Equatable {
     }
 }
 
-/// Arch's skills for one session, in a folder that only that session reads (agent open decision 3). The folder is a Claude Code plugin: `.claude-plugin/plugin.json` names `plugin`, and `skills/<name>/SKILL.md` holds each of `names`. Claude Code loads it with `--plugin-dir` and its skill tool. Codex cannot read a skill file in a session, whose shell and file tools are off, so it ignores this and keeps the `guide` topics.
+/// Arch's skills for one session, in a folder that only that session reads (agent decision 16). The folder is a Claude Code plugin: `.claude-plugin/plugin.json` names `plugin`, and `skills/<name>/SKILL.md` holds each of `names`. Claude Code loads it with `--plugin-dir` and its skill tool, and a message that starts with `/` is refused, since Claude Code would run it as one of its commands. Codex cannot read a skill file in a session, whose shell and file tools are off, so it ignores this and keeps the `guide` topics.
 public struct AIAgentSkills: Sendable, Equatable {
     public var folder: URL
     public var plugin: String
@@ -41,7 +41,7 @@ public struct AIAgentSkills: Sendable, Equatable {
 
 public struct AIAgentSessionRequest: Sendable {
     public var feature: AIFeatureID
-    /// The session's model; nil uses the feature's route, whose later models serve only when the earlier fail before `ready`.
+    /// The session's model; nil uses the feature's route, whose later models serve only when the earlier fail before `ready`, the first model output.
     public var model: AIModelRef?
     /// The static harness, which holds no session facts (agent decision 12).
     public var instructions: String
@@ -75,11 +75,11 @@ public enum AIAgentTurnEnd: Sendable, Equatable {
 }
 
 public enum AIAgentEvent: Sendable {
-    /// The first start event that passed the start check, with the model that now holds the conversation.
+    /// The model's first output in the session (Claude Code's first `message_start` after an `init` that passed the start check, or Codex's first item other than an error), with the model that now holds the conversation. A model that fails before it gives way to the route's next.
     case ready(AIModelRef)
     case text(String)
     case thinking(String)
-    /// A turn's tokens, also recorded under the session's feature and model.
+    /// A turn's tokens, also recorded under the session's feature and model. For Codex, what the turn added to the thread's running total.
     case usage(AIUsage)
     case notice(String)
     case turnFinished(AIAgentTurnEnd)
@@ -91,6 +91,8 @@ public enum AIAgentEvent: Sendable {
 enum AIAgentStreamEvent {
     /// Claude Code's `init` that passed the start check, or Codex's `thread.started`.
     case started(threadID: String?)
+    /// The model's output: Claude Code's `message_start`, or a Codex item other than an error.
+    case output
     case text(String)
     case thinking(String)
     case notice(String)
@@ -101,7 +103,7 @@ enum AIAgentStreamEvent {
 
 @MainActor
 public final class AIAgentSession {
-    /// Ends when the session ends: without an error after `end(keepingThread:)`, and with one when no model could start the session or a start check or the stream watcher refused the tool.
+    /// Ends when the session ends: without an error after `end(keepingThread:)`, and with one when no model produced output in the first turn or a start check or the stream watcher refused the tool.
     public nonisolated let events: AsyncThrowingStream<AIAgentEvent, any Error>
     public let id: UUID
     public let folder: URL
@@ -145,6 +147,10 @@ public final class AIAgentSession {
     private var claude: ClaudeCodeStreamDecoder?
     private var codex: CodexStreamDecoder?
     private var turn: Turn?
+    /// The task that runs the current message, which Stop and `end` cancel while it waits for a slot or the probes.
+    private var turnTask: Task<Void, Never>?
+    /// Codex's running total for the thread from its last `turn.completed`.
+    private var threadUsage: AIUsage?
     private var activeToolCalls = 0
     private var idleTimer: Task<Void, Never>?
     private var stopTimer: Task<Void, Never>?
@@ -180,9 +186,16 @@ public final class AIAgentSession {
 
     // MARK: Messages
 
-    /// Sends the user's message. The first carries the user's words and the preamble with tab handles (agent decision 12). A message sent while a turn runs waits for it.
-    public func send(_ message: String) {
+    /// Sends the user's message. The first carries the user's words and the preamble with tab handles (agent decision 12). A message sent while a turn runs waits for it. Throws `blockedByPolicy(.agentMessageIsCommand)` for a message that starts with `/`, after any white space, while Claude Code can hold a session with skills, since Claude Code runs it as one of its own commands without the model.
+    public func send(_ message: String) throws {
         guard !hasEnded else { return }
+        if request.skills != nil, message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
+           candidates.contains(where: { candidate in
+               guard case .commandLine(let tool) = candidate.provider.kind else { return false }
+               return tool.agent == .claudeCode
+           }) {
+            throw AIError.blockedByPolicy(.agentMessageIsCommand)
+        }
         queuedMessages.append(message)
         startNextTurn()
     }
@@ -192,8 +205,11 @@ public final class AIAgentSession {
         queuedMessages.removeAll()
         guard let turn, turn.outcome == nil, turn.pendingEnd == nil, !turn.isStopping else { return }
         turn.isStopping = true
-        // Before the message reached the tool, the turn ends once the probes return.
-        guard let process, turn.didStartProcess else { return }
+        // Before the message reached the tool, the turn ends at once, also while it waits for a slot of the provider's limiter.
+        guard let process, turn.didStartProcess else {
+            turnTask?.cancel()
+            return
+        }
         switch processKind {
         case .claudeCode:
             stopCount += 1
@@ -212,6 +228,7 @@ public final class AIAgentSession {
     /// Ends the session: its processes, its folder, and, unless `keepingThread`, Codex's copy of the thread with `codex --no-daemon delete --force`.
     public func end(keepingThread: Bool = false) async {
         queuedMessages.removeAll()
+        if let turn, !turn.didStartProcess { turnTask?.cancel() }
         endProcess()
         if turn?.outcome == nil { complete(.finished(.stopped)) }
         if !hasEnded {
@@ -220,11 +237,17 @@ public final class AIAgentSession {
         }
         guard !isClosed else { return }
         isClosed = true
-        if let threadID, !keepingThread, let holder = candidates.first, case .commandLine(let tool) = holder.provider.kind, tool.agent == .codex {
-            let environment = await tool.runEnvironment()
-            _ = try? await AIAgentCommand.run(tool.executable, CodexAgent.deleteArguments(thread: threadID), environment: environment)
-        }
+        if !keepingThread, let holder = candidates.first { await deleteThread(of: holder) }
         try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// Runs `codex --no-daemon delete --force` on the session's thread when `candidate` is the Codex model that holds it.
+    private func deleteThread(of candidate: AIRouteModel) async {
+        guard let threadID, case .commandLine(let tool) = candidate.provider.kind, tool.agent == .codex else { return }
+        self.threadID = nil
+        threadUsage = nil
+        let environment = await tool.runEnvironment()
+        _ = try? await AIAgentCommand.run(tool.executable, CodexAgent.deleteArguments(thread: threadID), environment: environment)
     }
 
     // MARK: The tool host
@@ -276,10 +299,10 @@ public final class AIAgentSession {
         guard !isTurnRunning, !hasEnded, !queuedMessages.isEmpty else { return }
         let message = queuedMessages.removeFirst()
         isTurnRunning = true
-        Task { await run(message) }
+        turnTask = Task { await run(message) }
     }
 
-    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one starts (start-only fallbacks). A model that fails before `ready` gives way to the next; with none left, the session ends with the last error.
+    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error.
     private func run(_ message: String) async {
         transcript.append((.user, message))
         var outcome: TurnOutcome = .failed(.notConfigured(.noUsableModel))
@@ -289,6 +312,7 @@ public final class AIAgentSession {
             guard model == nil, !hasEnded, candidates.count > 1 else { break }
             if case .finished = outcome { break }
             endProcess()
+            await deleteThread(of: candidate)
             candidates.removeFirst()
         }
         switch outcome {
@@ -311,30 +335,40 @@ public final class AIAgentSession {
         self.turn = turn
         let limiter = service.limiter(for: candidate.provider.id)
         await limiter.update(candidate.provider.limits)
+        // Before `ready`, a provider in a cool-down longer than 10 seconds gives way to the next model at once, as for other requests.
+        if model == nil, candidates.count > 1, let until = await limiter.coolDownUntil, until.timeIntervalSinceNow > 10 {
+            self.turn = nil
+            return (.failed(.rateLimited(candidate.provider.id, until: until)), "")
+        }
         do {
             try await limiter.acquire(isUser: true) { _ in }
         } catch {
             self.turn = nil
-            return (.failed(AIError(error)), "")
+            // Stop and `end` cancel the wait for a slot.
+            return (turn.isStopping || hasEnded ? .finished(.stopped) : .failed(AIError(error)), "")
         }
-        let outcome = await perform(message, on: candidate, tool: tool, kind: kind, turn: turn)
+        var outcome = await perform(message, on: candidate, tool: tool, kind: kind, turn: turn)
+        if case .failed = outcome, !turn.didStartProcess, turn.isStopping || hasEnded { outcome = .finished(.stopped) }
         idleTimer?.cancel()
         stopTimer?.cancel()
         self.turn = nil
-        let isError: Bool
+        let release: AIRateLimiter.Outcome
         switch outcome {
-        case .finished: isError = false
-        case .failed, .refused: isError = true
+        case .finished: release = .answered
+        case .failed(.rateLimited(_, let until)): release = .rateLimited(retryAfter: until)
+        case .failed, .refused: release = .other
         }
         // Only a turn that reached the tool counts, as for other requests.
         if turn.didStartProcess {
+            let isError = if case .finished = outcome { false } else { true }
             service.usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: turn.usage, isError: isError)
         }
-        await limiter.release(after: isError ? .other : .answered)
+        await limiter.release(after: release)
         return (outcome, turn.reply)
     }
 
     private func perform(_ message: String, on candidate: AIRouteModel, tool: AICommandLineConfiguration, kind: AIAgentKind, turn: Turn) async -> TurnOutcome {
+        if turn.isStopping || hasEnded { return .finished(.stopped) }
         let provider = candidate.provider.id
         let environment = await tool.runEnvironment()
         let probe: AIAgentProbeResult
@@ -522,7 +556,11 @@ public final class AIAgentSession {
         guard let turn else { return }
         switch event {
         case .started(let thread):
-            if let thread { threadID = thread }
+            guard let thread else { return }
+            if thread != threadID { threadUsage = nil }
+            threadID = thread
+        case .output:
+            // The model replied, so the conversation stays on it from here on.
             guard model == nil else { return }
             model = turn.candidate.ref
             candidates = [turn.candidate]
@@ -534,7 +572,13 @@ public final class AIAgentSession {
             continuation.yield(.thinking(text))
         case .notice(let text):
             continuation.yield(.notice(text))
-        case .usage(let usage):
+        case .usage(var usage):
+            if processKind == .codex {
+                // `turn.completed.usage` is the thread's running total, also on a resumed turn, so each turn counts what it added.
+                let total = usage
+                if let earlier = threadUsage { usage = Self.usage(total, since: earlier) }
+                threadUsage = total
+            }
             turn.usage = usage
             continuation.yield(.usage(usage))
         case .turnEnded(let end):
@@ -569,6 +613,12 @@ public final class AIAgentSession {
         case .signaled(let signal): detail = errorLine ?? "\(name) stopped on signal \(signal)."
         }
         complete(.failed(.providerUnavailable(turn.candidate.provider.id, detail: detail)))
+    }
+
+    /// What a running total added since an earlier one, by field and never below zero.
+    private static func usage(_ total: AIUsage, since earlier: AIUsage) -> AIUsage {
+        AIUsage(inputTokens: max(total.inputTokens - earlier.inputTokens, 0), outputTokens: max(total.outputTokens - earlier.outputTokens, 0),
+                cachedInputTokens: max(total.cachedInputTokens - earlier.cachedInputTokens, 0))
     }
 
     private func armIdleTimer(_ timeout: Duration) {

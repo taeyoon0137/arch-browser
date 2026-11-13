@@ -9,6 +9,7 @@ private let agentFixtures = Bundle.module.resourceURL!.appendingPathComponent("F
         ("claude-session.stdout.jsonl", "result"),
         ("claude-probe.stdout.jsonl", "result"),
         ("claude-ordinary.stdout.jsonl", "result"),
+        ("claude-skills.stdout.jsonl", "result"),
         ("codex-session-first.stdout.jsonl", "turn.completed"),
         ("codex-session-resume.stdout.jsonl", "turn.completed"),
         ("codex-approval-required.stdout.jsonl", "turn.completed"),
@@ -27,7 +28,7 @@ private let agentFixtures = Bundle.module.resourceURL!.appendingPathComponent("F
 
     @Test func fixturesCarryNoPersonalDetails() throws {
         let files = try FileManager.default.contentsOfDirectory(atPath: agentFixtures.path)
-        #expect(files.count == 15)
+        #expect(files.count == 17)
         let email = try Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
         let uuid = try Regex("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
         // The vendors' message, request, and tool call identifiers, which the recording replaced with `msg_fixture01` and so on.

@@ -5,16 +5,19 @@ enum ClaudeCodeAgent {
     /// The listed flags Arch passes, which `claude --help` must list; `--max-turns` is not in `--help`, so a version without it fails before reading a message.
     static let requiredFlags = ["--print", "--verbose", "--input-format", "--output-format", "--include-partial-messages", "--no-session-persistence",
                                 "--session-id", "--restricted", "--tools", "--strict-mcp-config", "--mcp-config", "--allowedTools", "--permission-mode",
-                                "--permission-prompts", "--disable-slash-commands", "--append-system-prompt", "--model", "--effort", "--plugin-dir"]
+                                "--permission-prompts", "--disable-slash-commands", "--append-system-prompt", "--model", "--effort", "--plugin-dir",
+                                "--settings"]
     /// The levels `--effort` takes.
     static let effortLevels = ["low", "medium", "high", "xhigh", "max"]
     /// The MCP server name, which makes the tools `mcp__arch__<name>`.
     static let serverName = "arch"
     static let maxTurns = 150
+    /// With a session skill folder: turns off `plugin-authoring`, the skill of a reviewed built-in plugin that the model could call and that writes files of its own. A `Skill(<name>)` rule in `--allowedTools` does not narrow the skill tool: 2.1.323 ran a skill that such a rule left out.
+    static let skillSettings = #"{"skillOverrides":{"plugin-authoring":"off"}}"#
 
     // MARK: Arguments
 
-    /// One long-lived session process (agent decision 11). With `skills`, the skill tool and the session's skill folder replace `--disable-slash-commands` (agent open decision 3).
+    /// One long-lived session process (agent decision 11). With `skills`, the skill tool, the session's skill folder, and `skillSettings` replace `--disable-slash-commands` (agent decision 16).
     static func sessionArguments(sessionID: UUID, configuration: URL, instructions: String, model: String, effort: String?, skills: AIAgentSkills?) -> [String] {
         var arguments = ["-p", "--verbose",
                          "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages",
@@ -24,7 +27,7 @@ enum ClaudeCodeAgent {
                          "--allowedTools", skills == nil ? "mcp__\(serverName)__*" : "mcp__\(serverName)__*,Skill",
                          "--permission-mode", "dontAsk", "--permission-prompts", "none"]
         if let skills {
-            arguments += ["--plugin-dir", skills.folder.path]
+            arguments += ["--plugin-dir", skills.folder.path, "--settings", skillSettings]
         } else {
             arguments.append("--disable-slash-commands")
         }
@@ -52,7 +55,7 @@ enum ClaudeCodeAgent {
         base.merging(quietEnvironment) { _, fixed in fixed }
     }
 
-    /// The MCP timeouts bound the server's start and sit above the approval wait. With skills, the bundled and policy skills stay out, so only the session's skills and the reviewed ones remain.
+    /// The MCP timeouts bound the server's start and sit above the approval wait. With skills, the bundled and policy skills, `doctor`, the extra usage commands, and fast mode stay out, so only the session's skills and the reviewed built-in commands remain.
     static func sessionEnvironment(_ base: [String: String], skills: AIAgentSkills?) -> [String: String] {
         var environment = ordinaryEnvironment(base)
         environment["MCP_TIMEOUT"] = "20000"
@@ -60,6 +63,9 @@ enum ClaudeCodeAgent {
         if skills != nil {
             environment["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
             environment["CLAUDE_CODE_DISABLE_POLICY_SKILLS"] = "1"
+            environment["DISABLE_DOCTOR_COMMAND"] = "1"
+            environment["DISABLE_EXTRA_USAGE_COMMAND"] = "1"
+            environment["CLAUDE_CODE_DISABLE_FAST_MODE"] = "1"
         }
         return environment
     }
@@ -109,17 +115,15 @@ enum ClaudeCodeAgent {
 
 // MARK: - Start check
 
-/// What every `init` event must show (`docs/agents.md`, Claude Code ▸ Start check). The reviewed lists hold the built-in plugins, agent types, skills, and commands of 2.1.323 under Arch's arguments and environment; a name joins only after review, so a version that adds one is refused until the presets are updated.
+/// What every `init` event must show (`docs/agents.md`, Claude Code ▸ Start check). The reviewed lists hold the built-in plugins, agent types, and commands of 2.1.323 under Arch's arguments and environment; a name joins only after review, so a version that adds one is refused until the presets are updated. With a session skill folder, `skills` may list only the folder's skills.
 struct ClaudeCodeStartCheck {
     static let reviewedPlugins: Set<String> = ["cc-plugin-agents-md", "cc-plugin-privacy", "cc-plugin-plugin-authoring"]
     static let reviewedAgentTypes: Set<String> = ["claude", "Explore", "general-purpose", "Plan", "statusline-setup"]
-    /// With a session skill folder and the bundled and policy skills off: the skills a built-in command and a reviewed plugin still offer.
-    static let reviewedSkills: Set<String> = ["doctor", "plugin-authoring"]
-    /// With a session skill folder: the built-in commands that `init` still lists, which a message would have to start with `/` to run and which the model cannot call.
+    /// With a session skill folder and its environment and settings: the built-in commands that `init` still lists (`claude-skills` in the fixtures). A message that starts with `/` runs one, which `AIAgentSession.send(_:)` refuses; the model cannot call them.
     static let reviewedCommands: Set<String> = ["agents", "auto-mode-setup", "autocompact", "clear", "color", "compact", "config", "output-style", "context",
                                                 "effort", "fast", "focus", "heapdump", "init", "mcp", "model", "__remote-workflow", "workflow-launch-exec",
-                                                "reload-plugins", "reload-skills", "rename", "security-review", "usage-credits", "extra-usage", "usage",
-                                                "insights", "recap", "goal", "list-agents", "team-onboarding"]
+                                                "reload-plugins", "reload-skills", "rename", "security-review", "usage", "insights", "recap", "goal",
+                                                "list-agents", "team-onboarding"]
 
     /// nil for an ordinary request, which may list no tool and no server.
     var session: Session?
@@ -163,7 +167,7 @@ struct ClaudeCodeStartCheck {
 
         // Skills, commands, plugins, and agent types.
         let skills = session?.skills
-        let allowedSkills = skills.map { skills in Set(skills.names.map { "\(skills.plugin):\($0)" }).union(Self.reviewedSkills) } ?? []
+        let allowedSkills = skills.map { skills in Set(skills.names.map { "\(skills.plugin):\($0)" }) } ?? []
         let listedSkills = event["skills"] as? [String] ?? []
         extra += listedSkills.filter { !allowedSkills.contains($0) }.map { "the skill \($0)" }
         let allowedCommands = skills == nil ? Set<String>() : Set(listedSkills).union(Self.reviewedCommands)
@@ -205,13 +209,16 @@ struct ClaudeCodeStartCheck {
 
 // MARK: - Stream
 
-/// Turns Claude Code's stream-json lines into the runner's events. Text comes only from `stream_event` deltas; `user`, `assistant`, `control_response`, and unknown line types are skipped. Every `init` goes through the start check, and one that fails throws `blockedByPolicy(.agentUsedOwnTools)`.
+/// Turns Claude Code's stream-json lines into the runner's events. Text comes only from `stream_event` deltas; `user`, `assistant`, `control_response`, and unknown line types are skipped. Every `init` goes through the start check, and one that fails throws `blockedByPolicy(.agentUsedOwnTools)`. Each `message_start` is the model's output, which the runner's `ready` waits for.
 struct ClaudeCodeStreamDecoder {
     var check: ClaudeCodeStartCheck
     let provider: AIProviderID
     private var hasPassedInit = false
     /// Each model request's last reported usage in the current turn, for a turn that an interrupt ended.
     private var requestUsages: [AIUsage] = []
+    /// Whether a `rate_limit_event` since the last `result` reported `rejected`, and the reset time it gave.
+    private var isLimitRejected = false
+    private var limitResetsAt: Date?
 
     init(check: ClaudeCodeStartCheck, provider: AIProviderID) {
         self.check = check
@@ -231,7 +238,12 @@ struct ClaudeCodeStreamDecoder {
         case "stream_event":
             return streamEvent(object["event"] as? [String: Any] ?? [:])
         case "rate_limit_event":
-            return Self.rateLimitNotice(object["rate_limit_info"] as? [String: Any] ?? [:]).map { [.notice($0)] } ?? []
+            let info = object["rate_limit_info"] as? [String: Any] ?? [:]
+            if info["status"] as? String == "rejected" {
+                isLimitRejected = true
+                limitResetsAt = (info["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            }
+            return Self.rateLimitNotice(info).map { [.notice($0)] } ?? []
         case "result":
             return result(object)
         default:
@@ -243,6 +255,7 @@ struct ClaudeCodeStreamDecoder {
         switch event["type"] as? String {
         case "message_start":
             if let usage = (event["message"] as? [String: Any])?["usage"] as? [String: Any] { requestUsages.append(Self.usage(usage)) }
+            return [.output]
         case "message_delta":
             if let usage = event["usage"] as? [String: Any], !requestUsages.isEmpty {
                 requestUsages[requestUsages.count - 1] = Self.usage(usage, over: requestUsages[requestUsages.count - 1])
@@ -265,7 +278,11 @@ struct ClaudeCodeStreamDecoder {
 
     /// The turn's end. After an interrupt, `result.usage` leaves out the interrupted request, so the turn's usage is the sum of each request's last stream usage instead.
     private mutating func result(_ object: [String: Any]) -> [AIAgentStreamEvent] {
-        defer { requestUsages = [] }
+        defer {
+            requestUsages = []
+            isLimitRejected = false
+            limitResetsAt = nil
+        }
         let subtype = object["subtype"] as? String
         let reason = object["terminal_reason"] as? String
         let usage: AIUsage? = reason == "aborted_streaming"
@@ -276,11 +293,21 @@ struct ClaudeCodeStreamDecoder {
             events.append(.turnEnded(.turnLimit))
         } else if object["is_error"] as? Bool == true || subtype != "success" {
             let detail = (object["result"] as? String) ?? (object["errors"] as? [String])?.joined(separator: " ") ?? "Claude Code ended the turn with \(subtype ?? "an error")."
-            events.append(.turnFailed(detail.contains("/login") ? .authentication(provider) : .providerUnavailable(provider, detail: detail)))
+            events.append(.turnFailed(error(of: object, detail: detail)))
         } else {
             events.append(.turnEnded(reason == "aborted_streaming" ? .stopped : .completed))
         }
         return events
+    }
+
+    /// A usage limit (HTTP 429, `api_error` `usage_limit_reached`, or a `rate_limit_event` that reported `rejected`) as `rateLimited` until the reset time the tool gave, and a sign-in the tool asks for again as `authentication`.
+    private func error(of object: [String: Any], detail: String) -> AIError {
+        let status = object["api_error_status"] as? Int
+        if status == 429 || object["api_error"] as? String == "usage_limit_reached" || isLimitRejected {
+            return .rateLimited(provider, until: limitResetsAt)
+        }
+        if status == 401 || detail.contains("/login") { return .authentication(provider) }
+        return .providerUnavailable(provider, detail: detail)
     }
 
     /// As the `messages` format counts: tokens written to the cache count as input, tokens read from it as cached input.

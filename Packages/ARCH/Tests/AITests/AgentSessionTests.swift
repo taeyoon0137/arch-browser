@@ -8,6 +8,8 @@ private let agentFixtures = Bundle.module.resourceURL!.appendingPathComponent("F
 private let harness = "You are a browser agent in Arch.\nUse only Arch's tools; say \"done\" when finished."
 private let ticketServer = AIAgentToolServer(executable: URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-mcp"), arguments: ["--session"],
                                              environment: ["ARCH_AGENT_TICKET": "ticket-1"], tools: ["click", "list_tabs", "session_info"])
+/// The skill folder of the recorded `claude-skills` run.
+private let recordedSkills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/var/folders/xx/fixture/T/arch-skills"), plugin: "arch", names: ["arch-browser"])
 private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
 
 // MARK: - Arguments and environment
@@ -18,7 +20,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: cli, model: "haiku", environment: ["ANTHROPIC_API_KEY": "sk-never", "CLAUDE_CONFIG_DIR": "/custom"])
         let session = try fixture.start(effort: "low")
         let log = AgentEventLog(session)
-        session.send("Call the session_info tool, then reply with only the code word it returned.")
+        try session.send("Call the session_info tool, then reply with only the code word it returned.")
         try await log.wait { $0.contains("finished:completed") }
         await session.end()
 
@@ -56,7 +58,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let log = AgentEventLog(session)
         let folderMode = try FileManager.default.attributesOfItem(atPath: fixture.folder.path)[.posixPermissions] as? Int
         #expect(folderMode == 0o700)
-        session.send("Hello")
+        try session.send("Hello")
         try await log.wait { $0.contains("finished:completed") }
         let configuration = fixture.folder.appendingPathComponent("mcp.json")
         let mode = try FileManager.default.attributesOfItem(atPath: configuration.path)[.posixPermissions] as? Int
@@ -79,6 +81,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(arguments[arguments.firstIndex(of: "--plugin-dir")! + 1] == "/private/tmp/arch-skills")
         #expect(arguments[arguments.firstIndex(of: "--tools")! + 1] == "Skill")
         #expect(arguments[arguments.firstIndex(of: "--allowedTools")! + 1] == "mcp__arch__*,Skill")
+        #expect(arguments[arguments.firstIndex(of: "--settings")! + 1] == #"{"skillOverrides":{"plugin-authoring":"off"}}"#)
         #expect(!arguments.contains("--disable-slash-commands"))
         #expect(!arguments.contains("--model"))
         // An effort the tool does not take is left out.
@@ -86,6 +89,11 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let environment = ClaudeCodeAgent.sessionEnvironment(["HOME": "/h"], skills: skills)
         #expect(environment["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] == "1")
         #expect(environment["CLAUDE_CODE_DISABLE_POLICY_SKILLS"] == "1")
+        #expect(environment["DISABLE_DOCTOR_COMMAND"] == "1")
+        #expect(environment["DISABLE_EXTRA_USAGE_COMMAND"] == "1")
+        #expect(environment["CLAUDE_CODE_DISABLE_FAST_MODE"] == "1")
+        let plain = ClaudeCodeAgent.sessionEnvironment(["HOME": "/h"], skills: nil)
+        #expect(plain["DISABLE_DOCTOR_COMMAND"] == nil && plain["CLAUDE_CODE_DISABLE_FAST_MODE"] == nil)
     }
 
     @Test func codexFirstAndResumedTurnArgumentsAndEnvironment() async throws {
@@ -96,9 +104,9 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let folder = String(cString: resolved)
         free(resolved)
         let log = AgentEventLog(session)
-        session.send("First")
+        try session.send("First")
         try await log.wait { $0.contains("finished:completed") }
-        session.send("Second")
+        try session.send("Second")
         try await log.wait { $0.filter { $0 == "finished:completed" }.count == 2 }
         await session.end(keepingThread: true)
 
@@ -229,24 +237,21 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(session([Self.tools + ["type"]]).failure(of: event, isFirst: true) == "Arch's tools did not connect.")
     }
 
-    @Test func sessionSkillsPassOnlyWithTheirFolderAndTheReviewedOnes() throws {
-        let skills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/tmp/arch-skills"), plugin: "arch", names: ["arch-browser"])
-        var event = try recordedInit()
-        event["tools"] = ["Skill"] + Self.tools.map { "mcp__arch__\($0)" }
-        event["skills"] = ["arch:arch-browser", "doctor", "plugin-authoring"]
-        event["slash_commands"] = ["arch:arch-browser", "doctor", "plugin-authoring", "clear", "compact", "model"]
-        var plugins = event["plugins"] as? [[String: Any]] ?? []
-        plugins.insert(["name": "arch", "path": "/private/tmp/arch-skills", "source": "arch@inline", "version": "1.0.0"], at: 0)
-        event["plugins"] = plugins
-        #expect(session(skills: skills).failure(of: event, isFirst: true) == nil)
-        #expect(session().failure(of: event, isFirst: true)?.contains("Skill") == true)
-        var withUserSkill = event
-        withUserSkill["skills"] = ["arch:arch-browser", "deep-research"]
-        #expect(session(skills: skills).failure(of: withUserSkill, isFirst: true)?.contains("the skill deep-research") == true)
-        var otherFolder = event
-        plugins[0]["path"] = "/private/tmp/other"
-        otherFolder["plugins"] = plugins
-        #expect(session(skills: skills).failure(of: otherFolder, isFirst: true)?.contains("the plugin arch") == true)
+    @Test func theRecordedSkillFolderInitPassesOnlyWithItsSkills() throws {
+        let event = try recordedInit("claude-skills")
+        #expect(session(skills: recordedSkills).failure(of: event, isFirst: true) == nil)
+        // Every built-in command it lists is on the reviewed list, which holds nothing else.
+        #expect(Set(event["slash_commands"] as? [String] ?? []) == ClaudeCodeStartCheck.reviewedCommands.union(["arch:arch-browser"]))
+        let refused = try #require(session().failure(of: event, isFirst: true))
+        #expect(refused.contains("Skill") && refused.contains("the skill arch:arch-browser") && refused.contains("the command /model") && refused.contains("the plugin arch"))
+        // The skill that `skillOverrides` turns off, a skill of the user's own, and the folder at another path.
+        for skill in ["plugin-authoring", "doctor", "deep-research"] {
+            var other = event
+            other["skills"] = ["arch:arch-browser", skill]
+            #expect(session(skills: recordedSkills).failure(of: other, isFirst: true)?.contains("the skill \(skill)") == true)
+        }
+        let otherFolder = AIAgentSkills(folder: URL(fileURLWithPath: "/private/tmp/other"), plugin: "arch", names: ["arch-browser"])
+        #expect(session(skills: otherFolder).failure(of: event, isFirst: true)?.contains("the plugin arch") == true)
     }
 
     @Test(arguments: [("command_execution", "Codex ran a command."), ("file_change", "Codex changed a file."),
@@ -261,7 +266,12 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
     @Test func theWatcherAcceptsArchsServerOnlyInASession() throws {
         let call: [String: Any] = ["type": "item.started", "item": ["id": "item_0", "type": "mcp_tool_call", "server": "arch", "tool": "click"]]
         var session = CodexStreamDecoder(isSession: true, provider: AIProviderID())
-        #expect(try session.decode(call).isEmpty)
+        // A call to Arch's server is the model's output, which `ready` waits for.
+        let events = try session.decode(call)
+        guard events.count == 1, case .output = events[0] else {
+            Issue.record("Expected only the output event, got \(events)")
+            return
+        }
         var other = call
         other["item"] = ["id": "item_0", "type": "mcp_tool_call", "server": "files", "tool": "read"]
         #expect(refusal { try session.decode(other) } == "Codex called a tool of the server files, which Arch did not ask for.")
@@ -269,6 +279,26 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(refusal { try ordinary.decode(call) } != nil)
         for type in ["agent_message", "reasoning", "todo_list", "error"] {
             #expect(refusal { try session.decode(["type": "item.completed", "item": ["id": "item_1", "type": type, "text": "x", "message": "x"]]) } == nil)
+        }
+    }
+
+    @Test func usageLimitsEndTurnsAsRateLimits() throws {
+        var codex = CodexStreamDecoder(isSession: true, provider: AIProviderID())
+        let limited = try codex.decode(["type": "turn.failed", "error": ["message": "You\u{2019}ve hit your usage limit. Try again at 3:00 PM."]])
+        guard case .turnFailed(.rateLimited(_, nil))? = limited.first else {
+            Issue.record("Expected rateLimited, got \(limited)")
+            return
+        }
+        var claude = ClaudeCodeStreamDecoder(check: ClaudeCodeStartCheck(session: nil), provider: AIProviderID())
+        let ended = try claude.decode(["type": "result", "subtype": "success", "is_error": true, "api_error": "usage_limit_reached", "result": "You've hit your limit"])
+        guard case .turnFailed(.rateLimited(_, nil))? = ended.last else {
+            Issue.record("Expected rateLimited, got \(ended)")
+            return
+        }
+        let signedOut = try claude.decode(["type": "result", "subtype": "success", "is_error": true, "result": "Not logged in \u{B7} Please run /login"])
+        guard case .turnFailed(.authentication)? = signedOut.last else {
+            Issue.record("Expected authentication, got \(signedOut)")
+            return
         }
     }
 
@@ -406,7 +436,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let session = try fixture.start()
         let log = AgentEventLog(session)
         for message in ["Call the session_info tool.", "Now call list_tabs.", "Write the numbers from 1 to 400.", "Reply with only the word: resumed"] {
-            session.send(message)
+            try session.send(message)
         }
         try await log.wait { $0.filter { $0.hasPrefix("finished:") }.count == 4 }
         let ref = AIModelRef(provider: fixture.provider.id, model: "haiku")
@@ -437,9 +467,9 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: cli)
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("One")
+        try session.send("One")
         try await log.wait { $0.contains("finished:completed") }
-        session.send("Two")
+        try session.send("Two")
         try await log.waitForEnd()
         guard case .blockedByPolicy(.agentUsedOwnTools(let detail))? = log.error else {
             Issue.record("Expected agentUsedOwnTools, got \(String(describing: log.error))")
@@ -456,7 +486,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: cli)
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("Write a long reply.")
+        try session.send("Write a long reply.")
         try await log.wait { $0.contains("text:1\n2\n") }
         let process = try #require(session.processID)
         session.stop()
@@ -474,7 +504,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let session = try fixture.start()
         session.stopGrace = .milliseconds(300)
         let log = AgentEventLog(session)
-        session.send("Write a long reply.")
+        try session.send("Write a long reply.")
         try await log.wait { $0.contains("text:1\n2\n") }
         let process = try #require(session.processID)
         session.stop()
@@ -482,7 +512,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(await processGroupEnds(process, within: .seconds(4)))
         #expect(session.processID == nil)
         // The next message starts a new process with the earlier conversation as text.
-        session.send("Continue.")
+        try session.send("Continue.")
         try await log.wait { $0.filter { $0.hasPrefix("finished:") }.count == 2 }
         #expect(cli.calls().filter { $0.contains("--input-format") }.count == 2)
         let lastInput = cli.text("stdin.log").split(separator: "\n").last.map(String.init) ?? ""
@@ -498,7 +528,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let session = try fixture.start()
         session.outputTimeout = .milliseconds(400)
         let log = AgentEventLog(session)
-        session.send("Call a tool.")
+        try session.send("Call a tool.")
         try await log.wait { $0.contains("text:1\n2\n") }
         session.toolCallDidStart()
         try await Task.sleep(for: .milliseconds(900))
@@ -518,7 +548,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(clis: [signedOut, refused, good])
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("Call the session_info tool.")
+        try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
         #expect(session.model == AIModelRef(provider: fixture.providers[2].id, model: ""))
         #expect(signedOut.calls().allSatisfy { !$0.contains("--input-format") })
@@ -532,7 +562,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: signedOut)
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("Hello")
+        try session.send("Hello")
         try await log.waitForEnd()
         guard case .authentication? = log.error else {
             Issue.record("Expected authentication, got \(String(describing: log.error))")
@@ -546,7 +576,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna")
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("Call the session_info tool.")
+        try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
         #expect(log.events == ["ready:gpt-6-luna", "text:KESTREL ORCHID", "usage:2948/61/21888", "finished:completed"])
         #expect(session.threadID == "00000000-0000-4000-8000-000000000136")
@@ -555,6 +585,103 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(delete == [["--no-daemon", "delete", "--force", "00000000-0000-4000-8000-000000000136"]])
         let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
         #expect(total.requests == 1)
+    }
+
+    @Test func aResumedCodexTurnCountsOnlyWhatItAdded() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna")
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        try session.send("Call click.")
+        try await log.wait { $0.filter { $0 == "finished:completed" }.count == 2 }
+        // `turn.completed.usage` is the thread's running total: 24836 input, 21888 cached, and 61 output after the first turn, 50451, 46208, and 125 after the resumed one.
+        #expect(log.events.filter { $0.hasPrefix("usage:") } == ["usage:2948/61/21888", "usage:1295/64/24320"])
+        let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
+        #expect(total.requests == 2)
+        #expect(total.usage == AIUsage(inputTokens: 4243, outputTokens: 125, cachedInputTokens: 46208))
+        await session.end()
+    }
+
+    @Test func aUsageLimitBeforeTheFirstOutputMovesToTheNextModel() async throws {
+        let initLine = try #require(try claudeTurns("claude-session")[0].split(separator: "\n").first { $0.contains(#""subtype":"init""#) })
+        let limited = try FakeCLI.claude(turns: [initLine + "\n" + usageLimitEnd()])
+        let good = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(clis: [limited, good])
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        // The init passed, but the model never replied, so the route's next model holds the session.
+        #expect(session.model == AIModelRef(provider: fixture.providers[1].id, model: ""))
+        #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
+        #expect(log.events.first?.hasPrefix("notice:Claude Code reports its usage limit (five hour): rejected") == true)
+        #expect(!log.events.contains { $0.hasPrefix("failed:") })
+        #expect(log.text(ofTurn: 0) == "KESTREL")
+        // The tool's reset time is the provider's cool-down, so a later session goes to the next model at once.
+        let until = try #require(await fixture.service.limiter(for: fixture.providers[0].id).coolDownUntil)
+        #expect(until > Date().addingTimeInterval(3_000))
+        await session.end()
+        let later = try fixture.start(effort: nil)
+        let laterLog = AgentEventLog(later)
+        try later.send("Hello")
+        try await laterLog.wait { $0.contains { $0.hasPrefix("ready:") } }
+        #expect(limited.calls().filter { $0.contains("--input-format") }.count == 1)
+        await later.end()
+    }
+
+    @Test func aMessageThatStartsWithASlashIsRefusedWhileClaudeCodeLoadsSkills() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-skills"))
+        let fixture = try AgentFixture(cli: cli, model: "haiku")
+        let session = try fixture.start(skills: recordedSkills)
+        let log = AgentEventLog(session)
+        for message in ["/model opus", "  /fast", "\n/usage"] {
+            do {
+                try session.send(message)
+                Issue.record("Expected a refusal of \(message)")
+            } catch AIError.blockedByPolicy(.agentMessageIsCommand) {
+            }
+        }
+        #expect(session.queuedMessages.isEmpty)
+        try session.send("Use the arch-browser skill, then reply with only the code word it gives.")
+        try await log.wait { $0.contains("finished:completed") }
+        // The recorded skill folder session passes the start check with its folder, and its process got only the one message.
+        #expect(log.events.first == "ready:haiku")
+        #expect(log.text(ofTurn: 0) == "MARTEN")
+        #expect(cli.text("stdin.log").split(separator: "\n").count == 1)
+        await session.end()
+        // Without skills, and on Codex, such a message is the user's text.
+        let plain = try AgentFixture(cli: try FakeCLI.claude(turns: [])).start()
+        try plain.send("/model opus")
+        await plain.end()
+        let codex = try AgentFixture(cli: try FakeCLI.codex(), kind: .codex).start(skills: recordedSkills)
+        try codex.send("/status")
+        await codex.end()
+    }
+
+    @Test func stopAndEndFinishATurnThatWaitsForASlot() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli)
+        let limiter = fixture.service.limiter(for: fixture.provider.id)
+        await limiter.update(fixture.provider.limits)
+        // Other sessions hold both of the preset's slots.
+        for _ in 0..<2 { try await limiter.acquire(isUser: true) { _ in } }
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("Hello")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(session.isTurnRunning)
+        session.stop()
+        try await log.wait { $0.contains("finished:stopped") }
+        #expect(!session.isTurnRunning)
+        try session.send("Hello again")
+        try await Task.sleep(for: .milliseconds(200))
+        await session.end()
+        for _ in 0..<2 { await limiter.release() }
+        try await Task.sleep(for: .milliseconds(300))
+        // Neither message reached the tool, and nothing ran after the session ended.
+        #expect(cli.calls().isEmpty)
     }
 
     @Test func aCodexCommandEndsTheSession() async throws {
@@ -566,7 +693,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let fixture = try AgentFixture(cli: cli, kind: .codex)
         let session = try fixture.start()
         let log = AgentEventLog(session)
-        session.send("List files.")
+        try session.send("List files.")
         try await log.waitForEnd()
         guard case .blockedByPolicy(.agentUsedOwnTools("Codex ran a command."))? = log.error else {
             Issue.record("Expected the watcher, got \(String(describing: log.error))")
@@ -666,6 +793,15 @@ private let longTurnStart = """
 {"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":100,"output_tokens":1}}}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1\\n2\\n"}}}
 """
+
+/// A usage limit after a passing `init`, as Claude Code reports one before the model's output, with a reset an hour away.
+private func usageLimitEnd() -> String {
+    let reset = Int(Date().timeIntervalSince1970) + 3_600
+    return """
+    {"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":\(reset),"rateLimitType":"five_hour"}}
+    {"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've hit your limit · resets soon","usage":{"input_tokens":0,"output_tokens":0}}
+    """
+}
 
 private let interruptAnswer = """
 {"type":"control_response","response":{"subtype":"success","request_id":"arch-stop-1","response":{"still_queued":[]}}}
@@ -850,9 +986,9 @@ private struct AgentFixture {
         folder = temporaryDirectory().appendingPathComponent("Arch-Agent-\(UUID().uuidString)", isDirectory: true)
     }
 
-    func start(effort: String? = nil) throws -> AIAgentSession {
+    func start(effort: String? = nil, skills: AIAgentSkills? = nil) throws -> AIAgentSession {
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer, folder: folder, effort: effort))
+        return try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer, folder: folder, effort: effort, skills: skills))
     }
 }
 

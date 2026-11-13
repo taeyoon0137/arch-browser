@@ -224,14 +224,17 @@ struct CodexStreamDecoder {
         case "item.started", "item.updated", "item.completed":
             let item = object["item"] as? [String: Any] ?? [:]
             try watch(item)
-            guard object["type"] as? String == "item.completed" else { return [] }
-            return completed(item)
+            // Any item but an error is the model's output.
+            let output: [AIAgentStreamEvent] = item["type"] as? String == "error" ? [] : [.output]
+            guard object["type"] as? String == "item.completed" else { return output }
+            return output + completed(item)
         case "turn.completed":
+            // The thread's running total, which the session turns into the turn's own usage.
             let usage = (object["usage"] as? [String: Any]).map(Self.usage)
             return (usage.map { [AIAgentStreamEvent.usage($0)] } ?? []) + [.turnEnded(.completed)]
         case "turn.failed":
             let message = ((object["error"] as? [String: Any])?["message"] as? String) ?? lastError ?? "Codex ended the turn with an error."
-            return [.turnFailed(.providerUnavailable(provider, detail: message))]
+            return [.turnFailed(Self.isUsageLimit(message) ? .rateLimited(provider, until: nil) : .providerUnavailable(provider, detail: message))]
         case "error":
             // Codex can report a retry this way and go on; a turn that then ends without `turn.completed` fails with it.
             lastError = object["message"] as? String ?? lastError
@@ -275,6 +278,11 @@ struct CodexStreamDecoder {
         case "web_search": return "Codex searched the web."
         default: return "Codex used \(type.replacingOccurrences(of: "_", with: " ")), which Arch did not ask for."
         }
+    }
+
+    /// Codex's sentences for a usage limit ("You’ve hit your usage limit…") and for retries that ended on a 429.
+    static func isUsageLimit(_ message: String) -> Bool {
+        message.localizedCaseInsensitiveContains("usage limit") || message.contains("Too Many Requests")
     }
 
     /// As the `chatCompletions` format counts: `input_tokens` includes the cached tokens, which `inputTokens` leaves out.

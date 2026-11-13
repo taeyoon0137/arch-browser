@@ -27,6 +27,15 @@ import Testing
         #expect(configuration.capabilities(of: configuration.models[0]).contains(.agent))
     }
 
+    @Test func signInTypesThePresetsVariablesBeforeTheCommand() {
+        #expect(AICommandLineEditor.signInCommand(program: "codex", arguments: ["login"], environment: [:]) == "codex login")
+        #expect(AICommandLineEditor.signInCommand(program: "codex", arguments: ["login"], environment: ["CODEX_HOME": "/Volumes/Data/Codex Home", "A_B": "it's"])
+                == #"A_B='it'\''s' CODEX_HOME='/Volumes/Data/Codex Home' codex login"#)
+        // A name the shell cannot assign is left out.
+        #expect(AICommandLineEditor.signInCommand(program: "'/opt/claude'", arguments: ["auth", "login"], environment: ["NOT VALID": "x", "9X": "y", "CLAUDE_CONFIG_DIR": "/c"])
+                == "CLAUDE_CONFIG_DIR='/c' '/opt/claude' auth login")
+    }
+
     @Test func aPresetWithoutItsToolKeepsTheNameForFind() async throws {
         let draft = await AICommandLineDraft.preset(.codex, searchPath: "/nonexistent")
         #expect(draft.executable == "codex")
