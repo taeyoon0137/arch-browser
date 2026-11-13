@@ -50,9 +50,9 @@ public final class Tab: ObservableObject, Identifiable {
     var didFinishLoad: (() -> Void)?
     /// Sends each time the main frame finishes loading a document, for the AI interface's hooks. Loads of frames inside the page and navigations within the document send nothing.
     let didLoadDocument = PassthroughSubject<Void, Never>()
-    /// The session sets this callback to close the sheets of a page whose dialogs no longer apply.
+    /// The session sets this callback to end the prompts and sheets of a page whose dialogs no longer apply.
     var didCancelDialogs: (() -> Void)?
-    /// The session sets this callback to bring the tab forward, so that a sheet it needs can show.
+    /// The session sets this callback to bring the tab forward, so that a prompt it needs can show.
     var requestSelection: (() -> Void)?
     /// The session sets this callback to show the tab and bring its window and the app forward, as the return button of the page's picture-in-picture window asks.
     var requestActivation: (() -> Void)?
@@ -60,6 +60,8 @@ public final class Tab: ObservableObject, Identifiable {
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show a sheet for the page, which waits until a window shows the page. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
     var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
+    /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
+    var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
@@ -247,39 +249,23 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: JavaScript dialogs
 
+    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app.
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        showAlert(alert, isPageDialog: true) { _ in completion() }
+        showPrompt(TabPromptContent.alert(message: message, identity: pageIdentity)) { _ in completion() }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn) }
+        showPrompt(TabPromptContent.confirm(message: message, identity: pageIdentity)) { completion(TabPromptContent.confirmResult($0)) }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: defaultText ?? "")
-        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, identity: pageIdentity)) { completion(TabPromptContent.textInputResult($0)) }
     }
 
-    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show.
+    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show. Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it.
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
         requestSelection?()
-        let alert = NSAlert()
-        alert.messageText = "Leave this page?"
-        alert.informativeText = "Changes you made may not be saved."
-        alert.addButton(withTitle: "Leave")
-        alert.addButton(withTitle: "Stay")
-        showAlert(alert) { completion($0 != .alertSecondButtonReturn) }
+        showPrompt(TabPromptContent.leavePage(identity: pageIdentity)) { completion(TabPromptContent.leavePageResult($0)) }
     }
 
     public func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {
@@ -428,12 +414,14 @@ extension Tab: EngineWebContentsUIDelegate {
         }
     }
 
-    /// Names the site in the title so that a page cannot pass its dialog off as one from the app.
-    private func pageAlert(_ message: String) -> NSAlert {
-        let alert = NSAlert()
-        alert.messageText = url?.host.map { "\u{201C}\($0)\u{201D} says" } ?? "This page says"
-        alert.informativeText = message
-        return alert
+    /// The tab's page as the asker of its own prompts.
+    private var pageIdentity: PromptIdentity {
+        PromptSiteIdentity.make(for: url, in: self)
+    }
+
+    private func showPrompt(_ content: PromptContent, completion: @escaping (PromptResponse) -> Void) {
+        guard let presentPrompt else { return completion(.dismissed) }
+        presentPrompt(content, completion)
     }
 
     private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {

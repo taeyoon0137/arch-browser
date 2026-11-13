@@ -781,7 +781,7 @@ public final class BrowserSession: ObservableObject {
             self.sheets.cancel(for: tab, pageDialogsOnly: true)
             self.prompts.dismiss(tabID: tab.id, pageDialogsOnly: true)
         }
-        // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
+        // A leave-page card shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in
             guard let self, let tab else { return }
             guard let window = self.window(showing: tab) else { return self.selectUnshownTab(tab) }
@@ -849,6 +849,10 @@ public final class BrowserSession: ObservableObject {
         tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
+        }
+        tab.presentPrompt = { [weak self, weak tab] content, completion in
+            guard let self, let tab else { return completion(.dismissed) }
+            self.enqueuePrompt(content, for: tab, completion: completion)
         }
         // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.
         tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() }
