@@ -631,6 +631,23 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidResetDialogs() {
         uiDelegate?.webContentsDidCancelDialogs(self)
     }
+    /// The UI delegate shows the app's panel; without one the page gets no file. The page receives only what the request's rules keep (`answer(from:)`).
+    public func cefBrowserRunFileChooser(_ mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], completion: @escaping ([String]?) -> Void) {
+        guard let uiDelegate else { return completion(nil) }
+        let request = Self.fileChooserRequest(mode: mode, defaultPath: defaultPath, acceptedTypes: acceptedTypes)
+        uiDelegate.webContents(self, runFileChooser: request) { completion(request.answer(from: $0)?.map(\.path)) }
+    }
+    /// The request for a chooser the bridge reports. A save chooser suggests only the file name of CEF's default path, which can name a folder on the Mac.
+    static func fileChooserRequest(mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String]) -> EngineFileChooserRequest {
+        let chooserMode: EngineFileChooserRequest.Mode = switch mode {
+        case .openMultiple: .openFiles
+        case .openFolder: .openFolder
+        case .save: .save
+        default: .openFile
+        }
+        let name = chooserMode == .save ? (defaultPath as NSString).lastPathComponent : nil
+        return EngineFileChooserRequest(mode: chooserMode, acceptedTypes: acceptedTypes, suggestedName: name)
+    }
     public func cefBrowserShouldDownloadURL(_ url: String, hasDocument: Bool) -> Bool {
         guard let uiDelegate, let url = URL(string: url) else { return true }
         return uiDelegate.webContents(self, shouldDownload: url, hasPage: hasDocument)

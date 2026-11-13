@@ -58,6 +58,8 @@ public final class Tab: ObservableObject, Identifiable {
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits until a window shows the page. Without it the page gets no file.
+    var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a sheet for the page, which waits until a window shows the page. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
     var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
@@ -265,6 +267,13 @@ extension Tab: EngineWebContentsUIDelegate {
 
     public func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {
         didCancelDialogs?()
+    }
+
+    // MARK: File choosers
+
+    public func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) {
+        guard let chooseFiles else { return completion(nil) }
+        chooseFiles(request, completion)
     }
 
     // MARK: Context menus

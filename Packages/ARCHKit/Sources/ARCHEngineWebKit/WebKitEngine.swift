@@ -18,9 +18,12 @@ public final class WebKitEngine: Engine {
         return Bundle(for: WKWebView.self).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ProcessInfo.processInfo.operatingSystemVersionString
     }
 
-    /// Registers the private APIs of the Web Inspector inside pages, so that the flags page lists them before the engine starts. Call on the main thread, where the flags live.
+    /// Registers the private APIs of the Web Inspector inside pages and of file choosers' types, so that the flags page lists them before the engine starts. Call on the main thread, where the flags live.
     public init() {
-        MainActor.assumeIsolated { WebKitInspectorAPI.register() }
+        MainActor.assumeIsolated {
+            WebKitInspectorAPI.register()
+            WebKitFileChooserAPI.register()
+        }
     }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {

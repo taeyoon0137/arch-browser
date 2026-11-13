@@ -14,6 +14,7 @@
 #include "include/cef_client.h"
 #include "include/cef_context_menu_handler.h"
 #include "include/cef_devtools_message_observer.h"
+#include "include/cef_dialog_handler.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
@@ -279,6 +280,10 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
 - (void)handleLeavePageDialog:(void (^)(BOOL))completion;
 - (void)handleResetDialogs;
+- (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
+              defaultPath:(NSString *)defaultPath
+            acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+               completion:(void (^)(NSArray<NSString *> *_Nullable))completion;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
@@ -424,6 +429,7 @@ class BridgeClient : public CefClient,
                      public CefLoadHandler,
                      public CefFindHandler,
                      public CefDownloadHandler,
+                     public CefDialogHandler,
                      public CefJSDialogHandler,
                      public CefKeyboardHandler,
                      public CefPermissionHandler,
@@ -445,6 +451,7 @@ public:
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefDialogHandler> GetDialogHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
@@ -500,6 +507,34 @@ public:
         }
         CefRefPtr<CefJSDialogCallback> continuation = callback;
         [owner_ handleLeavePageDialog:^(BOOL leave) { continuation->Continue(leave, CefString()); }];
+        return true;
+    }
+
+    // Every file chooser that Chromium opens comes here: a page's file input, and any other, such as a download's Save As. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused.
+    bool OnFileDialog(CefRefPtr<CefBrowser> browser, FileDialogMode mode, const CefString &title, const CefString &default_file_path,
+                      const std::vector<CefString> &accept_filters, const std::vector<CefString> &accept_extensions,
+                      const std::vector<CefString> &accept_descriptions, CefRefPtr<CefFileDialogCallback> callback) override {
+        if (!owner_) {
+            callback->Cancel();
+            return true;
+        }
+        ARCHCEFFileChooserMode chooserMode = mode == FILE_DIALOG_OPEN_MULTIPLE ? ARCHCEFFileChooserModeOpenMultiple
+                                             : mode == FILE_DIALOG_OPEN_FOLDER ? ARCHCEFFileChooserModeOpenFolder
+                                             : mode == FILE_DIALOG_SAVE        ? ARCHCEFFileChooserModeSave
+                                                                               : ARCHCEFFileChooserModeOpen;
+        NSMutableArray<NSString *> *types = [NSMutableArray arrayWithCapacity:accept_filters.size()];
+        for (const CefString &filter : accept_filters) {
+            [types addObject:ToNSString(filter)];
+        }
+        CefRefPtr<CefFileDialogCallback> continuation = callback;
+        [owner_ handleFileChooser:chooserMode defaultPath:ToNSString(default_file_path) acceptedTypes:types completion:^(NSArray<NSString *> *paths) {
+            std::vector<CefString> files;
+            for (NSString *path in paths) {
+                files.push_back(CefString(path.UTF8String));
+            }
+            // An empty list cancels.
+            continuation->Continue(files);
+        }];
         return true;
     }
 
@@ -1212,6 +1247,19 @@ private:
     }
     answer(NO, nil);
     [_delegate cefBrowserDidResetDialogs];
+}
+
+- (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
+              defaultPath:(NSString *)defaultPath
+            acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+               completion:(void (^)(NSArray<NSString *> *_Nullable))completion {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (!delegate) {
+        completion(nil);
+        return;
+    }
+    // CEF ignores a second answer, so a delegate that answers twice changes nothing.
+    [delegate cefBrowserRunFileChooser:mode defaultPath:defaultPath acceptedTypes:acceptedTypes completion:completion];
 }
 
 - (void)handleBeforeClose {

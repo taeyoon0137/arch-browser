@@ -225,6 +225,16 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
     ARCHCEFDialogKindPrompt,
 };
 
+/// What a file chooser asks the user to pick, as CEF's file dialog modes name it.
+typedef NS_ENUM(NSInteger, ARCHCEFFileChooserMode) {
+    ARCHCEFFileChooserModeOpen,
+    ARCHCEFFileChooserModeOpenMultiple,
+    /// A folder, whose files the page receives.
+    ARCHCEFFileChooserModeOpenFolder,
+    /// A new or existing file to write.
+    ARCHCEFFileChooserModeSave,
+};
+
 /// Edit commands a page allows in a context menu. One value may combine several.
 typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandCut = 1 << 0,
@@ -349,6 +359,11 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
 /// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
 - (void)cefBrowserDidResetDialogs;
+/// Asks the app to show its own panel for a file chooser that Chromium opens: a page's file input, or any other, such as a download's Save As. CEF shows none of its own. `acceptedTypes` are the lowercase MIME types and dotted extensions the page accepts, empty for any file; `defaultPath` is the suggested path, often only a file name, or empty. Call `completion` once with the chosen paths, or with nil or an empty array to cancel; CEF cancels the chooser if the block is released unanswered.
+- (void)cefBrowserRunFileChooser:(ARCHCEFFileChooserMode)mode
+                      defaultPath:(NSString *)defaultPath
+                    acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                       completion:(void (^)(NSArray<NSString *> *_Nullable paths))completion;
 /// Asks the app to show the page's context menu. The bridge calls this after CEF's current work returns, so CEF keeps running while the menu tracks. Call `completion` once after the menu closes; the bridge calls it itself if the browser closes first.
 - (void)cefBrowserRunContextMenu:(ARCHCEFContextMenuParams *)params completion:(void (^)(void))completion;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.

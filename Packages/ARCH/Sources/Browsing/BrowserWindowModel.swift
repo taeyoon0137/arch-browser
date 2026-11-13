@@ -687,7 +687,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Closes the window from code, as a small window does once its tab leaves or closes. AppKit would take an attached sheet away unanswered, so a sheet that the sheet queue does not show, such as the print panel or Export as PDF's save panel, ends first with Cancel. The queue's own sheet waits for its tab's next window (`prepareToClose()`).
     func close() {
-        if let nsWindow, let sheet = nsWindow.attachedSheet, sheet !== visibleSheet?.alert.window {
+        if let nsWindow, let sheet = nsWindow.attachedSheet, sheet !== visibleSheet?.window {
             nsWindow.endSheet(sheet, returnCode: .cancel)
         }
         nsWindow?.close()

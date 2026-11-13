@@ -183,6 +183,14 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
     }
 
+    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`).
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        guard let delegate = owner.uiDelegate else { return completionHandler(nil) }
+        let request = WebKitFileChooserAPI.request(for: parameters)
+        let answer = WebKitFileChooserAnswer(completionHandler)
+        delegate.webContents(owner, runFileChooser: request) { answer.send(request.answer(from: $0)) }
+    }
+
     /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. Without a UI delegate the request gets the safe answer, a denial, rather than a prompt of WebKit's own. WebKit handles geolocation through the app's location authorization.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         guard let delegate = owner.uiDelegate else { return decisionHandler(.deny) }
