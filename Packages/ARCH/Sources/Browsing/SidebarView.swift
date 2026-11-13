@@ -188,6 +188,7 @@ struct SidebarColumn: View {
                         librarySwipe: SidebarSwipeHandlers(changed: { swipeReveal = min(travel, max(0, $0)) },
                                                            ended: { distance, velocity in finishLibrarySwipe(opens: distance > travel * 0.3 || velocity > 300) }))
                 .frame(width: width)
+                .environment(\.libraryReveal, progress)
                 .opacity(1 - 0.5 * progress)
                 .allowsHitTesting(progress == 0)
                 .accessibilityHidden(progress > 0)
@@ -322,6 +323,10 @@ private struct AddressPillPullKey: EnvironmentKey {
     static let defaultValue = CGSize.zero
 }
 
+private struct LibraryRevealKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 extension EnvironmentValues {
     /// The sidebar width used to lay out the space pages and bottom bar.
     var sidebarWidth: CGFloat {
@@ -345,6 +350,12 @@ extension EnvironmentValues {
     var addressPillPull: CGSize {
         get { self[AddressPillPullKey.self] }
         set { self[AddressPillPullKey.self] = newValue }
+    }
+
+    /// How far the library has pushed the sidebar aside, from 0 when closed to 1 when open, following a swipe.
+    var libraryReveal: CGFloat {
+        get { self[LibraryRevealKey.self] }
+        set { self[LibraryRevealKey.self] = newValue }
     }
 }
 

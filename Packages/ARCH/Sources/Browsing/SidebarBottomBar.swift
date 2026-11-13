@@ -10,6 +10,7 @@ struct SidebarBottomBar: View {
     @Environment(\.sidebarWidth) private var width
     @Environment(\.sidebarIsFloating) private var isFloating
     @Environment(\.spaceTheme) private var theme
+    @Environment(\.libraryReveal) private var libraryReveal
 
     /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
@@ -77,7 +78,9 @@ struct SidebarBottomBar: View {
     var body: some View {
         ZStack {
             HStack {
+                // The open library shows its own button in this place, so the one in the sidebar's visible edge fades out as the library comes in.
                 LibraryButton(session: session)
+                    .opacity(1 - libraryReveal)
                 Spacer(minLength: 0)
             }
             // Center the symbols and new space button as one group, ignoring the library button. If they do not fit, scroll them together without covering the library button or widening the sidebar.
