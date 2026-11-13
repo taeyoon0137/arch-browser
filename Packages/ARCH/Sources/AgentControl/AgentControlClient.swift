@@ -1,4 +1,4 @@
-// The client end of the control socket, for `arch-cli` and `arch-mcp` (docs/agents.md, Local control channel ▸ Client checks of Arch; Framing and methods): it connects, checks that the listening process is the Arch of the bundle that contains the client before it sends a byte, and says `hello`. Calls are blocking, which suits a command-line process that does one thing at a time.
+// The client end of the control socket, for `arch-cli` and `arch-mcp` (docs/agents.md, Local control channel ▸ Client checks of Arch; Framing and methods): it connects, checks that the listening process is the Arch of the bundle that contains the client before it sends a byte, waits for Arch's `ready`, and says `hello`. Every frame it reads must come while the checked process holds Arch's end. Calls are blocking, which suits a command-line process that does one thing at a time.
 import Darwin
 import Foundation
 
@@ -12,7 +12,7 @@ public enum AgentClientError: Error, Equatable {
     /// Arch speaks another control protocol version, named here.
     case protocolMismatch(arch: Int)
     case refused(AgentRefusal)
-    /// Arch closed the connection before it answered `hello`, as it does for a client that fails its own peer check.
+    /// Arch closed the connection before it answered `hello` or before `ready`, as it does for a client that fails its own peer check.
     case closedBeforeAnswer
     case closed
     case timedOut
@@ -54,20 +54,22 @@ public enum AgentClientError: Error, Equatable {
 
 public final class AgentControlConnection {
     private let socket: Int32
+    /// The listener as the check saw it.
+    private let peer: AgentPeer
     private var reader = AgentFrameReader()
     private var nextRequestID = 1
 
     /// The check of the client's own bundle: the listener must run `Contents/MacOS/Arch` of the app bundle that contains this executable, which outside an app bundle nothing does. The expected hash is read only once something listens.
-    public static func archCheck(forClientAt executable: URL? = AgentBundleLayout.currentExecutable()) -> (Int32) throws -> Void {
+    public static func archCheck(forClientAt executable: URL? = AgentBundleLayout.currentExecutable()) -> (Int32) throws -> AgentPeer {
         { socket in
             let layout = executable.flatMap(AgentBundleLayout.containing(helper:))
             let expected = layout.flatMap { try? AgentCodeIdentity.uniqueHash(ofFileAt: $0.archExecutableURL) }
-            try AgentPeerCheck(expectedHash: expected).verify(socket: socket)
+            return try AgentPeerCheck(expectedHash: expected).verify(socket: socket)
         }
     }
 
-    /// Connects to the socket at `location`, then runs `check` on the connected socket before anything is sent. A failed check closes the connection.
-    public init(location: AgentSocketLocation, check: (Int32) throws -> Void) throws {
+    /// Connects to the socket at `location`, then runs `check` on the connected socket before anything is sent. `check` returns the peer it checked, which every frame read later must still name. A failed check closes the connection.
+    public init(location: AgentSocketLocation, check: (Int32) throws -> AgentPeer) throws {
         let socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard socket >= 0 else { throw AgentClientError.system("A socket could not be made: \(String(cString: strerror(errno))).") }
         _ = fcntl(socket, F_SETFD, FD_CLOEXEC)
@@ -83,8 +85,9 @@ public final class AgentControlConnection {
             if [ENOENT, ECONNREFUSED, ENOTDIR].contains(error) { throw AgentClientError.notRunning }
             throw AgentClientError.system("Arch's control socket could not be reached: \(String(cString: strerror(error))).")
         }
+        let peer: AgentPeer
         do {
-            try check(socket)
+            peer = try check(socket)
         } catch let failure as AgentPeerCheckFailure {
             Darwin.close(socket)
             throw AgentClientError.notArch(failure)
@@ -93,19 +96,23 @@ public final class AgentControlConnection {
             throw error
         }
         self.socket = socket
+        self.peer = peer
     }
 
     deinit {
         Darwin.close(socket)
     }
 
-    /// Says `hello` and returns Arch's answer. Throws for another protocol version and for a refusal, which Arch follows by closing the connection.
+    /// Waits for Arch's `ready`, says `hello`, and returns Arch's answer. Throws for another protocol version and for a refusal, which Arch follows by closing the connection. Call it first: `hello`, with its ticket, goes only after `ready` came from the checked process, so a program that took the socket's path reads nothing.
     public func hello(_ hello: AgentHello, timeout: TimeInterval = 10) throws -> AgentHelloAnswer {
         let id = AgentRPCID.number(nextRequestID)
         nextRequestID += 1
         let request = AgentRPCMessage.request(id: id, method: AgentControlProtocol.helloMethod, params: try AgentJSON(encoding: hello))
         let message: AgentRPCMessage
         do {
+            guard case .notification(AgentControlProtocol.readyMethod, _) = try receive(timeout: timeout) else {
+                throw AgentClientError.malformedAnswer("its first message is not ready.")
+            }
             try send(request)
             message = try receive(timeout: timeout)
         } catch AgentClientError.closed {
@@ -146,7 +153,7 @@ public final class AgentControlConnection {
         }
     }
 
-    /// Reads the next message, waiting at most `timeout` seconds for each read when one is given.
+    /// Reads the next message, waiting at most `timeout` seconds for each read when one is given. Throws `notArch(.peerChanged)` and shuts the connection when the message came while another process held Arch's end than the checked one.
     public func receive(timeout: TimeInterval? = nil) throws -> AgentRPCMessage {
         var limit = timeval(tv_sec: Int(timeout ?? 0), tv_usec: Int32(((timeout ?? 0).truncatingRemainder(dividingBy: 1)) * 1_000_000))
         _ = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
@@ -159,6 +166,7 @@ public final class AgentControlConnection {
                 throw AgentClientError.malformedAnswer("a frame of \(length) bytes is over the limit.")
             }
             if let frame {
+                try confirmPeer()
                 do {
                     return try AgentRPCMessage.decode(frame)
                 } catch let error as AgentRPCError {
@@ -174,6 +182,23 @@ public final class AgentControlConnection {
                 throw AgentClientError.system("Reading from Arch failed: \(String(cString: strerror(errno))).")
             }
             reader.append(Data(chunk[0 ..< count]))
+        }
+    }
+
+    /// The kernel's peer token names the process that last read or wrote Arch's end, as that process is now, so the check at connect cannot show who reads and writes afterward. Each frame is therefore checked against the process ID and version that the code check saw; since the version changes at each `exec`, an unchanged pair is the program that passed, and Security need not run again. A peer that has fully closed its end (`ENOTCONN`/`EINVAL`) is not a different live process and cannot read what the client sends next, so the already-buffered frame stands; a live process whose ID or version differs is a handoff and fails.
+    private func confirmPeer() throws {
+        let current: AgentPeer
+        do {
+            current = try AgentPeer.read(socket: socket)
+        } catch let AgentPeerCheckFailure.unreadablePeer(code) where code == ENOTCONN || code == EINVAL {
+            return
+        } catch let failure as AgentPeerCheckFailure {
+            Darwin.shutdown(socket, SHUT_RDWR)
+            throw AgentClientError.notArch(failure)
+        }
+        guard current.isSameProcess(as: peer) else {
+            Darwin.shutdown(socket, SHUT_RDWR)
+            throw AgentClientError.notArch(.peerChanged)
         }
     }
 }

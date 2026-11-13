@@ -1,4 +1,4 @@
-// The client end of the control socket against a listener in a temporary folder, which stands in for Arch: no listener reads as Arch not running (exit 69); the code identity check runs before a byte is sent, passes for the listener's own code, and fails for other code and outside an app bundle (exit 77); `hello` carries the protocol version and returns the answer; another protocol version exits 75, a refusal with outside access off 69, and a connection closed before the answer 6.
+// The client end of the control socket against a listener in a temporary folder, which stands in for Arch: no listener reads as Arch not running (exit 69); the code identity check runs before a byte is sent, passes for the listener's own code, and fails for other code and outside an app bundle (exit 77); against a real second process (a `nc` listener) the check reads the peer's code, not this process's; the client waits for Arch's `ready` before it sends `hello`, which carries the protocol version and returns the answer; another protocol version exits 75, a refusal with outside access off 69, and a connection closed before the answer 6.
 import AgentControl
 import Darwin
 import Foundation
@@ -55,11 +55,22 @@ private final class TestListener {
         }
     }
 
-    /// Answers the `hello` request it reads with `answer`, and returns the request's params.
+    /// Writes one framed message, as Arch writes `ready` and its answer.
+    static func writeFrame(_ message: AgentRPCMessage, to connection: Int32) {
+        let frame = try! AgentFrame.encode(message.encoded())
+        _ = frame.withUnsafeBytes { Darwin.write(connection, $0.baseAddress!, $0.count) }
+    }
+
+    /// Writes the `ready` notification Arch sends first, once its own peer check passes.
+    static func writeReady(to connection: Int32) {
+        writeFrame(.notification(method: "ready", params: nil), to: connection)
+    }
+
+    /// Sends `ready`, then answers the `hello` request it reads with `answer`, and returns the request's params.
     static func answerHello(on connection: Int32, with answer: AgentHelloAnswer) -> AgentJSON? {
+        writeReady(to: connection)
         guard case .request(let id, "hello", let params)? = readMessage(from: connection) else { return nil }
-        let frame = try! AgentFrame.encode(AgentRPCMessage.result(id: id, result: AgentJSON(encoding: answer)).encoded())
-        _ = frame.withUnsafeBytes { write(connection, $0.baseAddress!, $0.count) }
+        writeFrame(.result(id: id, result: try! AgentJSON(encoding: answer)), to: connection)
         return params
     }
 }
@@ -72,7 +83,8 @@ private func ownCodeHash() throws -> Data {
     return try #require((information as? [String: Any])?[kSecCodeInfoUnique as String] as? Data)
 }
 
-private let passes: (Int32) throws -> Void = { _ in }
+/// A check that reads the real peer without an expected hash, so the connection's later per-frame peer check compares against it.
+private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $0) }
 
 @Suite(.serialized) struct ClientTests {
     @Test func noListenerMeansArchIsNotRunning() throws {
@@ -151,21 +163,59 @@ private let passes: (Int32) throws -> Void = { _ in }
 
     @Test func aConnectionClosedBeforeTheAnswerExits6() throws {
         let listener = try TestListener()
-        let wait = listener.serveOnce { _ = TestListener.readMessage(from: $0) }
+        let wait = listener.serveOnce { TestListener.writeReady(to: $0); _ = TestListener.readMessage(from: $0) }
         let connection = try AgentControlConnection(location: listener.location, check: passes)
         #expect(throws: AgentClientError.closedBeforeAnswer) { try connection.hello(AgentHello(client: .cli, version: "0.1.0")) }
         #expect(wait())
         #expect(AgentClientError.closedBeforeAnswer.exitCode.rawValue == 6)
     }
 
+    @Test func aConnectionClosedBeforeReadyExits6() throws {
+        let listener = try TestListener()
+        let wait = listener.serveOnce { _ in }
+        let connection = try AgentControlConnection(location: listener.location, check: passes)
+        #expect(throws: AgentClientError.closedBeforeAnswer) { try connection.hello(AgentHello(client: .cli, version: "0.1.0")) }
+        #expect(wait())
+    }
+
     @Test func aListenerThatDoesNotAnswerTimesOut() throws {
         let listener = try TestListener()
         let release = DispatchSemaphore(value: 0)
-        let wait = listener.serveOnce { _ in release.wait() }
+        let wait = listener.serveOnce { TestListener.writeReady(to: $0); release.wait() }
         let connection = try AgentControlConnection(location: listener.location, check: passes)
         #expect(throws: AgentClientError.timedOut) { try connection.hello(AgentHello(client: .cli, version: "0.1.0"), timeout: 0.2) }
         release.signal()
         #expect(wait())
+    }
+
+    /// A second process stands in for the listener, so the peer the check reads is not this process. The check passes for the peer's own running-code hash and fails for this process's, which proves it reads the peer through `LOCAL_PEERTOKEN` rather than `SecCodeCopySelf`.
+    @Test func theCheckReadsThePeersCodeNotItsOwn() throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("act-peer-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("c.sock").path
+        let listener = Process()
+        listener.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        listener.arguments = ["-U", "-l", path]
+        listener.standardOutput = FileHandle.nullDevice
+        listener.standardError = FileHandle.nullDevice
+        try listener.run()
+        defer { listener.terminate() }
+        for _ in 0 ..< 100 where !FileManager.default.fileExists(atPath: path) { usleep(20_000) }
+
+        let socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { Darwin.close(socket) }
+        var address = AgentSocketLocation(path: path, isInTemporaryFolder: true).address()
+        let connected = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        try #require(connected == 0)
+
+        let peer = try AgentPeer.read(socket: socket)
+        #expect(peer.processID != getpid())
+        let peerHash = try AgentCodeIdentity.uniqueHash(ofProcessWith: peer.auditToken)
+        let ownHash = try ownCodeHash()
+        #expect(peerHash != ownHash)
+        #expect(throws: Never.self) { try AgentPeerCheck(expectedHash: peerHash).verify(socket: socket) }
+        #expect(throws: AgentPeerCheckFailure.otherCode) { try AgentPeerCheck(expectedHash: ownHash).verify(socket: socket) }
     }
 }
 

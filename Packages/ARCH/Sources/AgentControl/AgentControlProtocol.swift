@@ -1,9 +1,11 @@
-// The control protocol's version and its first message, `hello` (docs/agents.md, Local control channel ▸ Framing and methods). `hello` and its answer keep this shape in every protocol version, so that a client and an Arch of different versions can still name both versions.
+// The control protocol's version, Arch's first message, `ready`, and the client's, `hello` (docs/agents.md, Local control channel ▸ Framing and methods). `ready`, `hello`, and its answer keep this shape in every protocol version, so that a client and an Arch of different versions can still name both versions.
 import Foundation
 
 public enum AgentControlProtocol {
     /// The version this build speaks. A `hello` with another version is refused, and the client exits with code 75.
     public static let version = 1
+    /// The notification without params that Arch writes once its peer checks pass. The client sends nothing before it arrives.
+    public static let readyMethod = "ready"
     public static let helloMethod = "hello"
 }
 
