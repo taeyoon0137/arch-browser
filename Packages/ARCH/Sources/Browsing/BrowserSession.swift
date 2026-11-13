@@ -177,6 +177,12 @@ public final class BrowserSession: ObservableObject {
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
 
+    /// The Persona of the sidebar target, read without opening a window: the last main window's, or, while none is open, that of the space the front window of `windowsToReopen` would open on, or of the first space once that one is gone, as `currentSpace` falls back. The Bookmarks menu lists its favorites.
+    var sidebarTargetPersonaID: Persona.ID {
+        if let window = lastMainWindow { return window.personaID }
+        return (spaces.first { $0.id == windowsToReopen[0].currentSpaceID } ?? spaces[0]).resolvedPersonaID
+    }
+
     /// Opens the saved session's main windows once at launch, after the app has built its menus.
     public func restoreWindows() {
         if windows.isEmpty { reopenWindows(windowsToReopen) }

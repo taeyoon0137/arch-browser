@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
+    /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
+    private var bookmarksMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
     private var undoItem: NSMenuItem?
     private var closingItems: [NSMenuItem] = []
@@ -279,6 +281,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         spacesMenu.addItem(withTitle: "Delete Persona\u{2026}", action: #selector(deletePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
 
+        // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
+        let bookmarksMenu = NSMenu(title: "Bookmarks")
+        bookmarksMenu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+        bookmarksMenu.delegate = self
+        self.bookmarksMenu = bookmarksMenu
+        mainMenu.addItem(submenu(bookmarksMenu, title: "Bookmarks"))
+
         let historyMenu = NSMenu(title: "History")
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
         historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
@@ -394,8 +403,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return history
     }()
 
-    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. The list is made when the menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; the pages have no key equivalents.
+    /// Fills the Bookmarks menu for the sidebar target, and lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. Both are made when their menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; their items have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
+        if menu === bookmarksMenu, let session { return fillBookmarks(menu, with: session.bookmarkMenuEntries) }
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
         let activeWindow = session?.activeWindow
@@ -430,6 +440,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self.tabID = tabID
             self.item = item
         }
+    }
+
+    /// Replaces the menu's items with the entries, each space and folder as a submenu. The Bookmarks menu is built like the History menu's pages, when it opens, and its items have no key equivalents.
+    private func fillBookmarks(_ menu: NSMenu, with entries: [BookmarkMenu.Entry]) {
+        menu.removeAllItems()
+        for entry in entries {
+            switch entry {
+            case .heading(let title):
+                menu.addItem(.sectionHeader(title: title))
+            case .favorite(let id, let title, let url):
+                menu.addItem(bookmarkItem(title: title, url: url, choice: .favorite(id)))
+            case .tab(let id, let title, let url):
+                menu.addItem(bookmarkItem(title: title, url: url, choice: .tab(id)))
+            case .submenu(let title, let entries):
+                let folderMenu = NSMenu(title: title)
+                fillBookmarks(folderMenu, with: entries)
+                menu.addItem(submenu(folderMenu, title: title))
+            case .divider:
+                menu.addItem(.separator())
+            case .noBookmarks:
+                menu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+            }
+        }
+    }
+
+    private func bookmarkItem(title: String, url: URL?, choice: BookmarkMenu.Choice) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(openBookmark(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = choice
+        item.toolTip = url?.absoluteString
+        return item
+    }
+
+    @objc private func openBookmark(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? BookmarkMenu.Choice else { return }
+        session.openBookmark(choice)
     }
     @objc private func togglePinned() { frontSidebarTarget().selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.activeWindow?.selectedTab.map(session.addFavorite) }
