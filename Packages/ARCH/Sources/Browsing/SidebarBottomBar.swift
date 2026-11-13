@@ -82,8 +82,6 @@ struct SidebarBottomBar: View {
                 LibraryButton(session: session)
                     .opacity(1 - libraryReveal)
                 Spacer(minLength: 0)
-                // Shown only while macOS's Low Power Mode is on, in the room groupWidth keeps free at the trailing end.
-                LowPowerModeIndicator()
             }
             // Center the symbols and new space button as one group, ignoring the library button. If they do not fit, scroll them together without covering the library button or widening the sidebar.
             ViewThatFits(in: .horizontal) {
@@ -106,6 +104,9 @@ struct SidebarBottomBar: View {
             .onPreferenceChange(SidebarItemFramesKey.self) { sidebarDrag.spaceSymbolFrames = $0 }
             // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
             .offset(x: isFloating ? 0 : 2)
+            // Shown only while macOS's Low Power Mode is on, in the room groupWidth keeps free at the trailing end. Declared after the strip so that VoiceOver reaches it in its place on screen, after the new space button.
+            LowPowerModeIndicator()
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(height: Self.height)
     }

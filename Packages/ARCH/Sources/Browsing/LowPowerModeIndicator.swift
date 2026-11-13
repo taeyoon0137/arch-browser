@@ -19,36 +19,39 @@ final class LowPowerMode: ObservableObject {
         }
     }
 
-    static let batterySettingsURL = URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension")!
+    /// The System Settings pane that holds the mode, named Battery on a Mac with a battery and Energy on one without. Its identifier is undocumented (see Decisions in docs/plan.md); if macOS renames it, System Settings opens at its last pane.
+    static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension")!
 
-    /// Opens Battery settings, where the user turns the mode off for the whole Mac or chooses when it turns on.
-    static func openBatterySettings() {
-        NSWorkspace.shared.open(batterySettingsURL)
+    /// Opens the mode's settings, where the user turns it off for the whole Mac or chooses when it turns on.
+    static func openSettings() {
+        NSWorkspace.shared.open(settingsURL)
     }
 }
 
-/// The trailing end of the sidebar's bottom bar while Low Power Mode is on: a yellow battery symbol whose help says pages may animate more slowly. A click, like the context menu's Battery Settings…, opens Battery settings; Arch itself changes nothing.
+/// The trailing end of the sidebar's bottom bar while Low Power Mode is on: a battery symbol with a yellow level, as macOS marks the mode, whose help says pages may animate more slowly. A click, like the context menu's Low Power Mode Settings…, opens the mode's settings; Arch itself changes nothing.
 struct LowPowerModeIndicator: View {
     @ObservedObject private var mode = LowPowerMode.shared
     @State private var isHovering = false
 
     var body: some View {
         if mode.isEnabled {
-            Button(action: LowPowerMode.openBatterySettings) {
+            Button(action: LowPowerMode.openSettings) {
+                // The outline takes the bar's secondary color, which keeps its contrast in light and dark sidebars; only the level is yellow.
                 Image(systemName: "battery.50percent")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.yellow)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.secondary, Color.yellow)
                     .frame(width: 30, height: 28)
                     .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering ? 0.08 : 0)))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .onHover { isHovering = $0 }
-            .help("Low Power Mode is on, so pages may animate more slowly. Click to open Battery settings.")
-            .contextMenu { Button("Battery Settings…", action: LowPowerMode.openBatterySettings) }
+            .help("Low Power Mode is on, so pages may animate more slowly. Click to open its settings.")
+            .contextMenu { Button("Low Power Mode Settings…", action: LowPowerMode.openSettings) }
             .accessibilityLabel("Low Power Mode")
             .accessibilityValue("On")
-            .accessibilityHint("Opens Battery settings")
+            .accessibilityHint("Opens Low Power Mode settings")
         }
     }
 }
