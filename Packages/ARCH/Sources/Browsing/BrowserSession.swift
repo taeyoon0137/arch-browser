@@ -549,17 +549,17 @@ public final class BrowserSession: ObservableObject {
         personas.first { $0.id == id }
     }
 
-    /// The Persona's name alone, where the interface names a Persona without a space, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one.
+    /// The Persona's name alone, as the space header's prefix before the space's name, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one. The Persona pickers of Settings ▸ Plugins and the import sheet, which show no space, list `Persona.name`.
     func displayedName(ofPersona id: Persona.ID) -> String? {
         displayedPlace(ofPersona: id, space: nil)
     }
 
-    /// How the interface names a Persona from a place (Persona rule 7 in `docs/windows-personas.md`): "Work / Research" for the Persona and `space`, the Persona's name alone without a space, as for a favorite's tab, or nil while the default Persona is the only one.
+    /// How the interface names a Persona from a place (Persona rule 7 in `docs/windows-personas.md`): "Work / Research" for the Persona and `space`, the Persona's name alone without a space, or nil while the default Persona is the only one.
     func displayedPlace(ofPersona id: Persona.ID, space: Space?) -> String? {
         Self.displayedPlace(ofPersona: id, space: space, among: personas)
     }
 
-    /// `displayedPlace(ofPersona:space:)` for the session's `personas`, also nil for a Persona that is no longer listed.
+    /// `displayedPlace(ofPersona:space:)` among `personas`, also nil for a Persona that is no longer listed, for callers that hold the Personas, such as the sheets' texts and tests.
     static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard personas.count > 1, let persona = personas.first(where: { $0.id == id }) else { return nil }
         return space.map { "\(persona.name) / \($0.name)" } ?? persona.name

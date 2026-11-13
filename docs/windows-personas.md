@@ -388,9 +388,9 @@ func windowDidBecomeMain(_ window: BrowserWindowModel)
 public func spaces(in persona: Persona.ID) -> [Space]
 public func favorites(in persona: Persona.ID) -> [Favorite]
 func persona(withID id: Persona.ID) -> Persona?
-/// The Persona's name alone, for surfaces without a space, or nil while the default Persona is the only one.
+/// The Persona's name alone, as the space header's prefix before the space's name, or nil while the default Persona is the only one. The Persona pickers of Settings ▸ Plugins and the import sheet list `Persona.name`.
 func displayedName(ofPersona id: Persona.ID) -> String?
-/// Persona rule 7: "Work / Research", the Persona's name alone without a space, or nil while the default Persona is the only one. A static variant takes the Personas, for tests.
+/// Persona rule 7: "Work / Research", the Persona's name alone without a space, or nil while the default Persona is the only one. A static variant takes the Personas, for callers that hold them, such as the sheets' texts and tests.
 func displayedPlace(ofPersona id: Persona.ID, space: Space?) -> String?
 /// The last main window's space when it belongs to the Persona, else the Persona's first space.
 func preferredSpace(in persona: Persona.ID) -> Space
@@ -646,7 +646,7 @@ Preference
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
   - The window title adds the Persona and the space, as "Example Domain — Work / Research" (Persona rule 7), and with no tab selected is "Work / Research" alone, which already holds the space's name.
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.
-  - The Clear Site Data sheet names the Persona of the tab's place, whose data is removed from every space: "…removed from both engines in the Persona of “Work / Research”…" (Persona rule 7). A favorite's tab has no space, so for it the sheet says "…in the Persona “Work”…".
+  - The Clear Site Data sheet names the Persona of the tab's place, whose data is removed from every space: "…removed from both engines in the Persona of “Work / Research”…" (Persona rule 7). A favorite's tab has no space and shows in the window's current space, so for it the sheet names that space, as the window title does: "…in the Persona of “Work / Research”…".
 - Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the window the command acts on: the window of the space menu, or for the Spaces menu the sidebar target, which comes forward from behind a small window; an empty name changes nothing. The Spaces menu's items act on the sidebar target's Persona. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
 - Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the drop target filter in `SpaceTabsView` uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette and the tab switcher list only tabs of the window's Persona, and palette commands run through its plugins. A page that a page or a preview opens joins a space of its own Persona, the window's current space or else `preferredSpace(in:)`, as does Open Link in New Tab from a favorite's page.
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet asks "Delete the Persona of “Work / Research”?" with the space menu's space or the sidebar target's current space (Persona rule 7), and says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:

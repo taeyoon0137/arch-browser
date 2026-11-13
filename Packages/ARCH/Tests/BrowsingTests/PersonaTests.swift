@@ -47,14 +47,25 @@ import Testing
         #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1).information.hasPrefix("Its 1 space and 0 favorites are removed, and its 1 tab closes into"))
     }
 
-    /// A favorite's tab belongs to no space, so a sheet about it names the Persona alone.
-    @Test func aTabWithoutASpaceNamesThePersonaAlone() {
+    /// A favorite's tab belongs to no space and shows in the window's current space, so a sheet about it names the Persona with that space, as the window title does.
+    @Test func aFavoritesTabTakesTheWindowsSpace() {
         let personas = [defaultPersona, work]
-        #expect(BrowserSession.displayedPlace(ofPersona: work.id, space: nil, among: personas) == "Work")
-        let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: nil, among: personas)
-        #expect(persona == "the Persona \u{201C}Work\u{201D}")
+        let research = self.research
+        let archive = Space(name: "Archive", personaID: work.id)
+        let personal = Space(name: "Personal", personaID: Persona.defaultID)
+        let spaces = [personal, research, archive]
+        // A tab in a space names its own space, whichever space the window shows.
+        #expect(BrowserWindowModel.sheetSpace(ofTabIn: archive.id, personaID: work.id, spaces: spaces, currentSpace: research)?.id == archive.id)
+        let space = BrowserWindowModel.sheetSpace(ofTabIn: nil, personaID: work.id, spaces: spaces, currentSpace: research)
+        #expect(space?.id == research.id)
+        let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: space, among: personas)
+        #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
         #expect(BrowserWindowModel.clearSiteDataTexts(site: "example.org", persona: persona).information
-            == "Its cookies and other website data are removed from both engines in the Persona \u{201C}Work\u{201D}, which signs you out of the site. Its open tabs load again.")
+            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        // Only a tab outside every space of its Persona names the Persona alone.
+        #expect(BrowserWindowModel.sheetSpace(ofTabIn: nil, personaID: work.id, spaces: spaces, currentSpace: personal) == nil)
+        #expect(BrowserSession.displayedPlace(ofPersona: work.id, space: nil, among: personas) == "Work")
+        #expect(BrowserWindowModel.sheetName(ofPersona: work.id, space: nil, among: personas) == "the Persona \u{201C}Work\u{201D}")
     }
 
     /// A Persona that is no longer listed, as while its deletion finishes, is not named.

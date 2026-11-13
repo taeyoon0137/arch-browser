@@ -283,7 +283,7 @@ public final class BrowserWindowModel: ObservableObject {
         return ("Delete \(persona)?", "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
     }
 
-    /// How a sheet about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" from a tab without one, such as a favorite's, or nil while the default Persona is the only one.
+    /// How a sheet about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
     static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
         return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
@@ -1034,8 +1034,8 @@ public final class BrowserWindowModel: ObservableObject {
     /// Asks with a sheet on the selected tab before clearing the data of its page's host.
     public func confirmClearSiteData() {
         guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
-        // With several Personas, the sheet names the one whose data goes, from the tab's space.
-        let space = session.spaces.first { $0.id == tab.spaceID }
+        // With several Personas, the sheet names the one whose data goes, from the tab's place.
+        let space = Self.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: session.spaces, currentSpace: currentSpace)
         let texts = Self.clearSiteDataTexts(site: site.displayName, persona: Self.sheetName(ofPersona: tab.personaID, space: space, among: session.personas))
         let alert = NSAlert()
         alert.messageText = texts.message
@@ -1046,6 +1046,12 @@ public final class BrowserWindowModel: ObservableObject {
         session.enqueueSheet(alert, for: tab) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.session.clearSiteData(of: site, in: personaID) }
         }
+    }
+
+    /// The space a sheet about a tab's Persona names with it (Persona rule 7): the tab's space, or for a favorite's tab, which belongs to no space and shows in the window's current space, that space while it belongs to the tab's Persona, as the window title names it.
+    static func sheetSpace(ofTabIn spaceID: UUID?, personaID: Persona.ID, spaces: [Space], currentSpace: Space) -> Space? {
+        if let space = spaces.first(where: { $0.id == spaceID }) { return space }
+        return currentSpace.resolvedPersonaID == personaID ? currentSpace : nil
     }
 
     /// The Clear Site Data sheet's question and explanation for the site, naming with several Personas the Persona whose data goes, as `sheetName(ofPersona:space:among:)` names it.
