@@ -12,6 +12,8 @@ final class PseudoTerminal {
     private let shellID: pid_t
     private let master: Descriptor
     private let readSource: DispatchSourceRead
+    /// Output read that the main queue has not taken yet, which pauses and resumes `readSource`.
+    private let output: PendingOutput
     /// Keeps typed and pasted input in order. `pendingInput` and `isWriteRetryScheduled` belong to it.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.terminal.write")
     /// Input that the terminal had no room for yet, because the program in front has not read its earlier input.
@@ -55,7 +57,9 @@ final class PseudoTerminal {
         }
         shellID = processID
         self.master = Descriptor(master)
-        readSource = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "xyz.taeyoon.arch.terminal.read"))
+        let source = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "xyz.taeyoon.arch.terminal.read"))
+        readSource = source
+        output = PendingOutput(limit: Self.outputLimit, pause: { source.suspend() }, resume: { source.resume() })
         startReading()
         waitForExit()
     }
@@ -122,11 +126,16 @@ final class PseudoTerminal {
     /// The most output that waits for the main queue before reading pauses. The screen takes it in about 10 milliseconds in a release build.
     static let outputLimit = 65_536
 
+    /// Whether reading has paused until the main queue takes the output that waits. Tests keep the main queue busy until it has.
+    var isReadingPaused: Bool {
+        output.isReadingPaused
+    }
+
     /// Reads until every program has closed the terminal or it is hung up, then closes it. Output waits in `PendingOutput` until one block on the main queue takes all of it, so heavy output, such as `cat` of a large file, updates the screen once per batch rather than once per read, which returns about a kilobyte. Reading pauses while `outputLimit` bytes wait, so a program that writes faster than the screen keeps up waits for the terminal, and the main queue, which every window shares, stays free for events such as Control-C.
     private func startReading() {
         let source = readSource
         let master = master
-        let output = PendingOutput(limit: Self.outputLimit, pause: { source.suspend() }, resume: { source.resume() })
+        let output = output
         let capacity = 65_536
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 1)
         source.setEventHandler { [weak self] in
@@ -275,6 +284,13 @@ final class PendingOutput: @unchecked Sendable {
         guard !isTakeScheduled else { return false }
         isTakeScheduled = true
         return true
+    }
+
+    /// Whether `append` has paused reading and no `take` has resumed it yet.
+    var isReadingPaused: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isPaused
     }
 
     /// Everything read since the last call, and reading again if it paused.
