@@ -32,6 +32,8 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
+    /// Whether macOS lets Arch show notifications, which the download notifier, the permission sheet, and Settings ▸ Websites share.
+    public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
     /// The engines whose application did not start the last time the session tried, which run no web extensions meanwhile.
@@ -86,7 +88,7 @@ public final class BrowserSession: ObservableObject {
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
-    private let downloadNotifier = DownloadNotifier()
+    private let downloadNotifier: DownloadNotifier
     /// The sheets that tabs asked for, which wait until a window shows their tab.
     let sheets = TabSheetQueue()
     /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
@@ -105,7 +107,8 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization)
+        downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.

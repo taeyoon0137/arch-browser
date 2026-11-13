@@ -2,20 +2,22 @@
 import AppKit
 import UserNotifications
 
-/// Asks for notification permission the first time a download finishes, not at launch. A bare build has no app bundle and therefore no notification center, so it posts nothing.
+/// Asks macOS for notification permission, through the session's `NotificationAuthorization`, when a download finishes while macOS has not asked yet, not at launch. A bare build has no app bundle and therefore no notification center, so it posts nothing.
 final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
     private static let pathKey = "ARCHDownloadPath"
     private let center: UNUserNotificationCenter? = Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil
-    /// Chromium's notification service may make itself the center's delegate when it shows a page's notification. The notifier takes the role back before each post and passes responses to other notifications on to the replaced delegate.
+    private let authorization: NotificationAuthorization
+    /// A notification service that posts through UserNotifications, as Chromium's would after the engine change in Phase VI of `docs/plan.md`, makes itself the center's delegate. The notifier takes the role back before each post and passes responses to other notifications on to the replaced delegate.
     private weak var otherDelegate: UNUserNotificationCenterDelegate?
 
     /// Becoming the delegate at launch lets a click on a notification from an earlier run still reveal its file.
-    override init() {
+    init(authorization: NotificationAuthorization) {
+        self.authorization = authorization
         super.init()
         claimDelegate()
     }
 
-    /// Every finished download asks for permission, which the system shows only the first time. Only a download that finishes while the app is not active posts a notification.
+    /// Every finished download checks the permission, and the first one before macOS has asked asks. Only a download that finishes while the app is not active posts a notification.
     func downloadDidFinish(_ entry: DownloadEntry) {
         guard let center, let path = entry.targetPath else { return }
         let isInBackground = !NSApp.isActive
@@ -24,12 +26,10 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = path.lastPathComponent
         content.userInfo = [Self.pathKey: path.path]
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        center.requestAuthorization(options: [.alert]) { granted, _ in
+        authorization.request { granted in
             guard granted, isInBackground else { return }
-            DispatchQueue.main.async {
-                self.claimDelegate()
-                center.add(request)
-            }
+            self.claimDelegate()
+            center.add(request)
         }
     }
 

@@ -1,4 +1,4 @@
-// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, and engine profiles take the remembered answers and, when they start, the removals of answers. Each test keeps its store in a temporary folder of its own.
+// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the sheet's Allow and offer System Settings while Arch's notifications are off. Each test keeps its store in a temporary folder of its own.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -14,7 +14,7 @@ import Testing
         let store = SitePermissionStore(directory: folder.url)
         store.set(.allow, for: [.camera, .microphone], origin: Self.origin)
         store.set(.deny, for: [.geolocation], origin: Self.origin)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let sheets = SheetRecorder()
 
         var granted: [Bool] = []
@@ -27,7 +27,7 @@ import Testing
     @Test func requestsThatWaitForOneSheetShareItsAnswerAndTheAnswerIsRemembered() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let sheets = SheetRecorder()
         let tabID = UUID()
         let request = EnginePermissionRequest(origin: Self.site, types: [.camera])
@@ -47,7 +47,7 @@ import Testing
     @Test func aSheetClosedWithoutAnAnswerAndScreenRecordingLeaveNothingRemembered() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let sheets = SheetRecorder()
 
         var granted: [Bool] = []
@@ -65,7 +65,7 @@ import Testing
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
         store.set(.allow, for: [.camera], origin: Self.origin)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
 
         answers.follow(context)
@@ -92,7 +92,7 @@ import Testing
         // The next launch reads the removal from the file, and a profile that starts then takes the answer away.
         let relaunched = SitePermissionStore(directory: folder.url)
         #expect(relaunched.removed == [Self.origin: [.geolocation]])
-        let answers = SitePermissionAnswers(store: relaunched)
+        let answers = SitePermissionAnswers(store: relaunched, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
         answers.follow(context)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(nil))
@@ -102,6 +102,76 @@ import Testing
         relaunched.set(.allow, for: [.geolocation], origin: Self.origin)
         #expect(relaunched.removed.isEmpty)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(true))
+    }
+
+    @Test func allowingNotificationsAsksMacOSOnceAfterTheSheet() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .notDetermined)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
+        let sheets = SheetRecorder()
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        #expect(sheets.alerts.first?.informativeText.contains("macOS asks") == true)
+        #expect(sheets.alerts.first?.buttons.count == 2)
+        #expect(system.requests == 0)
+
+        sheets.respond(.alertFirstButtonReturn)
+        #expect(granted == [true])
+        #expect(system.requests == 1)
+        #expect(store.decision(for: .notifications, origin: Self.origin) == .allow)
+
+        // The remembered Allow answers without a sheet and without asking macOS again.
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        #expect(granted == [true, true])
+        #expect(sheets.alerts.count == 1)
+        #expect(system.requests == 1)
+    }
+
+    @Test func dontAllowAndOtherPermissionsDoNotAskMacOS() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .notDetermined)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
+        let sheets = SheetRecorder()
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        sheets.respond(.alertSecondButtonReturn)
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        #expect(sheets.alerts.last?.informativeText.contains("macOS") == false)
+        sheets.respond(.alertFirstButtonReturn)
+
+        #expect(granted == [false, true])
+        #expect(system.requests == 0)
+        #expect(store.decision(for: .notifications, origin: Self.origin) == .deny)
+    }
+
+    @Test func whileArchsNotificationsAreOffTheSheetOpensSystemSettingsAndRemembersNothing() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .denied)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
+        let sheets = SheetRecorder()
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        let alert = try #require(sheets.alerts.first)
+        #expect(alert.buttons.map(\.title) == ["Allow", "Don\u{2019}t Allow", "Open System Settings"])
+        #expect(alert.informativeText.contains("off in System Settings"))
+
+        sheets.respond(.alertThirdButtonReturn)
+        #expect(granted == [false])
+        #expect(system.opened.count == 1)
+        #expect(system.requests == 0)
+        #expect(store.decisions.isEmpty)
+
+        // A bare build says that it cannot show notifications and offers no setting.
+        let bare = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
+        bare.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        #expect(sheets.alerts.last?.buttons.count == 2)
+        #expect(sheets.alerts.last?.informativeText.contains("can\u{2019}t show notifications") == true)
     }
 }
 
