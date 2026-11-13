@@ -1,6 +1,6 @@
 # Hooks design
 
-This note designs hooks for Arch, feature rows 64 to 68. A hook runs a script when a browser event matches it, and the script can run an agent. Each part has one job, one interface, and its own tests, so a later feature can use one part without the others: browser events, the shared hook scheduler, model tiers, the hook registry, the script runner, the agent run API, the agent hook editor with the Tidy Tab Names preset, and the same parts for outside programs. Nothing here is built; tasks VII.23 to VII.32 in `docs/plan.md` build it. The design builds on the AI interface (`docs/ai.md`), the plugin system (`docs/plugins.md`), and agents (`docs/agents.md`), whose rules apply unless this note says otherwise.
+This note designs hooks for Arch, feature rows 64 to 68. A hook runs a script when a browser event matches it, and the script can run an agent. Each part has one job, one interface, and its own tests, so a later feature can use one part without the others: browser events, the shared hook scheduler, model tiers, the hook registry, the script runner, the agent run API, the agent hook editor with the Tidy Tab Names preset, and the same parts for outside programs. Browser events and the shared hook scheduler are built; tasks VII.24 to VII.32 in `docs/plan.md` build the rest, and VII.23.1 checks the built parts from the bundle. The design builds on the AI interface (`docs/ai.md`), the plugin system (`docs/plugins.md`), and agents (`docs/agents.md`), whose rules apply unless this note says otherwise.
 
 Terms: an "event" is a `BrowserEvent` delivered by the browser event bus. A "hook" is a trigger, a filter, and a script that Arch runs for each matching event. A "run" is one script handling one event. An "agent run" is one call of the agent run API: a prompt with a model choice, a record level, tools, and limits, run to completion without the user. An "agent hook" is a hook whose script the agent hook editor writes around one agent run.
 
@@ -21,7 +21,7 @@ Terms: an "event" is a `BrowserEvent` delivered by the browser event bus. A "hoo
 | Part | Module | One job | Interface | Used by | Task |
 |---|---|---|---|---|---|
 | Browser events | `Events` (new) | Turns session changes into typed events and delivers them | `BrowserEventBus`, `BrowserEvent`, `BrowserEventFilter`, `BrowserEvent.view(_:)` | The AI hook center through `BrowserHooks`, the hook registry, plugins' events, outside subscribers | VII.23 |
-| Hook scheduler | `AI` | Runs each event's hooks one at a time per subject in one order, with waits, replacement, timeouts, cancellation, failure pauses, and budget checks | `AIHookScheduler`, `AIHookStep` | The AI hook center, plugin hooks, the hook registry | VII.23 |
+| Hook scheduler | `AI` | Runs each event's hooks one at a time per subject in one order, with waits, replacement, timeouts, cancellation, failure pauses, and budget checks | `AIHookScheduler`, `AIHookStep`, `AIHookStepOutcome` | The AI hook center, plugin hooks, the hook registry | VII.23 |
 | Model tiers | `AI` | Names models by tier (Fast, Standard, Deep) and lets a request carry its route | `AIModelTier`, `AIRouteChoice`, `AIFeatureRouting` | Agent runs, `arch-cli agent run`, the agent composer's model menu | VII.24 |
 | Hook registry | `Hooks` (new) | Keeps hooks and matches events to them; runs their scripts as steps of the shared scheduler with limits, loop protection, and pausing; logs runs | `HookRegistry`, `Hook`, `HookStore`, `HookRunLog` | Settings ▸ AI ▸ Agent Hooks, the editor, `arch-cli hooks` | VII.25 |
 | Script runner | `Hooks`, on `Plugins`' script runtime | Runs one script for one event: JavaScript in the script plugin sandbox, or a shell script the user trusts | `HookScriptRunning`, the script API | The hook registry | VII.26, VII.31 |
@@ -49,21 +49,21 @@ AgentRunner ──▶ AIService (AI: tiers, routes, budgets, usage)
 .library(name: "Events", targets: ["Events"]),
 .library(name: "Hooks", targets: ["Hooks"]),
 
-.target(name: "Events", dependencies: ["ARCHEngine", "AI"], path: "Packages/ARCH/Sources/Events"),
+.target(name: "Events", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Events"),
 .target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent"], path: "Packages/ARCH/Sources/Hooks"),
 .testTarget(name: "EventsTests", dependencies: ["Events"], path: "Packages/ARCH/Tests/EventsTests"),
 // `Fixtures` holds the hook scripts and shell scripts the runner tests run.
 .testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests", resources: [.copy("Fixtures")]),
 ```
 
-- `Plugins` and `Agent` add `Events`; `Browsing`, `Preferences`, and `Arch` add `Events` and `Hooks`. `AI` gains no dependency, and `ArchCLI` still depends on `AgentControl` alone: it prints events, hooks, and run results as JSON from Arch, as it does for tool results.
+- `Browsing` depends on `Events`. `Plugins` and `Agent` add `Events`, and `Browsing`, `Preferences`, and `Arch` add `Hooks`, with the tasks that use them. `AI` gains no dependency, and `ArchCLI` still depends on `AgentControl` alone: it prints events, hooks, and run results as JSON from Arch, as it does for tool results.
 - The parts are separate modules because they serve different users: `Agent` and `Plugins` both need events and cannot depend on `Hooks`, which depends on both; the AI interface stays free of browser types.
 
 ## Decisions
 
 Code comments and documents cite these as "hook decision 1" and so on.
 
-1. One event bus. `BrowserEventBus` in the new `Events` module delivers every browser event, and `Browsing` posts them from one place, `BrowserEventSource`. The AI hook center keeps its `AIHookEvent`, which `BrowserHooks` makes from bus events, so `AI` keeps no dependencies and its hook tests stay unchanged. `Events` depends on `AI` only for `AISitePattern`, so site filters and site exclusions share one matcher, and on `ARCHEngine` for `EngineKind`.
+1. One event bus. `BrowserEventBus` in the new `Events` module delivers every browser event, and `Browsing` posts them from one place, `BrowserEventSource`. The AI hook center keeps its `AIHookEvent`, which `BrowserHooks` makes from bus events, so `AI` keeps no dependencies and its hook tests stay unchanged. `Events` depends on `AI` only for `AISitePattern`, so site filters and site exclusions share one matcher, on `ARCHEngine` for `EngineKind`, and on `AgentControl` for `AgentAddress.reduced` and `AgentUntrusted`, so the outside view reduces addresses and marks names as agents' tools do.
 2. Events carry no page content: identifiers, kinds, engines, reasons, and addresses only. A title or page text reaches a consumer only through a call its grant allows.
 3. A hook's action is always a script. An agent hook is a hook whose script the editor writes; within a hook, only a script's call to the agent run API runs an agent.
 4. Scripts are JavaScript in the script plugin sandbox by default. A shell script runs only after the user turns on Allow Shell Scripts and trusts the file with Touch ID or the login password. Arch then runs its own copy, checked by digest. Arch never writes, generates, or edits a shell script, and outside programs cannot add one.
@@ -141,19 +141,20 @@ public enum BrowserTitleSource: String, Codable, Hashable, Sendable {
     case suggested
 }
 
-public enum BrowserEventPayload: Codable, Sendable {
-    case tabOpened(BrowserTabRef, openerTabID: UUID?)
-    case tabClosed(BrowserTabRef, reason: BrowserTabCloseReason)
+/// The labels name each value, so the synthesized JSON reads `{"pageLoaded":{"tab":{…},"isRestore":false,"isFirstLoadAfterOpen":true}}`.
+public enum BrowserEventPayload: Codable, Hashable, Sendable {
+    case tabOpened(tab: BrowserTabRef, openerTabID: UUID?)
+    case tabClosed(tab: BrowserTabRef, reason: BrowserTabCloseReason)
     /// `isFirstLoadAfterOpen`: the tab's first load with an `http` or `https` address since this launch's `tabOpened` for it.
-    case pageLoaded(BrowserTabRef, isRestore: Bool, isFirstLoadAfterOpen: Bool)
-    case addressChanged(BrowserTabRef, previousURL: URL?)
-    case titleChanged(BrowserTabRef, source: BrowserTitleSource)
-    case tabSelected(BrowserTabRef, windowID: UUID)
-    case downloadFinished(BrowserDownloadRef)
+    case pageLoaded(tab: BrowserTabRef, isRestore: Bool, isFirstLoadAfterOpen: Bool)
+    case addressChanged(tab: BrowserTabRef, previousURL: URL?)
+    case titleChanged(tab: BrowserTabRef, source: BrowserTitleSource)
+    case tabSelected(tab: BrowserTabRef, windowID: UUID)
+    case downloadFinished(download: BrowserDownloadRef)
     case spaceSwitched(windowID: UUID, spaceID: UUID, personaID: UUID, previousSpaceID: UUID?, previousPersonaID: UUID?)
 }
 
-public struct BrowserEvent: Identifiable, Codable, Sendable {
+public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
     /// One more than the previous event's in this launch; outside programs resume after it.
     public var sequence: UInt64
@@ -163,10 +164,14 @@ public struct BrowserEvent: Identifiable, Codable, Sendable {
     public var cause: BrowserEventCause?
 
     public var kind: BrowserEventKind { get }
+    /// The tab of a tab event; nil for downloads and space switches.
+    public var tab: BrowserTabRef? { get }
     /// The tab, download, or window the event is about.
     public var subject: UUID { get }
     /// For `spaceSwitched`, the Persona of the space the window switched to.
     public var personaID: UUID { get }
+    /// The tab's space, or for `spaceSwitched` the space the window switched to; nil for a favorite's tab and for downloads, which belong to their Persona only.
+    public var spaceID: UUID? { get }
     /// The addresses that site filters and exclusions apply to: the tab's, or the download's source and page.
     public var urls: [URL] { get }
 }
@@ -183,15 +188,18 @@ public struct BrowserEvent: Identifiable, Codable, Sendable {
 | `downloadFinished` | A download entry's state becomes `completed` and its file exists | Download | Downloads that fail or are canceled |
 | `spaceSwitched` | A window's current space changes; `previousPersonaID` differs when the Persona changes with it | Window | The first space of each window at launch |
 
-Scope filters, Persona checks, and a hook script's Persona treat `spaceSwitched` as an event of the space the window switched to.
+Scope filters, Persona checks, and a hook script's Persona treat `spaceSwitched` as an event of the space the window switched to. A favorite's tab and a download belong to their Persona only, so only a whole Persona in a scope takes their events.
 
 ### The bus
 
 ```swift
 @MainActor
 public final class BrowserEventBus {
-    public init()
-    /// Gives the event its identifier, sequence, date, and the cause of the enclosing `withCause` block when it has none, then delivers it to every subscriber whose filter matches, in subscription order, before returning.
+    /// Nonisolated, so that the session, which is not isolated yet, can make it with itself.
+    public nonisolated init()
+    /// The cause of the innermost enclosing `withCause` block, which code that starts a change finishing later keeps for its events.
+    public var currentCause: BrowserEventCause? { get }
+    /// Gives the event its identifier, sequence, date, and the cause of the enclosing `withCause` block when it has none, then delivers it to every subscriber whose filter matches, in subscription order, before returning. A post from a handler is delivered once the current event has reached every subscriber.
     public func post(_ payload: BrowserEventPayload, cause: BrowserEventCause? = nil)
     @discardableResult
     public func subscribe(_ filter: BrowserEventFilter, _ handler: @escaping @MainActor (BrowserEvent) -> Void) -> BrowserEventSubscription
@@ -218,6 +226,7 @@ public struct BrowserEventFilter: Codable, Hashable, Sendable {
     public func matches(_ event: BrowserEvent) -> Bool
 }
 
+/// In JSON, `"everywhere"` or the list of places, each `{"persona": "<id>"}` or `{"space": "<id>"}`.
 public enum BrowserEventScope: Codable, Hashable, Sendable {
     case everywhere
     /// Whole Personas and single spaces, which the interface shows as "Persona" and "Persona / Space".
@@ -237,11 +246,12 @@ public enum BrowserPlace: Codable, Hashable, Sendable {
 
 ```swift
 public struct BrowserEventCause: Codable, Hashable, Sendable {
+    /// Labeled, so the JSON reads `{"agentSession":{"id":"…"}}`.
     public enum Origin: Codable, Hashable, Sendable {
         case hookRun(hook: UUID, run: UUID)
-        case agentSession(UUID)
+        case agentSession(id: UUID)
         case outsideClient(grant: UUID)
-        case plugin(String)
+        case plugin(id: String)
     }
     public var origin: Origin
     /// The hooks whose runs led to this change, oldest first, at most three.
@@ -250,7 +260,7 @@ public struct BrowserEventCause: Codable, Hashable, Sendable {
 ```
 
 - An immediate change from code, such as a rename, runs inside `withCause`, so its events carry the cause.
-- A navigation or new tab started by code finishes later. The source keeps the cause on the tab (`Tab.pendingCause`) and attaches it to that tab's next `addressChanged` and `pageLoaded`, and to the `tabOpened` of a tab opened by code. The user's own navigation in the tab clears it.
+- A navigation or new tab started by code finishes later. The source keeps the cause on the tab (`Tab.pendingCause`) and attaches it to that tab's next `addressChanged` events and `pageLoaded`, which uses it up, and to the `tabOpened` of a tab opened by code inside `withCause`, which keeps it for its first load. Code that starts a navigation sets `pendingCause` to the bus's `currentCause`. The user's own navigation in the tab, from the address field or Home, clears it.
 - A run's actions carry `hookRun` with the triggering event's `hookChain` followed by the run's hook, so successive effects keep their history (Loop protection). The agent tool host's actions carry `agentSession` or `outsideClient`, and tool calls from an agent run started by a hook carry the hook's run.
 
 ### Delivery views
@@ -284,13 +294,54 @@ An outside program's line for one of the user's tabs:
 - Window events for an outside program: `tabSelected` reaches a grant only for a tab of its Persona, and `spaceSwitched` only when the grant's Persona is on one side of the switch. Windows get handles per grant (`win1`, `win2`, …), as tabs and spaces do, and never their identifiers. A space of the grant's Persona appears as its space handle (`s1`); the other side of a switch between Personas appears as `"otherPersona": true` with no identifier, so the line says only that the window entered or left the grant's Persona.
 - The registry adds `hook` for hook scripts (Script API); a plugin's event has none.
 
+```swift
+// Events
+public struct BrowserEventScriptAccess {
+    public var showsAddress: (URL) -> Bool
+    public var showsDownloadDetails: Bool
+    /// For a hook with `agent`, the AI interface's site check: an event with an address it refuses never reaches the hook, and a refused previous address stays out. nil for every other consumer.
+    public var allowsAI: ((URL) -> Bool)?
+    /// Addresses and download details with `tabs`.
+    public static func hook(tabs: Bool, allowsAI: ((URL) -> Bool)?) -> Self
+    /// Addresses with `tabs` or on the pages the granted sites cover, download details with `downloads`.
+    public static func plugin(tabs: Bool, downloads: Bool, covers: @escaping (URL) -> Bool) -> Self
+}
+
+/// What an outside program's view needs from its grant. `Agent` implements it over the grant's handle tables (VII.30).
+@MainActor
+public protocol BrowserEventOutsideReader: AnyObject {
+    var grantID: UUID { get }
+    var personaID: UUID { get }
+    /// `.own("t1")` or `.shared("t2")` by handle, or `.watched("w4")`, given on first use and never reused.
+    func name(ofTab id: UUID) -> BrowserEventOutsideTab
+    func handle(ofSpace id: UUID) -> String
+    func handle(ofWindow id: UUID) -> String
+    func allowsAI(on url: URL) -> Bool
+}
+
+extension BrowserEvent {
+    /// `BrowserEventScriptView`, with camel-case keys such as `personaId`, or nil when the event does not reach the consumer.
+    public func view(_ access: BrowserEventScriptAccess) -> BrowserEventScriptView?
+    /// `BrowserEventOutsideView`, one line of the outside view, or nil when the event does not reach the grant.
+    @MainActor public func view(_ reader: some BrowserEventOutsideReader) -> BrowserEventOutsideView?
+}
+```
+
+- A tab's engine shows as `webkit` or `chromium` in both views, as `arch-cli` and the agent tools name it.
+- An outside program's tab carries `handle` and the reduced `url`, or `watch` and the host as `site`, or `excluded: true` without either; an address change adds `previousUrl` or `previousSite` unless the previous address is excluded. A download carries the name as `<untrusted source="page">…</untrusted>`, the type, the size, the source's host, and the agent tab's handle, or `excluded: true` without the name and host. A space switch carries `window`, `to`, and `from`, each `{"space": "s1"}` or `{"otherPersona": true}`:
+
+```json
+{ "seq": 813, "kind": "spaceSwitched", "date": "2026-11-14T09:31:02Z", "window": "win1", "to": { "otherPersona": true }, "from": { "space": "s1" } }
+```
+
 ### The source
 
 `BrowserEventSource` in `Browsing` follows the session's tabs, favorites' tabs, small windows' tabs, windows, and downloads, as `BrowserHooks` now follows three kinds, and posts every kind.
 
-- `tabClosed` comes from `BrowserSession.closeTab(_:remember:reason:)`, with `TabCloseReason` mapped case by case, and from deleting a space or a Persona as `spaceDeleted`. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
+- `tabClosed` comes from `BrowserSession.closeTab(_:remember:reason:)`, with `TabCloseReason` mapped case by case, and from deleting a Persona, whose tabs close as `spaceDeleted`; deleting a space moves its tabs instead. Closes by code pass their reason (`plugin`, `hook`, or `agent`) through `closeTab(_:remember:reason:eventReason:)`. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
+- `tabOpened` follows the session's tab lists and names the opening tab, which the session sets before a popup's tab joins its list. The tabs listed when the session attaches the source are the restored ones.
 - `titleChanged` follows the inputs of `Tab.displayTitle`: `title` (`page`), `customTitle` (`user`), and `suggestedTitle` (`suggested`).
-- `tabSelected` and `spaceSwitched` follow each `BrowserWindowModel`'s selected tab and `currentSpaceID`, with the window model's identifier as `windowID`.
+- `tabSelected` and `spaceSwitched` follow each `BrowserWindowModel`'s selected tab and `currentSpaceID`, with the window model's identifier as `windowID`. Reopening main windows from the saved session, or the last main window once none is open, runs inside `BrowserEventSource.restoringWindows(_:)`, so their selections and spaces, and what other windows give up for them, post nothing. A window's space when the source first sees it is no switch.
 - `pageLoaded` keeps the current rules for `isRestore`: the first load of a restored tab and of a pinned tab opened by a browser import.
 - Agent tabs post with kind `agent` once VII.12 marks agent folders; until then no tab has that kind.
 - Once both exist, the agents' tool host (VII.12) gets navigations, opened tabs, and downloads for its tool results' events from the bus, filtered to the session's agent tabs.
@@ -307,7 +358,7 @@ The center keeps `AIHookEvent`, its registrations, actions, and tests, and runs 
 | `addressChanged(tab, previousURL)` to another document, ignoring the fragment | `scheduler.cancel(subject: tab.id, otherThan: tab.url)` |
 | `tabClosed(tab, _)` | `scheduler.cancel(subject: tab.id, except: event.id)` |
 
-Removing a download from the list still calls `cancel(subject:)` directly. The center's ordering, actions, checks, and built-in hooks stay as `docs/ai.md` describes them. Excluding agent tabs also keeps Tab Names off them, as VII.12 requires.
+Removing a download from the list still calls `cancel(subject:)` directly. The center's ordering, actions, checks, and built-in hooks stay as `docs/ai.md` describes them. `BrowserHooks.events`, the filter it subscribes with, names no tab kinds, so agent tabs stay out, which also keeps Tab Names off them, as VII.12 requires. `attach(events:service:)` hosts the center of any `AIService`, which the tests use.
 
 ### The shared scheduler
 
@@ -317,13 +368,15 @@ The center's scheduling moves out of `AIHookCenter` into `AIHookScheduler`, in `
 // AI
 @MainActor
 public final class AIHookScheduler {
-    /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events.
-    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?)
+    /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, ties in posting order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events, and `urls` are the addresses site exclusions apply to: a step with a feature whose event has an excluded address skips at once, and a post left without steps changes no chain.
+    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, urls: [URL] = [])
     /// The subject went away: cancels its chains, except the chain of `event`, the close's own.
     public func cancel(subject: UUID, except event: UUID? = nil)
     /// The tab committed another document: cancels its chains that have a document other than this one, ignoring the fragment. Chains without a document stay.
     public func cancel(subject: UUID, otherThan document: URL?)
-    /// Owners paused after consecutive authentication or provider errors, until resumed or their route changes.
+    /// The owner's hooks went away: its waiting steps skip, and its running steps stop.
+    public func cancel(owner: String)
+    /// Owners paused after consecutive authentication or provider errors, until resumed or a route of their steps changes.
     @Published public private(set) var pausedOwners: Set<String>
     public func resume(owner: String)
 }
@@ -343,6 +396,17 @@ public struct AIHookStep: Sendable {
     public var mayRun: @MainActor @Sendable () -> Bool
     /// The step's work. It reports each AI request's end, nil for a reply, for the failure count.
     public var run: @Sendable (_ requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws -> Void
+    /// Gets the step's one end, before the chain's next step starts.
+    public var didEnd: @MainActor @Sendable (AIHookStepOutcome) -> Void
+}
+
+/// Every posted step ends exactly once.
+public enum AIHookStepOutcome: Sendable {
+    case finished, failed(any Error), timedOut
+    /// Canceled while it ran: its chain was replaced or canceled, its owner was canceled, or one of its routes changed.
+    case stopped
+    /// It never started: `canceled`, `declinedByOwner`, `paused`, `excludedSite`, `unavailable`, or `budgetReached(AIBudget)`.
+    case skipped(AIHookSkipReason)
 }
 ```
 
@@ -351,7 +415,8 @@ public struct AIHookStep: Sendable {
 - Order: one event's steps from every owner join one chain, so Tab Names runs before Tidy Tab Names on the same page load, and the name Tidy Tab Names gives wins.
 - Documents: steps of `pageLoaded`, `addressChanged`, and `titleChanged` events carry the event's address. When a tab commits another document, `BrowserHooks` cancels the tab's chains for other documents, whose renames would no longer fit and whose page reads would read the wrong page.
 - Closes: at `tabClosed`, the tab's other chains end, registry runs included, and the close's own chain runs.
-- `AIHookCenter.post(_:)` keeps its signature and posts under a new event identifier, so the center's tests pass unchanged; `post(_:event:)` takes the bus event's identifier. `pausedFeatures` and `resume(_:)` read and resume the scheduler's owners.
+- `AIHookCenter.post(_:)` keeps its signature and posts under a new event identifier, so the center's tests pass unchanged; `post(_:event:)` takes the bus event's identifier. `pausedFeatures` and `resume(_:)` read and resume the scheduler's owners. The center's kinds use the bus's kind names, so its steps join the chain of the bus event they come from. A center hook's `stop` skips the center's later hooks only; the center applies a hook's actions when its step ends finished and records a failure, a timeout, or a reached budget as the feature's last error. Ending a subscription cancels its feature's steps (`cancel(owner:)`).
+- A route change cancels the running steps whose `routes` name it and resumes the owners whose latest steps with a feature name it.
 
 ### Plugins
 

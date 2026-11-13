@@ -2,6 +2,7 @@
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import Extensions
 import Foundation
 import History
@@ -145,6 +146,7 @@ public final class BrowserSession: ObservableObject {
             pageAssistant.attach(to: self)
             pluginPages.attach(to: self)
             hooks.attach(to: self)
+            eventSource.attach(to: self)
         }
     }
 
@@ -187,14 +189,20 @@ public final class BrowserSession: ObservableObject {
     /// Opens main windows as their records describe them, front to back, and returns them in that order. Each shows its saved tab, which a window in front of it then gives up when it shows the tab as a pane of its split view (window rule 2), or its space's first free tab when the tab has closed (window rule 3).
     @discardableResult
     private func reopenWindows(_ records: [SessionSnapshot.WindowRecord]) -> [BrowserWindowModel] {
-        // Created back to front, so that `windows` lists them front to back.
-        let reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
-        // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
-        for (window, record) in zip(reopened, records) {
-            if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectTab(tab.id) }
-        }
-        for window in reopened where window.selectedTabID == nil {
-            window.selectTab(window.firstFreeTab(inSpace: window.currentSpaceID)?.id)
+        var reopened: [BrowserWindowModel] = []
+        // The windows' selections and spaces, and what other windows give up for them, post no events.
+        MainActor.assumeIsolated {
+            eventSource.restoringWindows {
+                // Created back to front, so that `windows` lists them front to back.
+                reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
+                // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
+                for (window, record) in zip(reopened, records) {
+                    if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectTab(tab.id) }
+                }
+                for window in reopened where window.selectedTabID == nil {
+                    window.selectTab(window.firstFreeTab(inSpace: window.currentSpaceID)?.id)
+                }
+            }
         }
         // The front window comes forward last, so it becomes key.
         reopened.reversed().forEach { $0.nsWindow?.makeKeyAndOrderFront(nil) }
@@ -333,10 +341,11 @@ public final class BrowserSession: ObservableObject {
 
     /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
-    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
+    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) -> BrowserWindowModel {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
         tab.isInSmallWindow = true
+        tab.opener = opener
         tabs.append(tab)
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
         window.selectTab(tab.id)
@@ -604,7 +613,7 @@ public final class BrowserSession: ObservableObject {
             if window.preview?.personaID == id { window.closePreview() }
             if window.kind == .main, window.personaID == id { window.switchToSpace(destination.id) }
         }
-        for tab in allTabs where tab.personaID == id { closeTab(tab) }
+        for tab in allTabs where tab.personaID == id { closeTab(tab, eventReason: .spaceDeleted) }
         undoableCloseCount = 0
         // Its unfinished downloads stop, and the pages kept for them close. Finished rows stay in the library.
         downloads.filter { $0.personaID == id && !$0.isFinished }.forEach { $0.item.cancel() }
@@ -747,10 +756,11 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }?.resolvedPersonaID == personaID ? id : preferredSpace(in: personaID).id
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
-    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool) -> Tab {
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it, set before the tab joins the list so that its `tabOpened` event names the opening tab.
+    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
+        tab.opener = opener
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
         return tab
@@ -764,8 +774,7 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false)
-            opened.opener = tab.webContents
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
             opened.isUnread = true
         }
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
@@ -918,11 +927,17 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
+    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log and the `tabClosed` event.
     public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
+        closeTab(tab, remember: remember, reason: reason, eventReason: BrowserTabCloseReason(reason))
+    }
+
+    /// Closes a tab, with `eventReason` in its `tabClosed` event, which a close by code or with a deleted Persona gives in place of the log's reason. The event goes out while the session still lists the tab, so its consumers can read the tab's last name and address.
+    func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user, eventReason: BrowserTabCloseReason) {
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return }
+        MainActor.assumeIsolated { eventSource.tabWillClose(tab, reason: eventReason) }
         recordClose(of: tab, reason: reason)
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
         sheets.cancel(for: tab)
@@ -1247,7 +1262,10 @@ public final class BrowserSession: ObservableObject {
 
     /// The conversations of the page reader and the question popover, which windows show. It follows the session's tabs once the session exists.
     public let pageAssistant = PageAssistant()
-    /// Posts the tabs' and downloads' events to the AI interface's hooks and applies their actions, once the session exists.
+    /// The browser event bus (`docs/hooks.md`, Browser events), which `eventSource` posts to and the app shell passes to the consumers it creates.
+    public let events = BrowserEventBus()
+    private lazy var eventSource = BrowserEventSource(bus: events)
+    /// Turns the bus's events into the AI interface's hook events and applies their actions, once the session exists.
     private let hooks = BrowserHooks()
 
     // MARK: Drag and drop

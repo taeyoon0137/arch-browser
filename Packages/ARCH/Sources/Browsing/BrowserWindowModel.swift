@@ -322,6 +322,7 @@ public final class BrowserWindowModel: ObservableObject {
             return
         }
         tab.forgetExternalAppDecline()
+        tab.pendingCause = nil
         tab.webContents.navigationController.load(URLRequest(url: url))
     }
 
@@ -416,10 +417,8 @@ public final class BrowserWindowModel: ObservableObject {
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
         switch kind {
         case .main:
-            let tab = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false)
-            tab.opener = opener
-            selectTab(tab.id)
-        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID).selectedTab?.opener = opener
+            selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener).id)
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID, opener: opener)
         }
     }
 
@@ -490,6 +489,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         if let tab = selectedTab {
             tab.forgetExternalAppDecline()
+            tab.pendingCause = nil
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
             openTab(url: url)

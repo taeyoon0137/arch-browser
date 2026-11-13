@@ -602,12 +602,13 @@ public protocol AIPageSource: Sendable {
 
 Hooks let features act on browser events (row 54). The hook center lives in `AI`; `Browsing` posts the events and applies the actions.
 
-`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). VII.23 moves its scheduling into `AIHookScheduler` beside it, which the center owns and shares with plugin hooks and the hook registry, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
+`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). Its scheduling is `AIHookScheduler` beside it, which the center owns (`AIHookCenter.scheduler`) and plugin hooks and the hook registry are to share, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
 
 ### Events
 
 ```swift
-public enum AIHookEventKind: Hashable, Sendable {
+/// The raw values are the bus's kind names, so the center's steps join the chain of the bus event they come from.
+public enum AIHookEventKind: String, Hashable, Sendable {
     case pageLoaded, tabOpened, downloadFinished
 }
 
@@ -650,9 +651,9 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` follows the session's tabs, including favorites' tabs, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
-- `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
+- `BrowserHooks` ends a tab's chains for other documents when the tab commits another document, ignoring the fragment (`scheduler.cancel(subject:otherThan:)`), ends its chains except the close's own when it closes (`scheduler.cancel(subject:except:)`), and calls `cancel(subject:)` when the user removes a download from the list.
 
 ### Subscription
 
@@ -697,14 +698,19 @@ public protocol AIHookHost: AnyObject {
 public final class AIHookCenter: ObservableObject {
     /// Each feature's last error: from its hooks' last request that failed, a hook that failed on its own or timed out, or a reached budget. A request that succeeds or a change to the feature's route clears it, and a hook that sends no request leaves it.
     @Published public private(set) var lastErrors: [AIFeatureID: any Error]
-    /// Features whose hooks paused after consecutive authentication or provider errors.
+    /// Features whose hooks paused after consecutive authentication or provider errors: the scheduler's paused owners.
     @Published public private(set) var pausedFeatures: Set<AIFeatureID>
     /// Set by `Browsing`, which owns it. Without a host, posted events reach no hook.
     public weak var host: (any AIHookHost)?
+    /// The shared scheduler that runs the center's hooks as steps under their features (`docs/hooks.md`, The shared scheduler).
+    public let scheduler: AIHookScheduler
 
     @discardableResult
     public func subscribe(_ registration: AIHookRegistration) -> AIHookSubscription
+    /// Posts under a new event identifier.
     public func post(_ event: AIHookEvent)
+    /// Posts in the chain of the browser event `id`, which other owners' steps for that event join.
+    public func post(_ event: AIHookEvent, event id: UUID)
     public func cancel(subject: UUID)
     public func resume(_ feature: AIFeatureID)
 }
@@ -724,17 +730,17 @@ public enum AIHookError: Error, Sendable {
 - Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once. Once built, plugin hooks join the same chain at 200 and the hook registry's hooks at 1,000 and above, in the registry's order.
 - Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only actions the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
-- The center skips hooks without sending a request when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. After each hook's delay, it repeats these checks and checks the event's site.
+- The scheduler skips the center's hooks without sending a request, after each hook's delay, when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused, and when it has reached the daily limit for automatic requests or the monthly spending limit, which the center keeps as the feature's last error. It checks the event's site when the center posts the event and again after each delay.
 
 ### Cancellation
 
 The center cancels a running hook and its request when:
 
 - a newer event of the same kind and subject arrives (the new event's chain starts after the old one stops);
-- the subject goes away (`cancel(subject:)`);
-- once VII.23 builds the shared scheduler, the event's tab commits another document, ignoring the fragment, which would make its actions stale;
+- the subject goes away: the tab closes, or the user removes the download (`cancel(subject:)`);
+- the event's tab commits another document, ignoring the fragment, which would make its actions stale;
 - the user switches the feature off or changes its route;
-- the subscription is canceled;
+- the subscription is canceled, which ends its feature's hooks;
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 

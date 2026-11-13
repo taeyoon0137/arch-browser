@@ -2,6 +2,7 @@
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import Foundation
 
 public final class Tab: ObservableObject, Identifiable {
@@ -82,6 +83,8 @@ public final class Tab: ObservableObject, Identifiable {
     var recordVisit: ((URL, String) -> Void)?
     /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens.
     var isRestored = false
+    /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded` and then clears (`docs/hooks.md`, Causes). The user's own navigation in the tab clears it.
+    var pendingCause: BrowserEventCause?
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
@@ -141,10 +144,17 @@ public final class Tab: ObservableObject, Identifiable {
     var isListedInSidebar: Bool { !isInSmallWindow }
 
     /// The user's name for the tab, a hook's name for its page, or the page's title.
-    public var displayTitle: String { customTitle ?? suggestedTitle?.title ?? pageTitle }
+    public var displayTitle: String { Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: url) }
 
     /// The page's title, or its host if it has no title.
-    public var pageTitle: String {
+    public var pageTitle: String { Self.pageTitle(title: title, url: url) }
+
+    /// The name a tab with these inputs shows, which the event source computes from a change's new value before the tab publishes it.
+    static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?) -> String {
+        customTitle ?? suggestedTitle?.title ?? pageTitle(title: title, url: url)
+    }
+
+    private static func pageTitle(title: String, url: URL?) -> String {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }
