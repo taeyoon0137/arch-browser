@@ -52,7 +52,7 @@ Checked at runtime for step 11, with the bundled app, temporary logging in `AppD
 
 Checked at runtime for step 11, with the screen locked and temporary code in `AppDelegate` that drove the windows and logged their state
 - Links sent while Arch was in the background, by `open -a` and by `open location`, opened small windows, the first 900×640 and centered on the screen, the second cascaded from it. A link that launched Arch opened as a tab of the main window.
-- `NSWindow.endSheet(_:returnCode:)` calls the sheet's completion handler at once and only then animates the sheet out, running the run loop for about 0.27 seconds before it returns. A sheet that the handler begins on another window stays on the first window, and that window's model no longer knows it. A deferred sheet therefore shows again only after `endSheet` returns (`TabSheetQueue`). With that, an `alert` moved with its tab between two main windows and from a small window to the main window, and OK there answered the page.
+- `NSWindow.endSheet(_:returnCode:)` calls the sheet's completion handler at once and only then animates the sheet out, running the run loop for about 0.27 seconds before it returns. A sheet that the handler begins on another window stays on the first window, and that window's model no longer knows it. A deferred sheet therefore showed again only after `endSheet` returned (`TabSheetQueue`). With that, an `alert` moved with its tab between two main windows and from a small window to the main window, and OK there answered the page. The tabs' prompts are cards now (`TabPromptQueue`), which a pane draws over its tab's page, so they end no sheet and run no run loop, and a card moves with its tab without a deferral; the fact still holds for the window sheets that remain, such as the print and save panels, which `BrowserWindowModel.close()` ends with Cancel.
 - Move to Main Window put the tab last among its space's open tabs and selected it in the main window, which then held its page's view, and the small window closed. `performClose` on a small window closed its tab into the closed list, Reopen Last Closed Tab brought it back as a listed tab of the main window, and Close Tab closed both tab and window. Archiving left a small window's tab open. Quitting with a small window open saved its tab as an open tab of its space and only the main window in `windows`.
 - `window.open` without a user gesture opened no popup on Chromium, so popups from a small window remain a check for the screen.
 
@@ -121,7 +121,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 
 | # | What breaks | Mitigation | Step |
 |---|---|---|---|
-| R1 | One visible-sheet slot lets a sheet in one window block every other window, and the `NSApp.mainWindow` fallback can put a tab's sheet on the wrong window | `TabSheetQueue` keeps the queues per tab and one visible sheet per window. A window with no visible sheet shows the oldest sheet of the tabs on its screen, its selected tab's first, on its own `nsWindow`, which exists from the window's creation, so a sheet requested at selection time shows at once. When a tab leaves a window, that window's sheet is deferred and shows again in the next window that shows the tab | 8 |
+| R1 | One visible-sheet slot lets a sheet in one window block every other window, and the `NSApp.mainWindow` fallback can put a tab's sheet on the wrong window | `TabSheetQueue` keeps the queues per tab and one visible sheet per window. A window with no visible sheet shows the oldest sheet of the tabs on its screen, its selected tab's first, on its own `nsWindow`, which exists from the window's creation, so a sheet requested at selection time shows at once. When a tab leaves a window, that window's sheet is deferred and shows again in the next window that shows the tab. Since then the tab prompts became cards over their panes (`TabPromptQueue`), which removes the slot: cards of different tabs show at once, each over its own tab's pane | 8 |
 | R2 | Lookups by engine kind pick the default Persona's runtime: a kept download page is never closed, Clear Site Data clears the wrong profile, a popup is owned by the wrong browser | Every lookup goes through `runtime(of: tab)` or the runtime stored with the kept page | 3 |
 | R3 | Cookie copies cross Personas | One `CookieSync` per Persona, whose `runtimes` closure returns only that Persona's runtimes | 3 |
 | R4 | Clear Site Data on Chromium reaches the global profile through the hidden browser and the flush | The bridge's context object creates the hidden browser in its own context and flushes the manager it visited | 4 |
@@ -212,17 +212,17 @@ public final class BrowserWindowModel: ObservableObject {
     public let devToolsDock: DevToolsDock
     weak var shareButtonView: NSView?
     var sharePicker: PageSharePicker?
-    /// The AppKit window, set when it is created. Sheets, printing, export, and sharing use it.
+    /// The AppKit window, set when it is created. Window sheets, printing, export, and sharing use it.
     public weak var nsWindow: NSWindow?
     /// The saved frame, where the window opens, then the frame outside full screen that the window controller records.
     var restorableFrame: CGRect?
 
     /// Window rule 1: the selected tab and the panes of its split view that no other window shows, left to right.
     @Published private(set) var shownTabIDs: [UUID]
-    /// The selected tab, then the other shown panes, or the selected tab alone while its page fills the window. Their sheets can show here. Empty once the window has let go of its tabs as it closes.
+    /// The selected tab, then the other shown panes, or the selected tab alone while its page fills the window. Their prompts show as cards over their panes. Empty once the window has let go of its tabs as it closes.
     var tabsOnScreen: [Tab] { get }
-    /// The sheet the window shows, which `TabSheetQueue` sets and clears.
-    var visibleSheet: TabSheet?
+    /// The tab whose prompt card has the keyboard focus, which the card's layer sets.
+    var focusedPromptTabID: UUID?
     public var selectedTab: Tab? { get }
     /// Selects the tab, or the empty page for nil, in the steps below.
     public func selectTab(_ id: UUID?)
@@ -246,7 +246,7 @@ public final class BrowserWindowModel: ObservableObject {
     func firstFreeTab(inSpace id: UUID) -> Tab?
     /// Lets go of what the window shows as it closes (Windows and menus ▸ Engine and tab events).
     @MainActor func prepareToClose()
-    /// Closes the window from code, first ending with Cancel a sheet that `TabSheetQueue` does not show (Small window ▸ Closing).
+    /// Closes the window from code, first ending with Cancel any sheet on the window (Small window ▸ Closing).
     func close()
     /// Step 11: a page that one of the window's pages or its preview opened becomes a selected tab of a main window's current space, or opens in a small window of its own beside a small window (open decision 11).
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID)
@@ -254,15 +254,16 @@ public final class BrowserWindowModel: ObservableObject {
 ```
 
 - These commands move here from the session with the same names and bodies, reading the user's data through `session`: `switchToSpace`, `switchToAdjacentSpace`, `addSpace` (adds a space to this window's Persona and switches to it), `selectTab(at:)`, `selectLastTab`, `selectAdjacentTab`, `moveSelectedTab`, `shortcutNumber(for:)`, `openTab(url:engine:)` (in the current space, selected here), `openFavorite`, `navigate(to:)`, `goHome`, `canGoHome`, `setCurrentPageAsHome(ofSpace:)`, `canSetCurrentPageAsHome`, `showCommandPalette`, `dismissCommandPalette`, `submitCommandPalette`, `focusCommandBar`, `closeInternalPage`, `exitPageFullscreen`, `focusPage`, `showFindBar`, `hideFindBar`, `findNext`, `findPrevious`, `toggleLibrary`, `toggleSidebar`, `goBack`, `goForward`, `go(to:inTab:)`, `recentBackItems`, `reload`, `stopLoading`, `toggleDeveloperTools` with the developer tools properties, zoom in, out, and reset with `canZoom`, `printPage`, `exportPageAsPDF`, `canPrint`, the capture commands with `canCapture`, `shareSelectedPage`, `canShareSelectedPage`, the tab switcher, `closeSelectedTab`, `closeOtherTabs`, `confirmClearSiteData`, `canClearSiteData`, `renameSpace`, `renameTab`, and `endRenaming`.
-- `selectTab(_:)` sets `selectedTabID` and runs these in order. Steps 1 and 3 can end a sheet and run the run loop (Facts for step 11), allowing a click to select another tab meanwhile. Each step reads the selection when it runs.
+- `selectTab(_:)` sets `selectedTabID` and runs these in order. Step 1 can close another window, so each step reads the selection when it runs.
   1. `updateShownTabs()`, then `session.release(selectedTab, except: self)`, which makes every other window that shows the tab give it up first and then lets every window show the panes that no window shows any longer.
   2. The window's side effects: leave the internal page, end another tab's page fullscreen, stamp the tab's activation date, record this window's activation, clear the unread dot, and follow the tab's space (main windows only). Only when the tab changed: close the command palette, stop find on the old tab, and close the question popover.
-  3. `session.sheets.deferSheet(of: self)` and `session.sheets.showNext()`.
-  4. `session.windowDidSelect(self)`, which updates the focused tab while this is the active window. The session's change observer saves the selection.
-  5. `devToolsDock.track(selectedTab?.webContents.devTools)`.
-  6. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, and move keyboard focus from another pane of the split view to the selected page.
+  3. `session.windowDidSelect(self)`, which updates the focused tab while this is the active window. The session's change observer saves the selection.
+  4. `devToolsDock.track(selectedTab?.webContents.devTools)`.
+  5. Subscribe to the selected tab's `objectWillChange` so that views reading the tab through the window refresh, and move keyboard focus from another pane of the split view to the selected page.
+
+  A tab's prompts need no step: they belong to the tab, so each pane that shows the tab shows its oldest prompt as a card (`PanePromptLayer`), a tab that leaves the screen takes its prompts with it, and they show again when a window shows the tab. Until the tab prompts became cards, step 3 deferred the window's one sheet and showed the next, and ending a sheet ran the run loop (Facts for step 11).
 - `shows(_:)` reads `shownTabIDs`, and `isShownInAnotherWindow(_:)` asks the other windows. `updateShownTabs()` runs after the selection or a split view changes and after another window closes: the window keeps its selected tab and the panes it shows already, and takes each other pane of `paneTabs` that no other window shows. Before it publishes them, a restored tab among them that has no page yet gets it (`BrowserSession.loadPage(of:)`, `docs/plan.md` Decisions), so a tab's page exists from the moment a window shows it. `PageAreaView` fills each pane of `paneTabs` outside `shownTabIDs` with a placeholder (Interactions ▸ Split view).
-- `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection, ends the pane's page fullscreen, and defers its sheet. A small window that loses its tab closes instead, and `prepareToClose()` lets go of the page's fullscreen, sheet, and docked tools.
+- `giveUp(_:)` is rule 2 in the window that loses a tab. It drops the tab from `shownTabIDs`, then selects `fallbackTab(excluding:)` when the tab is its selected tab, or else keeps its selection and ends the pane's page fullscreen. A small window that loses its tab closes instead, and `prepareToClose()` lets go of the page's fullscreen and docked tools. The tab's prompts go with the tab.
 - `fallbackTab(excluding:)` returns the first tab of `recentTabs` that is listed in the sidebar, is not `excluding`, and is not shown by another window, or nil. It can be another pane of the same split view; the window then shows a placeholder in the pane of the tab it gave up.
 - `isLibraryVisible.didSet` asks the session to mark finished downloads seen.
 - `focusPage` moves keyboard focus only while the selected page is in the window's own `nsWindow`, so a page that another window took in the meantime keeps that window's focus. It gives the focus to the view of the page's engine view that takes the keys, `viewTakingFocus(in:)` (Small window ▸ Closing).
@@ -284,33 +285,28 @@ final class PersonaEngines {
 
 - `EngineRuntime` gains `let personaID: Persona.ID`. `CookieSync.swift` does not change: within one Persona, each engine kind has one runtime.
 
-`TabSheetQueue` (new, internal, `TabSheetQueue.swift`, moved out of the session)
+`TabPromptQueue` (internal, `TabPromptQueue.swift`, in place of the earlier `TabSheetQueue`)
 
 ```swift
-/// A sheet a tab asked for.
-struct TabSheet {
-    let tabID: UUID
-    let alert: NSAlert
-    let isPageDialog: Bool
-    let completion: (NSApplication.ModalResponse) -> Void
-}
-
-/// Sheets that tabs asked for, oldest first per tab. A window shows one of them at a time (`BrowserWindowModel.visibleSheet`), for a tab on its screen.
-final class TabSheetQueue {
-    /// The open browser windows, which the session supplies.
-    var windows: () -> [BrowserWindowModel] = { [] }
-    func enqueue(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool, completion: @escaping (NSApplication.ModalResponse) -> Void)
-    /// Each window that has an AppKit window and shows no sheet, a tab's or another such as a Persona prompt, shows the oldest waiting sheet of its `tabsOnScreen`, the selected tab's first. The window controller calls it again once a sheet has left the window.
-    func showNext()
-    /// Puts away the window's sheet once its tab has left the window's screen. It shows again first when a window shows its tab.
-    func deferSheet(of window: BrowserWindowModel)
-    func cancel(for tab: Tab, pageDialogsOnly: Bool = false)
-    func cancelAll()
+/// The prompts tabs asked for, oldest first per tab. A window shows a tab's oldest prompt as a card over the tab's pane while the tab is on its screen.
+final class TabPromptQueue: ObservableObject {
+    @Published private(set) var waiting: [UUID: [PromptState]]
+    private(set) var isAccepting: Bool
+    func enqueue(_ content: PromptContent, for tabID: UUID, completion: @escaping (PromptResponse) -> Void)
+    func current(for tabID: UUID) -> PromptState?
+    func hasPrompt(for tabID: UUID?) -> Bool
+    /// The prompt leaves the queue before its completion runs; a second answer or an unknown prompt does nothing.
+    func answer(_ id: PromptState.ID, with answer: PromptAnswer)
+    /// Ends the tab's prompts without the user, oldest first, or only its page dialogs.
+    func dismiss(tabID: UUID, pageDialogsOnly: Bool = false)
+    /// Quitting: ends every prompt, and every new one at once, until `reopen()`.
+    func close()
+    func reopen()
 }
 ```
 
-- The deferral response, the page-dialog flag, and the permission waiters keep today's rules. AppKit calls a sheet's completion handler before `endSheet` takes the sheet off its window, so the handler of a deferred sheet only puts it back in its queue, and the code that deferred it calls `showNext()` once `deferSheet(of:)` has returned. `isQuitting` stays on the session, whose `enqueueSheet` answers `.cancel` at once while the app quits.
-- `canPrint` and `canClearSiteData` read the window's `nsWindow?.attachedSheet`, so the queue needs no query of its own.
+- The queue knows no window. A pane shows its tab's prompt while the tab is in its window's `tabsOnScreen` and no internal page covers it (`PromptPresentation`), so the prompts of a tab that moves to another window go with it, and the cards of different tabs show at once in different panes and windows. The permission waiters keep their rules. `isQuitting` stays on the session, which closes the queue while the app quits and opens it again when a window's own sheet stops the quit.
+- `canPrint` and `canClearSiteData` read the window's `nsWindow?.attachedSheet` for window sheets, such as the print panel, and the queue for the selected tab's prompt.
 
 `DevToolsDockSettings` (new, in `DevToolsDock.swift`)
 
@@ -595,13 +591,13 @@ Monitors
 Engine and tab events
 - A popup opens in its opener's space and Persona, owned by the opener's runtime. When a window shows the opener, the popup is selected there; from step 11, a small window's popup opens in a new small window (open decision 11). Otherwise it opens unread in the background, as today.
 - Open Link in New Tab opens unread in the background of the page's space, as today; for a small-window tab, that is its destination space.
-- `requestSelection`, which a leave-page sheet uses on close, shows the page the sheet asks about. The window that shows the tab selects it when it is another pane there, or closes the internal page over it when it is selected already. Otherwise the sidebar target selects it. A favorite's tab keeps a window's current space, so it goes to the front main window of its Persona instead, or to the sidebar target moved to the Persona's preferred space.
+- `requestSelection`, which a leave-page card uses on close, shows the page the card asks about. The window that shows the tab selects it when it is another pane there, or closes the internal page over it when it is selected already. Otherwise the sidebar target selects it. A favorite's tab keeps a window's current space, so it goes to the front main window of its Persona instead, or to the sidebar target moved to the Persona's preferred space.
 - Page fullscreen goes to the window that shows the tab. A tab that no window shows exits fullscreen at once.
 - Closing a tab that windows show makes each of them pick its fallback (window rule 3).
 - `deleteSpace` moves the tabs to a neighbor space in the same Persona and switches every window on the deleted space there.
 - Archiving treats every shown tab as active.
 - Now Playing follows `focusedTabID`. AppleScript's `active tab` is `focusedTab`, and `tabs` lists sidebar order (spaces in Persona order), then small-window tabs.
-- Closing a window runs `prepareToClose()`, in order: stop the page reader's replies about its tabs, dismiss the palette, hide find, cancel region capture, exit page fullscreen, close the preview panel and the question popover, empty `shownTabIDs` and defer the visible sheet, and `devToolsDock.track(nil)`. Then the session keeps the window's record, removes the model, lets the other windows take the panes it showed and show their sheets, and updates the focused tab; the change of `windows` schedules a save. When code closes a window, as Move to Main Window does, `close()` first ends a sheet that `TabSheetQueue` does not show with Cancel, and `prepareToClose()` defers the queue's sheet before AppKit takes it away, so that the sheet waits for a window that shows its tab. Persona deletion closes its small windows through `closeTab`, which first cancels the tab's sheets.
+- Closing a window runs `prepareToClose()`, in order: stop the page reader's replies about its tabs, dismiss the palette, hide find, cancel region capture, exit page fullscreen, close the preview panel and the question popover, empty `shownTabIDs`, and `devToolsDock.track(nil)`. The tabs keep their prompts. Then the session keeps the window's record, removes the model, lets the other windows take the panes it showed, which show their tabs' cards, and updates the focused tab; the change of `windows` schedules a save. When code closes a window, as Move to Main Window does, `close()` first ends any sheet on the window with Cancel; the tabs' prompts are cards that stay with their tabs and wait for a window that shows them. Persona deletion closes its small windows through `closeTab`, which first ends the tab's prompts without the user.
 
 ## Small window (III.7)
 
@@ -610,25 +606,25 @@ When
 
 The tab
 - Its destination space is the last main window's current space when the small window opens, or the last closed main window's, or the first space. Its Persona is that space's (open decision 6). It uses the default engine.
-- `isInSmallWindow` is true. The tab stays in `session.tabs`, so sheets, permissions, downloads, zoom, crash notices, Now Playing, and the close log work.
+- `isInSmallWindow` is true. The tab stays in `session.tabs`, so prompts, permissions, downloads, zoom, crash notices, Now Playing, and the close log work.
 - `isListedInSidebar` keeps it out of `tabs(in:pinned:)` (and with it the sidebar, ⌘-numbers, `orderedTabs`, `moveSelectedTab`, and AppleScript's space order), `closeOtherTabs`, the `closeTab` fallback, `recentTabs`, the `switchToSpace` candidates, `openFavorite`'s reuse, the palette's matching tabs, the restore fallback, and archiving. `deleteSpace` moves it with its space. `snapshot()` writes it as an open tab of its destination space.
 - A main window never selects it. Selecting it explicitly runs Move to Main Window instead.
 
 The window
 - 900×640. The first is centered on the screen with the pointer, and later ones cascade from it. The window is made key and ordered front, then the app activates with `NSRunningApplication.current.activate(options: [])`. Without `.activateAllWindows`, only the key and main windows come forward (checked in step 11).
-- `SmallWindowView`: one row on the traffic-light line with the site's icon and host, which opens the palette like ⌘L, back, forward, reload or stop, share, and a Move to Main Window button (`arrow.up.left.and.arrow.down.right`, with its shortcut in the tooltip). Below it, `PageAreaView` over the window material with the destination space's tint, which is the window's current space. Find, sheets, page fullscreen, the developer tools (with this window's dock), the page reader, the question popover, the preview panel, and the ⌘L palette in edit mode work. The palette lists no tabs to switch to, because the window shows only its own. Sidebar commands go to the main window, which comes forward. ⌃Tab passes to the page, and Close Other Tabs is disabled.
+- `SmallWindowView`: one row on the traffic-light line with the site's icon and host, which opens the palette like ⌘L, back, forward, reload or stop, share, and a Move to Main Window button (`arrow.up.left.and.arrow.down.right`, with its shortcut in the tooltip). Below it, `PageAreaView` over the window material with the destination space's tint, which is the window's current space. Find, prompt cards, page fullscreen, the developer tools (with this window's dock), the page reader, the question popover, the preview panel, and the ⌘L palette in edit mode work. The palette lists no tabs to switch to, because the window shows only its own. Sidebar commands go to the main window, which comes forward. ⌃Tab passes to the page, and Close Other Tabs is disabled.
 - A page that the small window's page or its preview opens, and the preview's Open in Tab, open in another small window (`showOpenedPage`, open decision 11).
 
 Move to Main Window (the button, Window ▸ Move to Main Window, ⌥⌘N)
 1. Clear `isInSmallWindow` and move the tab to the end of its destination space's open tabs. That space is still there, because `deleteSpace` moves a small window's tab with its space, so `preferredSpace(in:)` is not needed.
-2. The sidebar target selects the tab, which applies window rule 2: the small window gives it up by closing (its sheet is deferred, page fullscreen ends, its dock lets the tools go), then the main window shows the tab and its sheet. The view moves without a reload.
+2. The sidebar target selects the tab, which applies window rule 2: the small window gives it up by closing (page fullscreen ends, its dock lets the tools go), then the main window shows the tab and its prompt card, with the text typed into the card. The view moves without a reload.
 3. The main window comes forward with the page focused.
 - Main windows reach no small window's tab: every explicit selection in a main window goes through lists that `isListedInSidebar` filters, so the rule that selecting it runs Move to Main Window needs no code of its own.
 
 Closing
 - Closing a small window asks to close its tab, so a Chromium page with a `beforeunload` handler can ask to stay. The tab goes to the closed list, and ⇧⌘T reopens it in the main window. A small window whose tab closes for any reason closes with it.
 - A page that closes itself with `window.close()` closes its small window at once on both engines. A Chromium tab closes only at `OnBeforeClose`, once CEF's view is released (Facts for plan task I.14), so the window's focus must not keep that view. `focusPage` gives the focus to the view that takes the keys, `viewTakingFocus(in:)`: the engine view when it takes focus, as WebKit's page view does, or else the topmost visible view inside it that does, which on Chromium is the current page's view within CEF's view, the view CEF focuses itself. Visible first, because a page that a tab left for another site keeps its hidden view above the current one while it is in the back-forward cache; while every such view is hidden, as before Chromium shows a new page's view, the topmost one. Keys then reach the page, and the app never makes CEF's view the first responder. The bridge's `DetachBrowserView` makes a closing page that has the focus give it up and, once its view has left the window, updates the windows at once, as Chromium's page view does when it goes, so AppKit does not wait for the app's next event to let go of it. Both apply to every Chromium page in every window. Reporting a page's own close to the session at `DoClose`, before CEF has closed the browser, would hide the wait instead: the session would release the bridge's browser object before `OnBeforeClose`, which takes the browser out of the extensions' windows, and the browser would stay open, unseen, until AppKit let go of its view.
-- AppKit would take a sheet away unanswered when code closes its window, so `BrowserWindowModel.close()` first ends a sheet that `TabSheetQueue` does not show, the print panel or Export as PDF's save panel, with Cancel. A download's save panel therefore never opens as a sheet on a small window, which a download-only tab closes on the next turn of the run loop; it opens as a panel of its own.
+- AppKit would take a sheet away unanswered when code closes its window, so `BrowserWindowModel.close()` first ends a sheet on the window, the print panel or Export as PDF's save panel, with Cancel; the tab's prompt cards are no sheets and go with the tab. A download's save panel therefore never opens as a sheet on a small window, which a download-only tab closes on the next turn of the run loop; it opens as a panel of its own.
 
 Preference
 - Settings ▸ General: "Open links from other apps in a small window when Arch is in the background", stored under `ARCHOpensLinksInSmallWindow` (`BrowserSession.opensLinksInSmallWindowKey`), on while nothing is saved. `application(_:open:)` reads it as each link arrives, so a change applies to the next link. Off restores the behavior from before step 11: every link opens a tab in the sidebar target, which comes forward from behind a small window that is still open.
@@ -642,7 +638,7 @@ Preference
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
   - The window title adds the Persona's name.
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.
-  - The Clear Site Data sheet names the Persona: "…removed from both engines in the Persona “Work”…".
+  - The Clear Site Data card names the Persona and space in its first row, as "Work / Research", and says that the data goes "…from both engines for every space of this Persona…".
 - Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the window the command acts on: the window of the space menu, or for the Spaces menu the sidebar target, which comes forward from behind a small window; an empty name changes nothing. The Spaces menu's items act on the sidebar target's Persona. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
 - Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the drop target filter in `SpaceTabsView` uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette and the tab switcher list only tabs of the window's Persona, and palette commands run through its plugins. A page that a page or a preview opens joins a space of its own Persona, the window's current space or else `preferredSpace(in:)`, as does Open Link in New Tab from a favorite's page.
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:

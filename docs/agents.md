@@ -636,7 +636,7 @@ An in-app session's scope contains registrable domains: the sites of tabs attach
 | P6 | A download from an agent tab (`shouldDownload`) | Asks, with Allow Downloads from This Site for This Session |
 | P7 | A file input or a file chooser in an agent tab | Refused until VII.22; then asks, and the user picks the file in `NSOpenPanel`; the agent never names a local path |
 | P8 | A permission request (camera, microphone, location, screen, notifications, and others) from an agent tab | Denied without asking; the result tells the agent to hand the tab to the user |
-| P9 | A `confirm`, `prompt`, or leave-page dialog, or HTTP authentication, in an agent tab | The user answers in Arch's own sheet; the agent waits and sees the dialog's text as untrusted |
+| P9 | A `confirm`, `prompt`, or leave-page dialog, or HTTP authentication, in an agent tab | The user answers in Arch's own card over the agent tab's pane; the agent waits, learning of the prompt through `TabPromptQueue.hasPrompt(for:)` and `current(for:)`, and sees the dialog's text as untrusted |
 | P10 | An `alert` in an agent tab | Dismissed and reported as an event |
 | P11 | A link to another app (`openExternally`) from an agent tab | Asks, naming the app |
 | P12 | Any interaction in a tab the user shared | Asks every time, whatever the mode |
