@@ -1,5 +1,6 @@
-// The skill installer in a temporary home folder, never the user's own skill folders: the targets' folders from the home folder, `CLAUDE_CONFIG_DIR`, and `CODEX_HOME`; `--path` folders; refusal of folders inside an app bundle; copies written and recognized as current or outdated; folders, files, and links that are not Arch's left alone, with no destination written when one of them is; removal of Arch's folders only; and an in-app session's skill folder.
+// The skill installer in a temporary home folder, never the user's own skill folders: the targets' folders from `HOME` or the account's home folder, `CLAUDE_CONFIG_DIR`, and `CODEX_HOME`; `--path` folders; refusal of folders inside an app bundle; copies written and recognized as current or outdated; folders, files, and links that are not Arch's, and Arch's copies changed since, left alone, with no destination written when one of them is; removal of Arch's folders only; and an in-app session's skill folder.
 import AgentControl
+import CryptoKit
 import Darwin
 import Foundation
 import Testing
@@ -26,7 +27,7 @@ private final class TemporarySkills {
     }
 
     func installer(_ environment: [String: String] = [:]) -> AgentSkillInstaller {
-        AgentSkillInstaller(homeFolder: home, environment: environment)
+        AgentSkillInstaller(accountHomeFolder: home, environment: environment)
     }
 
     func write(_ text: String, to url: URL) throws {
@@ -51,16 +52,38 @@ private let skill = AgentHarness.entrySkill(cliPath: "/Applications/Arch.app/Con
         #expect(file.path == place.home.appendingPathComponent(".claude/skills/arch-browser/SKILL.md").path)
     }
 
+    @Test func homeMovesEveryTargetAsTheToolsReadIt() throws {
+        let place = try TemporarySkills()
+        // HOME comes before the account's home folder, as Claude Code and Codex take it.
+        let installer = place.installer(["HOME": place.other.path + "/"])
+        let paths = try AgentSkillInstaller.Target.allCases.map { try installer.destination(for: .target($0), skillName: skill.name).skillsFolder.path }
+        #expect(paths == [".claude/skills", ".agents/skills", ".codex/skills"].map { place.other.appendingPathComponent($0).path })
+        #expect(try place.installer(["HOME": ""]).destination(for: .target(.codex), skillName: skill.name).skillsFolder.path == place.home.appendingPathComponent(".agents/skills").path)
+        #expect(throws: AgentSkillInstaller.Failure.notAbsolute(variable: "HOME", value: "home")) {
+            try place.installer(["HOME": "home"]).destination(for: .target(.codex), skillName: skill.name)
+        }
+        // A target whose variable is set and --path do not use HOME.
+        let moved = place.installer(["HOME": "home", "CLAUDE_CONFIG_DIR": place.other.appendingPathComponent("claude").path])
+        #expect(try moved.destination(for: .target(.claude), skillName: skill.name).skillsFolder.path == place.other.appendingPathComponent("claude/skills").path)
+        #expect(try moved.destination(for: .path(place.other.path), skillName: skill.name).skillsFolder.path == place.other.path)
+    }
+
     @Test func claudeConfigDirAndCodexHomeMoveTheirTargets() throws {
         let place = try TemporarySkills()
-        let installer = place.installer(["CLAUDE_CONFIG_DIR": place.other.appendingPathComponent("claude").path, "CODEX_HOME": "~/codex-home"])
+        let installer = place.installer(["CLAUDE_CONFIG_DIR": place.other.appendingPathComponent("claude").path, "CODEX_HOME": place.other.appendingPathComponent("codex-home").path])
         #expect(try installer.destination(for: .target(.claude), skillName: skill.name).skillsFolder.path == place.other.appendingPathComponent("claude/skills").path)
-        #expect(try installer.destination(for: .target(.codexHome), skillName: skill.name).skillsFolder.path == place.home.appendingPathComponent("codex-home/skills").path)
+        #expect(try installer.destination(for: .target(.codexHome), skillName: skill.name).skillsFolder.path == place.other.appendingPathComponent("codex-home/skills").path)
         // CODEX_HOME moves only Codex's own folder; ~/.agents/skills stays in the home folder.
         #expect(try installer.destination(for: .target(.codex), skillName: skill.name).skillsFolder.path == place.home.appendingPathComponent(".agents/skills").path)
         #expect(try place.installer(["CLAUDE_CONFIG_DIR": ""]).destination(for: .target(.claude), skillName: skill.name).skillsFolder.path == place.home.appendingPathComponent(".claude/skills").path)
-        #expect(throws: AgentSkillInstaller.Failure.notAbsolute(variable: "CODEX_HOME", value: "codex")) {
-            try place.installer(["CODEX_HOME": "codex"]).destination(for: .target(.codexHome), skillName: skill.name)
+        // The tools use the value as it is, so a relative path or a leading ~ leaves the folder they read unclear.
+        for value in ["codex", "~", "~/codex-home"] {
+            #expect(throws: AgentSkillInstaller.Failure.notAbsolute(variable: "CODEX_HOME", value: value)) {
+                try place.installer(["CODEX_HOME": value]).destination(for: .target(.codexHome), skillName: skill.name)
+            }
+        }
+        #expect(throws: AgentSkillInstaller.Failure.notAbsolute(variable: "CLAUDE_CONFIG_DIR", value: "~/.claude-work")) {
+            try place.installer(["CLAUDE_CONFIG_DIR": "~/.claude-work"]).destination(for: .target(.claude), skillName: skill.name)
         }
         #expect(AgentSkillInstaller.Failure.notAbsolute(variable: "CODEX_HOME", value: "codex").exitCode == .usage)
     }
@@ -113,10 +136,12 @@ private let skill = AgentHarness.entrySkill(cliPath: "/Applications/Arch.app/Con
         let place = try TemporarySkills()
         let installer = place.installer()
         let destination = try installer.destination(for: .target(.claude), skillName: skill.name)
-        // A copy from an Arch elsewhere, and one in an older format that Finder visited.
+        // A copy from an Arch elsewhere, and one in an older format, with its digest, that Finder visited.
         try installer.install(AgentHarness.entrySkill(cliPath: "/Users/someone/Old/Arch.app/Contents/Helpers/arch-cli"), at: [destination])
         #expect(installer.state(of: destination, skill: skill) == .outdated)
-        try place.write("---\nname: arch-browser\ndescription: Old.\n---\narch-skill-version: 0\n\nOld text.\n", to: destination.file)
+        let older = "---\nname: arch-browser\ndescription: Old.\n---\narch-skill-version: 0\n\nOld text.\n"
+        let digest = SHA256.hash(data: Data(older.utf8)).map { String(format: "%02x", $0) }.joined()
+        try place.write(older.replacingOccurrences(of: "version: 0", with: "version: 0 sha256=\(digest)"), to: destination.file)
         try place.write("", to: destination.folder.appendingPathComponent(".DS_Store"))
         #expect(installer.state(of: destination, skill: skill) == .outdated)
         try installer.install(skill, at: [destination])
@@ -170,6 +195,23 @@ private let skill = AgentHarness.entrySkill(cliPath: "/Applications/Arch.app/Con
         #expect(try cases.installer().remove(at: empty) == false)
         try cases.installer().install(skill, at: [empty])
         #expect(cases.installer().state(of: empty, skill: skill) == .current)
+    }
+
+    @Test func aCopyChangedSinceArchWroteItStays() throws {
+        let place = try TemporarySkills()
+        let installer = place.installer()
+        let claude = try installer.destination(for: .target(.claude), skillName: skill.name)
+        let other = try installer.destination(for: .path(place.other.path), skillName: skill.name)
+        // The user's note in Arch's copy, which keeps the version line.
+        try installer.install(skill, at: [claude])
+        let edited = skill.markdown + "My own note.\n"
+        try place.write(edited, to: claude.file)
+        #expect(installer.state(of: claude, skill: skill) == .modified)
+        #expect(throws: AgentSkillInstaller.Failure.modifiedSkill(claude.folder.path)) { try installer.install(skill, at: [other, claude]) }
+        #expect(throws: AgentSkillInstaller.Failure.modifiedSkill(claude.folder.path)) { try installer.remove(at: claude) }
+        #expect(place.read(claude.file) == edited)
+        #expect(installer.state(of: other, skill: skill) == .absent)
+        #expect(AgentSkillInstaller.Failure.modifiedSkill("x").exitCode == .refused)
     }
 
     @Test func removeDeletesOnlyArchsFolders() throws {

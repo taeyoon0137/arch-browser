@@ -1,7 +1,13 @@
-// The harness: every guide topic the design names, the tool names and statuses the topics use, the MCP instructions within 2,000 characters, the skills made from the same text with front matter of only `name` and `description` and the version line first, the version line check, and the `guide` tool's results.
+// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the MCP instructions within 2,000 characters, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
 import AgentControl
+import CryptoKit
 import Foundation
 import Testing
+
+/// The hex SHA-256 digest of a text's UTF-8 bytes, computed here as the design describes it.
+private func sha256(_ text: String) -> String {
+    SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+}
 
 /// A `SKILL.md`'s front matter as key and raw value, its body's lines, or nil without front matter.
 private func parts(_ markdown: String) -> (frontMatter: [(String, String)], body: [Substring])? {
@@ -25,9 +31,12 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
     let description = try AgentJSON.decode(Data(parsed.frontMatter[1].1.utf8)).stringValue
     #expect(description == skill.description)
     #expect(skill.description.count <= 1_024)
-    #expect(parsed.body.first.map(String.init) == AgentSkill.versionLine)
+    // The version line carries the digest of the same text with the bare version line.
+    let versionLine = try #require(parsed.body.first.map(String.init))
     #expect(AgentSkill.versionLine == "arch-skill-version: 1")
-    #expect(AgentSkill.isArchs(skill.markdown))
+    let bare = skill.markdown.replacingOccurrences(of: versionLine, with: AgentSkill.versionLine)
+    #expect(versionLine == "\(AgentSkill.versionLine) sha256=\(sha256(bare))")
+    #expect(AgentSkill.origin(of: skill.markdown) == .archs)
     #expect(skill.markdown.hasSuffix("\n") && !skill.markdown.hasSuffix("\n\n"))
     return try #require(description)
 }
@@ -48,23 +57,58 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(AgentHarness.instructions.utf8.count <= AgentLimits.resultTextBytes)
     }
 
-    @Test func topicsNameOnlyTheCatalogsToolsParametersAndValues() {
+    @Test func topicsNameOnlyTheCatalogsToolsParametersAndValues() throws {
+        func values(_ parameter: AgentToolParameter) -> [String] {
+            switch parameter.kind {
+            case .choice(let values), .list(let values?): return values
+            default: return []
+            }
+        }
         // Words with an underscore, such as hand_to_user or max_chars, must be the catalog's.
         var known = Set(AgentToolCatalog.tools.map(\.name))
         for tool in AgentToolCatalog.tools {
             for parameter in tool.parameters {
                 known.insert(parameter.name)
-                switch parameter.kind {
-                case .choice(let values), .list(let values?): known.formUnion(values)
-                default: break
-                }
+                known.formUnion(values(parameter))
             }
         }
         let texts = [AgentHarness.instructions, AgentHarness.mcpInstructions] + AgentGuideTopic.allCases.map(\.text)
-        for text in texts {
-            let words = text.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "_") }).filter { $0.contains("_") }
-            for word in words {
-                #expect(known.contains(String(word)), "\(word)")
+        let words = Set(texts.flatMap { $0.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "_") }).map(String.init) })
+        for word in words where word.contains("_") {
+            #expect(known.contains(word), "\(word)")
+        }
+        // The other names the texts use, without an underscore: each must be the named tool's parameter or value, and stays listed only while a text names it.
+        let uses: [(tool: String, parameter: String?, values: [String])] = [
+            ("guide", "topic", []),
+            ("navigate", nil, []),
+            ("click", nil, []),
+            ("screenshot", nil, []),
+            ("open_tab", "ref", []),
+            ("open_tab", "tab", []),
+            ("snapshot", "mode", ["interactive", "full"]),
+            ("snapshot", "ref", []),
+            ("snapshot", "diff", []),
+            ("read_text", "offset", []),
+            ("type", "ref", []),
+            ("type", "replace", []),
+            ("type", "submit", []),
+            ("wait_for", "text", []),
+            ("wait_for", "url", []),
+            ("wait_for", "ref", []),
+            ("wait_for", "load", []),
+            ("list_tabs", "scope", ["shared"]),
+            ("request_approval", "kind", ["purchase", "send", "delete", "download", "other"]),
+            ("hand_to_user", "reason", ["sign_in", "verification", "payment"]),
+        ]
+        for use in uses {
+            let tool = try #require(AgentToolCatalog.tool(named: use.tool), "\(use.tool)")
+            #expect(words.contains(use.tool), "\(use.tool)")
+            guard let name = use.parameter else { continue }
+            let parameter = try #require(tool.parameters.first { $0.name == name }, "\(use.tool) \(name)")
+            #expect(words.contains(name), "\(use.tool) \(name)")
+            for value in use.values {
+                #expect(values(parameter).contains(value), "\(use.tool) \(name) \(value)")
+                #expect(words.contains(value), "\(use.tool) \(name) \(value)")
             }
         }
     }
@@ -126,18 +170,28 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(try checkSkill(skill) == skill.description)
     }
 
-    @Test func theVersionLineMarksArchsSkills() {
-        #expect(AgentSkill.isArchs("---\nname: a\ndescription: \"b\"\n---\narch-skill-version: 1\n\nText.\n"))
-        #expect(AgentSkill.isArchs("---\nname: a\n---\narch-skill-version: 12"))
+    @Test func theVersionLineMarksArchsSkillsAndItsDigestShowsChanges() {
+        let skill = AgentSkill(name: "a", description: "b", body: "Text.")
+        #expect(AgentSkill.origin(of: skill.markdown) == .archs)
+        // Another format version with its digest is Arch's too.
+        let bare = "---\nname: a\n---\narch-skill-version: 12\n\nText.\n"
+        #expect(AgentSkill.origin(of: bare.replacingOccurrences(of: "version: 12", with: "version: 12 sha256=\(sha256(bare))")) == .archs)
+        // Arch's version line with a line added, the body or front matter edited, a wrong digest, or none.
+        #expect(AgentSkill.origin(of: skill.markdown + "My note.\n") == .modified)
+        #expect(AgentSkill.origin(of: skill.markdown.replacingOccurrences(of: "Text.", with: "Mine.")) == .modified)
+        #expect(AgentSkill.origin(of: skill.markdown.replacingOccurrences(of: "name: a", with: "name: c")) == .modified)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---\narch-skill-version: 1 sha256=00\n\nText.\n") == .modified)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---\narch-skill-version: 1 mine\n\nText.\n") == .modified)
+        #expect(AgentSkill.origin(of: bare) == .modified)
         // Without front matter, without the line, with another line first, in the front matter, or with no number.
-        #expect(!AgentSkill.isArchs("arch-skill-version: 1\n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\ndescription: b\n---\n# A skill of the user's\n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\n---\n\narch-skill-version: 1\n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\narch-skill-version: 1\n---\nText.\n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\n---\narch-skill-version: \n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\n---\narch-skill-version: 1a\n"))
-        #expect(!AgentSkill.isArchs("---\nname: a\n---"))
-        #expect(!AgentSkill.isArchs(""))
+        #expect(AgentSkill.origin(of: "arch-skill-version: 1\n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\ndescription: b\n---\n# A skill of the user's\n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---\n\narch-skill-version: 1\n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\narch-skill-version: 1\n---\nText.\n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---\narch-skill-version: \n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---\narch-skill-version: 1a\n") == .other)
+        #expect(AgentSkill.origin(of: "---\nname: a\n---") == .other)
+        #expect(AgentSkill.origin(of: "") == .other)
     }
 
     @Test func theGuideToolGivesTheGuideOrATopic() throws {

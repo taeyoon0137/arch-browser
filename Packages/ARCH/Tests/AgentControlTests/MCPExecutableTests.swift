@@ -1,4 +1,4 @@
-// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. These copies run outside an app bundle, so `ARCH_AGENT_TEST_SOCKET` moves their socket to a path in the temporary folder where nothing listens, and a running Arch never sees them: the lists come from the catalog and tool calls end in the not-running error result. The `skills` commands run from a copy in a scratch app bundle, with `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `--path` in the temporary folder, so they never write the user's own skill folders; they connect to no socket. `swift build` writes the executable beside this test bundle and must run before `swift test`.
+// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. These copies run outside an app bundle, so `ARCH_AGENT_TEST_SOCKET` moves their socket to a path in the temporary folder where nothing listens, and a running Arch never sees them: the lists come from the catalog and tool calls end in the not-running error result. The `skills` commands run from a copy in a scratch app bundle, with `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `--path` in the temporary folder, so they never write the user's own skill folders; they connect to no socket. `swift build` writes the executable beside this test bundle and must run before `swift test`.
 import AgentControl
 import Foundation
 import Testing
@@ -156,7 +156,7 @@ private let codexStart = [
         try FileManager.default.copyItem(at: try builtExecutable(), to: layout.cliExecutableURL)
         let folder = root.appendingPathComponent("skills", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let environment = ["CLAUDE_CONFIG_DIR": root.appendingPathComponent("claude").path, "CODEX_HOME": root.appendingPathComponent("codex").path]
+        let environment = ["HOME": root.path, "CLAUDE_CONFIG_DIR": root.appendingPathComponent("claude").path, "CODEX_HOME": root.appendingPathComponent("codex").path]
         let places = ["--target", "claude", "--target", "codex-home", "--path", folder.path]
         let files = ["claude/skills", "codex/skills", "skills"].map { root.appendingPathComponent($0).appendingPathComponent("arch-browser/SKILL.md") }
         let skill = AgentHarness.entrySkill(cliPath: layout.cliExecutableURL.path)
@@ -171,24 +171,46 @@ private let codexStart = [
         let list = try run(layout.cliExecutableURL, ["skills", "list"] + places, environment: environment, input: [], json: false)
         #expect(list.status == 0)
         #expect(list.output.components(separatedBy: "Installed, with this Arch's text.").count == 4, "\(list.output)")
+        // Without a place, list names the three targets; codex's folder is under HOME.
+        let targets = try run(layout.cliExecutableURL, ["skills", "list"], environment: environment, input: [], json: false)
+        #expect(targets.status == 0)
+        #expect(targets.output.contains("Codex: \(root.appendingPathComponent(".agents/skills/arch-browser").path)\n  Not installed."), "\(targets.output)")
 
-        // A foreign folder stops install before anything is written and stays at remove, which exits 4 after removing the others.
+        // A foreign folder in the last place stops install before any path is listed or written: the first place keeps its older copy, and the second stays absent.
         try FileManager.default.removeItem(at: files[2])
         try Data("my notes".utf8).write(to: files[2].deletingLastPathComponent().appendingPathComponent("notes.md"))
-        try Data("old".utf8).write(to: files[0])
+        let older = AgentHarness.entrySkill(cliPath: "/Other/Arch.app/Contents/Helpers/arch-cli").markdown
+        try Data(older.utf8).write(to: files[0])
+        try FileManager.default.removeItem(at: files[1].deletingLastPathComponent())
         let refused = try run(layout.cliExecutableURL, ["skills", "install"] + places, environment: environment, input: [], json: false)
         #expect(refused.status == AgentExitCode.refused.rawValue)
         #expect(refused.errors.contains("Arch did not write"))
-        #expect((try? String(contentsOf: files[0], encoding: .utf8)) == "old")
-        // An Arch copy of other text is listed as outdated.
-        try Data(AgentHarness.entrySkill(cliPath: "/Other/Arch.app/Contents/Helpers/arch-cli").markdown.utf8).write(to: files[0])
+        #expect(!refused.output.contains("Writing"), "\(refused.output)")
+        #expect((try? String(contentsOf: files[0], encoding: .utf8)) == older)
+        #expect(!FileManager.default.fileExists(atPath: files[1].deletingLastPathComponent().path))
+        // An Arch copy of other text is listed as outdated, and one changed since Arch wrote it as changed.
         let outdated = try run(layout.cliExecutableURL, ["skills", "list", "--target", "claude"], environment: environment, input: [], json: false)
         #expect(outdated.output.contains("older than this Arch"))
-        let remove = try run(layout.cliExecutableURL, ["skills", "remove"] + places, environment: environment, input: [], json: false)
+        try Data((older + "My note.\n").utf8).write(to: files[0])
+        let modified = try run(layout.cliExecutableURL, ["skills", "list", "--target", "claude"], environment: environment, input: [], json: false)
+        #expect(modified.output.contains("changes made after Arch wrote it"), "\(modified.output)")
+        try Data(older.utf8).write(to: files[0])
+
+        // remove processes every place: a missing --path folder and the foreign folder are reported after Arch's copy is removed, with the higher exit code.
+        let missing = root.appendingPathComponent("missing").path
+        let remove = try run(layout.cliExecutableURL, ["skills", "remove", "--path", missing] + places, environment: environment, input: [], json: false)
         #expect(remove.status == AgentExitCode.refused.rawValue)
+        #expect(remove.errors.contains("\(missing) is not a folder."), "\(remove.errors)")
+        #expect(remove.errors.contains("Arch did not write"))
+        #expect(remove.output.contains("Removed \(files[0].deletingLastPathComponent().path)."), "\(remove.output)")
+        #expect(remove.output.contains("No skill of Arch's is at \(files[1].deletingLastPathComponent().path)."), "\(remove.output)")
         #expect(!FileManager.default.fileExists(atPath: files[0].deletingLastPathComponent().path))
-        #expect(!FileManager.default.fileExists(atPath: files[1].deletingLastPathComponent().path))
         #expect(FileManager.default.fileExists(atPath: files[2].deletingLastPathComponent().appendingPathComponent("notes.md").path))
+        // A missing folder before a valid target exits 2 after removing the target's copy.
+        #expect(try run(layout.cliExecutableURL, ["skills", "install", "--target", "codex-home"], environment: environment, input: [], json: false).status == 0)
+        let usage = try run(layout.cliExecutableURL, ["skills", "remove", "--path", missing, "--target", "codex-home"], environment: environment, input: [], json: false)
+        #expect(usage.status == AgentExitCode.usage.rawValue)
+        #expect(!FileManager.default.fileExists(atPath: files[1].deletingLastPathComponent().path))
         let again = try run(layout.cliExecutableURL, ["skills", "remove", "--target", "claude"], environment: environment, input: [], json: false)
         #expect(again.status == 0)
         #expect(again.output.contains("No skill of Arch's is at"))

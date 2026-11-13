@@ -1,4 +1,5 @@
 // The harness tells agents how to work in Arch (docs/agents.md, Harness and skills). String literals let the app and `arch-cli` share the text without a resource bundle: static instructions, guide topics, the summary arch-mcp sends as its `instructions`, and skills made from the same text. These include the entry skill that `arch-cli skills install` writes for outside agents and the topic skills in an in-app session's own skill folder (agent decision 16). The `guide` tool and `arch-cli guide` return the same instructions and topics.
+import CryptoKit
 import Foundation
 
 /// A guide topic for the `guide` tool, `arch-cli guide <topic>`, and an in-app session's skills.
@@ -40,13 +41,25 @@ public enum AgentGuideTopic: String, CaseIterable, Sendable {
     var isSessionSkill: Bool { self != .cli }
 }
 
-/// A skill for Claude Code and Codex: a folder named after the skill containing `SKILL.md`. Its front matter has only `name` and `description` because the tools check front matter keys. Its body starts with Arch's version line to mark the folder as Arch's.
+/// A skill for Claude Code and Codex: a folder named after the skill containing `SKILL.md`. Its front matter has only `name` and `description` because the tools check front matter keys. Its body starts with Arch's version line, which marks the folder as Arch's and carries a digest that shows whether the text changed after Arch wrote it.
 public struct AgentSkill: Equatable, Sendable {
     public static let fileName = "SKILL.md"
     /// The format of the skills Arch writes.
     public static let formatVersion = 1
+    /// The version line without its digest.
     public static var versionLine: String { "\(versionPrefix)\(formatVersion)" }
     private static let versionPrefix = "arch-skill-version: "
+    private static let digestPrefix = " sha256="
+
+    /// Who wrote a `SKILL.md`, by its version line.
+    public enum Origin: Equatable, Sendable {
+        /// No version line follows the front matter.
+        case other
+        /// Arch's version line, but the text does not match its digest, as after the user edited the file.
+        case modified
+        /// Arch's text, unchanged since Arch wrote it.
+        case archs
+    }
 
     /// The folder's name and the front matter's `name`: lowercase letters, digits, and hyphens.
     public var name: String
@@ -61,19 +74,33 @@ public struct AgentSkill: Equatable, Sendable {
         self.body = body
     }
 
-    /// `SKILL.md`'s text. The description is a YAML double-quoted string encoded as JSON so no character in it changes the front matter.
+    /// `SKILL.md`'s text. The description is a YAML double-quoted string encoded as JSON so no character in it changes the front matter. The version line ends with ` sha256=` and the hex SHA-256 digest of the same text with the bare version line.
     public var markdown: String {
-        "---\nname: \(name)\ndescription: \(Self.quoted(description))\n---\n\(Self.versionLine)\n\n\(body)\n"
+        let unsigned = text(versionLine: Self.versionLine)
+        return text(versionLine: Self.versionLine + Self.digestPrefix + Self.digest(unsigned))
     }
 
-    /// Whether Arch wrote a `SKILL.md`: front matter followed by a version line of any format version.
-    public static func isArchs(_ markdown: String) -> Bool {
-        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---"), end + 1 < lines.count else { return false }
+    private func text(versionLine: String) -> String {
+        "---\nname: \(name)\ndescription: \(Self.quoted(description))\n---\n\(versionLine)\n\n\(body)\n"
+    }
+
+    /// Who wrote a `SKILL.md`: front matter followed by a version line of any format version marks Arch's, and its digest shows whether the text is still Arch's.
+    public static func origin(of markdown: String) -> Origin {
+        var lines = markdown.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---"), end + 1 < lines.count else { return .other }
         let line = lines[end + 1]
-        guard line.hasPrefix(versionPrefix) else { return false }
-        let number = line.dropFirst(versionPrefix.count)
-        return !number.isEmpty && number.allSatisfy(\.isASCII) && number.allSatisfy(\.isNumber)
+        guard line.hasPrefix(versionPrefix) else { return .other }
+        let rest = line.dropFirst(versionPrefix.count)
+        let number = rest.prefix { $0 != " " }
+        guard !number.isEmpty, number.allSatisfy({ $0.isASCII && $0.isNumber }) else { return .other }
+        let mark = rest.dropFirst(number.count)
+        guard mark.hasPrefix(digestPrefix) else { return .modified }
+        lines[end + 1] = line.prefix(versionPrefix.count + number.count)
+        return mark.dropFirst(digestPrefix.count) == digest(lines.joined(separator: "\n")) ? .archs : .modified
+    }
+
+    private static func digest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func quoted(_ text: String) -> String {

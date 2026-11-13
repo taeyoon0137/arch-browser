@@ -1,15 +1,15 @@
-// Supports `arch-cli skills list`, `install`, and `remove`, and Install, Update, and Remove in Settings ▸ AI ▸ Agents (docs/agents.md, Harness and skills ▸ Skills for outside agents). Copies the entry skill into Claude Code's or Codex's skill folder, or a folder the user names, and writes topic skills into an in-app session's own folder. Copies rather than links let agents read the skills without access to the app bundle. The installer replaces or removes only Arch's folders: folders, not links, containing only a `SKILL.md` with Arch's version line.
+// Supports `arch-cli skills list`, `install`, and `remove`, and Install, Update, and Remove in Settings ▸ AI ▸ Agents (docs/agents.md, Harness and skills ▸ Skills for outside agents). Copies the entry skill into Claude Code's or Codex's skill folder, or a folder the user names, and writes topic skills into an in-app session's own folder. Copies rather than links let agents read the skills without access to the app bundle. The installer replaces or removes only Arch's folders: folders, not links, containing only a `SKILL.md` with Arch's version line and text that matches its digest.
 import Darwin
 import Foundation
 
 public struct AgentSkillInstaller {
     /// A tool's skill folder, named by `--target`. Written only when named.
     public enum Target: String, CaseIterable, Sendable {
-        /// Claude Code's user skills, `${CLAUDE_CONFIG_DIR:-~/.claude}/skills`.
+        /// Claude Code's user skills, `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`.
         case claude
-        /// Codex's user skills in `~/.agents/skills`, also read by other agents.
+        /// Codex's user skills in `$HOME/.agents/skills`, also read by other agents.
         case codex
-        /// Codex's skills under its own folder, `${CODEX_HOME:-~/.codex}/skills`.
+        /// Codex's skills under its own folder, `${CODEX_HOME:-$HOME/.codex}/skills`.
         case codexHome = "codex-home"
 
         public var title: String {
@@ -50,12 +50,14 @@ public struct AgentSkillInstaller {
         case current
         /// Arch's copy with different text, written by an older Arch or a copy at another location.
         case outdated
+        /// Arch's copy changed after Arch wrote it, as by the user, which Arch leaves unchanged.
+        case modified
         /// Something Arch did not write and leaves unchanged.
         case foreign
     }
 
     public enum Failure: Error, Equatable {
-        /// `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is set to a path that is not absolute.
+        /// `HOME`, `CLAUDE_CONFIG_DIR`, or `CODEX_HOME` is set to a path that is not absolute, which the tools do not expand, `~` included.
         case notAbsolute(variable: String, value: String)
         /// The folder lies inside an app bundle, whose signature covers its files.
         case insideAppBundle(String)
@@ -63,6 +65,8 @@ public struct AgentSkillInstaller {
         case notAFolder(String)
         /// The skill's folder was left unchanged because it contains something Arch did not write.
         case foreignFolder(String)
+        /// The skill's folder was left unchanged because its `SKILL.md` changed after Arch wrote it.
+        case modifiedSkill(String)
         case system(String)
 
         /// A one-sentence message for the user.
@@ -72,6 +76,7 @@ public struct AgentSkillInstaller {
             case .insideAppBundle(let path): return "\(path) is inside an app bundle, whose signature covers its files, so arch-cli leaves it alone."
             case .notAFolder(let path): return "\(path) is not a folder."
             case .foreignFolder(let path): return "\(path) holds files that Arch did not write, so arch-cli leaves it alone."
+            case .modifiedSkill(let path): return "\(path) holds Arch's skill with changes made after Arch wrote it, so arch-cli leaves it alone."
             case .system(let detail): return detail
             }
         }
@@ -79,7 +84,7 @@ public struct AgentSkillInstaller {
         public var exitCode: AgentExitCode {
             switch self {
             case .notAbsolute, .insideAppBundle, .notAFolder: return .usage
-            case .foreignFolder: return .refused
+            case .foreignFolder, .modifiedSkill: return .refused
             case .system: return .toolError
             }
         }
@@ -88,12 +93,13 @@ public struct AgentSkillInstaller {
     /// The maximum `SKILL.md` size read to check whether Arch wrote it; Arch's files are a few kilobytes.
     static let largestSkillFile = 1024 * 1024
 
-    public var homeFolder: URL
-    /// The environment supplying `CLAUDE_CONFIG_DIR` and `CODEX_HOME`: the login shell's for the app, the process's for `arch-cli`.
+    /// The home folder from the account database, used when the environment has no `HOME`.
+    public var accountHomeFolder: URL
+    /// The environment supplying `HOME`, `CLAUDE_CONFIG_DIR`, and `CODEX_HOME`: the login shell's for the app, the process's for `arch-cli`.
     public var environment: [String: String]
 
-    public init(homeFolder: URL, environment: [String: String]) {
-        self.homeFolder = homeFolder
+    public init(accountHomeFolder: URL, environment: [String: String]) {
+        self.accountHomeFolder = accountHomeFolder
         self.environment = environment
     }
 
@@ -106,7 +112,7 @@ public struct AgentSkillInstaller {
         case .target(.claude):
             skillsFolder = try folder(variable: "CLAUDE_CONFIG_DIR", default: ".claude").appendingPathComponent("skills", isDirectory: true)
         case .target(.codex):
-            skillsFolder = homeFolder.appendingPathComponent(".agents/skills", isDirectory: true)
+            skillsFolder = try homeFolder().appendingPathComponent(".agents/skills", isDirectory: true)
         case .target(.codexHome):
             skillsFolder = try folder(variable: "CODEX_HOME", default: ".codex").appendingPathComponent("skills", isDirectory: true)
         case .path(let path):
@@ -120,11 +126,19 @@ public struct AgentSkillInstaller {
         return Destination(place: place, skillsFolder: skillsFolder, folder: skillsFolder.appendingPathComponent(skillName, isDirectory: true))
     }
 
-    /// The folder named by a variable, expanding a leading `~` to the home folder, or the home folder's `default`.
+    /// The home folder that Claude Code and Codex read their skill folders under: `HOME`, as both tools take it, or the account database's when `HOME` is unset or empty.
+    private func homeFolder() throws -> URL {
+        try absoluteFolder(variable: "HOME") ?? accountHomeFolder
+    }
+
+    /// The folder named by a variable, or the home folder's `default`.
     private func folder(variable: String, default name: String) throws -> URL {
-        guard let value = environment[variable], !value.isEmpty else { return homeFolder.appendingPathComponent(name, isDirectory: true) }
-        if value == "~" { return homeFolder }
-        if value.hasPrefix("~/") { return homeFolder.appendingPathComponent(String(value.dropFirst(2)), isDirectory: true) }
+        try absoluteFolder(variable: variable) ?? homeFolder().appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// The absolute path a variable holds as the tools use it, without expanding `~`, or nil when it is unset or empty.
+    private func absoluteFolder(variable: String) throws -> URL? {
+        guard let value = environment[variable], !value.isEmpty else { return nil }
         guard value.hasPrefix("/") else { throw Failure.notAbsolute(variable: variable, value: value) }
         return URL(fileURLWithPath: value, isDirectory: true).standardized
     }
@@ -151,6 +165,7 @@ public struct AgentSkillInstaller {
         switch Self.contents(of: destination) {
         case .absent: return .absent
         case .foreign: return .foreign
+        case .modified: return .modified
         case .archs(let text): return text == skill.markdown ? .current : .outdated
         }
     }
@@ -158,6 +173,8 @@ public struct AgentSkillInstaller {
     private enum Contents {
         case absent
         case foreign
+        /// Arch's folder with a `SKILL.md` changed after Arch wrote it.
+        case modified
         /// Arch's folder and its `SKILL.md` text.
         case archs(String)
     }
@@ -176,30 +193,43 @@ public struct AgentSkillInstaller {
               kind(at: destination.file) == .file,
               let size = (try? FileManager.default.attributesOfItem(atPath: destination.file.path))?[.size] as? Int, size <= largestSkillFile,
               let data = try? Data(contentsOf: destination.file),
-              let text = String(data: data, encoding: .utf8),
-              AgentSkill.isArchs(text)
+              let text = String(data: data, encoding: .utf8)
         else { return .foreign }
-        return .archs(text)
+        switch AgentSkill.origin(of: text) {
+        case .other: return .foreign
+        case .modified: return .modified
+        case .archs: return .archs(text)
+        }
     }
 
     // MARK: - Writing and removing
 
-    /// Writes the skill to each destination, replacing Arch's earlier copies. Checks all destinations before writing; if any folder is not Arch's, writes nothing.
-    public func install(_ skill: AgentSkill, at destinations: [Destination]) throws {
-        for destination in destinations where state(of: destination, skill: skill) == .foreign {
-            throw Failure.foreignFolder(destination.folder.path)
+    /// Throws for the first destination that Arch leaves unchanged: a folder Arch did not write, or Arch's copy changed after Arch wrote it.
+    public func checkReplaceable(_ destinations: [Destination]) throws {
+        for destination in destinations {
+            switch Self.contents(of: destination) {
+            case .absent, .archs: break
+            case .foreign: throw Failure.foreignFolder(destination.folder.path)
+            case .modified: throw Failure.modifiedSkill(destination.folder.path)
+            }
         }
+    }
+
+    /// Writes the skill to each destination, replacing Arch's earlier copies. Checks all destinations before writing; if any folder is not Arch's or was changed, writes nothing.
+    public func install(_ skill: AgentSkill, at destinations: [Destination]) throws {
+        try checkReplaceable(destinations)
         for destination in destinations {
             try Self.write(skill, to: destination.folder)
         }
     }
 
-    /// Removes the skill's folder if Arch wrote it and returns whether one was removed. Leaves other folders unchanged and throws.
+    /// Removes the skill's folder if Arch wrote it unchanged and returns whether one was removed. Leaves other folders unchanged and throws.
     @discardableResult
     public func remove(at destination: Destination) throws -> Bool {
         switch Self.contents(of: destination) {
         case .absent: return false
         case .foreign: throw Failure.foreignFolder(destination.folder.path)
+        case .modified: throw Failure.modifiedSkill(destination.folder.path)
         case .archs: break
         }
         do {

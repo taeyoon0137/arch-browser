@@ -253,7 +253,7 @@ enum CLICommands {
             printError("The home folder could not be read.")
             return .internalError
         }
-        let installer = AgentSkillInstaller(homeFolder: home, environment: ProcessInfo.processInfo.environment)
+        let installer = AgentSkillInstaller(accountHomeFolder: home, environment: ProcessInfo.processInfo.environment)
         do {
             switch action {
             case .list:
@@ -269,23 +269,22 @@ enum CLICommands {
                 let skill = AgentHarness.entrySkill(cliPath: layout.cliExecutableURL.path)
                 let destinations = try places.map { try installer.destination(for: $0, skillName: skill.name) }
                 // Refuses before listing paths to write, since nothing will be written.
-                if let foreign = destinations.first(where: { installer.state(of: $0, skill: skill) == .foreign }) {
-                    throw AgentSkillInstaller.Failure.foreignFolder(foreign.folder.path)
-                }
+                try installer.checkReplaceable(destinations)
                 print("Writing the \(skill.name) skill, a copy that names \(layout.cliExecutableURL.path):")
                 for destination in destinations { print("  \(destination.file.path)") }
                 try installer.install(skill, at: destinations)
                 print("Done. New sessions of the tool read it.")
                 return .done
             case .remove:
+                // Every place is processed; the highest exit code among the problems is returned.
                 var code = AgentExitCode.done
                 for place in places {
-                    let destination = try installer.destination(for: place, skillName: AgentHarness.entrySkillName)
                     do {
+                        let destination = try installer.destination(for: place, skillName: AgentHarness.entrySkillName)
                         print(try installer.remove(at: destination) ? "Removed \(destination.folder.path)." : "No skill of Arch's is at \(destination.folder.path).")
                     } catch let failure as AgentSkillInstaller.Failure {
                         printError(failure.message)
-                        code = failure.exitCode
+                        if failure.exitCode.rawValue > code.rawValue { code = failure.exitCode }
                     }
                 }
                 return code
@@ -309,6 +308,7 @@ enum CLICommands {
         case .absent: return "Not installed. arch-cli skills install \(option) writes it."
         case .current: return "Installed, with this Arch's text."
         case .outdated: return "Installed, but older than this Arch or written by a copy of Arch elsewhere. arch-cli skills install \(option) updates it."
+        case .modified: return "Arch's copy with changes made after Arch wrote it, which arch-cli leaves alone."
         case .foreign: return "A folder that Arch did not write, which arch-cli leaves alone."
         }
     }
