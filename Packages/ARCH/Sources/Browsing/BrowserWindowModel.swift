@@ -1,5 +1,6 @@
 // The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and one tab's sheet, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the sheets waiting for their tabs, the page reader's conversations, engines, and persistence.
 // Isolation: AppKit, SwiftUI, and the session use the model on the main thread only. The members that reach the main actor types of `AI` and `Plugins` (the page assistant, page conversations, and plugin managers) are marked `@MainActor`, so only main actor code can call them; the rest stays unmarked, because the session, which calls it, is not isolated yet (`docs/plan.md`, task I.18). A new member follows the same rule. `selectTab(_:)` reaches one of the marked members through `MainActor.assumeIsolated`, which stops the app if it ever runs off the main thread.
+import Agent
 import AI
 import AppKit
 import ARCHEngine
@@ -59,6 +60,8 @@ public final class BrowserWindowModel: ObservableObject {
     }
     /// Whether the page reader shows beside the page.
     @Published public private(set) var isPageReaderVisible = false
+    /// What the agent panel shows in the trailing column in place of the page reader, or nil while it is hidden; only one of the two shows.
+    @Published public private(set) var agentPanel: AgentPanelContent?
     /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
     @Published private(set) var pageQuestion: PageQuestion?
     /// Where the selected tab's developer tools show.
@@ -617,11 +620,51 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`).
     @MainActor public func togglePageReader() {
-        withAnimation(SidebarView.pageSpring) { isPageReaderVisible.toggle() }
+        withAnimation(SidebarView.pageSpring) {
+            isPageReaderVisible.toggle()
+            if isPageReaderVisible { agentPanel = nil }
+        }
         if isPageReaderVisible {
             selectedTab.map(session.pageAssistant.readerDidShow)
         } else {
             session.pageReaderDidHide(in: self)
+        }
+    }
+
+    // MARK: Agent panel
+
+    /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
+    @MainActor public func showAgentComposer(text: String = "") {
+        let space = currentSpace
+        let persona = session.personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
+        let tab = isSelectedPageCovered ? nil : selectedTab.map(BrowserAgentHost.info(of:))
+        showAgentPanel(.composer(AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: tab, text: text)))
+    }
+
+    /// Shows a session in the panel, as a row or the indicator's menu does.
+    @MainActor public func showAgentSession(_ id: UUID) {
+        showAgentPanel(.session(id))
+    }
+
+    /// View ▸ Show Agent Panel: hides the panel, or shows the latest session of the window's current space, or the composer when it has none.
+    @MainActor public func toggleAgentPanel() {
+        guard agentPanel == nil else { return hideAgentPanel() }
+        if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
+            showAgentSession(latest.id)
+        } else {
+            showAgentComposer()
+        }
+    }
+
+    @MainActor public func hideAgentPanel() {
+        withAnimation(SidebarView.pageSpring) { agentPanel = nil }
+    }
+
+    @MainActor private func showAgentPanel(_ content: AgentPanelContent) {
+        if isPageReaderVisible { session.pageReaderDidHide(in: self) }
+        withAnimation(SidebarView.pageSpring) {
+            isPageReaderVisible = false
+            agentPanel = content
         }
     }
 

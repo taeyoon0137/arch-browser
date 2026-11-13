@@ -117,6 +117,8 @@ public final class AIAgentSession {
     /// Messages sent while a turn runs, which start in order after it.
     public private(set) var queuedMessages: [String] = []
     public private(set) var hasEnded = false
+    /// Called right after each CLI process starts, with its process ID, so that the `Agent` module reads its start time for the ticket check as close to the start as it can.
+    public var processDidStart: ((pid_t) -> Void)?
 
     /// Output must start within this and continue within `outputTimeout`; the latter pauses while a host tool call runs.
     var firstOutputTimeout: Duration = .seconds(120)
@@ -189,6 +191,13 @@ public final class AIAgentSession {
     /// Sends the user's message. The first carries the user's words and the preamble with tab handles (agent decision 12). A message sent while a turn runs waits for it. Throws `blockedByPolicy(.agentMessageIsCommand)` for a message that starts with `/`, after any white space, while Claude Code can hold a session with skills, since Claude Code runs it as one of its own commands without the model.
     public func send(_ message: String) throws {
         guard !hasEnded else { return }
+        try checkMessage(message)
+        queuedMessages.append(message)
+        startNextTurn()
+    }
+
+    /// Throws what `send(_:)` would throw for the message, without sending it, so that a caller that queues messages itself can keep a refused one in its composer.
+    public func checkMessage(_ message: String) throws {
         if request.skills != nil, message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
            candidates.contains(where: { candidate in
                guard case .commandLine(let tool) = candidate.provider.kind else { return false }
@@ -196,8 +205,6 @@ public final class AIAgentSession {
            }) {
             throw AIError.blockedByPolicy(.agentMessageIsCommand)
         }
-        queuedMessages.append(message)
-        startNextTurn()
     }
 
     /// Stops the running turn and drops queued messages. Claude Code gets the interrupt and keeps its process unless the turn has not ended 3 seconds later; Codex's process group ends.
@@ -239,6 +246,14 @@ public final class AIAgentSession {
         isClosed = true
         if !keepingThread, let holder = candidates.first { await deleteThread(of: holder) }
         try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// Ends the running process group at once, as at quit, without the work of `end(keepingThread:)`, which still removes the folder and Codex's thread.
+    public func endProcesses() {
+        queuedMessages.removeAll()
+        if let turn, !turn.didStartProcess { turnTask?.cancel() }
+        endProcess()
+        if turn?.outcome == nil { complete(.finished(.stopped)) }
     }
 
     /// Runs `codex --no-daemon delete --force` on the session's thread when `candidate` is the Codex model that holds it.
@@ -496,6 +511,7 @@ public final class AIAgentSession {
         self.process = process
         processKind = kind
         processID = process.id
+        processDidStart?(process.id)
         lines = AIAgentLineBuffer()
         Task { [weak self] in
             for await chunk in process.output {
@@ -661,6 +677,16 @@ extension AIService {
         } catch {
             throw AIError.providerUnavailable(candidates[0].provider.id, detail: "The session folder could not be made: \(error.localizedDescription)")
         }
+    }
+
+    /// The models that can run an agent session on the user's CLI, for the composer's menu: the `agent` route's usable models first, then every other model of a Claude Code or Codex preset.
+    public func agentSessionModels() -> [AIModelRef] {
+        let all = settings.providers.flatMap { provider -> [AIModelRef] in
+            guard case .commandLine(let tool) = provider.kind, tool.agent != nil else { return [] }
+            return provider.models.map { AIModelRef(provider: provider.id, model: $0.name) }
+        }
+        let route = features.first { $0.id == .agent }.flatMap { try? settings.routeModels(for: $0) }?.map(\.ref).filter(all.contains) ?? []
+        return route + all.filter { !route.contains($0) }
     }
 
     /// The effort levels the model takes, for the composer's menu: Claude Code's `--effort` levels, or the levels Codex's bundled catalog lists for the model. Empty when there are none, as for Codex's default model or a model the catalog does not list.

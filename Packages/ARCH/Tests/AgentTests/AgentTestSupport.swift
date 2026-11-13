@@ -1,5 +1,6 @@
 // What the agent tests share: a browser host with Personas and spaces in memory, a grant prompt and an authenticator that answer as told, a seal key in memory, a clock, a temporary folder for `agent.json`, the activity log, and the socket, and a client that runs its blocking calls off the main actor, where the service runs. The tests reach no Keychain, window, or Arch; the client is this test process, whose own code the service's peer check expects.
 import AgentControl
+import AI
 import AppKit
 import ARCHEngine
 import CryptoKit
@@ -49,6 +50,69 @@ import Testing
         spacesByPersona[id] = nil
         personasDidChange?()
     }
+}
+
+/// A runner on a CLI that records what the session sends and emits the events a test gives it.
+@MainActor final class FakeRunner: AgentSessionRunning {
+    let request: AIAgentSessionRequest
+    let events: AsyncThrowingStream<AIAgentEvent, any Error>
+    private let continuation: AsyncThrowingStream<AIAgentEvent, any Error>.Continuation
+    var processID: pid_t?
+    var processDidStart: ((pid_t) -> Void)?
+    private(set) var sent: [String] = []
+    private(set) var stops = 0
+    private(set) var endedKeepingThread: Bool?
+    private(set) var activeToolCalls = 0
+    private(set) var toolCalls = 0
+    private(set) var reportedTools: [[String]] = []
+
+    init(request: AIAgentSessionRequest) {
+        self.request = request
+        (events, continuation) = AsyncThrowingStream.makeStream()
+    }
+
+    /// The CLI process starts, as `posix_spawn` returns.
+    func startProcess(_ processID: pid_t) {
+        self.processID = processID
+        processDidStart?(processID)
+    }
+
+    func emit(_ event: AIAgentEvent) {
+        continuation.yield(event)
+    }
+
+    func fail(_ error: AIError) {
+        continuation.finish(throwing: error)
+    }
+
+    /// As `AIAgentSession` does while Claude Code may hold a session with Arch's skills.
+    func checkMessage(_ message: String) throws {
+        if request.skills != nil, message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") { throw AIError.blockedByPolicy(.agentMessageIsCommand) }
+    }
+
+    func send(_ message: String) throws {
+        try checkMessage(message)
+        sent.append(message)
+    }
+
+    func stop() { stops += 1 }
+
+    func end(keepingThread: Bool) async {
+        endedKeepingThread = keepingThread
+        processID = nil
+        continuation.finish()
+    }
+
+    func toolCallDidStart() {
+        activeToolCalls += 1
+        toolCalls += 1
+    }
+
+    func toolCallDidEnd() { activeToolCalls -= 1 }
+
+    func toolListDidChange(_ tools: [String]) { reportedTools.append(tools) }
+
+    func endProcesses() { processID = nil }
 }
 
 /// Answers each sheet with the next of `answers`, or Don't Allow once they run out.
@@ -167,6 +231,12 @@ final class Shared<Value>: @unchecked Sendable {
     var now = Date(timeIntervalSince1970: 2_000_000_000)
     let identity = Shared(AgentClientIdentity(key: .signed(identifier: "com.example.agent", team: "ABCDE12345"), name: "agent", executablePath: "/Applications/Agent.app/Contents/MacOS/agent", host: "Agent", isInterpreter: false))
     let processStarts = Shared<[pid_t: AgentProcessStart]>([:])
+    /// The process table the tickets' ancestry check reads.
+    let processRecords = Shared<[pid_t: AgentProcessRecord]>([:])
+    /// The runners the service started, in order, and the requests it started them with.
+    private(set) var runners: [FakeRunner] = []
+    private(set) var requests: [AIAgentSessionRequest] = []
+    var agentModels = [AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), AIModelRef(provider: AIProviderID(rawValue: "codex"), model: "gpt-6")]
     var services: [AgentService] = []
 
     init(keys: MemoryKeys = MemoryKeys()) throws {
@@ -193,6 +263,8 @@ final class Shared<Value>: @unchecked Sendable {
     func makeService(checks: AgentEndpoint.PeerChecks? = nil) throws -> AgentService {
         let identity = identity
         let starts = processStarts
+        let records = processRecords
+        let sessionsFolder = folder.appendingPathComponent("sessions", isDirectory: true)
         let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: AgentService.Dependencies(
             location: location,
             keys: keys,
@@ -202,9 +274,25 @@ final class Shared<Value>: @unchecked Sendable {
             prompt: prompt,
             authenticator: authenticator,
             allowsAI: { $0.host != "excluded.example" },
-            now: { [unowned self] in self.now }))
+            now: { [unowned self] in self.now },
+            processRecord: { records.value[$0] },
+            startRunner: { [unowned self] request in
+                let runner = FakeRunner(request: request)
+                self.runners.append(runner)
+                self.requests.append(request)
+                return runner
+            },
+            mcpExecutable: URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-mcp"),
+            sessionFolder: { sessionsFolder.appendingPathComponent($0.uuidString, isDirectory: true) },
+            agentModels: { [unowned self] in self.agentModels },
+            toolName: { $0.rawValue == "codex" ? "Codex" : "Claude Code" }))
         services.append(service)
         return service
+    }
+
+    /// Makes `processID` a child of `parent`, which started at `start`, in the process table the ticket check reads.
+    func addProcess(_ processID: pid_t, parent: pid_t, start: AgentProcessStart = AgentProcessStart(seconds: 1_000, microseconds: 0)) {
+        processRecords.value[processID] = AgentProcessRecord(processID: processID, parentID: parent, start: start)
     }
 
     /// A service whose settings are read and whose outside access is on.
@@ -243,16 +331,18 @@ final class TestClient: @unchecked Sendable {
         connection = try AgentControlConnection(location: location, check: check)
     }
 
-    func hello(protocol version: Int = AgentControlProtocol.version, ticket: String? = nil) async throws -> AgentHelloAnswer {
-        try await Task.detached { try self.connection.hello(AgentHello(protocol: version, client: .cli, version: "9.9.9", ticket: ticket), timeout: 5) }.value
+    /// Says `hello` as `arch-cli`, or as `arch-mcp --session` when it presents a ticket, as only that client does.
+    func hello(protocol version: Int = AgentControlProtocol.version, ticket: String? = nil, client: AgentClientKind? = nil) async throws -> AgentHelloAnswer {
+        let kind = client ?? (ticket == nil ? .cli : .mcp)
+        return try await Task.detached { try self.connection.hello(AgentHello(protocol: version, client: kind, version: "9.9.9", ticket: ticket), timeout: 5) }.value
     }
 
     func callTool(_ name: String, _ arguments: [String: AgentJSON] = [:]) async throws -> AgentToolResult {
         try await Task.detached { try self.connection.callTool(AgentToolCall(name: name, arguments: arguments), timeout: 5) }.value
     }
 
-    func call(_ method: String) async throws -> AgentJSON {
-        try await Task.detached { try self.connection.call(method, timeout: 5) }.value
+    func call(_ method: String, params: AgentJSON? = nil) async throws -> AgentJSON {
+        try await Task.detached { try self.connection.call(method, params: params, timeout: 5) }.value
     }
 
     func receive() async throws -> AgentRPCMessage {

@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
 import AgentControl
 import Foundation
 
@@ -39,6 +39,10 @@ enum CLICommands {
             return links(action, folder: folder)
         case .skills(let action, let places):
             return skills(action, places: places)
+        case .task(let start):
+            return task(start, json: request.json)
+        case .sessions(let action):
+            return sessions(action, json: request.json)
         }
     }
 
@@ -121,6 +125,82 @@ enum CLICommands {
             if json { return printJSON(["released": .bool(released)]) }
             print(released ? "This client no longer has access to Arch. Its next command asks again." : "This client had no access to give up.")
             return .done
+        }
+    }
+
+    // MARK: - task and sessions
+
+    /// Starts a session in Arch and prints its progress: the agent's reply as it streams, each step Arch performs on its own line, and notices on standard error, until the turn ends. With `--json`, the session's summary and then each event as one JSON object per line. A refusal, such as a grant without Start Agent Tasks, exits 6, and a space or model Arch does not know exits 4.
+    private static func task(_ start: AgentTaskStart, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let summary: AgentSessionSummary
+            do {
+                summary = try connection.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: start)) { printError($0) }.decode(as: AgentSessionSummary.self)
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+            if json {
+                if printJSON(try AgentJSON(encoding: summary)) != .done { return .internalError }
+            } else {
+                printError("Session \(summary.id.uuidString) in \(summary.place), \(summary.mode.title). Approvals happen in Arch.")
+            }
+            var atLineStart = true
+            while true {
+                guard case .notification(AgentControlMethod.taskEventNotification, let params) = try connection.receive(),
+                      let event = try? params?.decode(as: AgentTaskEvent.self), event.session == summary.id else { continue }
+                if json {
+                    if printJSON(try AgentJSON(encoding: event)) != .done { return .internalError }
+                } else {
+                    switch event.kind {
+                    case .text:
+                        print(event.text, terminator: "")
+                        fflush(stdout)
+                        atLineStart = event.text.hasSuffix("\n")
+                    case .step:
+                        print((atLineStart ? "" : "\n") + "[Arch] \(event.text)")
+                        atLineStart = true
+                    case .notice:
+                        printError(event.text)
+                    case .turnFinished, .failed:
+                        if !atLineStart { print("") }
+                    }
+                }
+                switch event.kind {
+                case .turnFinished: return .done
+                case .failed:
+                    if !json { printError(event.text) }
+                    return .toolError
+                case .text, .step, .notice: continue
+                }
+            }
+        }
+    }
+
+    /// Lists the sessions this client started, shows one, or stops one's turn.
+    private static func sessions(_ action: AgentSessionsAction, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            do {
+                switch action {
+                case .list, .show:
+                    var params: AgentJSON?
+                    if case .show(let id) = action { params = try AgentJSON(encoding: AgentSessionReference(session: id)) }
+                    let list = try connection.call(AgentControlMethod.sessionsList, params: params).decode(as: AgentSessionList.self)
+                    if json { return printJSON(try AgentJSON(encoding: list)) }
+                    if list.sessions.isEmpty { print("This client has started no agent sessions.") }
+                    for session in list.sessions {
+                        print("\(session.id.uuidString)  \(session.title)\n  \(session.state) \u{00B7} \(session.mode.title) \u{00B7} \(session.place)\(session.model.map { " \u{00B7} \($0)" } ?? "")")
+                    }
+                case .stop(let id):
+                    let stopped = try connection.call(AgentControlMethod.taskStop, params: AgentJSON(encoding: AgentSessionReference(session: id)))["stopped"] == .bool(true)
+                    if json { return printJSON(["stopped": .bool(stopped)]) }
+                    print(stopped ? "The session's turn stopped." : "The session had no turn running.")
+                }
+                return .done
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .toolError
+            }
         }
     }
 

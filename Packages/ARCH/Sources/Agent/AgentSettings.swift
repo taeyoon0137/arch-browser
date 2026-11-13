@@ -9,11 +9,17 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     public var grants: [AgentGrant] = []
     /// The Persona Arch created for outside clients, which stays agent-only (agent decision 9) while this file names it.
     public var agentsPersonaID: UUID?
+    /// New sessions start in: the mode of an in-app session the user starts, and the ceiling of one that `arch-cli task` starts.
+    public var newSessionMode = AgentAccessLevel.askBeforeActing
+    /// Let In-App Agents Search History: whether in-app sessions may call `search_history`, over the history every Persona shares.
+    public var inAppAgentsSearchHistory = false
+    /// Keep Codex's Copy of Agent Conversations: deleting a session then leaves its thread in Codex's folder.
+    public var keepsCodexCopy = false
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case allowsOutsideClients, grants, agentsPersonaID
+        case allowsOutsideClients, grants, agentsPersonaID, newSessionMode, inAppAgentsSearchHistory, keepsCodexCopy
     }
 
     /// A field that a hand-written file or an earlier build lacks takes its default.
@@ -22,6 +28,9 @@ public struct AgentSettings: Codable, Equatable, Sendable {
         allowsOutsideClients = try container.decodeIfPresent(Bool.self, forKey: .allowsOutsideClients) ?? false
         grants = try container.decodeIfPresent([AgentGrant].self, forKey: .grants) ?? []
         agentsPersonaID = try container.decodeIfPresent(UUID.self, forKey: .agentsPersonaID)
+        newSessionMode = try container.decodeIfPresent(AgentAccessLevel.self, forKey: .newSessionMode) ?? .askBeforeActing
+        inAppAgentsSearchHistory = try container.decodeIfPresent(Bool.self, forKey: .inAppAgentsSearchHistory) ?? false
+        keepsCodexCopy = try container.decodeIfPresent(Bool.self, forKey: .keepsCodexCopy) ?? false
     }
 }
 

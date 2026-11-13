@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). This first host runs the reading tools that need no page: `session_info`, `list_spaces`, `list_tabs`, and `guide`, for an outside client's grant. Plan task VII.12 adds agent tabs and the reading and navigating tools, with their events, limits, and rules.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). This first host runs the reading tools that need no page: `session_info`, `list_spaces`, `list_tabs`, and `guide`, for an outside client's grant or an in-app session (`AgentToolClient`). Plan task VII.12 adds agent tabs and the reading and navigating tools, with their events, limits, and rules.
 import AgentControl
 import Foundation
 
@@ -38,6 +38,46 @@ struct AgentHandleTable {
     }
 }
 
+/// Who a call is for: an outside client's grant, or an in-app session. The host reads the same facts from both; a session adds its site scope and what is left of its call limits.
+struct AgentToolClient {
+    struct Session {
+        var siteScope: [String]
+        var hasSearchResults: Bool
+        var sharedTabCount: Int
+        var callsLeftThisTurn: Int
+        var callsLeftThisSession: Int
+    }
+
+    /// The grant's or session's ID.
+    var id: UUID
+    var personaID: UUID
+    /// The space where its agent folder goes; one that is gone falls back to the Persona's first.
+    var spaceID: UUID
+    var level: AgentAccessLevel
+    var scopes: AgentGrantScopes
+    /// Set for an in-app session.
+    var session: Session?
+
+    init(grant: AgentGrant) {
+        id = grant.id
+        personaID = grant.personaID
+        spaceID = grant.spaceID
+        level = grant.level
+        scopes = grant.scopes
+    }
+
+    /// An in-app session, whose `search_history` follows Let In-App Agents Search History and which starts no tasks of its own.
+    @MainActor init(session: AgentSession, searchesHistory: Bool) {
+        id = session.id
+        personaID = session.personaID
+        spaceID = session.spaceID
+        level = session.mode
+        scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
+        self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil, sharedTabCount: session.handles.sharedTabIDs.count,
+                               callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession)
+    }
+}
+
 @MainActor struct AgentToolHost {
     /// The tools this build runs; `tools/list` lists only these, and the others answer that they are not available yet.
     static let servedTools = ["session_info", "list_spaces", "list_tabs", "guide"]
@@ -65,6 +105,10 @@ struct AgentHandleTable {
     }
 
     func run(_ call: AgentToolCall, for grant: AgentGrant, handles: inout AgentGrantHandles) -> AgentToolResult {
+        run(call, for: AgentToolClient(grant: grant), handles: &handles)
+    }
+
+    func run(_ call: AgentToolCall, for client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
             return AgentToolResult(status: .error, code: "unknownTool", text: "Arch has no tool named \(call.name).")
         }
@@ -74,9 +118,9 @@ struct AgentHandleTable {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         switch tool.name {
-        case "session_info": return sessionInfo(grant, handles: &handles)
-        case "list_spaces": return listSpaces(grant, handles: &handles)
-        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", grant, handles: &handles)
+        case "session_info": return client.session == nil ? sessionInfo(client, handles: &handles) : sessionInfo(ofSession: client, handles: &handles)
+        case "list_spaces": return listSpaces(client, handles: &handles)
+        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", client, handles: &handles)
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "This build of Arch does not run \(tool.name) yet.")
         }
     }
@@ -111,26 +155,26 @@ struct AgentHandleTable {
 
     // MARK: Tools
 
-    private func sessionInfo(_ grant: AgentGrant, handles: inout AgentGrantHandles) -> AgentToolResult {
-        let persona = host.personas.first { $0.id == grant.personaID }?.name ?? "deleted"
-        let space = space(of: grant)
+    private func sessionInfo(_ client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
+        let persona = host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
+        let space = space(of: client)
         let spaceHandle = space.map { handles.spaces.handle(for: $0.id) }
         let openTabs = host.tabs(withIDs: Set(handles.agentTabIDs)).count
-        let asks = Self.whatAsks(grant.level)
-        var lines = ["This client has \(grant.level.title) access in the \(persona) Persona" + (space.map { ", in the space \($0.name) (\(spaceHandle ?? ""))." } ?? ".")]
+        let asks = Self.whatAsks(client.level)
+        var lines = ["This client has \(client.level.title) access in the \(persona) Persona" + (space.map { ", in the space \($0.name) (\(spaceHandle ?? ""))." } ?? ".")]
         lines.append("Site scope: none. An outside client navigates freely in its own agent tabs.")
         lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once.")
         lines.append("Limits: \(AgentLimits.toolCallsPerGrantPerDay.formatted(.number.locale(Locale(identifier: "en_US")))) tool calls a day for this grant, \(AgentLimits.actionsPerSecond) actions a second.")
         lines.append(contentsOf: asks)
         let structured: AgentJSON = [
-            "mode": .string(grant.level.rawValue),
+            "mode": .string(client.level.rawValue),
             "persona": .string(persona),
             "space": space.map { ["handle": .string(spaceHandle ?? ""), "name": .string($0.name)] } ?? .null,
             "siteScope": .null,
             "agentTabs": .number(Double(openTabs)),
             "limits": ["agentTabs": .number(Double(AgentLimits.agentTabs)), "toolCallsPerDay": .number(Double(AgentLimits.toolCallsPerGrantPerDay)), "actionsPerSecond": .number(Double(AgentLimits.actionsPerSecond))],
             "asks": .array(asks.map(AgentJSON.string)),
-            "scopes": ["searchHistory": .bool(grant.scopes.searchHistory), "startTasks": .bool(grant.scopes.startTasks)],
+            "scopes": ["searchHistory": .bool(client.scopes.searchHistory), "startTasks": .bool(client.scopes.startTasks)],
         ]
         return AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: structured)
     }
@@ -149,8 +193,8 @@ struct AgentHandleTable {
         ]
     }
 
-    private func listSpaces(_ grant: AgentGrant, handles: inout AgentGrantHandles) -> AgentToolResult {
-        let spaces = host.spaces(in: grant.personaID)
+    private func listSpaces(_ client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
+        let spaces = host.spaces(in: client.personaID)
         let agentTabs = host.tabs(withIDs: Set(handles.agentTabIDs))
         var rows: [AgentJSON] = []
         var lines: [String] = []
@@ -160,13 +204,13 @@ struct AgentHandleTable {
             rows.append(["handle": .string(handle), "name": .string(space.name), "agentTabs": .number(Double(count))])
             lines.append("\(handle)  \(space.name)  \(count == 1 ? "1 agent tab" : "\(count) agent tabs")")
         }
-        let persona = host.personas.first { $0.id == grant.personaID }?.name ?? "deleted"
+        let persona = host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
         let summary = spaces.isEmpty ? "The \(persona) Persona has no spaces." : "The \(persona) Persona has \(spaces.count == 1 ? "1 space" : "\(spaces.count) spaces")."
         return AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["spaces": .array(rows)])
     }
 
     /// The client's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI is listed without its title or address (rule P16).
-    private func listTabs(shared: Bool, _ grant: AgentGrant, handles: inout AgentGrantHandles) -> AgentToolResult {
+    private func listTabs(shared: Bool, _ client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
         let ids = shared ? handles.sharedTabIDs : handles.agentTabIDs
         let tabs = host.tabs(withIDs: Set(ids))
         var rows: [AgentJSON] = []
@@ -197,16 +241,64 @@ struct AgentHandleTable {
         let kind = shared ? "shared" : "agent"
         let summary: String
         switch tabs.count {
-        case 0: summary = shared ? "The user has shared no tabs with this client." : "This client has no agent tabs open."
+        case 0: summary = shared ? "The user has shared no tabs with this \(client.session == nil ? "client" : "session")." : "This \(client.session == nil ? "client" : "session") has no agent tabs open."
         case 1: summary = "1 \(kind) tab."
         default: summary = "\(tabs.count) \(kind) tabs."
         }
         return AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["scope": .string(kind), "tabs": .array(rows)])
     }
 
-    /// The grant's space, or the Persona's first space once that one is gone.
-    func space(of grant: AgentGrant) -> AgentSpaceInfo? {
-        let spaces = host.spaces(in: grant.personaID)
-        return spaces.first { $0.id == grant.spaceID } ?? spaces.first
+    /// An in-app session's details (docs/agents.md, Tools ▸ Catalog): its mode, its Persona and space, its site scope, its tabs, what is left of its limits, and what asks. The Persona and space read as "Persona / Space".
+    private func sessionInfo(ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
+        guard let session = client.session else { return sessionInfo(client, handles: &handles) }
+        let persona = host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
+        let space = space(of: client)
+        let spaceHandle = space.map { handles.spaces.handle(for: $0.id) }
+        let place = space.map { "\(persona) / \($0.name) (\(spaceHandle ?? ""))" } ?? "the \(persona) Persona"
+        let openTabs = host.tabs(withIDs: Set(handles.agentTabIDs)).count
+        let shared = handles.sharedTabIDs.map { handles.tabs.handle(for: $0) }
+        let asks = Self.whatAsksInSession(client.level)
+        let sites = session.siteScope.isEmpty ? "no sites yet" : session.siteScope.joined(separator: ", ")
+        var lines = ["This session works in \(place), in \(client.level.title)."]
+        lines.append("Site scope: \(sites)\(session.hasSearchResults ? ", and the search engine's results address" : ""). \(Self.scopeRule)")
+        lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once. Tabs the user shared: \(shared.isEmpty ? "none" : shared.joined(separator: ", ")).")
+        lines.append("Limits: \(session.callsLeftThisTurn) of \(AgentLimits.toolCallsPerTurn) tool calls left for this message and \(session.callsLeftThisSession) of \(AgentLimits.toolCallsPerSession) for the session, \(AgentLimits.actionsPerSecond) actions a second.")
+        lines.append(contentsOf: asks)
+        let structured: AgentJSON = [
+            "mode": .string(client.level.rawValue),
+            "persona": .string(persona),
+            "space": space.map { ["handle": .string(spaceHandle ?? ""), "name": .string($0.name)] } ?? .null,
+            "siteScope": ["sites": .array(session.siteScope.map(AgentJSON.string)), "searchResults": .bool(session.hasSearchResults)],
+            "agentTabs": .number(Double(openTabs)),
+            "sharedTabs": .array(shared.map(AgentJSON.string)),
+            "limits": ["agentTabs": .number(Double(AgentLimits.agentTabs)), "toolCallsLeftThisTurn": .number(Double(session.callsLeftThisTurn)),
+                       "toolCallsLeftThisSession": .number(Double(session.callsLeftThisSession)), "actionsPerSecond": .number(Double(AgentLimits.actionsPerSecond))],
+            "asks": .array(asks.map(AgentJSON.string)),
+            "scopes": ["searchHistory": .bool(client.scopes.searchHistory)],
+        ]
+        return AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: structured)
+    }
+
+    /// How the site scope gates the addresses an in-app session's agent writes (rule P13).
+    static let scopeRule = "Links you follow by ref open without asking. An address you write opens without asking only when a page or the user showed it, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other address asks the user first, in every mode, and so does a redirect of it to a site outside the scope."
+
+    /// What asks the user or is refused in each mode of an in-app session (docs/agents.md, Modes).
+    static func whatAsksInSession(_ mode: AgentAccessLevel) -> [String] {
+        let interactions: String
+        switch mode {
+        case .readOnly: interactions = "Interactions other than scroll and hover are refused, and so are sensitive steps such as request_approval."
+        case .askBeforeActing: interactions = "Each interaction asks the user first, and sensitive steps such as request_approval always ask."
+        case .actInAgentTabs: interactions = "Interactions in your agent tabs on sites in scope run without asking; elsewhere they ask once per site, and sensitive steps such as request_approval always ask."
+        }
+        return [
+            "Reading runs without asking. \(interactions) Any interaction in a tab the user shared asks every time.",
+            "Arch refuses typing passwords, codes, or card details, sites excluded from AI, and tabs you were not given. Hand such steps to the user with hand_to_user.",
+        ]
+    }
+
+    /// The grant's or session's space, or the Persona's first space once that one is gone.
+    func space(of client: AgentToolClient) -> AgentSpaceInfo? {
+        let spaces = host.spaces(in: client.personaID)
+        return spaces.first { $0.id == client.spaceID } ?? spaces.first
     }
 }

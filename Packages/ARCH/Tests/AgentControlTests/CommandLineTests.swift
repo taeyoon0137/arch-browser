@@ -41,6 +41,15 @@ import Testing
         #expect(try AgentCommandLine.parse(["skills", "install", "--target", "claude", "--target", "codex", "--target", "claude"]).command == .skills(.install, places: [.target(.claude), .target(.codex)]))
         #expect(try AgentCommandLine.parse(["--path", "/Users/someone/skills", "skills", "remove", "--target", "codex-home"]).command == .skills(.remove, places: [.path("/Users/someone/skills"), .target(.codexHome)]))
         #expect(try AgentCommandLine.parse(["skills", "list", "--target", "codex"]).command == .skills(.list, places: [.target(.codex)]))
+        #expect(try AgentCommandLine.parse(["task", "compare these two plans"]).command == .task(AgentTaskStart(task: "compare these two plans")))
+        #expect(try AgentCommandLine.parse(["--mode", "read", "task", "read it", "--space", "Office", "--model", "sonnet", "--deny-approvals", "--json"])
+            == AgentCLIRequest(command: .task(AgentTaskStart(task: "read it", space: "Office", mode: .readOnly, model: "sonnet", deniesApprovals: true)), json: true))
+        #expect(try AgentCommandLine.parse(["task", "x", "--mode", "act"]).command == .task(AgentTaskStart(task: "x", mode: .actInAgentTabs)))
+        #expect(try AgentCommandLine.parse(["sessions"]).command == .sessions(.list))
+        #expect(try AgentCommandLine.parse(["sessions", "list"]).command == .sessions(.list))
+        let id = UUID()
+        #expect(try AgentCommandLine.parse(["sessions", "show", id.uuidString]).command == .sessions(.show(id)))
+        #expect(try AgentCommandLine.parse(["sessions", "stop", id.uuidString.lowercased()]).command == .sessions(.stop(id)))
     }
 
     @Test(arguments: [
@@ -72,6 +81,18 @@ import Testing
         (["skills", "list", "--dir", "bin"], "--dir belongs to links."),
         (["links", "install", "--target", "claude"], "--target and --path belong to skills."),
         (["guide", "--path", "/tmp"], "--target and --path belong to skills."),
+        (["task"], "task takes the task as one argument, in quotes."),
+        (["task", "compare", "plans"], "task takes the task as one argument, in quotes."),
+        (["task", "  "], "task takes the task as one argument, in quotes."),
+        (["task", "x", "--mode", "write"], "--mode takes read, ask, or act."),
+        (["task", "x", "--mode"], "--mode needs read, ask, or act."),
+        (["task", "x", "--space"], "--space needs a space's name."),
+        (["task", "x", "--model"], "--model needs a model's name."),
+        (["spaces", "--deny-approvals"], "--space, --mode, --model, and --deny-approvals belong to task."),
+        (["sessions", "show"], "sessions show takes a session's ID, as sessions lists it."),
+        (["sessions", "stop", "s1"], "sessions stop takes a session's ID, as sessions lists it."),
+        (["sessions", "list", "all"], "sessions list takes no arguments."),
+        (["sessions", "delete"], "sessions takes list, show, or stop."),
     ])
     func usageErrors(arguments: [String], message: String) {
         #expect(throws: AgentUsageError(message: message)) { try AgentCommandLine.parse(arguments) }

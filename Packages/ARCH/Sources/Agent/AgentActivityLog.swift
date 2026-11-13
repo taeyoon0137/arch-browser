@@ -31,8 +31,10 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var date: Date
     public var event: Event
-    /// The grant the entry belongs to; sessions add their own ID with plan task VII.17.
+    /// The grant the entry belongs to, also for a session an outside client started.
     public var grantID: UUID?
+    /// The in-app session the entry belongs to.
+    public var sessionID: UUID?
     public var clientName: String
     public var personaID: UUID?
     public var tool: String?
@@ -46,12 +48,13 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     /// The result's status, or the refusal's reason.
     public var outcome: String?
 
-    public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
+    public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, sessionID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
                 site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil) {
         self.id = id
         self.date = date
         self.event = event
         self.grantID = grantID
+        self.sessionID = sessionID
         self.clientName = clientName
         self.personaID = personaID
         self.tool = tool

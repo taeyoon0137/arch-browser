@@ -1,4 +1,4 @@
-// The sidebar's bottom bar: the library button and the strip of space symbols with the new space button, which scrolls and shrinks toward its ends when the symbols do not fit.
+// The sidebar's bottom bar: the library button, the strip of space symbols with the new space button, which scrolls and shrinks toward its ends when the symbols do not fit, and the agents indicator while an agent acts.
 import AppKit
 import SwiftUI
 
@@ -79,6 +79,7 @@ struct SidebarBottomBar: View {
             HStack {
                 LibraryButton(session: session)
                 Spacer(minLength: 0)
+                AgentsIndicator(session: session)
             }
             // Center the symbols and new space button as one group, ignoring the library button. If they do not fit, scroll them together without covering the library button or widening the sidebar.
             ViewThatFits(in: .horizontal) {

@@ -28,6 +28,16 @@ public enum AgentCLICommand: Equatable, Sendable {
     case links(AgentLinksAction, folder: String?)
     /// The entry skill at the places named by `--target` and `--path`, in order; `list` without either lists every target.
     case skills(AgentSkillsAction, places: [AgentSkillInstaller.Place])
+    /// Starts an in-app session on the user's `agent` route and prints its progress until its turn ends (`task/start`).
+    case task(AgentTaskStart)
+    /// The sessions this client started (`sessions/list`), or stopping one (`task/stop`).
+    case sessions(AgentSessionsAction)
+}
+
+public enum AgentSessionsAction: Equatable, Sendable {
+    case list
+    case show(UUID)
+    case stop(UUID)
 }
 
 public enum AgentLinksAction: String, CaseIterable, Sendable {
@@ -78,6 +88,8 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "spaces", arguments: "", summary: "Lists the spaces of this client's Persona. The first command that reaches Arch asks you there to allow this client.", needsArch: true),
         AgentCLICommandSpec(name: "tabs", arguments: "[--shared]", summary: "Lists this client's agent tabs, or with --shared the tabs you shared with it.", needsArch: true),
         AgentCLICommandSpec(name: "release", arguments: "", summary: "Gives up this client's grant, so that its next command asks again.", needsArch: true),
+        AgentCLICommandSpec(name: "task", arguments: "\"<task>\" [--space name] [--mode read|ask|act] [--model name] [--deny-approvals]", summary: "Starts an agent session in Arch on your AI subscription and prints its progress until its turn ends. It needs a grant with Start Agent Tasks and runs in the grant's Persona, in the space --space names or the grant's, at most at the grant's access and the mode Settings sets for new sessions, which --mode can only lower. Arch asks you in its own window before sensitive steps; --deny-approvals denies each at once.", needsArch: true),
+        AgentCLICommandSpec(name: "sessions", arguments: "[list|show id|stop id]", summary: "Lists the agent sessions this client started, shows one, or stops one.", needsArch: true),
         AgentCLICommandSpec(name: "mcp", arguments: "[--session]", summary: "Runs as arch-mcp, the MCP server on standard input and output. Arch starts it with --session for its own agent sessions.", needsArch: true),
         AgentCLICommandSpec(name: "mcp-config", arguments: "[claude|codex|json]", summary: "Prints the configuration that adds arch-mcp, by its absolute path, to Claude Code, Codex, or another MCP client.", needsArch: false),
         AgentCLICommandSpec(name: "setup", arguments: "claude|codex", summary: "Shows the command that adds arch-mcp to Claude Code or Codex for your user, asks, and runs it.", needsArch: false),
@@ -94,12 +106,13 @@ public enum AgentCommandLine {
         return .cli(rest)
     }
 
-    /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`.
+    /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`; `--space`, `--mode`, and `--model` each take the next argument and, with `--deny-approvals`, belong to `task`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
         var json = false
         var help = false
         var shared = false
         var folder: String?
+        var taskOptions = TaskOptions()
         var places: [AgentSkillInstaller.Place] = []
         var words: [String] = []
         var remaining = arguments[...]
@@ -118,6 +131,17 @@ public enum AgentCommandLine {
             case "--path":
                 guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--path needs a folder.") }
                 if !places.contains(.path(value)) { places.append(.path(value)) }
+            case "--space":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--space needs a space's name.") }
+                taskOptions.space = value
+            case "--mode":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--mode needs read, ask, or act.") }
+                guard let mode = AgentAccessLevel(cliWord: value) else { throw AgentUsageError(message: "--mode takes read, ask, or act.") }
+                taskOptions.mode = mode
+            case "--model":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--model needs a model's name.") }
+                taskOptions.model = value
+            case "--deny-approvals": taskOptions.deniesApprovals = true
             case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "Unknown option \(argument).")
             default: words.append(argument)
             }
@@ -178,12 +202,41 @@ public enum AgentCommandLine {
                 throw AgentUsageError(message: "skills \(action.rawValue) needs --target claude, codex, or codex-home, or --path with a folder.")
             }
             command = .skills(action, places: places)
+        case "task":
+            guard operands.count == 1, let text = operands.first, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AgentUsageError(message: "task takes the task as one argument, in quotes.")
+            }
+            command = .task(AgentTaskStart(task: text, space: taskOptions.space, mode: taskOptions.mode, model: taskOptions.model, deniesApprovals: taskOptions.deniesApprovals))
+        case "sessions":
+            command = .sessions(try sessionsAction(operands))
         default:
             throw AgentUsageError(message: "Unknown command \(name).")
         }
         if case .links = command {} else if folder != nil { throw AgentUsageError(message: "--dir belongs to links.") }
         if case .skills = command {} else if !places.isEmpty { throw AgentUsageError(message: "--target and --path belong to skills.") }
+        if case .task = command {} else if taskOptions != TaskOptions() { throw AgentUsageError(message: "--space, --mode, --model, and --deny-approvals belong to task.") }
         return AgentCLIRequest(command: command, json: json)
+    }
+
+    /// `task`'s options, gathered wherever they appear.
+    private struct TaskOptions: Equatable {
+        var space: String?
+        var mode: AgentAccessLevel?
+        var model: String?
+        var deniesApprovals = false
+    }
+
+    private static func sessionsAction(_ operands: [String]) throws -> AgentSessionsAction {
+        switch operands.first {
+        case nil, "list"?:
+            guard operands.count <= 1 else { throw AgentUsageError(message: "sessions list takes no arguments.") }
+            return .list
+        case let verb? where verb == "show" || verb == "stop":
+            guard operands.count == 2, let id = UUID(uuidString: operands[1]) else { throw AgentUsageError(message: "sessions \(verb) takes a session's ID, as sessions lists it.") }
+            return verb == "show" ? .show(id) : .stop(id)
+        default:
+            throw AgentUsageError(message: "sessions takes list, show, or stop.")
+        }
     }
 
     /// arch-mcp's mode from its arguments and `ARCH_AGENT_TICKET`: an outside client without arguments, or an in-app session's server with `--session`, which needs the ticket. An outside client ignores a ticket in its environment.

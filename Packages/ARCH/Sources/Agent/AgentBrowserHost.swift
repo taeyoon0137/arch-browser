@@ -57,4 +57,10 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     func windowForSheet() -> NSWindow?
     /// Set by the service; the host calls it after Personas or spaces change, as when the user deletes one.
     var personasDidChange: (() -> Void)? { get set }
+    /// The search engine's results address, which every in-app session's site scope holds (docs/agents.md, Site scope and navigation).
+    var searchResultsAddress: AgentSearchResultsAddress? { get }
+}
+
+public extension AgentBrowserHost {
+    var searchResultsAddress: AgentSearchResultsAddress? { nil }
 }

@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
+// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): the in-app sessions' mode, history search, and Codex's copy of their conversations; Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
 import Agent
 import AgentControl
 import AI
@@ -25,6 +25,7 @@ struct AgentSettingsPage: View {
                 }
             }
         }
+        sessionsSection
         Section {
             Toggle("Allow Outside Clients (arch-cli and arch-mcp)", isOn: Binding(get: { service.settings.allowsOutsideClients }, set: setAllowsOutsideClients))
                 .disabled(!service.canChangeSettings || isChangingAccess)
@@ -50,6 +51,23 @@ struct AgentSettingsPage: View {
         AgentSkillsSection()
         grantsSection
         activitySection
+    }
+
+    // MARK: Sessions
+
+    private var sessionsSection: some View {
+        Section {
+            Picker("New sessions start in", selection: Binding(get: { service.settings.newSessionMode }, set: service.setNewSessionMode)) {
+                ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            Toggle("Let In-App Agents Search History", isOn: Binding(get: { service.settings.inAppAgentsSearchHistory }, set: service.setInAppAgentsSearchHistory))
+            Toggle("Keep Codex\u{2019}s Copy of Agent Conversations", isOn: Binding(get: { service.settings.keepsCodexCopy }, set: service.setKeepsCodexCopy))
+        } header: {
+            Text("Agent Sessions")
+        } footer: {
+            aiFootnote("A session the user starts begins in this mode and can be lowered at any time; raising it asks first. Sessions that a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; Claude Code keeps none of Arch\u{2019}s sessions.")
+        }
+        .disabled(!service.canChangeSettings)
     }
 
     private var settingsNotice: String? {

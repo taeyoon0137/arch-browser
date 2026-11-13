@@ -1,4 +1,4 @@
-// The control endpoint (docs/agents.md, Local control channel): a connection from a program that is not Arch's tool, another user, or a process that took over the peer's end is closed before its `hello` is answered and logged as refused; an injected check that expects this test process's code accepts; the socket's folder must be this user's, not a link, and of mode 0700; a stale socket is replaced only when nothing answers; the socket exists only while outside access is on or a session needs it; a client refuses a listener whose code does not match; Arch sends `ready` first; and with outside access off, a `hello` without a ticket is refused without a grant sheet.
+// The control endpoint (docs/agents.md, Local control channel): a connection from a program that is not Arch's tool, another user, or a process that took over the peer's end is closed before its `hello` is answered and logged as refused; an injected check that expects this test process's code accepts; the socket's folder must be this user's, not a link, and of mode 0700; a stale socket is replaced only when nothing answers; the socket exists only while outside access is on or a session needs it; a client refuses a listener whose code does not match; Arch sends `ready` first; and with outside access off, a `hello` without a ticket is refused without a grant sheet, and one with a ticket that names no session is refused for its ticket.
 import AgentControl
 import Darwin
 import Foundation
@@ -154,7 +154,7 @@ import Testing
             #expect(refusal.reason == .outsideAccessOff)
             #expect(error.exitCode == .unavailable)
         }
-        // Until in-app sessions bind them, no ticket names a session.
+        // A ticket that names no session is refused with its own reason.
         do {
             _ = try await TestClient(harness.location).hello(ticket: "c2Vzc2lvbg")
             Issue.record("The hello with a ticket was answered.")
@@ -191,6 +191,6 @@ import Testing
         await #expect(throws: AgentClientError.closed) { try await early.receive() }
         let client = try TestClient(harness.location)
         _ = try await client.hello()
-        await #expect(throws: AgentClientError.failed(.methodNotFound("task/start"))) { try await client.call("task/start") }
+        await #expect(throws: AgentClientError.failed(.methodNotFound("task/send"))) { try await client.call("task/send") }
     }
 }

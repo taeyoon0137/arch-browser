@@ -63,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                                   version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
         self.agents = agents
         PreferencesWindowController.agents = agents
+        session.agents = agents
+        session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }
@@ -119,6 +121,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Agent sessions end before Arch quits, so that their CLI processes and folders go and Codex's copies of their threads are deleted unless the user keeps them; Arch waits at most five seconds for them.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let agents, agents.sessions.contains(where: { !$0.hasEnded }) else { return .terminateNow }
+        Task { @MainActor [weak self] in
+            await agents.endSessionsForQuit()
+            // `ArchApplication.terminate` cleared the flag when AppKit returned to it.
+            self?.setQuitting(true)
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 
     /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the windows' sheets, so that Cancel leaves them showing. Closing the last main window quits through the same path.
     func confirmsQuit() -> Bool {
@@ -193,6 +207,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
@@ -223,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Show Agent Panel", action: #selector(toggleAgentPanel), keyEquivalent: "")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
@@ -375,6 +393,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
+    /// The agent panel shows in main windows.
+    @MainActor @objc private func newAgentTask() { frontSidebarTarget().showAgentComposer() }
+    @MainActor @objc private func toggleAgentPanel() { frontSidebarTarget().toggleAgentPanel() }
+    @MainActor @objc private func stopAllAgents() { agents?.stopAllAgents() }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
@@ -537,6 +559,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.isHidden = !PageAssistant.isReaderAvailable
             item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
             return activeWindow?.canTogglePageReader == true
+        }
+        // The agent commands stay out of the menu until a Claude Code or Codex model can run a session; Stop All Agents works while an agent acts.
+        if item.action == #selector(newAgentTask) || item.action == #selector(toggleAgentPanel) {
+            item.isHidden = MainActor.assumeIsolated { agents?.agentModels().isEmpty ?? true }
+            if item.action == #selector(toggleAgentPanel) {
+                item.title = session?.lastMainWindow?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
+            }
+            return !item.isHidden
+        }
+        if item.action == #selector(stopAllAgents) {
+            return MainActor.assumeIsolated { agents?.isAnyAgentActing ?? false }
         }
         // Both imports wait while another import runs or the last main window shows a sheet, and open a main window when none is open. They touch no tab, so an internal page does not disable them.
         if item.action == #selector(importBookmarksAndHistory) || item.action == #selector(importFromBrowser) {

@@ -50,6 +50,17 @@ public final class PreferencesWindowController: NSWindowController {
     /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var agents: AgentService?
 
+    /// Sign In for a Claude Code or Codex provider outside Settings, as from the agent panel: the built-in terminal with the tool's sign-in typed, as the provider's editor types it.
+    @MainActor public static func signInToAgentTool(_ providerID: AIProviderID) {
+        guard let provider = AIService.shared.settings.providers.first(where: { $0.id == providerID }), case .commandLine(let tool) = provider.kind,
+              let agent = tool.agent, let type = openTerminalTyping else { return shared.showAISection() }
+        Task {
+            let found = await AICommandLineConfiguration.locateExecutable(named: agent.executableName)
+            let program = found?.resolvingSymlinksInPath() == tool.executable.resolvingSymlinksInPath() ? agent.executableName : AICommandLineEditor.shellQuoted(tool.executable.path)
+            type(AICommandLineEditor.signInCommand(program: program, arguments: agent.signInArguments, environment: tool.environment))
+        }
+    }
+
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
     private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents))
     /// Settings ▸ Plugins, while the app shell has set `session`.

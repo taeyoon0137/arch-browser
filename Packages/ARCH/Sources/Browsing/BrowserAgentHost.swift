@@ -1,4 +1,4 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, and the front main window for the grant sheet. Later tasks add agent tabs and folders, dialogs, downloads, and permission requests here.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, and the search engine's results address for the sessions' site scope. Later tasks add agent tabs and folders, dialogs, downloads, and permission requests here.
 import Agent
 import AppKit
 import Combine
@@ -31,9 +31,17 @@ import Foundation
 
     public func tabs(withIDs ids: Set<UUID>) -> [AgentTabInfo] {
         guard !ids.isEmpty else { return [] }
-        return session.tabsInSidebarOrder.filter { ids.contains($0.id) }.map {
-            AgentTabInfo(id: $0.id, spaceID: $0.spaceID, title: $0.displayTitle, url: $0.url, isLoading: $0.isLoading, engine: $0.engineKind)
-        }
+        return session.tabsInSidebarOrder.filter { ids.contains($0.id) }.map(Self.info(of:))
+    }
+
+    /// A tab as the agents' service sees it.
+    static func info(of tab: Tab) -> AgentTabInfo {
+        AgentTabInfo(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, isLoading: tab.isLoading, engine: tab.engineKind)
+    }
+
+    /// The results page of the search engine chosen in Settings ▸ General, which takes the terms in `q`.
+    public var searchResultsAddress: AgentSearchResultsAddress? {
+        AgentSearchResultsAddress(base: SearchEngine.current.resultsURL)
     }
 
     /// A Persona of its own named Agents, with one space and storage of its own on both engines (Persona rule 2), so it holds no sign-ins.

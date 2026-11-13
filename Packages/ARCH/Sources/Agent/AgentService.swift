@@ -1,7 +1,8 @@
-// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings): it owns `agent.json`, the activity log, the grants, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, asks for a grant at a client's first tool call, runs calls through the tool host, and ends a grant's connections when the grant is revoked, released, or expires. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
+// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings; In the browser): it owns `agent.json`, the activity log, the grants, the in-app sessions, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, binds a session's `arch-mcp` by its ticket, asks for a grant at an outside client's first tool call, runs calls through the tool host, starts sessions for the user and for clients with the Start Agent Tasks scope, and ends a grant's connections when the grant is revoked, released, or expires. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
 import AgentControl
 import AI
 import AppKit
+import Combine
 import Foundation
 
 @MainActor public final class AgentService: ObservableObject {
@@ -26,6 +27,8 @@ import Foundation
     @Published public private(set) var saveProblem: String?
     /// The grants whose clients are connected now.
     @Published public private(set) var connectedGrantIDs: Set<UUID> = []
+    /// In-app sessions in the order they started, until the user deletes them or Arch quits.
+    @Published public private(set) var sessions: [AgentSession] = []
     public let activity: AgentActivityLog
     public let host: any AgentBrowserHost
     /// Arch's version, which `hello`'s answer names.
@@ -47,6 +50,17 @@ import Foundation
         var authenticator: any AgentAuthenticating
         var allowsAI: (URL) -> Bool
         var now: () -> Date
+        /// A process's parent and start time, for the tickets' ancestry check.
+        var processRecord: @Sendable (pid_t) -> AgentProcessRecord?
+        /// Starts a session's runner on the user's CLI: `AIService.startAgentSession(_:)` in the app.
+        var startRunner: @MainActor (AIAgentSessionRequest) throws -> any AgentSessionRunning
+        /// The bundled `arch-mcp` that each session's CLI starts.
+        var mcpExecutable: URL
+        /// Where a session's CLI works: `$TMPDIR/Arch-Agent-<session UUID>/` in the app.
+        var sessionFolder: (UUID) -> URL
+        /// The models that can run a session, in the `agent` route's order first, and a provider's tool name for errors, such as "Claude Code".
+        var agentModels: @MainActor () -> [AIModelRef]
+        var toolName: @MainActor (AIProviderID) -> String?
     }
 
     /// Don't Allow remembers nothing, but the next call of the same client asks again only after this long, so that a looping client cannot flood the user.
@@ -66,14 +80,21 @@ import Foundation
     private var handles: [UUID: AgentGrantHandles] = [:]
     private var usedThisLaunch: Set<UUID> = []
     private var expiryTimer: Timer?
+    /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
+    var sessionReadyWait = AgentSession.readyWait
+    var sessionTakeOverWait = AgentSession.takeOverWait
+    /// Republish each session's turn starting and ending, which the bottom bar's indicator reads.
+    private var sessionObservers: [UUID: AnyCancellable] = [:]
 
-    /// Set while an in-app session on a CLI needs the channel, which then listens with outside access off; plan task VII.17 sets it.
+    /// Set while an in-app session on a CLI lives, which then keeps the channel listening with outside access off.
     var sessionsNeedChannel = false {
-        didSet { updateListening() }
+        didSet { if sessionsNeedChannel != oldValue { updateListening() } }
     }
 
     /// The service for the app: its files in `directory`, the socket where `AgentSocketLocation` puts it, the seal key in the Keychain, and the peer checks against the bundled `arch-cli`, whose hash it reads now.
     public convenience init(directory: URL, host: any AgentBrowserHost, version: String) {
+        // Folders a session of an earlier run left, as after a crash, go before any session starts.
+        AIAgentSession.removeLeftoverFolders()
         let toolHash = try? AgentCodeIdentity.uniqueHash(ofFileAt: AgentBundleLayout(bundleURL: Bundle.main.bundleURL).cliExecutableURL)
         let identifier = AgentClientIdentifier(inspector: AgentSystemProcessInspector(), archProcessID: getpid(), toolHash: toolHash, passedOverPaths: AgentClientIdentifier.systemPassedOverPaths())
         let check = AgentPeerCheck(expectedHash: toolHash)
@@ -86,7 +107,14 @@ import Foundation
             prompt: AgentGrantSheetPresenter(host: host),
             authenticator: AgentDeviceOwnerAuthentication(),
             allowsAI: { AIService.shared.settings.allowsAI(on: $0) },
-            now: Date.init))
+            now: Date.init,
+            processRecord: { AgentSystemProcessInspector().record(of: $0) },
+            startRunner: { try AIService.shared.startAgentSession($0) },
+            mcpExecutable: AgentBundleLayout(bundleURL: Bundle.main.bundleURL).mcpExecutableURL,
+            sessionFolder: AIAgentSession.folder(for:),
+            agentModels: { AIService.shared.agentSessionModels() },
+            toolName: { id in AIService.shared.settings.providers.first { $0.id == id }.map(\.agentToolName) }))
+        AIService.shared.register(.agent)
     }
 
     init(directory: URL, host: any AgentBrowserHost, version: String, dependencies: Dependencies) {
@@ -239,8 +267,8 @@ import Foundation
             connections = [:]
             updateConnectedGrants()
         } else if isNeeded, !acceptsOutsideClients {
-            // Outside access went off while a session keeps the channel; sessions bind their connections with plan task VII.17, so every connection now is an outside client's.
-            for id in connections.keys { endpoint?.close(id) }
+            // Outside access went off while a session keeps the channel: only the sessions' own connections stay.
+            for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
         }
     }
 
@@ -254,6 +282,7 @@ import Foundation
     public func stop() {
         expiryTimer?.invalidate()
         dependencies.prompt.cancelAll()
+        for session in sessions where !session.hasEnded { session.endProcessesAtQuit() }
         if canChangeSettings, file.hasKey, !settings.grants.isEmpty { write() }
         activity.saveNow()
         endpoint?.stop()
@@ -326,6 +355,7 @@ import Foundation
         for grant in grants where !personas.contains(grant.personaID) {
             end(grant, as: .revoked, telling: "The Persona of this client's access was deleted.")
         }
+        sessionsPlacesDidChange(personas: personas)
         if let id = settings.agentsPersonaID, !personas.contains(id) {
             settings.agentsPersonaID = nil
             save()
@@ -403,14 +433,8 @@ import Foundation
         let personaID: UUID
         switch choice.persona {
         case .agents:
-            if let id = settings.agentsPersonaID, host.personas.contains(where: { $0.id == id }) {
-                personaID = id
-            } else {
-                // Recorded before its first profile starts, so that its profiles never take the remembered answers.
-                personaID = host.makeAgentsPersona()
-                settings.agentsPersonaID = personaID
-                applyAgentOnlyPersona()
-            }
+            // The grant's own write records it.
+            personaID = agentsPersona(saving: false)
         case .existing(let id):
             guard host.personas.contains(where: { $0.id == id }) else { return nil }
             personaID = id
@@ -427,6 +451,16 @@ import Foundation
         save()
         record(.granted, grant: grant, decision: choice.needsAuthentication ? .approvedWithTouchID : .approved)
         return grant
+    }
+
+    /// The Agents Persona, made with one space on first use. Recorded before its first profile starts, so that its profiles never take the remembered answers.
+    private func agentsPersona(saving: Bool) -> UUID {
+        if let id = settings.agentsPersonaID, host.personas.contains(where: { $0.id == id }) { return id }
+        let id = host.makeAgentsPersona()
+        settings.agentsPersonaID = id
+        if saving { save() }
+        applyAgentOnlyPersona()
+        return id
     }
 
     private func record(_ event: AgentActivityEntry.Event, grant: AgentGrant, decision: AgentActivityEntry.Decision? = nil) {
@@ -449,6 +483,389 @@ import Foundation
         AgentRPCError(code: AgentControlErrorCode.noGrant, message: message)
     }
 
+
+    // MARK: Sessions
+
+    /// What starts an in-app session.
+    public struct SessionStart {
+        /// The task in the user's words, the session's first message.
+        public var task: String
+        public var personaID: UUID
+        public var spaceID: UUID
+        /// Tabs shared with the session from the start, such as the selected tab; one on a site excluded from AI is left out.
+        public var attachedTabIDs: [UUID]
+        public var mode: AgentAccessLevel
+        /// Nil uses the `agent` route.
+        public var model: AIModelRef?
+        public var effort: String?
+        /// The composer's Use the Agents Persona: the session goes to the Agents Persona's first space instead.
+        public var usesAgentsPersona: Bool
+        var origin = AgentSession.Origin.app
+
+        public init(task: String, personaID: UUID, spaceID: UUID, attachedTabIDs: [UUID], mode: AgentAccessLevel, model: AIModelRef?, effort: String?, usesAgentsPersona: Bool = false) {
+            self.task = task
+            self.personaID = personaID
+            self.spaceID = spaceID
+            self.attachedTabIDs = attachedTabIDs
+            self.mode = mode
+            self.model = model
+            self.effort = effort
+            self.usesAgentsPersona = usesAgentsPersona
+        }
+    }
+
+    public struct SessionError: LocalizedError, Equatable {
+        public var message: String
+        public var errorDescription: String? { message }
+    }
+
+    public func session(withID id: UUID) -> AgentSession? {
+        sessions.first { $0.id == id }
+    }
+
+    /// The models that can run a session, the `agent` route's first, for the composer's menu.
+    public func agentModels() -> [AIModelRef] {
+        dependencies.agentModels()
+    }
+
+    /// Starts a session on the user's CLI and sends its first message, which holds the task and the handles of the attached tabs. Throws a sentence when the space is gone or the Agents Persona cannot be recorded, and the runner's refusals, such as for a task that starts with `/`, which then stays in the composer.
+    @discardableResult public func startSession(_ start: SessionStart) throws -> AgentSession {
+        var personaID = start.personaID
+        var spaceID = start.spaceID
+        var attached = start.attachedTabIDs
+        if start.usesAgentsPersona {
+            guard canChangeSettings else { throw SessionError(message: "Arch cannot record the Agents Persona until it reads its agent settings.") }
+            personaID = agentsPersona(saving: true)
+            guard let first = host.spaces(in: personaID).first else { throw SessionError(message: "The Agents Persona has no space.") }
+            spaceID = first.id
+            // The selected tab belongs to another Persona, so the session reads it only once the user shares it.
+            attached = []
+        }
+        guard host.spaces(in: personaID).contains(where: { $0.id == spaceID }) else { throw SessionError(message: "The session's space was deleted.") }
+        var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
+        let tabs = host.tabs(withIDs: Set(attached)).filter { tab in tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } ?? false }
+        tabs.compactMap(\.url).forEach { scope.add($0) }
+        let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: start.mode,
+                                   model: start.model, effort: start.effort, scope: scope, attachedTabIDs: tabs.map(\.id), tools: [])
+        session.reportedTools = listedTools(for: session)
+        let runner = try makeRunner(for: session)
+        do {
+            try runner.checkMessage(start.task)
+        } catch {
+            Task { await runner.end(keepingThread: false) }
+            throw error
+        }
+        session.attach(runner, processRecord: dependencies.processRecord)
+        configure(session)
+        sessions.append(session)
+        sessionsNeedChannel = true
+        try session.send(start.task)
+        return session
+    }
+
+    /// The runner for a session: the bundled `arch-mcp` with `--session` and the ticket, the first `tools/list` answer, the static harness, and for Claude Code the session's skill folder.
+    private func makeRunner(for session: AgentSession) throws -> any AgentSessionRunning {
+        let folder = dependencies.sessionFolder(session.id)
+        let skills = AgentSessionSkills.skills(inSessionFolder: folder)
+        let server = AIAgentToolServer(executable: dependencies.mcpExecutable, arguments: ["--session"], environment: [AgentMCPServer.ticketVariable: session.ticket.text], tools: session.reportedTools)
+        let request = AIAgentSessionRequest(model: session.requestedModel, instructions: AgentHarness.instructions, toolServer: server, id: session.id, folder: folder, effort: session.effort, skills: skills)
+        let runner = try dependencies.startRunner(request)
+        do {
+            try AgentSessionSkills.write(skills)
+        } catch {
+            Task { await runner.end(keepingThread: false) }
+            throw SessionError(message: "The session's skills could not be written: \(error.localizedDescription)")
+        }
+        return runner
+    }
+
+    private func configure(_ session: AgentSession) {
+        session.modeDidChange = { [weak self, weak session] in
+            guard let self, let session else { return }
+            self.toolsDidChange(forSession: session.id)
+        }
+        session.describe = { [weak self] error in self?.describe(error) ?? (error.localizedDescription, .retry) }
+        sessionObservers[session.id] = session.$isTurnRunning.removeDuplicates().dropFirst().sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    /// One sentence and one action for an error in a session (docs/agents.md, Errors).
+    private func describe(_ error: AIError) -> (String, AgentErrorAction?) {
+        switch error {
+        case .authentication(let provider):
+            return ("\(dependencies.toolName(provider) ?? "The tool") is not signed in.", .signIn(provider))
+        case .notConfigured, .budgetReached:
+            return (error.localizedDescription, .openAISettings)
+        case .blockedByPolicy(.agentMessageIsCommand):
+            return (error.localizedDescription, nil)
+        default:
+            return (error.localizedDescription, .retry)
+        }
+    }
+
+    /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again.
+    public func retry(_ session: AgentSession) async {
+        guard case .failed = session.state, !session.hasEnded, let old = session.runner else { return session.retryLastMessage() }
+        await old.end(keepingThread: false)
+        guard !session.hasEnded else { return }
+        do {
+            session.replaceRunner(try makeRunner(for: session), processRecord: dependencies.processRecord)
+            session.retryLastMessage()
+        } catch {
+            session.noteError(error)
+        }
+    }
+
+    /// Delete Session: its connections close, its CLI processes and folder go, and Codex's copy of its thread unless Keep Codex's Copy of Agent Conversations is on.
+    public func deleteSession(_ id: UUID) async {
+        guard let session = session(withID: id) else { return }
+        sessions.removeAll { $0.id == id }
+        sessionObservers[id] = nil
+        for connection in connections.values where connection.sessionID == id { endpoint?.close(connection.id) }
+        await session.end(keepingThread: settings.keepsCodexCopy)
+        updateSessionsChannel()
+    }
+
+    /// Stop All Agents: every session's turn stops and its queued messages go, and every outside client is disconnected; the grants stay. Plan task VII.13 also denies the pending approvals.
+    public func stopAllAgents() {
+        for session in sessions where !session.hasEnded { session.stop() }
+        for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
+    }
+
+    /// Whether any agent acts now: a session's turn runs or an outside client is connected, for the bottom bar's indicator.
+    public var isAnyAgentActing: Bool {
+        sessions.contains { $0.isTurnRunning } || !connectedGrantIDs.isEmpty
+    }
+
+    /// At quit, before the endpoint stops: every session ends, with its folder and Codex's thread, within `limit`; whatever is left ends its processes at `stop()`.
+    public func endSessionsForQuit(within limit: Duration = .seconds(5)) async {
+        let live = sessions.filter { !$0.hasEnded }
+        guard !live.isEmpty else { return }
+        let keepsCopy = settings.keepsCodexCopy
+        let ending = Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                for session in live { group.addTask { await session.end(keepingThread: keepsCopy) } }
+            }
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await ending.value }
+            group.addTask { try? await Task.sleep(for: limit) }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// A deleted Persona takes its sessions with it; a deleted space stops its sessions, which stay in the panel until deleted.
+    private func sessionsPlacesDidChange(personas: Set<UUID>) {
+        for session in sessions where !personas.contains(session.personaID) {
+            Task { await deleteSession(session.id) }
+        }
+        for session in sessions where personas.contains(session.personaID) && !session.hasEnded && !host.spaces(in: session.personaID).contains(where: { $0.id == session.spaceID }) {
+            for connection in connections.values where connection.sessionID == session.id { endpoint?.close(connection.id) }
+            Task {
+                await session.end(keepingThread: settings.keepsCodexCopy)
+                updateSessionsChannel()
+            }
+        }
+    }
+
+    private func updateSessionsChannel() {
+        sessionsNeedChannel = sessions.contains { !$0.hasEnded }
+    }
+
+    /// Where Use the Agents Persona starts a session, as "Persona / Space": the Agents Persona's first space, or the one Arch makes with it.
+    public var agentsPersonaPlace: String {
+        let id = settings.agentsPersonaID
+        let persona = id.flatMap { id in host.personas.first { $0.id == id }?.name } ?? "Agents"
+        let space = id.flatMap { host.spaces(in: $0).first?.name } ?? "Personal"
+        return "\(persona) / \(space)"
+    }
+
+    /// "Persona / Space", as the interface names a session's place.
+    public func place(of session: AgentSession) -> String {
+        let persona = host.personas.first { $0.id == session.personaID }?.name ?? "Deleted Persona"
+        guard let space = host.spaces(in: session.personaID).first(where: { $0.id == session.spaceID }) else { return persona }
+        return "\(persona) / \(space.name)"
+    }
+
+    // MARK: Session settings
+
+    public func setNewSessionMode(_ mode: AgentAccessLevel) {
+        guard canChangeSettings else { return }
+        settings.newSessionMode = mode
+        save()
+    }
+
+    public func setInAppAgentsSearchHistory(_ isOn: Bool) {
+        guard canChangeSettings else { return }
+        settings.inAppAgentsSearchHistory = isOn
+        save()
+    }
+
+    public func setKeepsCodexCopy(_ isOn: Bool) {
+        guard canChangeSettings else { return }
+        settings.keepsCodexCopy = isOn
+        save()
+    }
+
+    // MARK: Session connections
+
+    /// A ticket binds the connection to its session only when it matches one, compared with every session's in constant time, and the session's running CLI process is an ancestor of the peer by process ID and start time. A ticket used from outside that tree is refused, logged, and noted in the session.
+    private func bind(_ connection: ClientConnection, _ requestID: AgentRPCID, hello: AgentHello, ticket: String) {
+        var matched: AgentSession?
+        for session in sessions where session.ticket.matches(ticket) && matched == nil { matched = session }
+        // Only `arch-mcp --session` presents a ticket.
+        guard hello.client == .mcp, let session = matched, !session.hasEnded, let process = session.liveProcess,
+              AgentProcessAncestry.isProcess(connection.peer.processID, descendedFrom: process, records: dependencies.processRecord) else {
+            if let session = matched, !session.hasEnded, session.liveProcess != nil, hello.client == .mcp { session.noteForeignTicketUse() }
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: matched?.id, clientName: hello.client.rawValue,
+                                               outcome: matched == nil ? "the ticket names no session" : "the ticket's program is not the session's"))
+            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))
+        }
+        connection.hello = hello
+        connection.sessionID = session.id
+        connection.stage = .ready
+        reply(connection, requestID, Self.json(AgentHelloAnswer(version: version, status: .bound)))
+    }
+
+    private var sessionScopes: AgentGrantScopes {
+        AgentGrantScopes(searchHistory: settings.inAppAgentsSearchHistory, startTasks: false)
+    }
+
+    private func listedTools(for session: AgentSession) -> [String] {
+        AgentToolHost.tools(for: session.mode, scopes: sessionScopes).map(\.name)
+    }
+
+    /// `tools/list` on a session's connection: the tools its mode allows. A list that differs from the last one reported, as after a mode change, reaches the runner, whose start check accepts it in a later `init`.
+    private func listTools(for session: AgentSession) -> [String] {
+        let tools = listedTools(for: session)
+        if tools != session.reportedTools {
+            session.reportedTools = tools
+            session.runner?.toolListDidChange(tools)
+        }
+        return tools
+    }
+
+    /// Sends `tools/changed` on the session's connections after its mode changed.
+    private func toolsDidChange(forSession id: UUID) {
+        for connection in connections.values where connection.stage == .ready && connection.sessionID == id {
+            endpoint?.send(.notification(method: AgentControlMethod.toolsChangedNotification, params: nil), to: connection.id)
+        }
+    }
+
+    /// A session's call: held until the model's first output for at most 10 seconds, then refused, so that no page data flows before the start check passed; held while the user has taken the session over; counted against the session's limits; run by the tool host; and shown as a step. The runner's idle timer pauses meanwhile.
+    private func sessionCall(_ params: AgentJSON?, of session: AgentSession, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        guard let call = try? params?.decode(as: AgentToolCall.self) else {
+            return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
+        }
+        connection.runningCalls += 1
+        let runner = session.runner
+        runner?.toolCallDidStart()
+        Task {
+            defer {
+                connection.runningCalls -= 1
+                runner?.toolCallDidEnd()
+            }
+            let result = await sessionResult(of: call, in: session)
+            guard connections[connection.id] != nil else { return }
+            let tool = AgentToolCatalog.tool(named: call.name)
+            let tabHandle = call.arguments["tab"]?.stringValue
+            session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .toolCall, grantID: session.grantID, sessionID: session.id, clientName: session.clientName,
+                                               personaID: session.personaID, tool: tool?.name, toolClass: tool?.toolClass.rawValue,
+                                               decision: result.status == .refused ? .refused : .auto, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue))
+            reply(connection, requestID, Self.json(result))
+        }
+    }
+
+    private func sessionResult(of call: AgentToolCall, in session: AgentSession) async -> AgentToolResult {
+        guard await session.ready.wait(timeout: sessionReadyWait) else {
+            return AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls.")
+        }
+        guard await session.handedBack.wait(timeout: sessionTakeOverWait) else {
+            return AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message.")
+        }
+        if let refusal = session.countCall() { return refusal }
+        var handles = session.handles
+        let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: AgentToolClient(session: session, searchesHistory: settings.inAppAgentsSearchHistory), handles: &handles)
+        session.handles = handles
+        return result
+    }
+
+    private func closeConnection(_ connection: ClientConnection) {
+        endpoint?.close(connection.id)
+    }
+
+    // MARK: Tasks from outside clients
+
+    /// `task/start`: a session for an outside client whose grant has the Start Agent Tasks scope, as `AgentTaskPlan` resolves it: in the grant's Persona and the space it names among that Persona's spaces, at most at the lower of the grant's level and the Settings default. A client without a grant is asked for one first, as at its first tool call. The client's text adds nothing to the site scope, and the session's `task/event` notifications go to this connection.
+    private func startTask(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        connection.runningCalls += 1
+        Task {
+            defer { connection.runningCalls -= 1 }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+            startTask(params, for: grant, identity: identity, on: connection, requestID: requestID)
+        }
+    }
+
+    private func startTask(_ params: AgentJSON?, for grant: AgentGrant, identity: AgentClientIdentity, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard grant.scopes.startTasks else {
+            return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Start Agent Tasks. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
+        }
+        guard let start = try? params?.decode(as: AgentTaskStart.self), !start.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return replyError(connection, requestID, .invalidParams("task/start needs the task's text."))
+        }
+        let plan: AgentTaskPlan
+        do {
+            plan = try AgentTaskPlan.make(for: start, grant: grant, spaces: host.spaces(in: grant.personaID), models: dependencies.agentModels(), settingsDefault: settings.newSessionMode)
+        } catch {
+            return replyError(connection, requestID, .invalidParams((error as? AgentTaskPlan.Refusal)?.message ?? "\(error)"))
+        }
+        var session = SessionStart(task: start.task, personaID: grant.personaID, spaceID: plan.spaceID, attachedTabIDs: [], mode: plan.mode, model: plan.model, effort: nil)
+        session.origin = .outsideClient(grantID: grant.id, clientName: identity.displayName, deniesApprovals: start.deniesApprovals)
+        do {
+            let started = try startSession(session)
+            started.taskEvent = { [weak self] kind, text in
+                self?.endpoint?.send(.notification(method: AgentControlMethod.taskEventNotification, params: Self.json(AgentTaskEvent(session: started.id, kind: kind, text: text))), to: connection.id)
+            }
+            reply(connection, requestID, Self.json(summary(of: started)))
+        } catch {
+            replyError(connection, requestID, .invalidParams(error.localizedDescription))
+        }
+    }
+
+    private func clientSessions(of connection: ClientConnection) -> [AgentSession]? {
+        guard let identity = connection.identity, let grant = grant(for: identity) else { return nil }
+        return sessions.filter { $0.grantID == grant.id }
+    }
+
+    private func listSessions(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard var mine = clientSessions(of: connection) else { return replyError(connection, requestID, Self.noGrantError("This client has no grant.")) }
+        if let reference = try? params?.decode(as: AgentSessionReference.self) {
+            mine = mine.filter { $0.id == reference.session }
+            guard !mine.isEmpty else { return replyError(connection, requestID, .invalidParams("This client started no session with that ID.")) }
+        }
+        reply(connection, requestID, Self.json(AgentSessionList(sessions: mine.map(summary(of:)))))
+    }
+
+    private func stopTask(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let mine = clientSessions(of: connection) else { return replyError(connection, requestID, Self.noGrantError("This client has no grant.")) }
+        guard let reference = try? params?.decode(as: AgentSessionReference.self), let session = mine.first(where: { $0.id == reference.session }) else {
+            return replyError(connection, requestID, .invalidParams("This client started no session with that ID."))
+        }
+        let wasRunning = session.isTurnRunning
+        session.stop()
+        reply(connection, requestID, ["stopped": .bool(wasRunning)])
+    }
+
+    func summary(of session: AgentSession) -> AgentSessionSummary {
+        AgentSessionSummary(id: session.id, title: session.title, state: session.state.name, mode: session.mode, place: place(of: session),
+                            model: session.model.map { "\(dependencies.toolName($0.provider) ?? $0.provider.rawValue) \u{2014} \(aiModelTitle($0.model))" })
+    }
+
     // MARK: Messages
 
     private func handle(_ message: AgentRPCMessage, on connection: ClientConnection) {
@@ -464,13 +881,29 @@ import Foundation
         case (.ready, AgentControlProtocol.helloMethod):
             replyError(connection, requestID, .invalidRequest("hello comes once per connection."))
         case (.ready, AgentControlMethod.toolsList):
+            if let sessionID = connection.sessionID {
+                guard let session = session(withID: sessionID) else { return closeConnection(connection) }
+                return reply(connection, requestID, Self.json(AgentToolList(tools: listTools(for: session))))
+            }
             let grant = connection.identity.flatMap(grant(for:))
             let tools = grant.map { AgentToolHost.tools(for: $0.level, scopes: $0.scopes) } ?? AgentToolHost.toolsBeforeGrant
             reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name))))
         case (.ready, AgentControlMethod.toolsCall):
+            if let sessionID = connection.sessionID {
+                guard let session = session(withID: sessionID) else { return closeConnection(connection) }
+                return sessionCall(params, of: session, on: connection, requestID: requestID)
+            }
             call(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.taskStart) where connection.sessionID == nil:
+            startTask(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.taskStop) where connection.sessionID == nil:
+            stopTask(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.sessionsList) where connection.sessionID == nil:
+            listSessions(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):
-            if let identity = connection.identity { reply(connection, requestID, Self.json(answer(for: identity))) }
+            // A session's connection is bound; it has no grant to show.
+            let answer = connection.identity.map(answer(for:)) ?? AgentHelloAnswer(version: version, status: .bound)
+            reply(connection, requestID, Self.json(answer))
         case (.ready, AgentControlMethod.grantRelease):
             guard let identity = connection.identity, let grant = grant(for: identity) else { return reply(connection, requestID, ["released": false]) }
             end(grant, as: .released, telling: "This client gave up its access to Arch.", except: connection.id)
@@ -490,9 +923,8 @@ import Foundation
         guard hello.protocol == AgentControlProtocol.version else {
             return refuse(connection, requestID, AgentRefusal(reason: .protocolMismatch, message: "Arch speaks version \(AgentControlProtocol.version) of the control protocol, and this client version \(hello.protocol)."))
         }
-        // In-app sessions bind tickets with plan task VII.17; until then no ticket names a session.
-        guard hello.ticket == nil else {
-            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket."))
+        if let ticket = hello.ticket {
+            return bind(connection, requestID, hello: hello, ticket: ticket)
         }
         guard acceptsOutsideClients else {
             return refuse(connection, requestID, AgentRefusal(reason: .outsideAccessOff, message: "Outside access is off. Turn on Allow Outside Clients in Settings \u{25B8} AI \u{25B8} Agents."))
@@ -576,12 +1008,30 @@ private final class ClientConnection {
     let peer: AgentPeer
     var stage = Stage.new
     var hello: AgentHello?
+    /// An outside client's identity; nil for a session's connection.
     var identity: AgentClientIdentity?
+    /// The in-app session whose ticket the connection presented.
+    var sessionID: UUID?
     var runningCalls = 0
 
     init(id: UUID, peer: AgentPeer) {
         self.id = id
         self.peer = peer
+    }
+}
+
+extension AIFeature {
+    /// Agent Tasks (docs/agents.md, Model choice and fallbacks): sessions the user starts, whose page data reaches the model only as tool results that Arch checks. Its route lists only models that can run a session.
+    public static let agent = AIFeature(id: .agent, name: "Agent Tasks",
+                                        summary: "Runs agent sessions on Claude Code or Codex, which read and act in background tabs while Arch asks you before sensitive steps.",
+                                        trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
+}
+
+extension AIProviderConfiguration {
+    /// "Claude Code" or "Codex" for a preset, otherwise the provider's name.
+    var agentToolName: String {
+        if case .commandLine(let tool) = kind, let agent = tool.agent { return agent.title }
+        return name
     }
 }
 

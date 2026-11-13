@@ -1,4 +1,6 @@
 // Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, and site search. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+import Agent
+import AI
 import AppKit
 import ARCHEngine
 import Combine
@@ -64,6 +66,10 @@ public final class BrowserSession: ObservableObject {
     public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
+    /// The agents' service, which the app sets once it has made it; the agent panel and the bottom bar's indicator show its sessions.
+    public var agents: AgentService?
+    /// The app sets this to open the built-in terminal with a Claude Code or Codex provider's sign-in typed, for the agent panel's Sign In.
+    public var signInToAgentTool: ((AIProviderID) -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover.
     public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
