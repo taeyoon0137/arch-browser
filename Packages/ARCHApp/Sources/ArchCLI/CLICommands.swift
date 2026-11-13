@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the agent tab and reading commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `text`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
@@ -45,6 +45,13 @@ enum CLICommands {
             return sessions(action, json: request.json)
         case .tool(let call):
             return runTool(call, json: request.json)
+        case .typeFromStandardInput(var call):
+            let input = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+            // A trailing line break ends the input, as `echo` and here documents add one.
+            call.arguments["text"] = .string(input.hasSuffix("\n") ? String(input.dropLast()) : input)
+            return runTool(call, json: request.json)
+        case .screenshot(let call, let output):
+            return screenshot(call, output: output, json: request.json)
         }
     }
 
@@ -105,10 +112,22 @@ enum CLICommands {
 
     // MARK: - Tools
 
+    /// Calls one tool, and keeps waiting through `approval_wait` while the step waits for the user. The first call of a client without a grant waits while Arch asks the user, and says so on standard error.
+    private static func callWaiting(_ call: AgentToolCall, on connection: AgentControlConnection) throws -> AgentToolResult {
+        var result = try connection.callTool(call) { printError($0) }
+        var told = false
+        while result.status == .approvalPending, let approval = result.structured?["approval"]?.stringValue {
+            if !told { printError("Waiting for your approval in Arch\u{2026}") }
+            told = true
+            result = try connection.callTool(AgentToolCall(name: "approval_wait", arguments: ["approval": .string(approval)])) { printError($0) }
+        }
+        return result
+    }
+
     /// Calls one tool. The first call of a client without a grant waits while Arch asks the user, and says so on standard error.
     private static func runTool(_ call: AgentToolCall, json: Bool) -> AgentExitCode {
         withConnection { connection, _ in
-            let result = try connection.callTool(call) { printError($0) }
+            let result = try callWaiting(call, on: connection)
             if json {
                 if printJSON(result.structured ?? .null) != .done { return .internalError }
             } else if result.status == .ok {
@@ -117,6 +136,32 @@ enum CLICommands {
                 printError(result.text)
             }
             return AgentExitCode(status: result.status)
+        }
+    }
+
+    /// Takes a screenshot and writes its image to `output`, or to `arch-screenshot-<time>.jpg` in the current folder, never to standard output, then prints the result's text or structured value with the file's path.
+    private static func screenshot(_ call: AgentToolCall, output: String?, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let result = try callWaiting(call, on: connection)
+            guard result.status == .ok, let image = result.content.lazy.compactMap(\.imageData).first else {
+                if json { _ = printJSON(result.structured ?? .null) } else { printError(result.text) }
+                return result.status == .ok ? .internalError : AgentExitCode(status: result.status)
+            }
+            let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withYear, .withMonth, .withDay, .withTime]).replacingOccurrences(of: ":", with: "")
+            let file = URL(fileURLWithPath: output ?? "arch-screenshot-\(stamp).jpg")
+            do {
+                try image.write(to: file, options: output == nil ? .withoutOverwriting : .atomic)
+            } catch {
+                printError("The screenshot could not be written to \(file.path): \(error.localizedDescription)")
+                return .internalError
+            }
+            if json {
+                var structured = result.structured?.objectValue ?? [:]
+                structured["file"] = .string(file.path)
+                return printJSON(.object(structured))
+            }
+            print("\(result.text)\nWrote \(file.path).")
+            return .done
         }
     }
 

@@ -19,6 +19,19 @@ import Testing
     var personasDidChange: (() -> Void)?
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentPanel: AgentPanelModel?
+    /// Real web contents behind some tabs, which the page script and captures reach, as in the page script tests.
+    var webContents: [UUID: any EngineWebContents] = [:]
+    /// What the fake engine captures for a tab in place of its web contents' capture; a tab with neither captures nothing, as Chromium may for a tab no window shows.
+    var captures: [UUID: NSImage] = [:]
+    /// The apps that open links, by scheme.
+    var appNames: [String: String] = ["mailto": "Mail"]
+    var userTabIDs: Set<UUID> = []
+    var downloads: [UUID: [AgentDownloadInfo]] = [:]
+    private(set) var shownTabIDs: [UUID] = []
+    private(set) var shownPanels: [UUID] = []
+    private(set) var openedExternally: [URL] = []
 
     /// The pages the fake engine serves, by address, with their titles and text; any other address loads with an empty title and no text.
     var pages: [URL: (title: String, text: String)] = [:]
@@ -85,6 +98,30 @@ import Testing
         let text = pages[url]?.text ?? ""
         completion(.success(EngineReadableContent(url: url, title: tab.title, text: String(text.prefix(limit)), isTruncated: text.count > limit)))
     }
+
+    func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void) {
+        guard !silentTabIDs.contains(tabID) else { return }
+        guard let contents = webContents[tabID] else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        contents.executeJavaScript(source, inWorld: world, completion: completion)
+    }
+
+    func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
+        if let image = captures[tabID] { return completion(image) }
+        guard let contents = webContents[tabID] else { return completion(nil) }
+        if fullPage { contents.captureFullPage(completion: completion) } else { contents.captureViewport(completion: completion) }
+    }
+
+    func userTabs(in personaID: UUID) -> [AgentTabInfo] { tabs.filter { userTabIDs.contains($0.id) && $0.agentOwnerID == nil } }
+
+    func showTab(_ tabID: UUID) { shownTabIDs.append(tabID) }
+
+    func agentDownloads(of ownerID: UUID) -> [AgentDownloadInfo] { downloads[ownerID] ?? [] }
+
+    func appName(forOpening url: URL) -> String? { url.scheme.flatMap { appNames[$0] } }
+
+    func openExternally(_ url: URL) { openedExternally.append(url) }
+
+    func showAgentPanel(for ownerID: UUID) { shownPanels.append(ownerID) }
 
     func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
         Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
@@ -398,7 +435,8 @@ final class Shared<Value>: @unchecked Sendable {
             prompt: prompt,
             authenticator: authenticator,
             allowsAI: { $0.host != "excluded.example" },
-            now: { [unowned self] in self.now },
+            // A report that arrives after the test, such as a refused peer's, reads the clock of a harness that is gone.
+            now: { [weak self] in self?.now ?? Date() },
             processRecord: { records.value[$0] },
             startRunner: { [unowned self] request in
                 let runner = FakeRunner(request: request)
@@ -461,8 +499,8 @@ final class TestClient: @unchecked Sendable {
         return try await Task.detached { try self.connection.hello(AgentHello(protocol: version, client: kind, version: "9.9.9", ticket: ticket), timeout: 5) }.value
     }
 
-    func callTool(_ name: String, _ arguments: [String: AgentJSON] = [:]) async throws -> AgentToolResult {
-        try await Task.detached { try self.connection.callTool(AgentToolCall(name: name, arguments: arguments), timeout: 5) }.value
+    func callTool(_ name: String, _ arguments: [String: AgentJSON] = [:], timeout: TimeInterval = 5) async throws -> AgentToolResult {
+        try await Task.detached { try self.connection.callTool(AgentToolCall(name: name, arguments: arguments), timeout: timeout) }.value
     }
 
     func call(_ method: String, params: AgentJSON? = nil) async throws -> AgentJSON {

@@ -115,7 +115,7 @@ import Testing
             let result = await toolHost.run(call, for: grant, state: state).result
             #expect(result.status == .error && result.code == "invalidArguments" && result.text == problem, "\(call.name)")
         }
-        #expect(await toolHost.run(AgentToolCall(name: "snapshot", arguments: ["tab": "t1"]), for: grant, state: state).result.code == "notAvailable")
+        #expect(await toolHost.run(AgentToolCall(name: "guide"), for: grant, state: state).result.code == "notAvailable")
         #expect(await toolHost.run(AgentToolCall(name: "run_script"), for: grant, state: state).result.code == "unknownTool")
     }
 

@@ -1,4 +1,4 @@
-// Where the agent panel shows (docs/agents.md, In the browser ▸ The agent panel; Sidebar and attention): in a main or small window's trailing column in place of the page reader and at its width, with the composer for a new task or one session's conversation; the bottom bar's agents indicator, whose menu lists the acting sessions and outside clients and Stop All Agents; and the dot on the symbol of a space whose session waits for the user. The panel's views are the `Agent` module's; this file gives them the page reader's way of rendering replies and the window's ways of opening links and tabs.
+// Where the agent panel shows (docs/agents.md, In the browser ▸ The agent panel; Sidebar and attention): in a main or small window's trailing column in place of the page reader and at its width, with the composer for a new task, one session's conversation, or an outside client's steps and the cards that wait for the user; the bottom bar's agents indicator, whose menu lists the acting sessions and outside clients and Stop All Agents; and the dot on the symbol of a space whose session waits for the user. The panel's views are the `Agent` module's; this file gives them the page reader's way of rendering replies and the window's ways of opening links and tabs.
 import Agent
 import AI
 import SwiftUI
@@ -7,6 +7,8 @@ import SwiftUI
 public enum AgentPanelContent: Equatable {
     case composer(AgentComposerContext)
     case session(UUID)
+    /// An outside client's panel, by its grant's ID.
+    case client(UUID)
 }
 
 struct AgentPanelColumn: View {
@@ -14,7 +16,15 @@ struct AgentPanelColumn: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
-        if let content = windowModel.agentPanel, let agents = session.agents {
+        if case .client(let ownerID) = windowModel.agentPanel, let agents = session.agents {
+            // A selected agent tab shows its own client's panel.
+            AgentPanel(model: agents.panel, ownerID: windowModel.selectedTab?.agentOwnerID.flatMap { agents.panel.owners[$0] != nil ? $0 : nil } ?? ownerID, close: windowModel.hideAgentPanel)
+                .frame(width: PageReaderColumn.width)
+                .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)))
+                .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
+                .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
+                .transition(.move(edge: .trailing))
+        } else if let content = windowModel.agentPanel, let agents = session.agents {
             AgentPanelFrame(agents: agents, content: content, actions: actions)
                 .frame(width: PageReaderColumn.width)
                 // The page's own margin separates it from the panel.
@@ -61,6 +71,9 @@ private struct AgentPanelFrame: View {
                 AgentComposer(service: agents, context: context, actions: actions) { windowModel.showAgentSession($0.id) }
                     // A new context, as from New Agent Task with another tab selected, starts a new draft.
                     .id(context.id)
+            case .client:
+                // The column shows an outside client's panel on its own.
+                EmptyView()
             case .session(let id):
                 if let session = agents.session(withID: id) {
                     AgentSessionPanel(service: agents, session: session, actions: actions)

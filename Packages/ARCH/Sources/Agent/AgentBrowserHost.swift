@@ -1,4 +1,4 @@
-// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, and the agent tabs with what happens in them. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`. Later tasks add shared tabs, snapshots, actions, and approvals.
+// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, the agent tabs with what happens in them, the page script and captures that snapshots, actions, and screenshots use, the user's tabs that `request_tab` offers, the downloads of agent tabs, and the agent panel's place in the windows. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -88,10 +88,12 @@ public enum AgentTabReport: Equatable, Sendable {
     case dialogWaiting(AgentDialogKind, message: String)
     /// Rule P10 dismissed an alert, with its text.
     case alertDismissed(message: String)
-    /// Rule P6 refused a download of a file with this name.
-    case downloadRefused(name: String)
-    /// Rule P11 refused a link with this scheme to another app.
-    case externalAppRefused(scheme: String)
+    /// Rule P6: a page started a download from this address, which waits for the user, since `agentTabMayDownload` did not allow it.
+    case downloadAsked(URL)
+    /// A download from this address that the user allowed started.
+    case downloadStarted(URL)
+    /// Rule P11: a page opened this link to another app, which waits for the user.
+    case externalAppAsked(URL)
 }
 
 public enum AgentDialogKind: String, Equatable, Sendable {
@@ -99,6 +101,21 @@ public enum AgentDialogKind: String, Equatable, Sendable {
     case prompt
     case leavePage
     case signIn
+}
+
+/// A download an agent tab started, as `list_downloads` shows it: no path.
+public struct AgentDownloadInfo: Equatable, Sendable {
+    public var name: String
+    public var completedBytes: Int64
+    public var totalBytes: Int64
+    public var state: EngineDownloadState
+
+    public init(name: String, completedBytes: Int64, totalBytes: Int64, state: EngineDownloadState) {
+        self.name = name
+        self.completedBytes = completedBytes
+        self.totalBytes = totalBytes
+        self.state = state
+    }
 }
 
 /// A page of the browsing history.
@@ -128,6 +145,24 @@ public struct AgentHistoryPage: Equatable, Sendable {
     func closeAgentTab(_ tabID: UUID)
     /// The tab's main frame text through `readableContent(limit:completion:)`, which may never answer while the page shows a dialog.
     func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void)
+    /// Runs a function expression of the agents' page script in the tab's main frame, in the script world `world`, through `executeJavaScript(_:inWorld:completion:)`. A tab that no window shows gets a viewport of a window's size first, so that its page lays out. It may never answer while the page shows a dialog.
+    func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void)
+    /// The tab's viewport, or its whole page, as an image; nil when the engine gives none, as Chromium may for a tab that no window shows.
+    func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void)
+    /// The user's own open tabs of a Persona, without agent tabs, in sidebar order, which `request_tab` offers.
+    func userTabs(in personaID: UUID) -> [AgentTabInfo]
+    /// Shows the tab in a main window, without moving it out of its folder: for Take Over, `hand_to_user`, and the panel's steps.
+    func showTab(_ tabID: UUID)
+    /// The downloads the owner's agent tabs started, which the user allowed.
+    func agentDownloads(of ownerID: UUID) -> [AgentDownloadInfo]
+    /// The name of the app that opens `url`, or nil when none does.
+    func appName(forOpening url: URL) -> String?
+    /// Opens `url` in the app that handles it, once the user allowed it (P11).
+    func openExternally(_ url: URL)
+    /// Set by the service: the model of the agent panel, which the host places in the windows' trailing column.
+    var agentPanel: AgentPanelModel? { get set }
+    /// Shows the agent panel for the owner in the front main window, as when one of its cards waits.
+    func showAgentPanel(for ownerID: UUID)
     /// The pages of the browsing history, shared by every Persona, whose address or title contains `query`, most visited first.
     func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage]
     /// Adds the Agents Persona, empty and with no sign-ins, and returns its ID.
@@ -144,6 +179,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)? { get set }
     /// Set by the service; the host asks it before each main frame navigation of an agent tab, again before each redirect hop's request, and for the first address of a popup that joins an agent folder. False stops the navigation, or closes the popup.
     var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
+    /// Set by the service; the host asks it when a page in an agent tab starts a download. False refuses the download, and the tab then reports `downloadAsked` (P6).
+    var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
 }
 
 public extension AgentBrowserHost {

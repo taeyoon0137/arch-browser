@@ -1,4 +1,4 @@
-// The grant sheet (docs/agents.md, Outside clients: identity, grants, revocation): on the front main window, it names the client and its executable, says when every program in the client's shell shares the access, lets the user choose the Persona, space, access, extra scopes, and duration, each starting at its safe default, and says in plain sentences what the grant lets the client read. It has no default button: Return and Space do nothing, and Allow takes only a pointer click. A notification without page content posts while Arch is in the background. An unanswered sheet closes as Don't Allow after the outside clients' approval window.
+// The grant sheet (docs/agents.md, Outside clients: identity, grants, revocation): on the front main window, it names the client and its executable, says when every program in the client's shell shares the access, lets the user choose the Persona, space, access, extra scopes, and duration, each starting at its safe default, and says in plain sentences what the grant lets the client read. It has no default button: Return and Space do nothing, and Allow takes only a pointer click that no other program posted (`AgentPointerCheck`). A notification without page content posts while Arch is in the background. An unanswered sheet closes as Don't Allow after the outside clients' approval window.
 import AgentControl
 import AppKit
 import SwiftUI
@@ -114,8 +114,8 @@ struct AgentGrantSheetView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                AgentSheetButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
-                AgentSheetButton(title: choice.needsAuthentication ? "Allow\u{2026}" : "Allow", keyEquivalent: "", requiresPointer: true) { finish(normalized) }
+                AgentPointerButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
+                AgentPointerButton(title: choice.needsAuthentication ? "Allow\u{2026}" : "Allow", requiresPointer: true) { finish(normalized) }
             }
         }
         .padding(20)
@@ -142,47 +142,5 @@ struct AgentGrantSheetView: View {
         sentences.append("Steps that need you still ask in Arch.")
         if choice.needsAuthentication { sentences.append("Allowing asks for Touch ID or your login password.") }
         return sentences.joined(separator: " ")
-    }
-}
-
-/// A sheet button that never takes the keyboard focus, so that Space cannot press it; the Allow button also refuses anything but a pointer click, such as an accessibility press.
-private struct AgentSheetButton: NSViewRepresentable {
-    let title: String
-    let keyEquivalent: String
-    let requiresPointer: Bool
-    let action: () -> Void
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = PointerButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
-        button.bezelStyle = .push
-        button.keyEquivalent = keyEquivalent
-        button.refusesFirstResponder = true
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        button.title = title
-        context.coordinator.parent = self
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-
-    @MainActor final class Coordinator: NSObject {
-        var parent: AgentSheetButton
-
-        init(parent: AgentSheetButton) {
-            self.parent = parent
-        }
-
-        @objc func press() {
-            if parent.requiresPointer {
-                guard let type = NSApp.currentEvent?.type, type == .leftMouseUp || type == .leftMouseDown else { return }
-            }
-            parent.action()
-        }
-    }
-
-    private final class PointerButton: NSButton {
-        override var acceptsFirstResponder: Bool { false }
     }
 }

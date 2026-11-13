@@ -1,0 +1,333 @@
+// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, denial on timeout, Touch ID for outside clients' sensitive Allow, the warning line on cards whose text names a secret, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download or link to another app opens, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit.
+import AgentControl
+import AppKit
+import Foundation
+import Testing
+@testable import Agent
+
+@MainActor @Suite(.serialized) struct ApprovalTests {
+    nonisolated private static let owner = UUID()
+
+    private static func card(tab: UUID? = UUID(), document: Int? = 0, site: String? = "shop.example", sensitive: Bool = false, outside: Bool = true, deadline: TimeInterval = 60,
+                             offers: [AgentApprovalAnswer] = [.allowOnce, .allowOnPage, .allowOnSite, .deny], says: String? = nil, owner: UUID = owner) -> AgentApproval {
+        AgentApproval(ownerID: owner, clientName: "claude in Terminal", isOutsideClient: outside, kind: .step, isSensitive: sensitive, offers: offers, action: "Click \u{201C}Next\u{201D} on shop.example",
+                      tabID: tab, site: site, agentSays: says, document: document, createdAt: Date(), deadline: Date().addingTimeInterval(deadline))
+    }
+
+    /// Opens a card and returns the task that waits for its answer.
+    private static func open(_ card: AgentApproval, in approvals: AgentApprovals) async -> Task<AgentApprovalAnswer, Never> {
+        let task = Task { await approvals.request(card) }
+        for _ in 0 ..< 50 where !approvals.isPending(card.id) { await Task.yield() }
+        return task
+    }
+
+    @Test func cardsGroupPerPageAndAPagesAllowanceAnswersItsOtherCards() async {
+        let approvals = AgentApprovals()
+        let tab = UUID(), other = UUID()
+        let first = Self.card(tab: tab), second = Self.card(tab: tab), elsewhere = Self.card(tab: other, site: "news.example"), sensitive = Self.card(tab: tab, sensitive: true, offers: [.allowOnce, .deny])
+        let tasks = [await Self.open(first, in: approvals), await Self.open(second, in: approvals), await Self.open(elsewhere, in: approvals), await Self.open(sensitive, in: approvals)]
+        #expect(approvals.groups(of: Self.owner).map { $0.map(\.id) } == [[first.id, second.id, sensitive.id], [elsewhere.id]])
+        #expect(await approvals.answer(first.id, with: .allowOnPage))
+        #expect(await tasks[0].value == .allowOnPage)
+        #expect(await tasks[1].value == .allowOnPage)
+        // Another page's card, and a sensitive card that offers no allowance, still wait.
+        #expect(approvals.pending.map(\.id) == [elsewhere.id, sensitive.id])
+        #expect(await approvals.answer(elsewhere.id, with: .deny))
+        #expect(await tasks[2].value == .deny)
+        approvals.end(because: "Arch quit.")
+        #expect(await tasks[3].value == .ended("Arch quit."))
+        #expect(approvals.outcomes[sensitive.id] == .ended("Arch quit."))
+    }
+
+    @Test func aCardIsWithdrawnWhenItsPageMovesOnAndDeniedWhenNobodyAnswers() async throws {
+        let approvals = AgentApprovals()
+        let tab = UUID()
+        let page = Self.card(tab: tab, document: 1), handed = Self.card(tab: tab, document: nil), late = Self.card(tab: UUID(), deadline: 0.2)
+        let pageTask = await Self.open(page, in: approvals), handedTask = await Self.open(handed, in: approvals), lateTask = await Self.open(late, in: approvals)
+        // The same document keeps the card; the tab's next document withdraws it, but not a card the page moving on does not end.
+        approvals.withdraw(tab: tab, owner: Self.owner, document: 1)
+        #expect(approvals.isPending(page.id))
+        approvals.withdraw(tab: tab, owner: Self.owner, document: 2)
+        #expect(await pageTask.value == .withdrawn)
+        #expect(approvals.isPending(handed.id))
+        // The tab closing withdraws every card about it.
+        approvals.withdraw(tab: tab, owner: Self.owner, document: nil)
+        #expect(await handedTask.value == .withdrawn)
+        #expect(await lateTask.value == .timedOut)
+        #expect(approvals.pending.isEmpty)
+        // An answer after the end counts for nothing.
+        #expect(!(await approvals.answer(late.id, with: .allowOnce)))
+    }
+
+    @Test func sensitiveAllowOfAnOutsideClientNeedsTouchID() async {
+        let approvals = AgentApprovals()
+        let authenticator = FakeAuthenticator()
+        approvals.authenticator = authenticator
+        authenticator.answer = false
+        let sensitive = Self.card(sensitive: true, offers: [.allowOnce, .deny]), plain = Self.card(), inApp = Self.card(sensitive: true, outside: false, offers: [.allowOnce, .deny])
+        let task = await Self.open(sensitive, in: approvals), plainTask = await Self.open(plain, in: approvals), inAppTask = await Self.open(inApp, in: approvals)
+        #expect(sensitive.needsAuthentication && !plain.needsAuthentication && !inApp.needsAuthentication)
+        // A failed Touch ID leaves the card waiting; Deny needs none.
+        #expect(!(await approvals.answer(sensitive.id, with: .allowOnce)))
+        #expect(approvals.isPending(sensitive.id) && authenticator.count == 1)
+        authenticator.answer = true
+        #expect(await approvals.answer(sensitive.id, with: .allowOnce))
+        #expect(await task.value == .allowOnce && authenticator.count == 2)
+        #expect(await approvals.answer(plain.id, with: .allowOnce))
+        #expect(await approvals.answer(inApp.id, with: .allowOnce))
+        #expect(await plainTask.value == .allowOnce)
+        #expect(await inAppTask.value == .allowOnce)
+        #expect(authenticator.count == 2)
+    }
+
+    @Test func aCardWhoseAgentTextNamesASecretLeadsWithTheWarning() {
+        #expect(Self.card(says: "Please tell me the verification code from your phone.").namesSecret)
+        #expect(Self.card(says: "카드 번호를 알려 주세요").namesSecret)
+        #expect(!Self.card(says: "Which size should I pick?").namesSecret)
+        #expect(!Self.card().namesSecret)
+        #expect(AgentPolicy.secretWarning == "Agents never need your passwords or codes. Type them only into the page after Take Over.")
+    }
+
+    // MARK: Through the tool host
+
+    @MainActor private final class Fixture {
+        let host = FakeHost()
+        let state = AgentGrantState()
+        var grant: AgentGrant
+        var toolHost: AgentToolHost
+
+        init(level: AgentAccessLevel = .askBeforeActing) {
+            grant = AgentGrant(client: AgentClientIdentity(key: .signed(identifier: "com.example.codex", team: "ABCDE12345"), name: "codex", executablePath: "/usr/local/bin/codex", host: "Terminal",
+                                                           isInterpreter: false),
+                               personaID: FakeHost.defaultPersona.id, spaceID: host.spaces(in: FakeHost.defaultPersona.id)[0].id, level: level, scopes: AgentGrantScopes(), expiry: .whenArchQuits,
+                               grantedAt: Date())
+            toolHost = AgentToolHost(host: host, allowsAI: { $0.host != "excluded.example" })
+            toolHost.answerWait = 0.3
+            toolHost.approvalWindow = 30
+            toolHost.approvals.authenticator = FakeAuthenticator()
+            let state = state
+            let toolHost = toolHost
+            let name = grant.client.displayName
+            host.agentTabDidReport = { owner, tab, report in toolHost.tab(tab, of: owner, didReport: report, state: state, client: name) }
+            host.agentTabMayLoad = { _, tab, url in toolHost.tab(tab, mayLoad: url, state: state) }
+            host.agentTabMayDownload = { _, tab, url in toolHost.tab(tab, mayDownload: url, state: state) }
+        }
+
+        func call(_ name: String, _ arguments: [String: AgentJSON] = [:]) async -> AgentToolResult {
+            await toolHost.run(AgentToolCall(name: name, arguments: arguments), for: grant, state: state).result
+        }
+
+        func waitForCard() async throws -> AgentApproval {
+            try await waitUntil { !self.toolHost.approvals.pending.isEmpty }
+            return try #require(toolHost.approvals.pending.first)
+        }
+    }
+
+    @Test func aCallThatWaitsAnswersApprovalPendingAndApprovalWaitTakesItsResult() async throws {
+        let fixture = Fixture()
+        let first = await fixture.call("request_approval", ["summary": "Send the reply to Dana", "kind": "send"])
+        #expect(first.status == .approvalPending && first.structured?["approval"] == "a1")
+        #expect(first.text == "Waiting for the user in Arch; call approval_wait with approval a1.")
+        let card = try #require(fixture.toolHost.approvals.pending.first)
+        #expect(card.isSensitive && card.rules == [.p15] && card.agentSays == "Send the reply to Dana" && card.action == "Approve the agent's request to send a message")
+        #expect(card.offers == [.allowOnce, .deny, .denyAndStop, .reply(""), .takeOver])
+        // Still waiting after another answer wait.
+        #expect(await fixture.call("approval_wait", ["approval": "a1"]).status == .approvalPending)
+        #expect(await fixture.toolHost.approvals.answer(card.id, with: .allowOnce))
+        let done = await fixture.call("approval_wait", ["approval": "a1"])
+        #expect(done.status == .ok && done.structured?["decision"] == "approved" && done.text == "The user approved: Send the reply to Dana")
+        // A handle that waits for nothing, now or ever.
+        #expect(await fixture.call("approval_wait", ["approval": "a1"]).code == "notFound")
+        #expect(await fixture.call("approval_wait", ["approval": "a9"]).code == "notFound")
+        // Read Only refuses request_approval without a card.
+        let readOnly = Fixture(level: .readOnly)
+        let refused = await readOnly.call("request_approval", ["summary": "Delete it", "kind": "delete"])
+        #expect(refused.status == .refused && refused.code == AgentPolicy.readOnlyCode && readOnly.toolHost.approvals.pending.isEmpty)
+    }
+
+    @Test func theToolsThatWaitForTheUser() async throws {
+        let fixture = Fixture()
+        fixture.toolHost.answerWait = 10
+        // ask_user, with the warning line when the question names a secret.
+        async let asked = fixture.call("ask_user", ["question": "What is your one-time password?", "choices": ["Skip"]])
+        let question = try await fixture.waitForCard()
+        #expect(question.namesSecret && question.kind == .question(["Skip"]))
+        await fixture.toolHost.approvals.answer(question.id, with: .answer("I will type it myself"))
+        #expect(await asked.text == "The user answered: I will type it myself")
+
+        // request_tab shares the tab the user picks, for reading or acting, and it is listed as shared.
+        let userTab = AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox?id=9"), isLoading: false, engine: .webKit)
+        fixture.host.tabs.append(userTab)
+        fixture.host.userTabIDs = [userTab.id]
+        fixture.host.pages[userTab.url!] = ("Inbox", "Three new messages.")
+        async let requested = fixture.call("request_tab", ["reason": "To read the latest message", "access": "read"])
+        let pick = try await fixture.waitForCard()
+        #expect(pick.kind == .requestTab([AgentTabChoice(id: userTab.id, title: "Inbox", host: "mail.example")], acting: false))
+        await fixture.toolHost.approvals.answer(pick.id, with: .tab(userTab.id))
+        let shared = await requested
+        #expect(shared.status == .ok && shared.structured?["tab"] == "t1" && shared.structured?["access"] == "read")
+        #expect(await fixture.call("list_tabs", ["scope": "shared"]).text.contains("t1  <untrusted"))
+        #expect(await fixture.call("read_text", ["tab": "t1"]).text.contains("Three new messages."))
+        // A tab shared for reading refuses actions.
+        let action = await fixture.call("scroll", ["tab": "t1", "direction": "down"])
+        #expect(action.status != .ok)
+
+        // hand_to_user shows the tab and waits for Done; a denial of request_tab shares nothing.
+        let opened = await fixture.call("open_tab", ["url": "https://docs.example/sign-in"])
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        async let handed = fixture.call("hand_to_user", ["tab": .string(handle), "reason": "sign_in", "message": "Please sign in, then choose Done."])
+        let hand = try await fixture.waitForCard()
+        #expect(hand.kind == .handToUser("sign_in") && hand.document == nil && fixture.host.shownTabIDs.last == hand.tabID)
+        await fixture.toolHost.approvals.answer(hand.id, with: .done("Signed in"))
+        let finished = await handed
+        #expect(finished.status == .ok && finished.text == "The user finished in \(handle) and wrote: Signed in")
+        async let refused = fixture.call("request_tab", ["reason": "More", "access": "act"])
+        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .deny)
+        #expect(await refused.status == .denied)
+    }
+
+    @Test func aPagesDownloadAndLinkToAnotherAppAskOnCardsOfTheirOwn() async throws {
+        let fixture = Fixture()
+        let opened = await fixture.call("open_tab", ["url": "https://docs.example/files"])
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        let tabID = try #require(fixture.state.handles.tabs.id(for: handle))
+        let file = URL(string: "https://docs.example/files/report.pdf?token=1")!
+        // P6: refused until the user answers; Allow Once lets that address download once, and the tab asks for it again.
+        #expect(!fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
+        fixture.host.report(.downloadAsked(file), in: tabID)
+        let download = try await fixture.waitForCard()
+        #expect(download.kind == .download && download.rules == [.p6] && !download.isSensitive && download.offers == [.allowOnce, .allowDownloadsFromSite, .deny])
+        #expect(download.exactText == file.absoluteString && download.action == "Download \u{201C}report.pdf\u{201D} from docs.example in \(handle)")
+        await fixture.toolHost.approvals.answer(download.id, with: .allowOnce)
+        try await waitUntil { fixture.host.navigations.contains(.load(file)) }
+        #expect(fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
+        #expect(!fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
+        // Allow Downloads from This Site covers the next one from it.
+        fixture.host.report(.downloadAsked(file), in: tabID)
+        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .allowDownloadsFromSite)
+        try await waitUntil { fixture.state.downloadSites.contains("docs.example") }
+        #expect(fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://docs.example/other.zip")!, state: fixture.state))
+        #expect(!fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://elsewhere.example/other.zip")!, state: fixture.state))
+        // P11: a sensitive card naming the app; the link opens only after Allow.
+        let mail = URL(string: "mailto:dana@example.org")!
+        fixture.host.report(.externalAppAsked(mail), in: tabID)
+        // A page that asks again while the card waits gets no second card.
+        fixture.host.report(.externalAppAsked(mail), in: tabID)
+        let external = try await fixture.waitForCard()
+        #expect(fixture.toolHost.approvals.pending.count == 1)
+        #expect(external.kind == .externalApp("Mail") && external.isSensitive && external.needsAuthentication)
+        #expect(fixture.host.openedExternally.isEmpty)
+        await fixture.toolHost.approvals.answer(external.id, with: .allowOnce)
+        try await waitUntil { fixture.host.openedExternally == [mail] }
+        // The agent hears of each card and of each answer, never the full addresses.
+        let events = await fixture.call("list_tabs")
+        #expect(events.text.contains("which waits for the user in Arch (P6)") && events.text.contains("The user allowed the download in \(handle). It starts again."))
+        #expect(events.text.contains("The user opened the link from \(handle) in Mail."))
+        #expect(!events.text.contains("token=1") && !events.text.contains("dana@example.org"))
+    }
+
+    @Test func anActionInAskBeforeActingAsksAndTheAnswerDecides() async throws {
+        // The fake host has no page script, so the action's card is about the page: scroll changes no data, while click needs a ref, which needs a snapshot; request_approval stands in for a card the page withdraws.
+        let fixture = Fixture()
+        fixture.toolHost.answerWait = 10
+        let opened = await fixture.call("open_tab", ["url": "https://docs.example/guide"])
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        let tabID = try #require(fixture.state.handles.tabs.id(for: handle))
+        async let approval = fixture.call("request_approval", ["summary": "Submit the form", "kind": "submit", "tab": .string(handle)])
+        let card = try await fixture.waitForCard()
+        #expect(card.tabID == tabID && card.document == 1)
+        // The page moves on: the card goes, and the call is stale.
+        fixture.host.navigate(tabID, .load(URL(string: "https://docs.example/other")!))
+        #expect(await approval.status == .stale)
+        // Deny and Stop stops the client.
+        var stopped: [UUID] = []
+        fixture.toolHost.stopClient = { stopped.append($0) }
+        async let second = fixture.call("request_approval", ["summary": "Delete the draft", "kind": "delete", "tab": .string(handle)])
+        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .denyAndStop)
+        #expect(await second.status == .denied && stopped == [fixture.grant.id])
+        // A reply is the user's instruction.
+        async let third = fixture.call("request_approval", ["summary": "Buy the blue one", "kind": "purchase"])
+        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .reply("Buy the red one"))
+        let replied = await third
+        #expect(replied.status == .ok && replied.structured?["decision"] == "instruction" && replied.structured?["reply"] == "Buy the red one")
+    }
+
+    // MARK: Through the service
+
+    @Test func stopAllAgentsRevocationTheClientLeavingAndQuitDenyWaitingCards() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+
+        // Stop All Agents: the waiting card ends, its client's connection closes, and the grant stays.
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        _ = try await client.callTool("session_info")
+        let grant = try #require(service.grants.first)
+        let waiting = Task { try? await client.callTool("request_approval", ["summary": "Post the comment", "kind": "send"]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let first = try #require(service.approvals.pending.first)
+        #expect(harness.host.shownPanels == [grant.id])
+        #expect(service.panel.owners[grant.id] == AgentPanelOwner(name: "agent in Agent", access: "Ask Before Acting", place: "Default / Home"))
+        service.stopAllAgents()
+        #expect(service.approvals.outcomes[first.id] == .ended("The user stopped all agents in Arch."))
+        _ = await waiting.value
+        #expect(service.grants.map(\.id) == [grant.id])
+
+        // The client leaving ends the cards of its connection: it stops waiting for the answer, and its connection closes.
+        var leaving: TestClient? = try TestClient(harness.location)
+        _ = try await leaving?.hello()
+        _ = try? await leaving?.callTool("request_approval", ["summary": "Send it", "kind": "send"], timeout: 0.5)
+        let second = try #require(service.approvals.pending.first)
+        leaving = nil
+        try await waitUntil { service.approvals.outcomes[second.id] != nil }
+        #expect(service.approvals.outcomes[second.id] == .ended("The client left before the user answered."))
+
+        // Revocation ends the grant's cards.
+        let third = try TestClient(harness.location)
+        _ = try await third.hello()
+        let revoked = Task { try? await third.callTool("request_approval", ["summary": "Delete it", "kind": "delete"]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        service.revoke(grant.id)
+        #expect(service.approvals.outcomes[card.id] == .ended("The user revoked this client's access in Arch."))
+        _ = await revoked.value
+
+        // Quit ends whatever still waits, such as a card a page's download opened.
+        let pageCard = AgentApproval(ownerID: grant.id, clientName: "agent", isOutsideClient: true, kind: .download, isSensitive: false, offers: [.allowOnce, .deny], action: "Download",
+                                     createdAt: Date(), deadline: Date().addingTimeInterval(60))
+        let quitting = Task { await service.approvals.request(pageCard) }
+        try await waitUntil { service.approvals.isPending(pageCard.id) }
+        service.stop()
+        #expect(await quitting.value == .ended("Arch quit."))
+        // The service records each ended call before the harness goes.
+        try await waitUntil { service.activity.entries.filter { $0.tool == "request_approval" }.count == 3 }
+        #expect(service.activity.entries.filter { $0.tool == "request_approval" }.allSatisfy { $0.decision == .denied && $0.outcome == "denied" })
+    }
+}
+
+/// The click check on sensitive cards' and the grant sheet's Allow (docs/agents.md, Approval interface): a click that another program of this user posted names that program as its source, which Arch refuses unless it is part of the system; a click whose source is the system, or no process, counts.
+@Suite struct PointerCheckTests {
+    @Test func clicksPostedByOtherProgramsAreRefused() {
+        let paths: [pid_t: String] = [
+            501: "/opt/homebrew/bin/cliclick", 502: "/Users/someone/.local/bin/agent-helper", 503: "/usr/bin/osascript",
+            504: "/System/Library/CoreServices/System Events.app/Contents/MacOS/System Events", 505: "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+            510: "/System/Library/CoreServices/UniversalControl.app/Contents/MacOS/UniversalControl", 511: "/usr/libexec/hidd", 512: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+        ]
+        let path: (pid_t) -> String? = { paths[$0] }
+        for source in [501, 502, 503, 504, 505] as [pid_t] { #expect(AgentPointerCheck.isPostedByAnotherProgram(source: source, path: path), "\(source)") }
+        for source in [510, 511, 512] as [pid_t] { #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: source, path: path), "\(source)") }
+        // No source, Arch itself, and a process whose path Arch cannot read, as another user's, such as the window server's.
+        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 0, path: path))
+        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: getpid(), path: { _ in "/opt/homebrew/bin/cliclick" }))
+        #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 600, path: path))
+        // Only a pointer click counts: no event, as an accessibility press gives, and a key press do not.
+        #expect(!AgentPointerCheck.isPointerClick(nil))
+        let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+                                   isARepeat: false, keyCode: 36)
+        #expect(!AgentPointerCheck.isPointerClick(key))
+        let click = NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
+        #expect(AgentPointerCheck.isPointerClick(click))
+    }
+}

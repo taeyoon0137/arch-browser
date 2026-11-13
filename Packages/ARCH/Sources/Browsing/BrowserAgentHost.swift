@@ -1,4 +1,4 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, passes on what happens in them, and asks the service about each of their navigations. Later tasks add shared tabs, snapshots, actions, and approvals here.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, passes on what happens in them, and asks the service about each of their navigations and downloads. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
 import Agent
 import AppKit
 import ARCHEngine
@@ -12,6 +12,10 @@ import Foundation
     public var personasDidChange: (() -> Void)?
     public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentPanel: AgentPanelModel?
+    /// The addresses of the downloads each owner's tabs started once the user allowed them, which `list_downloads` follows in the session's downloads.
+    private var downloadsByOwner: [UUID: [URL]] = [:]
     private var cancellables: Set<AnyCancellable> = []
     /// The agent tabs this host follows, each with its owner, until it closes or the user takes it over.
     private var followed: [UUID: (owner: UUID, observer: AnyCancellable)] = [:]
@@ -101,6 +105,55 @@ import Foundation
         tab.webContents.readableContent(limit: limit, completion: completion)
     }
 
+    public func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void) {
+        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        giveViewport(to: tab)
+        tab.webContents.executeJavaScript(source, inWorld: world, completion: completion)
+    }
+
+    public func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
+        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(nil) }
+        giveViewport(to: tab)
+        if fullPage { tab.webContents.captureFullPage(completion: completion) } else { tab.webContents.captureViewport(completion: completion) }
+    }
+
+    /// A page whose view no window shows and has never been sized lays out in a viewport of nothing, where no element is visible or reachable, so it gets the size of the front window's content first.
+    private func giveViewport(to tab: Tab) {
+        let view = tab.webContents.view
+        guard view.window == nil, view.frame.width < 1 || view.frame.height < 1 else { return }
+        let size = session.sidebarTarget().nsWindow?.contentView?.bounds.size ?? NSSize(width: 1280, height: 800)
+        view.setFrameSize(NSSize(width: max(size.width, 800), height: max(size.height, 600)))
+    }
+
+    public func userTabs(in personaID: UUID) -> [AgentTabInfo] {
+        session.tabsInSidebarOrder.filter { $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info)
+    }
+
+    public func showTab(_ tabID: UUID) {
+        guard session.allTabs.contains(where: { $0.id == tabID }) else { return }
+        let window = session.sidebarTarget()
+        window.selectTab(tabID)
+        window.nsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    public func agentDownloads(of ownerID: UUID) -> [AgentDownloadInfo] {
+        let addresses = downloadsByOwner[ownerID] ?? []
+        return session.downloads.filter { addresses.contains($0.item.sourceURL) }
+            .map { AgentDownloadInfo(name: $0.filename, completedBytes: $0.completedBytes, totalBytes: $0.totalBytes, state: $0.state) }
+    }
+
+    public func appName(forOpening url: URL) -> String? {
+        NSWorkspace.shared.urlForApplication(toOpen: url).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+    }
+
+    public func openExternally(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
+    public func showAgentPanel(for ownerID: UUID) {
+        session.sidebarTarget().showAgentPanel(for: ownerID)
+    }
+
     public func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
         await session.history.suggestions(for: query, limit: limit).map { AgentHistoryPage(url: $0.url, title: $0.title) }
     }
@@ -131,6 +184,14 @@ import Foundation
 extension BrowserAgentHost: AgentTabMonitor {
     nonisolated func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
         MainActor.assumeIsolated { agentTabMayLoad?(owner, tab.id, url) ?? false }
+    }
+
+    nonisolated func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
+        MainActor.assumeIsolated {
+            guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
+            downloadsByOwner[owner, default: []].append(url)
+            return true
+        }
     }
 
     nonisolated func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {

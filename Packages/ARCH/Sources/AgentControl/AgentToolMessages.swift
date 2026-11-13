@@ -1,4 +1,4 @@
-// The control protocol's tool messages, which `arch-cli` and `arch-mcp` send and Arch's endpoint answers (docs/agents.md, Local control channel ▸ Framing and methods; Tools ▸ Results); `AgentControlMethod` names their methods. A call's ID is its JSON-RPC request ID, an integer the client picks: Arch answers each call once, and `progress` and `tools/cancel` name it. The tool host in the app makes the result; `arch-cli` prints its text, or its structured value with `--json`, and exits with its status's code, and `arch-mcp` turns it into MCP's result. Events, limits, and the input kind join the result with the tasks that produce them.
+// The control protocol's tool messages, which `arch-cli` and `arch-mcp` send and Arch's endpoint answers (docs/agents.md, Local control channel ▸ Framing and methods; Tools ▸ Results); `AgentControlMethod` names their methods. A call's ID is its JSON-RPC request ID, an integer the client picks: Arch answers each call once, and `progress` and `tools/cancel` name it. The tool host in the app makes the result; `arch-cli` prints its text, or its structured value with `--json`, writes a screenshot's image to a file, and exits with its status's code, and `arch-mcp` turns it into MCP's result. Events, limits, and the input kind travel in the text and the structured value.
 import Foundation
 
 /// `tools/list`'s result: the names of the catalog's tools that the connection may call. The client describes them from its own catalog, which is Arch's, since the peer checks admit only the tool of Arch's own bundle.
@@ -71,6 +71,12 @@ public enum AgentToolContent: Equatable, Sendable {
     /// The text of a text part.
     public var text: String? {
         if case .text(let text) = self { return text }
+        return nil
+    }
+
+    /// The bytes of an image part.
+    public var imageData: Data? {
+        if case .image(let data, _) = self { return data }
         return nil
     }
 }

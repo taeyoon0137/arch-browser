@@ -41,11 +41,15 @@ import Testing
         _ = try await client.hello()
         // Before a grant, the list names every served tool, since the sheet may allow any of them.
         let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
-        let readOnly = ["session_info", "list_spaces", "list_tabs", "open_tab", "navigate", "close_tab", "read_text", "wait_for", "list_downloads"]
-        #expect(names == readOnly + ["search_history", "guide"])
-        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == readOnly + ["search_history", "guide"])
-        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == readOnly + ["guide"])
-        #expect(AgentToolHost.tools(for: .actInAgentTabs, scopes: AgentGrantScopes(searchHistory: true)).map(\.name) == readOnly + ["search_history", "guide"])
+        let acting = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press",
+                      "select_option", "scroll", "hover", "wait_for", "list_downloads", "search_history", "ask_user", "request_approval", "hand_to_user", "approval_wait", "guide"]
+        #expect(names == acting)
+        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == acting)
+        // Read Only leaves out the actions that change data and the sensitive request_approval; the others come with Ask Before Acting, and search_history with its scope.
+        let readOnly = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "scroll", "hover", "wait_for",
+                        "list_downloads", "ask_user", "hand_to_user", "approval_wait", "guide"]
+        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == readOnly)
+        #expect(AgentToolHost.tools(for: .actInAgentTabs, scopes: AgentGrantScopes(searchHistory: true)).map(\.name) == acting)
     }
 
     @Test func aGrantSendsToolsChangedToTheClientsConnections() async throws {

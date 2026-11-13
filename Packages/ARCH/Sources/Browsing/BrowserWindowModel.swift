@@ -618,7 +618,7 @@ public final class BrowserWindowModel: ObservableObject {
         isPageReaderVisible || (selectedTab != nil && internalPage == nil)
     }
 
-    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`).
+    /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`). The agent panel, which takes the same place, closes.
     @MainActor public func togglePageReader() {
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible.toggle()
@@ -762,6 +762,11 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     // MARK: Closing
+
+    /// Shows an outside client's agent panel, with its steps and the cards that wait for the user, in place of the page reader, which hides.
+    @MainActor public func showAgentPanel(for ownerID: UUID) {
+        showAgentPanel(.client(ownerID))
+    }
 
     /// The window as `session.json` keeps it. The session also keeps it once the window closes.
     var record: SessionSnapshot.WindowRecord {

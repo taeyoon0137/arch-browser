@@ -172,6 +172,8 @@ public final class Tab: ObservableObject, Identifiable {
 protocol AgentTabMonitor: AnyObject {
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
     func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
+    /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).
+    func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool
     /// What happened in an agent tab, for its agent's next result.
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport)
     /// The agent tab closed, before the session removes an agent folder it leaves empty.
@@ -227,11 +229,15 @@ extension Tab: EngineWebContentsUIDelegate {
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads nothing (rule P6) until plan task VII.13 asks the user.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
-        if agentOwnerID != nil {
-            reportToAgent(.downloadRefused(name: url.lastPathComponent))
-            return false
+        if let owner = agentOwnerID {
+            guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
+                reportToAgent(.downloadAsked(url))
+                return false
+            }
+            reportToAgent(.downloadStarted(url))
+            return true
         }
         guard !hasPage else { return true }
         isDownloadOnly = true
@@ -398,9 +404,9 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Links for other apps
 
-    /// An agent's tab opens no other app (rule P11) until plan task VII.13 asks the user.
+    /// An agent's tab hands a link to another app only after the user allows it on a card in the agent panel, which names the app (rule P11).
     public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
-        if agentOwnerID != nil { return reportToAgent(.externalAppRefused(scheme: url.scheme ?? "")) }
+        if agentOwnerID != nil { return reportToAgent(.externalAppAsked(url)) }
         if isUserInitiated { forgetExternalAppDecline() }
         offerExternalApp(for: url)
     }

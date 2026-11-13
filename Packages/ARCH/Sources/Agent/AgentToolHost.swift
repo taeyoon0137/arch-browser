@@ -1,11 +1,12 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). This build runs, for an outside client's grant, the tools that need no page script: `session_info`, `list_spaces`, `list_tabs`, `open_tab` and `navigate` with an address or a history step, `close_tab`, `read_text`, `wait_for`, `list_downloads`, `search_history`, and `guide`, with the events since the client's previous call, the limits, and the rules in `AgentPolicy`, and for an in-app session (`AgentToolClient`) the tools that need no agent tab. Plan task VII.13 adds snapshots, refs, actions, and approvals.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session (`AgentToolClient`) the tools that need no agent tab. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
 import AgentControl
 import ARCHEngine
 import Foundation
 
 @MainActor struct AgentToolHost {
     /// The tools this build runs; `tools/list` lists only these, and the others answer that they are not available yet.
-    static let servedTools = ["session_info", "list_spaces", "list_tabs", "open_tab", "navigate", "close_tab", "read_text", "wait_for", "list_downloads", "search_history", "guide"]
+    static let servedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press",
+                              "select_option", "scroll", "hover", "wait_for", "list_downloads", "search_history", "ask_user", "request_approval", "hand_to_user", "approval_wait", "guide"]
 
     let host: any AgentBrowserHost
     /// Whether AI may read a page at this address: the site exclusions of `ai.json` (docs/agents.md, Site exclusions).
@@ -13,16 +14,34 @@ import Foundation
     var now: () -> Date = Date.init
     /// How long `navigate` and `open_tab` wait for the document (docs/agents.md, Tools ▸ Limits).
     var loadWait = TimeInterval(AgentLimits.toolWaitSeconds)
-    /// How long the page may take to answer a read before the call says it does not respond.
+    /// How long the page may take to answer a read or a script before the call says it does not respond.
     var scriptWait: TimeInterval = 10
+    /// The cards that wait for the user, which the service shows in the agent panel.
+    var approvals = AgentApprovals()
+    /// Outside clients navigate freely in their own agent tabs; in-app sessions come with plan task VII.17.
+    var clientKind: AgentClientKind = .outside
+    /// How long a call waits for the user before it answers `approvalPending`, and how long a card stays open (docs/agents.md, Tools ▸ Limits).
+    var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
+    var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
+    /// After an action, how long the host waits for a load it started, and the pause after it.
+    var settleWait: TimeInterval = 3
+    var settlePause: TimeInterval = 0.3
+    /// The connection the call came on, which its cards name so that they end when the client leaves.
+    var connectionID: UUID?
+    /// Deny and Stop: the service disconnects the client.
+    var stopClient: ((UUID) -> Void)?
 
-    /// What a call did, for the result and the activity log.
+    /// What a call did, for the result, the activity log, and the agent panel.
     struct Outcome {
         var result: AgentToolResult
         /// The page's site for the activity log, a host at most.
         var site: String?
         /// The tab whose load the call waited for and reported, whose load events it leaves out.
         var reportedTabID: UUID?
+        /// The step as the agent panel shows it to the user, such as "Clicked “Next” on example.org".
+        var step: String?
+        /// How the user decided, for the activity log, when a card asked.
+        var decision: AgentActivityEntry.Decision?
     }
 
     /// Every served tool in catalog order, for `tools/list` before a grant, since the grant sheet may allow any of them.
@@ -43,10 +62,40 @@ import Foundation
         }
     }
 
-    /// Runs a call for the grant and adds the events since the client's previous call.
+    /// Runs a call for the grant. A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result.
     func run(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+        if call.name == "approval_wait" { return await approvalWait(call, for: grant, state: state) }
+        let box = AgentCallBox()
+        Task { box.outcome = await runNow(call, for: grant, state: state, box: box) }
+        while true {
+            if await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome { return outcome }
+            guard let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
+            let handle = state.handles.approvals.handle(for: approvalID)
+            state.pendingCalls[handle] = box
+            return Self.pending(handle, tool: call.name)
+        }
+    }
+
+    /// `approval_wait`: the result of a call that answered `approvalPending`, once it has one, or `approvalPending` again after `answerWait`.
+    private func approvalWait(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+        if let refusal = precheck(call, state: state) { return refusal }
+        let handle = call.arguments["approval"]?.stringValue ?? ""
+        guard let box = state.pendingCalls[handle] else { return Self.error("notFound", "No call of this client waits under \(handle).") }
+        guard await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome else { return Self.pending(handle, tool: "approval_wait") }
+        state.pendingCalls[handle] = nil
+        return outcome
+    }
+
+    /// The answer of a call that waits for the user.
+    static func pending(_ handle: String, tool: String) -> Outcome {
+        Outcome(result: AgentToolResult(status: .approvalPending, text: "Waiting for the user in Arch; call approval_wait with approval \(handle).",
+                                        structured: ["approval": .string(handle)]), step: nil)
+    }
+
+    /// Runs a call now and adds the events since the client's previous call.
+    private func runNow(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let start = state.lastSequence
-        var outcome = await outcome(of: call, for: grant, state: state)
+        var outcome = await outcome(of: call, for: grant, state: state, box: box)
         // A result that would still pass its limit, as a page's very long address can make one, says so in its place, so that no result takes a client's connection past the frame limit.
         if outcome.result.text.utf8.count > AgentLimits.resultTextBytes { outcome.result = Self.tooLong(outcome.result, tool: call.name) }
         attachEvents(to: &outcome, since: start, state: state)
@@ -56,7 +105,8 @@ import Foundation
     /// The bytes a result leaves, within its limit, for the sentences around a page's text and for the events.
     static let resultRoom = 2_000
 
-    private func outcome(of call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    /// The checks before any tool runs: a tool of the catalog, arguments its parameters allow, and a call within the day's limit.
+    private func precheck(_ call: AgentToolCall, state: AgentGrantState) -> Outcome? {
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
             return Self.error("unknownTool", "Arch has no tool named \(call.name).")
         }
@@ -69,6 +119,12 @@ import Foundation
                                                    text: "This client made \(Self.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.",
                                                    structured: ["limits": ["toolCallsPerDay": .number(Double(AgentLimits.toolCallsPerGrantPerDay))]]))
         }
+        return nil
+    }
+
+    private func outcome(of call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+        if let refusal = precheck(call, state: state) { return refusal }
+        guard let tool = AgentToolCatalog.tool(named: call.name) else { return Self.error("unknownTool", "Arch has no tool named \(call.name).") }
         let arguments = call.arguments
         switch tool.name {
         case "session_info": return Outcome(result: sessionInfo(grant, state: state))
@@ -79,8 +135,15 @@ import Foundation
         case "close_tab": return closeTab(arguments, grant, state: state)
         case "read_text": return await readText(arguments, grant, state: state)
         case "wait_for": return await waitFor(arguments, grant, state: state)
-        case "list_downloads": return Outcome(result: AgentToolResult(status: .ok, text: "No downloads. Arch refuses downloads from agent tabs until it can ask the user about each one.", structured: ["downloads": []]))
+        case "list_downloads": return listDownloads(grant)
         case "search_history": return await searchHistory(arguments, grant)
+        case "snapshot": return await snapshot(arguments, grant, state: state)
+        case "screenshot": return await screenshot(arguments, grant, state: state)
+        case "click", "type", "press", "select_option", "scroll", "hover": return await act(tool.name, arguments, grant, state: state, box: box)
+        case "request_tab": return await requestTab(arguments, grant, state: state, box: box)
+        case "ask_user": return await askUser(arguments, grant, state: state, box: box)
+        case "request_approval": return await requestApproval(arguments, grant, state: state, box: box)
+        case "hand_to_user": return await handToUser(arguments, grant, state: state, box: box)
         case "guide": return Outcome(result: AgentHarness.guideResult(arguments: arguments))
         default: return Self.notAvailable("This build of Arch does not run \(tool.name) yet.")
         }
@@ -155,7 +218,7 @@ import Foundation
         }
         return [
             "Reading and navigating in your own agent tabs run without asking. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, sites excluded from AI, internal pages, downloads, other apps, and tabs you were not given. Hand such steps to the user with hand_to_user.",
+            "Arch refuses typing passwords, codes, or card details, file choosers, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and every action in a tab the user shared ask the user.",
         ]
     }
 
@@ -238,15 +301,21 @@ import Foundation
     // MARK: Navigation
 
     private func openTab(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
-        if arguments["ref"] != nil || arguments["tab"] != nil {
-            if arguments["url"] != nil { return Self.error("invalidArguments", "open_tab takes url or ref, not both.") }
-            return Self.notAvailable("Links from snapshots come with the snapshot tool, which this build of Arch does not run yet. Give url.")
-        }
-        guard let text = arguments["url"]?.stringValue else { return Self.error("invalidArguments", "open_tab needs url or ref.") }
         let url: URL
-        switch writtenAddress(text) {
-        case .value(let written): url = written
-        case .outcome(let refusal): return refusal
+        if let ref = arguments["ref"]?.stringValue {
+            if arguments["url"] != nil { return Self.error("invalidArguments", "open_tab takes url or ref, not both.") }
+            guard let handle = arguments["tab"]?.stringValue else { return Self.error("invalidArguments", "open_tab needs tab, the tab whose snapshot holds ref.") }
+            switch link(ref, in: handle, grant, state: state) {
+            case .value(let followed): url = followed
+            case .outcome(let failure): return failure
+            }
+        } else {
+            if arguments["tab"] != nil { return Self.error("invalidArguments", "open_tab takes tab only with ref.") }
+            guard let text = arguments["url"]?.stringValue else { return Self.error("invalidArguments", "open_tab needs url or ref.") }
+            switch writtenAddress(text) {
+            case .value(let written): url = written
+            case .outcome(let refusal): return refusal
+            }
         }
         let openTabs = host.agentTabs(of: grant.id)
         guard openTabs.count < AgentLimits.agentTabs else {
@@ -269,7 +338,6 @@ import Foundation
     private func navigate(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         let given = ["url", "ref", "action"].filter { arguments[$0] != nil }
         guard given.count == 1 else { return Self.error("invalidArguments", "navigate takes one of url, ref, or action.") }
-        if given == ["ref"] { return Self.notAvailable("Links from snapshots come with the snapshot tool, which this build of Arch does not run yet. Give url or action.") }
         let tab: AgentTabInfo, handle: String
         switch agentTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
         case .value(let resolved): (tab, handle) = resolved
@@ -280,6 +348,11 @@ import Foundation
             switch writtenAddress(text) {
             case .value(let url): navigation = .load(url)
             case .outcome(let refusal): return refusal
+            }
+        } else if let ref = arguments["ref"]?.stringValue {
+            switch link(ref, in: handle, grant, state: state) {
+            case .value(let url): navigation = .load(url)
+            case .outcome(let failure): return failure
             }
         } else {
             switch arguments["action"]?.stringValue {
@@ -310,6 +383,31 @@ import Foundation
             return .outcome(Outcome(result: Self.refusal(rule, "Arch did not open the address. \(sentence)"), site: AgentActivityEntry.site(of: url)))
         }
         return .value(url)
+    }
+
+    /// The full address of a link that a ref names in the tab's latest snapshot, which a followed link opens without the agent seeing its query (docs/agents.md, Untrusted marking), refused like a written address on a site agents do not open (P16), and stale once the tab shows another document.
+    private func link(_ ref: String, in handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<URL> {
+        let tab: AgentTabInfo
+        switch readableTab(handle, grant, state: state) {
+        case .value(let resolved): tab = resolved.0
+        case .outcome(let failure): return .outcome(failure)
+        }
+        guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref] else { return .outcome(Self.stale(handle)) }
+        guard let url = entry.href else { return .outcome(Self.error("notALink", "\(ref) in \(handle) is not a link. Use click for other elements.")) }
+        if case .refused(let rule, let sentence) = AgentPolicy.mayOpen(url, allowsAI: allowsAI) {
+            return .outcome(Outcome(result: Self.refusal(rule, "Arch did not open the link. \(sentence)"), site: AgentActivityEntry.site(of: url)))
+        }
+        return .value(url)
+    }
+
+    /// The tab's latest snapshot while the tab still shows its document.
+    func currentSnapshot(of tab: AgentTabInfo, state: AgentGrantState) -> AgentSnapshotRecord? {
+        guard let record = state.snapshots[tab.id], record.document == state.activity(of: tab.id).documents, record.url == tab.url else { return nil }
+        return record
+    }
+
+    static func stale(_ handle: String) -> Outcome {
+        Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The page in \(handle) changed since your last snapshot. Take a new snapshot.", structured: ["tab": .string(handle)]))
     }
 
     /// Waits until the tab's main frame finishes a document, the tab stops loading, a rule stops its navigation, or it closes or leaves the client, at most `loadWait`, and says whether one of them happened.
@@ -438,14 +536,13 @@ import Foundation
     }
 
     /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it.
-    private func mayStillRead(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
+    func mayStillRead(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
         tab.agentOwnerID == grant.id || state.handles.sharedTabIDs.contains(tab.id)
     }
 
     private func waitFor(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         let given = ["load", "text", "url", "ref"].filter { arguments[$0] != nil }
         guard given.count == 1 else { return Self.error("invalidArguments", "wait_for takes one of load, text, url, or ref.") }
-        if given == ["ref"] { return Self.notAvailable("Refs come with the snapshot tool, which this build of Arch does not run yet. Wait for load, text, or url.") }
         if given == ["load"], arguments["load"] != .bool(true) { return Self.error("invalidArguments", "load must be true.") }
         let tab: AgentTabInfo, handle: String
         switch readableTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
@@ -458,7 +555,22 @@ import Foundation
         let waited: String
         var isMet = false
         // A tab the user takes over during the wait is no longer the client's to watch: the read, or the check after the poll, refuses it (P17).
-        if let text = arguments["text"]?.stringValue {
+        if let ref = arguments["ref"]?.stringValue {
+            waited = "\(ref) to appear"
+            guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref], let target = AgentRefTarget(ref, fingerprint: entry.fingerprint) else { return Self.stale(handle) }
+            while !isMet {
+                guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
+                guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
+                if case .refused(let rule, let sentence) = AgentPolicy.mayRead(current.url, allowsAI: allowsAI) {
+                    return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle), site: site)
+                }
+                if case .value(let reply) = await pageScript(.element(target), in: current, as: AgentElementReply.self) {
+                    isMet = reply.facts != nil && !["notFound", "stale", "hidden", "detached"].contains(reply.problem ?? "")
+                }
+                if isMet || Date() >= deadline { break }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        } else if let text = arguments["text"]?.stringValue {
             waited = "the text \u{201C}\(text)\u{201D} to appear"
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
@@ -486,6 +598,24 @@ import Foundation
         let structured: AgentJSON = ["tab": .string(handle), "met": .bool(isMet)]
         if isMet { return Outcome(result: AgentToolResult(status: .ok, text: "\(handle): the wait for \(waited) is over; it happened.", structured: structured), site: site) }
         return Outcome(result: AgentToolResult(status: .timeout, text: "\(handle): the wait for \(waited) timed out after \(Self.seconds(seconds)).", structured: structured), site: site)
+    }
+
+    /// The downloads the client's agent tabs started once the user allowed them: name, size, and state, never a path.
+    private func listDownloads(_ grant: AgentGrant) -> Outcome {
+        let downloads = host.agentDownloads(of: grant.id)
+        var rows: [AgentJSON] = []
+        var lines: [String] = []
+        for download in downloads {
+            let name = Self.pageName(download.name, url: nil)
+            let size = download.totalBytes > 0 ? ByteCountFormatter.string(fromByteCount: download.totalBytes, countStyle: .file) : "size unknown"
+            rows.append(["name": .string(name), "completedBytes": .number(Double(download.completedBytes)), "totalBytes": .number(Double(download.totalBytes)), "state": .string(download.state.rawValue)])
+            lines.append("\(name)  \(size)  \(download.state.rawValue)")
+        }
+        let summary = downloads.isEmpty ? "No downloads. A download from an agent tab starts only after the user allows it in Arch." : "\(downloads.count == 1 ? "1 download" : "\(downloads.count) downloads")."
+        let list = Self.fitted(summary, lines, rows, noun: "download")
+        var structured: [String: AgentJSON] = ["downloads": .array(list.rows)]
+        if let limits = list.limits { structured["limits"] = limits }
+        return Outcome(result: AgentToolResult(status: .ok, text: list.text, structured: .object(structured)))
     }
 
     /// History pages whose title or address without query and fragment contains the query, without excluded sites and pages agents do not read, at most `limit`, each address once. The store also matches queries and fragments, which agents never see, so it is asked for more.
@@ -517,7 +647,7 @@ import Foundation
     // MARK: Tabs
 
     /// One of the grant's agent tabs by handle: not found for a handle this client was not given or a tab that closed, and refused (P17) for a tab the user took over.
-    private func agentTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
+    func agentTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
         guard let id = state.handles.tabs.id(for: handle) else { return .outcome(Self.error("tabNotFound", "This client has no tab \(handle).")) }
         guard let tab = host.tabs(withIDs: [id]).first else { return .outcome(Self.error("tabNotFound", "\(handle) is closed.")) }
         guard tab.agentOwnerID == grant.id else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
@@ -525,7 +655,7 @@ import Foundation
     }
 
     /// A tab the client may read: one of its agent tabs, or one the user shared with it.
-    private func readableTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
+    func readableTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
         if let id = state.handles.tabs.id(for: handle), state.handles.sharedTabIDs.contains(id), let tab = host.tabs(withIDs: [id]).first { return .value((tab, handle)) }
         return agentTab(handle, grant, state: state)
     }
@@ -541,7 +671,7 @@ import Foundation
         return spaces.first { $0.id == grant.spaceID } ?? spaces.first
     }
 
-    private func personaName(of grant: AgentGrant) -> String {
+    func personaName(of grant: AgentGrant) -> String {
         host.personas.first { $0.id == grant.personaID }?.name ?? "deleted"
     }
 
@@ -552,8 +682,8 @@ import Foundation
 
     // MARK: Events
 
-    /// Keeps what happened in an agent tab for its client's next result, in `state`, which a grant has from its first call. A tab that a page opened beyond the limit of agent tabs closes again, on the next turn of the run loop, since the engine is still in the callback that made it.
-    func tab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport, state: AgentGrantState?) {
+    /// Keeps what happened in an agent tab for its client's next result, in `state`, which a grant has from its first call. A tab that a page opened beyond the limit of agent tabs closes again, on the next turn of the run loop, since the engine is still in the callback that made it. A new document withdraws the cards about the tab's earlier one, and a tab that closed or left the client withdraws all of its cards. A download or a link to another app that a page started asks the user on a card of its own (P6, P11).
+    func tab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport, state: AgentGrantState?, client: String = "") {
         if case .opened(let openedID) = report, host.agentTabs(of: ownerID).count > AgentLimits.agentTabs {
             let host = host
             DispatchQueue.main.async { MainActor.assumeIsolated { host.closeAgentTab(openedID) } }
@@ -561,6 +691,20 @@ import Foundation
             return
         }
         state?.record(.report(report), tab: tabID)
+        switch report {
+        case .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).documents ?? Int.max)
+        case .closed, .takenOver: approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
+        case .downloadAsked(let url): if let state { askAboutDownload(url, in: tabID, of: ownerID, state: state, client: client) }
+        case .externalAppAsked(let url): if let state { askAboutExternalApp(url, in: tabID, of: ownerID, state: state, client: client) }
+        default: break
+        }
+    }
+
+    /// Rule P6 when a page in an agent tab starts a download: a download the user allowed once, or one from a site the user allowed downloads from for the session, goes ahead.
+    func tab(_ tabID: UUID, mayDownload url: URL, state: AgentGrantState?) -> Bool {
+        guard let state else { return false }
+        if state.allowedDownloads.remove(url) != nil { return true }
+        return url.host.map { state.downloadSites.contains($0.lowercased()) } ?? false
     }
 
     /// Rule P16 at each main frame navigation, redirect hop, and popup of an agent tab, whoever started it: the exclusions then in force decide, and a refusal is an event for the client.
@@ -650,18 +794,26 @@ import Foundation
             let text = pageText(message)
             if let text { json["message"] = .string(text) }
             line = "\(handle) showed an alert, which Arch dismissed (P10)" + (text.map { ": \($0)" } ?? ".")
-        case .report(.downloadRefused(let name)):
-            json["kind"] = "downloadRefused"
+        case .report(.downloadAsked(let url)):
+            json["kind"] = "downloadAsked"
             json["rule"] = "P6"
-            let text = pageName(name)
+            let text = pageName(url.lastPathComponent)
             if let text { json["name"] = .string(text) }
-            line = "\(handle) started a download\(text.map { " of \($0)" } ?? ""), which Arch refused (P6). \(AgentPolicy.downloadSentence)"
-        case .report(.externalAppRefused(let scheme)):
-            json["kind"] = "externalAppRefused"
+            line = "\(handle) started a download\(text.map { " of \($0)" } ?? ""), which waits for the user in Arch (P6)."
+        case .report(.downloadStarted(let url)):
+            json["kind"] = "downloadStarted"
+            let text = pageName(url.lastPathComponent)
+            if let text { json["name"] = .string(text) }
+            line = "\(handle) started a download\(text.map { " of \($0)" } ?? "") that the user allowed. list_downloads shows how it goes."
+        case .report(.externalAppAsked(let url)):
+            json["kind"] = "externalAppAsked"
             json["rule"] = "P11"
-            let text = pageName(scheme)
+            let text = pageName(url.scheme ?? "")
             if let text { json["scheme"] = .string(text) }
-            line = "\(handle) tried to open a link in another app\(text.map { " with the scheme \($0)" } ?? ""), which Arch refused (P11). \(AgentPolicy.externalAppSentence)"
+            line = "\(handle) tried to open a link in another app\(text.map { " with the scheme \($0)" } ?? ""), which waits for the user in Arch (P11)."
+        case .decided(let sentence):
+            json["kind"] = "decided"
+            line = sentence
         case .refused(let url):
             json["kind"] = "navigationRefused"
             json["rule"] = "P16"
@@ -705,7 +857,7 @@ import Foundation
         return true
     }
 
-    private static func integer(_ value: AgentJSON) -> Int? {
+    static func integer(_ value: AgentJSON) -> Int? {
         guard case .number(let number) = value else { return nil }
         return Int(number)
     }
@@ -715,7 +867,7 @@ import Foundation
         value.formatted(.number.locale(Locale(identifier: "en_US")))
     }
 
-    private static func seconds(_ value: Double) -> String {
+    static func seconds(_ value: Double) -> String {
         value == value.rounded() ? (value == 1 ? "1 second" : "\(Int(value)) seconds") : String(format: "%.1f seconds", value)
     }
 

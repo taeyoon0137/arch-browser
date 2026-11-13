@@ -142,9 +142,11 @@ import Testing
         var confirmed: Bool?
         agentTab.webContents(page, runJavaScriptConfirm: "Sure?", completion: { confirmed = $0 })
         #expect(confirmed == true && sheets == 1)
-        // P6 and P11: no download and no other app.
+        // P6 and P11: a download the user has not allowed stops and waits for a card, as a link to another app does; one the user allowed goes ahead.
         #expect(!agentTab.webContents(page, shouldDownload: URL(string: "https://example.org/file.zip")!, hasPage: true))
         agentTab.webContents(page, openExternally: URL(string: "mailto:someone@example.org")!, isUserInitiated: true)
+        monitor.allowedDownloads = [URL(string: "https://example.org/allowed.zip")!]
+        #expect(agentTab.webContents(page, shouldDownload: URL(string: "https://example.org/allowed.zip")!, hasPage: true))
         // P16: the monitor decides each navigation.
         monitor.allows = false
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://excluded.example/")!, disposition: .currentTab, isUserInitiated: false)) == .cancel)
@@ -152,7 +154,8 @@ import Testing
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/next")!, disposition: .currentTab, isUserInitiated: true)) == .allow)
         #expect(monitor.asked == [URL(string: "https://excluded.example/")!, URL(string: "https://example.org/next")!])
         #expect(monitor.reports == [.permissionDenied([.camera]), .alertDismissed(message: "Hello"), .dialogWaiting(.confirm, message: "Sure?"),
-                                    .downloadRefused(name: "file.zip"), .externalAppRefused(scheme: "mailto")])
+                                    .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
+                                    .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
         #expect(monitor.owners == Set([owner]))
 
         // The user's own tab asks, shows its alerts, and downloads, and the monitor hears nothing of it.
@@ -165,7 +168,7 @@ import Testing
         userTab.webContents(userPage, requestPermission: EnginePermissionRequest(origin: URL(string: "https://example.org")!, types: [.camera]), completion: { granted = $0 })
         #expect(granted == true && asked == 1)
         #expect(userTab.webContents(userPage, shouldDownload: URL(string: "https://example.org/file.zip")!, hasPage: true))
-        #expect(monitor.reports.count == 5)
+        #expect(monitor.reports.count == 6)
     }
 }
 
@@ -180,6 +183,12 @@ private final class MonitorDouble: AgentTabMonitor {
         asked.append(url)
         owners.insert(owner)
         return allows
+    }
+
+    var allowedDownloads: Set<URL> = []
+
+    func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
+        allowedDownloads.contains(url)
     }
 
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {

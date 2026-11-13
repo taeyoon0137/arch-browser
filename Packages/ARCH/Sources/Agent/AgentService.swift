@@ -1,4 +1,4 @@
-// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings; In the browser): it owns `agent.json`, the activity log, the grants, the in-app sessions, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, binds a session's `arch-mcp` by its ticket, asks for a grant at an outside client's first tool call, runs calls through the tool host, starts sessions for the user and for clients with the Start Agent Tasks scope, and ends a grant's connections when the grant is revoked, released, or expires. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
+// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings; In the browser; Approval interface): it owns `agent.json`, the activity log, the grants, the in-app sessions, the cards that wait for the user, the agent panel's model, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, binds a session's `arch-mcp` by its ticket, asks for a grant at an outside client's first tool call, runs calls through the tool host, starts sessions for the user and for clients with the Start Agent Tasks scope, and ends a grant's connections when the grant is revoked, released, or expires. A revocation, Stop All Agents, a client's Stop, the client leaving, and quit end the cards they concern as denied. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
 import AgentControl
 import AI
 import AppKit
@@ -31,6 +31,9 @@ import Foundation
     @Published public private(set) var sessions: [AgentSession] = []
     public let activity: AgentActivityLog
     public let host: any AgentBrowserHost
+    /// The cards that wait for the user, and the agent panel that shows them with each client's steps.
+    public let approvals = AgentApprovals()
+    public let panel: AgentPanelModel
     /// Arch's version, which `hello`'s answer names.
     public let version: String
 
@@ -61,6 +64,11 @@ import Foundation
         /// The models that can run a session, in the `agent` route's order first, and a provider's tool name for errors, such as "Claude Code".
         var agentModels: @MainActor () -> [AIModelRef]
         var toolName: @MainActor (AIProviderID) -> String?
+        /// How long a call waits for the user before it answers `approvalPending`, and how long an outside client's card stays open.
+        var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
+        var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
+        /// Called when a card opens, for the notification without content while Arch is in the background.
+        var attention: () -> Void = AgentAttention.notify
     }
 
     /// Don't Allow remembers nothing, but the next call of the same client asks again only after this long, so that a looping client cannot flood the user.
@@ -122,6 +130,7 @@ import Foundation
         self.host = host
         self.version = version
         self.dependencies = dependencies
+        panel = AgentPanelModel(approvals: approvals)
         file = AgentSettingsFile(fileURL: directory.appendingPathComponent(Self.settingsFileName), keys: dependencies.keys)
         activity = AgentActivityLog(fileURL: directory.appendingPathComponent(Self.activityFileName), now: dependencies.now)
         // Until the seal is checked, the Persona the file names stays agent-only, before any of its profiles starts.
@@ -131,6 +140,12 @@ import Foundation
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
         host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
+        host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }
+        approvals.authenticator = dependencies.authenticator
+        approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
+        panel.showTab = { [weak host] in host?.showTab($0) }
+        panel.stop = { [weak self] in self?.stopClient($0) }
+        host.agentPanel = panel
         expiryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.expireGrants() }
         }
@@ -309,6 +324,7 @@ import Foundation
         expiryTimer?.invalidate()
         dependencies.prompt.cancelAll()
         for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
+        approvals.end(because: "Arch quit.")
         if canChangeSettings, file.hasKey, !settings.grants.isEmpty { write() }
         activity.saveNow()
         endpoint?.stop()
@@ -347,6 +363,7 @@ import Foundation
         settings.grants.removeAll { $0.id == grant.id }
         launchGrants.removeAll { $0.id == grant.id }
         states[grant.id] = nil
+        approvals.end(owner: grant.id, because: message)
         if wasKept { save() }
         record(event, grant: grant)
         endClientSessions(of: grant.id, because: message)
@@ -499,6 +516,39 @@ import Foundation
         let now = dependencies.now()
         if let index = settings.grants.firstIndex(where: { $0.id == grant.id }) { settings.grants[index].lastUsedAt = now }
         if let index = launchGrants.firstIndex(where: { $0.id == grant.id }) { launchGrants[index].lastUsedAt = now }
+    }
+
+    /// A client's Stop, and Deny and Stop on one of its cards: denies its waiting cards and disconnects it. Its grant stays.
+    func stopClient(_ grantID: UUID) {
+        approvals.end(owner: grantID, because: "The user stopped this client's work in Arch.")
+        guard let grant = grants.first(where: { $0.id == grantID }) else { return }
+        for connection in connections.values where connection.identity?.key == grant.client.key { endpoint?.close(connection.id) }
+    }
+
+    /// Shows a new card in the agent panel of the front main window, with its client's name, access, and place, and notifies while Arch is in the background.
+    private func cardDidOpen(_ approval: AgentApproval) {
+        if let grant = grants.first(where: { $0.id == approval.ownerID }) { describeInPanel(grant) }
+        host.showAgentPanel(for: approval.ownerID)
+        dependencies.attention()
+    }
+
+    /// The panel's header for a grant: the client, its access, and its place as "Persona / Space".
+    private func describeInPanel(_ grant: AgentGrant) {
+        let tools = toolHost()
+        let persona = tools.personaName(of: grant)
+        let place = tools.space(of: grant).map { "\(persona) / \($0.name)" } ?? persona
+        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.title, place: place), for: grant.id)
+    }
+
+    /// The tool host for a call on a connection, or for what agent tabs report, with the service's cards and waits.
+    func toolHost(connectionID: UUID? = nil) -> AgentToolHost {
+        var tools = AgentToolHost(host: host, allowsAI: dependencies.allowsAI, now: dependencies.now)
+        tools.approvals = approvals
+        tools.answerWait = dependencies.answerWait
+        tools.approvalWindow = dependencies.approvalWindow
+        tools.connectionID = connectionID
+        tools.stopClient = { [weak self] in self?.stopClient($0) }
+        return tools
     }
 
     private func updateConnectedGrants() {
@@ -657,9 +707,10 @@ import Foundation
         updateSessionsChannel()
     }
 
-    /// Stop All Agents: every session's turn stops and its queued messages go, and every outside client is disconnected; the grants stay. Plan task VII.17.1 also cancels running calls and denies the pending approvals.
+    /// Stop All Agents: every session's turn stops and its queued messages go, every card that waits for the user is denied, which ends the calls waiting on it, and every outside client is disconnected; the grants stay. Plan task VII.17.1 also cancels the sessions' running calls and denies their pending approvals.
     public func stopAllAgents() {
         for session in sessions where !session.hasEnded { session.stop() }
+        approvals.end(because: "The user stopped all agents in Arch.")
         for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
     }
 
@@ -1023,13 +1074,15 @@ import Foundation
             updateConnectedGrants()
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
-            let outcome = await AgentToolHost(host: host, allowsAI: dependencies.allowsAI, now: dependencies.now).run(call, for: grant, state: state(for: grant))
+            describeInPanel(grant)
+            let outcome = await toolHost(connectionID: connection.id).run(call, for: grant, state: state(for: grant))
             let result = outcome.result
             let tool = AgentToolCatalog.tool(named: call.name)
             let refused = result.status == .refused
             activity.record(AgentActivityEntry(date: dependencies.now(), event: .toolCall, grantID: grant.id, clientName: identity.displayName, personaID: grant.personaID,
-                                               tool: tool?.name, toolClass: tool?.toolClass.rawValue, site: outcome.site, decision: refused ? .refused : .auto,
+                                               tool: tool?.name, toolClass: tool?.toolClass.rawValue, site: outcome.site, decision: refused ? .refused : outcome.decision ?? .auto,
                                                rule: refused ? result.code : nil, outcome: result.status.rawValue))
+            if result.status != .approvalPending { recordStep(outcome, of: call, for: grant) }
             reply(connection, requestID, Self.json(result))
         }
     }
@@ -1047,11 +1100,23 @@ import Foundation
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
-        AgentToolHost(host: host, allowsAI: dependencies.allowsAI).tab(tabID, of: ownerID, didReport: report, state: states[ownerID])
+        let client = grants.first { $0.id == ownerID }?.client.displayName ?? ""
+        toolHost().tab(tabID, of: ownerID, didReport: report, state: states[ownerID], client: client)
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL) -> Bool {
-        AgentToolHost(host: host, allowsAI: dependencies.allowsAI).tab(tabID, mayLoad: url, state: states[ownerID])
+        toolHost().tab(tabID, mayLoad: url, state: states[ownerID])
+    }
+
+    /// A call's step in the agent panel: the tool host's sentence for the user, or the tool and its tab, with how it ended.
+    private func recordStep(_ outcome: AgentToolHost.Outcome, of call: AgentToolCall, for grant: AgentGrant) {
+        let handle = call.arguments["tab"]?.stringValue ?? outcome.result.structured?["tab"]?.stringValue
+        let tabID = handle.flatMap { states[grant.id]?.handles.tabs.id(for: $0) }
+        let name = call.name.replacingOccurrences(of: "_", with: " ")
+        var sentence = outcome.step ?? (name.prefix(1).uppercased() + name.dropFirst() + (handle.map { " \($0)" } ?? "") + (outcome.site.map { " on \($0)" } ?? ""))
+        if outcome.result.status != .ok { sentence += " \u{2014} \(outcome.result.status.rawValue)\(outcome.result.code.map { " (\($0))" } ?? "")" }
+        panel.record(AgentStepRecord(date: dependencies.now(), sentence: sentence, tabID: tabID, tabHandle: handle, status: outcome.result.status,
+                                     addressesAgents: outcome.result.structured?["addressesAgents"] == .bool(true)), for: grant.id)
     }
 
     private func reply(_ connection: ClientConnection, _ requestID: AgentRPCID, _ result: AgentJSON) {
@@ -1140,6 +1205,7 @@ extension AgentService: AgentEndpointDelegate {
 
     func endpoint(_ endpoint: AgentEndpoint, didClose connection: UUID) {
         guard endpoint === self.endpoint else { return }
+        approvals.end(connection: connection, because: "The client left before the user answered.")
         connections[connection] = nil
         updateConnectedGrants()
     }

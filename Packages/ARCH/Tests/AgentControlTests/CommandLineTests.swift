@@ -76,9 +76,40 @@ import Testing
         #expect(try AgentCommandLine.parse(["--json", "open", "https://example.org/"]).json)
     }
 
+    /// The reading and acting commands of snapshots and refs each run one tool; `type --text -` leaves the text for standard input, and `screenshot` names its file.
+    @Test func actingCommandsParseIntoTheirCalls() throws {
+        func call(_ arguments: [String]) throws -> AgentToolCall? {
+            guard case .tool(let call) = try AgentCommandLine.parse(arguments).command else { return nil }
+            return call
+        }
+        #expect(try call(["snapshot", "t1"]) == AgentToolCall(name: "snapshot", arguments: ["tab": "t1"]))
+        #expect(try call(["snapshot", "t1", "--full", "--ref", "e4", "--diff"]) == AgentToolCall(name: "snapshot", arguments: ["tab": "t1", "mode": "full", "ref": "e4", "diff": true]))
+        #expect(try call(["click", "t1", "e5"]) == AgentToolCall(name: "click", arguments: ["tab": "t1", "ref": "e5"]))
+        #expect(try call(["hover", "t2", "f1e3"]) == AgentToolCall(name: "hover", arguments: ["tab": "t2", "ref": "f1e3"]))
+        #expect(try call(["type", "t1", "e2", "lamp", "--submit"]) == AgentToolCall(name: "type", arguments: ["tab": "t1", "ref": "e2", "text": "lamp", "submit": true]))
+        #expect(try call(["type", "t1", "e2", "--text", "two words", "--replace"]) == AgentToolCall(name: "type", arguments: ["tab": "t1", "ref": "e2", "text": "two words", "replace": true]))
+        #expect(try AgentCommandLine.parse(["type", "t1", "e2", "--text", "-"]).command == .typeFromStandardInput(AgentToolCall(name: "type", arguments: ["tab": "t1", "ref": "e2"])))
+        #expect(try call(["press", "t1", "Meta+A"]) == AgentToolCall(name: "press", arguments: ["tab": "t1", "keys": "Meta+A"]))
+        #expect(try call(["press", "t1", "Enter", "--ref", "e2"]) == AgentToolCall(name: "press", arguments: ["tab": "t1", "keys": "Enter", "ref": "e2"]))
+        #expect(try call(["select", "t1", "e9", "Express", "Gift"]) == AgentToolCall(name: "select_option", arguments: ["tab": "t1", "ref": "e9", "values": ["Express", "Gift"]]))
+        #expect(try call(["scroll", "t1", "down", "--amount", "400"]) == AgentToolCall(name: "scroll", arguments: ["tab": "t1", "direction": "down", "amount": 400]))
+        #expect(try call(["scroll", "t1", "e7"]) == AgentToolCall(name: "scroll", arguments: ["tab": "t1", "ref": "e7"]))
+        #expect(try AgentCommandLine.parse(["screenshot", "t1", "-o", "page.jpg"]).command == .screenshot(AgentToolCall(name: "screenshot", arguments: ["tab": "t1", "area": "viewport"]), output: "page.jpg"))
+        #expect(try AgentCommandLine.parse(["screenshot", "t1", "--full"]).command == .screenshot(AgentToolCall(name: "screenshot", arguments: ["tab": "t1", "area": "full"]), output: nil))
+        #expect(try AgentCommandLine.parse(["screenshot", "t1", "--ref", "e3"]).command == .screenshot(AgentToolCall(name: "screenshot", arguments: ["tab": "t1", "area": "e3"]), output: nil))
+    }
+
     @Test(arguments: [
         ([], "Name a command."),
-        (["click", "t1", "e1"], "Unknown command click."),
+        (["scrape", "t1"], "Unknown command scrape."),
+        (["click", "t1"], "click takes <tab> <ref>."),
+        (["type", "t1", "e1"], "type takes <tab> <ref> and the text, or --text - to read it from standard input."),
+        (["type", "t1", "e1", "a", "--text", "b"], "type takes <tab> <ref> and the text, or --text - to read it from standard input."),
+        (["select", "t1", "e1"], "select takes <tab> <ref> and at least one value."),
+        (["scroll", "t1", "e1", "--amount", "5"], "scroll takes --amount only with a direction."),
+        (["screenshot", "t1", "--full", "--ref", "e1"], "screenshot takes --full or --ref, not both."),
+        (["snapshot", "t1", "--submit"], "Only type takes --submit."),
+        (["click", "t1", "e1", "-o", "x.jpg"], "Only screenshot takes -o."),
         (["open"], "open takes <url>."),
         (["navigate", "t1"], "navigate takes <tab> <url>."),
         (["close", "t1", "t2"], "close takes <tab>."),
