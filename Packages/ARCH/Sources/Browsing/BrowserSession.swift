@@ -94,10 +94,17 @@ public final class BrowserSession: ObservableObject {
     private let downloadNotifier: DownloadNotifier
     /// The sheets that tabs asked for, which wait until a window shows their tab.
     let sheets = TabSheetQueue()
-    /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
+    /// The prompts that tabs asked for, which a window shows as cards over their tabs' panes.
+    let prompts = TabPromptQueue()
+    /// Set while the app quits. Every sheet and prompt gets its safe answer at once, so that a page's next dialog cannot hold the quit and every engine callback has its answer before the engines shut down. A quit that does not happen opens the prompt queue again.
     public var isQuitting = false {
         didSet {
-            if isQuitting { sheets.cancelAll() }
+            if isQuitting {
+                sheets.cancelAll()
+                prompts.close()
+            } else {
+                prompts.reopen()
+            }
         }
     }
 
@@ -770,7 +777,9 @@ public final class BrowserSession: ObservableObject {
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
-            if let self, let tab { self.sheets.cancel(for: tab, pageDialogsOnly: true) }
+            guard let self, let tab else { return }
+            self.sheets.cancel(for: tab, pageDialogsOnly: true)
+            self.prompts.dismiss(tabID: tab.id, pageDialogsOnly: true)
         }
         // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in
@@ -871,10 +880,11 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Puts `replacement`, which the Persona's runtime for its engine owns, in place of the tab's web contents and closes the old one. Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
+    /// Puts `replacement`, which the Persona's runtime for its engine owns, in place of the tab's web contents and closes the old one. Sheets, prompts, and searches belong to the old page, and the window that selects the tab docks the new page's tools.
     private func replaceWebContents(of tab: Tab, with replacement: any EngineWebContents) {
         let old = tab.webContents
         sheets.cancel(for: tab)
+        prompts.dismiss(tabID: tab.id)
         let window = windows.first { $0.selectedTabID == tab.id }
         if window?.isFindBarVisible == true { window?.hideFindBar() }
         tab.replaceWebContents(with: replacement)
@@ -883,8 +893,10 @@ public final class BrowserSession: ObservableObject {
         scheduleSave()
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
+    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite. While the tab's leave-page card shows, that card is the question, so nothing more happens. Otherwise the tab's prompts end first, so that a page that waits on its own dialog can answer its `beforeunload` check.
     public func requestCloseTab(_ tab: Tab) {
+        guard prompts.current(for: tab.id)?.content.kind != .leavePage else { return }
+        prompts.dismiss(tabID: tab.id)
         let isUndoable = tab.spaceID != nil
         closeWhenPageAgrees(tab) { [weak self] in
             // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
@@ -910,8 +922,9 @@ public final class BrowserSession: ObservableObject {
     public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) -> Bool {
         guard tabs.contains(where: { $0.id == tab.id }) || favoriteTabs.values.contains(where: { $0 === tab }) else { return false }
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
-        // Ending a visible sheet runs the run loop (`TabSheetQueue.deferSheet(of:)`), so another close, of this tab or of another one, can finish before `cancel` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
+        // Ending a visible sheet runs the run loop (`TabSheetQueue.deferSheet(of:)`), so another close, of this tab or of another one, can finish before `cancel` returns, and ending the tab's prompts runs the code that asked for them before `dismiss` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
         sheets.cancel(for: tab)
+        prompts.dismiss(tabID: tab.id)
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return false }
@@ -1160,12 +1173,17 @@ public final class BrowserSession: ObservableObject {
     /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
     let permissionAnswers: SitePermissionAnswers
 
-    // MARK: Sheets
+    // MARK: Sheets and prompts
 
     /// Queues a sheet for a tab, which shows on the window that shows the tab on screen (`TabSheetQueue`). While the app quits, the sheet gets the safe answer, `.cancel`, at once.
     func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
         sheets.enqueue(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
+    }
+
+    /// Queues a prompt for a tab, which a card shows over the tab's pane while a window shows the tab (`TabPromptQueue`). While the app quits, it ends at once without the user.
+    func enqueuePrompt(_ content: PromptContent, for tab: Tab, completion: @escaping (PromptResponse) -> Void) {
+        prompts.enqueue(content, for: tab.id, completion: completion)
     }
 
     // MARK: Zoom

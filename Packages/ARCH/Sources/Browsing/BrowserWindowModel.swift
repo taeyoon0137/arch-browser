@@ -92,6 +92,10 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// The tab whose page shows the region capture overlay, from Capture Region until the user drags out a region or cancels.
     @Published public private(set) var regionCaptureTabID: UUID?
+    /// The tab whose prompt card has the keyboard focus, which the card's layer sets (`PanePromptLayer`).
+    @Published var focusedPromptTabID: UUID?
+    /// Counts the requests for the selected tab's card to take the focus, as `focusPage()` makes while the card shows.
+    @Published private(set) var promptFocusRequests = 0
 
     /// Tab identifiers in the order the tabs were last selected, most recent first. Tabs not selected since launch are missing.
     private var activationOrder: [UUID] = []
@@ -540,6 +544,9 @@ public final class BrowserWindowModel: ObservableObject {
         session.allTabs.first { $0.id == id }?.webContents.exitFullscreen()
     }
 
+    /// Whether the selected tab has a prompt, which its card shows over the page unless an internal page covers it. The page's own commands, such as find, printing, and Clear Site Data, wait for the answer.
+    var hasPromptOnSelectedTab: Bool { session.prompts.hasPrompt(for: selectedTabID) }
+
     /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window, and leaves a page that another window has taken in the meantime alone. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
     func focusPage(leaving previous: NSView? = nil) {
         DispatchQueue.main.async { [weak self] in
@@ -549,6 +556,11 @@ public final class BrowserWindowModel: ObservableObject {
             // Keys must not reach a page an internal page covers.
             guard self.internalPage == nil else {
                 window.makeFirstResponder(nil)
+                return
+            }
+            // A card over the page takes the keys in its place.
+            if self.hasPromptOnSelectedTab {
+                self.promptFocusRequests += 1
                 return
             }
             window.makeFirstResponder(Self.viewTakingFocus(in: view))
@@ -631,7 +643,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that neither an internal page nor the preview panel covers.
     @MainActor var canAskAboutPage: Bool {
-        guard !isSelectedPageCovered, let url = selectedTab?.url else { return false }
+        guard !isSelectedPageCovered, !hasPromptOnSelectedTab, let url = selectedTab?.url else { return false }
         return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
     }
 
@@ -642,7 +654,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// From the page's context menu, so the tab is this window's selected tab: a click in another pane selects that pane's tab first.
     @MainActor func askAboutSelection(_ text: String, in tab: Tab) {
-        guard PageAssistant.isQuestionAvailable, let url = tab.url, PageAssistant.canRead(url) else { return }
+        guard PageAssistant.isQuestionAvailable, !session.prompts.hasPrompt(for: tab.id), let url = tab.url, PageAssistant.canRead(url) else { return }
         openPageQuestion(in: tab, selection: AISelection(pageURL: url, pageTitle: tab.pageTitle, text: text))
     }
 
@@ -699,9 +711,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Find in page
 
-    /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match. The bar does not open under the preview panel, whose page it would not search.
+    /// Opens the bar and searches the current text. While the bar is open, this only returns focus to its field without moving the match. The bar does not open under the preview panel, whose page it would not search, or while the page waits for the answer to its tab's prompt.
     public func showFindBar() {
-        guard selectedTab != nil, preview == nil else { return }
+        guard selectedTab != nil, preview == nil, !hasPromptOnSelectedTab else { return }
         findBarFocusRequests += 1
         guard !isFindBarVisible else { return }
         isFindBarVisible = true
@@ -826,9 +838,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Printing
 
-    /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it, no PDF is rendering, and the window shows no sheet.
+    /// Whether Print and Export as PDF can act: a page is selected with no internal page or preview over it and no prompt waiting, no PDF is rendering, and the window shows no sheet.
     public var canPrint: Bool {
-        guard selectedTab != nil, !isSelectedPageCovered, !isRenderingPDF else { return false }
+        guard selectedTab != nil, !isSelectedPageCovered, !hasPromptOnSelectedTab, !isRenderingPDF else { return false }
         return nsWindow?.attachedSheet == nil
     }
 
@@ -1025,9 +1037,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Site data
 
-    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers, and the window shows no sheet.
+    /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers and whose tab has no prompt waiting, and the window shows no sheet.
     public var canClearSiteData: Bool {
-        guard !isSelectedPageCovered, SiteDataScope(url: selectedTab?.url) != nil else { return false }
+        guard !isSelectedPageCovered, !hasPromptOnSelectedTab, SiteDataScope(url: selectedTab?.url) != nil else { return false }
         return nsWindow?.attachedSheet == nil
     }
 

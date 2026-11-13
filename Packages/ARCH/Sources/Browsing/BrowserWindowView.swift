@@ -171,12 +171,13 @@ public struct BrowserWindowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
-    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs, favorites, or space symbols is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before do not count.
+    /// Keeps the card visible while hovered, while its text is edited, while one of its tabs, favorites, or space symbols is dragged, or while its menu, popover, sheet, or the command palette is open. Child windows that were there before do not count, and neither does a prompt card's field, which is no text of the sidebar's.
     private func checkPeek() {
         let window = windowReference.window
         let hasOpenChild = window?.attachedSheet != nil
             || (window?.childWindows ?? []).contains { $0.isVisible && !childWindowsBeforePeek.contains(ObjectIdentifier($0)) }
-        let isEditingText = windowModel.renamingSpaceID != nil || windowModel.renamingTabID != nil || windowModel.renamingFolderID != nil || window?.firstResponder is NSText
+        let isEditingText = windowModel.renamingSpaceID != nil || windowModel.renamingTabID != nil || windowModel.renamingFolderID != nil
+            || (window?.firstResponder is NSText && windowModel.focusedPromptTabID == nil)
         let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || sidebarDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
         withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }

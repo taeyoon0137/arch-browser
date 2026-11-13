@@ -39,6 +39,8 @@ struct TabRowView: View {
                 TabAudioBadge()
             }
             Spacer(minLength: 0)
+            // The tab waits for the user's answer to a prompt, shown or not.
+            TabPromptIndicator(prompts: session.prompts, tabID: tab.id)
             // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
             if showsHover {
                 TabCloseButton { session.requestCloseTab(tab) }

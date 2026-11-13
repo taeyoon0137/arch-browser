@@ -68,7 +68,7 @@ struct PageAreaView: View {
                     ForEach(panes) { tab in
                         Group {
                             if windowModel.shows(tab) {
-                                PagePaneView(session: session, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
+                                PagePaneView(session: session, prompts: session.prompts, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
                             } else {
                                 ShownElsewherePaneView(tab: tab, isSplit: panes.count > 1)
                             }
@@ -86,9 +86,11 @@ struct PageAreaView: View {
     }
 }
 
-/// One tab's page in its rounded frame, with the crash notice and, for the selected tab, the internal page, the region capture overlay, the find bar, and the question popover. In a split view, a click on the page selects its tab, the selected tab's pane has a ring in the space's tint, and each pane has a close control.
+/// One tab's page in its rounded frame, with the crash notice and, for the selected tab, the internal page, the region capture overlay, the find bar, and the question popover, and above them the tab's prompt card. In a split view, a click on the page selects its tab, the selected tab's pane has a ring in the space's tint, and each pane has a close control, which stays above the card.
 private struct PagePaneView: View {
     @ObservedObject var session: BrowserSession
+    /// Observed so that VoiceOver leaves the page under a card.
+    @ObservedObject var prompts: TabPromptQueue
     @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Observed so that the pane shows the new view when the tab switches engines.
     @ObservedObject var tab: Tab
@@ -100,7 +102,10 @@ private struct PagePaneView: View {
     private var cornerRadius: CGFloat { isPageFullscreen ? 0 : PageFrameShape.cornerRadius }
 
     var body: some View {
-        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil)
+        let isOnScreen = windowModel.tabsOnScreen.contains { $0.id == tab.id }
+        let isCovered = isSelected && windowModel.internalPage != nil
+        let showsCard = PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCoveredByInternalPage: isCovered) != nil
+        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil, hidesPageFromAccessibility: showsCard)
             .background(PageBackgroundView(isEmpty: false))
             .overlay { PageCrashNoticeView(tab: tab) }
             .overlay { if isSelected { InternalPageOverlay() } }
@@ -122,6 +127,10 @@ private struct PagePaneView: View {
                     .padding(.top, 12)
                     .padding(.trailing, 16)
                 }
+            }
+            .overlay {
+                PanePromptLayer(prompts: prompts, tab: tab, isOnScreen: isOnScreen, isFocusedPane: isSelected, isCovered: isCovered,
+                                cornerRadius: cornerRadius, selectPane: selectTab)
             }
             .overlay(alignment: .topLeading) {
                 if isSplit {
