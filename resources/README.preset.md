@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `LiveFolders`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -120,8 +120,8 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, LiveFolders, Plugins, Preferences, Terminal
+│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, LiveFoldersTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers

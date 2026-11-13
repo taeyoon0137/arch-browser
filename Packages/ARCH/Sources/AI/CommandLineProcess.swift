@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 /// How a process ended.
-enum CommandLineTermination: Equatable, Sendable {
+public enum CommandLineTermination: Equatable, Sendable {
     case exited(Int32)
     case signaled(Int32)
 
@@ -14,7 +14,7 @@ enum CommandLineTermination: Equatable, Sendable {
     }
 }
 
-final class CommandLineProcess: @unchecked Sendable {
+public final class CommandLineProcess: @unchecked Sendable {
     /// Seconds between SIGTERM and SIGKILL.
     private static let terminationGrace: TimeInterval = 2
     /// Seconds standard output stays open after the process exits, for what it wrote to be read.
@@ -22,9 +22,9 @@ final class CommandLineProcess: @unchecked Sendable {
     private static let errorTailLimit = 8_192
 
     /// The process ID, which is also the ID of its process group.
-    let id: pid_t
+    public let id: pid_t
     /// Standard output as it arrives. It finishes at the end of the output, a second after the process exits if a process it started keeps the output open, or when the task reading it is cancelled.
-    let output: AsyncStream<Data>
+    public let output: AsyncStream<Data>
     /// The end of standard error, kept for an error's detail.
     private let errorTail: Task<Data, Never>
     private let exit = ExitRecord()
@@ -32,7 +32,7 @@ final class CommandLineProcess: @unchecked Sendable {
     private var isTerminating = false
 
     /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes.
-    init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data) throws {
+    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data) throws {
         let pipes = try Self.makePipes()
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
@@ -95,12 +95,12 @@ final class CommandLineProcess: @unchecked Sendable {
     }
 
     /// Waits until the process has ended.
-    func termination() async -> CommandLineTermination {
+    public func termination() async -> CommandLineTermination {
         await exit.wait()
     }
 
     /// Sends SIGTERM to the process group, then SIGKILL two seconds later to whatever of the group still runs. Calls after the first do nothing.
-    func terminate() {
+    public func terminate() {
         lock.lock()
         let isFirst = !isTerminating
         isTerminating = true
@@ -112,7 +112,7 @@ final class CommandLineProcess: @unchecked Sendable {
     }
 
     /// The last line the tool wrote to standard error. It is read once standard error ends, or a second after this call if a process the tool started keeps standard error open.
-    func lastErrorLine() async -> String? {
+    public func lastErrorLine() async -> String? {
         let deadline = Task { [errorTail] in
             guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
             errorTail.cancel()

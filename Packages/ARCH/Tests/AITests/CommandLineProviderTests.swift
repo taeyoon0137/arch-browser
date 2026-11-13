@@ -1,4 +1,4 @@
-// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, output held open by a background process, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
+// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, output held open by a background process, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH and the GitHub CLI's two configuration folders, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
 import Darwin
 import Foundation
 import Testing
@@ -303,16 +303,26 @@ import Testing
 }
 
 @Suite struct LoginShellTests {
-    @Test func takesTheLineAfterTheMarker() {
-        let output = "Welcome back\nnoise\(LoginShell.marker)\n/opt/tools/bin:/usr/bin\nbye\n"
-        #expect(LoginShell.path(inOutput: output) == "/opt/tools/bin:/usr/bin")
-        #expect(LoginShell.path(inOutput: "\(LoginShell.marker)\n/opt/tools/bi") == nil)
-        #expect(LoginShell.path(inOutput: "no marker\n") == nil)
+    @Test func takesTheLinesAfterTheMarker() {
+        let output = "Welcome back\nnoise\(LoginShell.marker)\n/opt/tools/bin:/usr/bin\n/Users/me/.gh\n/Users/me/.config\nbye\n"
+        #expect(LoginShell.variables(inOutput: output) == LoginShell.Variables(path: "/opt/tools/bin:/usr/bin", gitHubConfigDirectory: "/Users/me/.gh", configHome: "/Users/me/.config"))
+        #expect(LoginShell.variables(inOutput: "\(LoginShell.marker)\n/opt/tools/bin\n/Users/me/.gh\n/Users/me/.con") == nil)
+        #expect(LoginShell.variables(inOutput: "\(LoginShell.marker)\n\n/Users/me/.gh\n\n") == nil)
+        #expect(LoginShell.variables(inOutput: "no marker\n") == nil)
     }
 
-    @Test func readsThePathOfALoginShell() async {
-        let path = await LoginShell.readPath(shell: URL(fileURLWithPath: "/bin/sh"))
-        #expect(path?.split(separator: ":").contains("/usr/bin") == true)
+    /// `GH_CONFIG_DIR` and `XDG_CONFIG_HOME` count only as absolute paths.
+    @Test func leavesOutConfigurationFoldersThatAreUnsetOrRelative() {
+        let output = "\(LoginShell.marker)\n/usr/bin\n\nconfig\n"
+        #expect(LoginShell.variables(inOutput: output) == LoginShell.Variables(path: "/usr/bin"))
+    }
+
+    @Test func readsTheVariablesOfALoginShell() async throws {
+        let variables = await LoginShell.readVariables(shell: URL(fileURLWithPath: "/bin/sh"))
+        #expect(variables?.path.split(separator: ":").contains("/usr/bin") == true)
+        // A profile's text before the marker and its exported variables, as a login shell's are.
+        let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin GH_CONFIG_DIR=/tmp/gh-config XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
+        #expect(await LoginShell.readVariables(shell: shell) == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config", configHome: "/tmp/config-home"))
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {

@@ -23,7 +23,7 @@
 - Folders nest up to four levels in a space's pinned or open list (Nested folders, III.18). Browser import joins nested folder names into one level ("Work / Docs"). Folder rows drag among the rows, into other folders, and to another space's symbol (III.19).
 - `Tab.isUnread` puts a dot on the row of a tab that a page opened in the background; selecting the tab clears it. It is not saved.
 - `session.json` is at version 14: III.16 took version 13 for saved pages, and III.18 version 14 for folder parents. Each step that adds fields takes the next free version number when it lands and migrates through `normalized()`. VII.12 adds `TabFolder.agentSessionID`, which is not encoded, for agent folders among the open tabs.
-- `AI` runs command-line tools through `CommandLineProcess` (`posix_spawn`, its own process group, pipes, a minimal environment) and finds them with `LoginShell.locateExecutable(named:)` in the login shell's PATH. Both are internal to `AI`. `LoginShell` reads only PATH from the login shell, and `baseEnvironment` holds `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`, `TMPDIR`, and `TERM=dumb`; a command-line provider adds the non-secret variables of its configuration (`docs/ai.md`). Settings opens the built-in terminal through a closure the app shell sets (`PreferencesWindowController.openTerminal`).
+- `AI` runs command-line tools through `CommandLineProcess` (`posix_spawn`, its own process group, pipes, a minimal environment) and finds them with `LoginShell.locateExecutable(named:)` in the login shell's PATH. Since III.21 both are public, and `LoginShell.variables()` reads `GH_CONFIG_DIR` and `XDG_CONFIG_HOME` with PATH in its one login shell run per launch, which only `GitHubCLI` passes on; `baseEnvironment` holds `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`, `TMPDIR`, and `TERM=dumb`; a command-line provider adds the non-secret variables of its configuration (`docs/ai.md`). Settings opens the built-in terminal through a closure the app shell sets (`PreferencesWindowController.openTerminal`).
 - `FaviconLoader` caches icons by icon address, shares concurrent downloads, and clears its cache once it holds 200. At every launch `restoreTabs` has each restored tab's stand-in request its site's `/favicon.ico` (`loadSiteIcon()`), and a load on a stand-in requests the new site's.
 - The app's Info.plist sets no App Transport Security exception, so the app's own `URLSession` refuses plain HTTP, as for site icons.
 - Browser import counts an address as already pinned in a space by each pinned tab's current address (`tab.url`) and, since III.16, its saved page, and merges an imported folder into a pinned folder of the same name (`SidebarImport`).
@@ -172,14 +172,14 @@ Code comments and documents cite these rules by number, as in "bookmark rule 4".
 
 ### Feeds
 
-- `FeedFetcher` loads the feed through a `URLSession` with an ephemeral configuration, no cookies, no cache, a 30-second limit, and an `Accept` header for RSS, Atom, and XML. Its requests carry the stored validators. A 304 keeps the items. 429 and 503 with `Retry-After`, in seconds or as a date, postpone the next attempt. Another status is an error that names it. The body stops at 5 MB.
+- `FeedFetcher` loads the feed through a `URLSession` with an ephemeral configuration, no cookies, no cache, a 30-second limit, and an `Accept` header for RSS, Atom, and XML. Its requests carry the stored validators. A 304 keeps the items. 429 and 503 with `Retry-After`, in seconds or as a date, postpone the next attempt. Another status is an error that names it. The body stops at 5 MB. A redirect is followed only to another `https` address without a user name or password. `FeedFetcher.discover(_:)` loads an address for the sheet and answers the feed it is or the feeds its page names (`FeedDiscovery.Outcome`).
 - Feeds load outside every Persona's engine storage, so no site sees the user's sign-ins or cookies, and a feed that needs a signed-in session cannot load. A private feed whose address carries a token in its query works; the address stays in the Keychain (live folder rule 8).
 - `FeedParser` parses with `XMLParser`, namespaces on and external entities off, and recognizes the format by its root element (`rss`, `rdf:RDF`, or `feed`); anything else is not a feed. For each item:
-  - ID: Atom `id`, RSS `guid`, RSS 1.0 `rdf:about`, else the link, else a digest of the title and date.
+  - ID: Atom `id`, RSS `guid`, RSS 1.0 `rdf:about`, else the item's address. Items without an address are skipped, so every kept item has an ID.
   - Address: Atom's alternate link, the RSS link, or a `guid` that is a permalink, resolved against `xml:base` and the feed's address. Items without an `http` or `https` address are skipped.
-  - Title: plain text with markup removed and character references decoded (numeric ones and the common named ones), whitespace collapsed, and cut at 300 characters. Without one, the address without its scheme.
+  - Title: plain text with markup removed and character references decoded (numeric ones and the common named ones), whitespace collapsed, and cut at 300 characters; an Atom title of type `text` is plain already and only has its whitespace collapsed. Without one, the address without its scheme.
   - Date: Atom `updated`, else `published`; RSS `pubDate` in RFC 822 forms with or without the weekday and with numeric or named zones; `dc:date` in ISO 8601 with or without fractions.
-- Items keep document order, or newest first when every item has a date. The first items up to the folder's limit are kept. The feed's title becomes the folder's default name.
+- Items keep document order, or newest first when every item has a date; of two items with one ID, the first counts. The first items up to the folder's limit are kept. The feed's title becomes the folder's default name.
 - `FeedDiscovery` reads an HTML page's first 512 KB for `<link rel="alternate">` tags of the RSS and Atom types and returns up to ten addresses resolved against the page, with their titles.
 
 ### GitHub
@@ -243,8 +243,25 @@ query($q: String!, $n: Int!) {
 
 ### Storage
 
-- `LiveFolderStore` keeps `live-folders.json` in the app's Application Support folder: a version, and for each folder ID its last attempt and success, failure count, last error, earliest next attempt, feed validators, feed interval and title, items in source order, the time of the first successful fetch, `viewedAt`, and the dismissed item IDs. It writes on its own queue half a second after the last change, and again at quit.
+- `LiveFolderStore` keeps `live-folders.json` in the app's Application Support folder: a version, and for each folder ID (`LiveFolderState`) the source its items came from, its last attempt and success, failure count, last error, earliest next attempt, feed validators, feed interval and title, items in source order, the time of the first successful fetch, `viewedAt`, and the dismissed item IDs. It writes on its own queue half a second after the last change, and again at quit.
 - A file that does not decode moves to `live-folders.unreadable.json`, and the folders fetch again. After the session loads and whenever a live folder goes, entries for folders that are not live folders in `session.json` are removed, and so are the Keychain items of folders that are not private feed folders, so a deleted folder, space, or Persona leaves nothing behind.
+
+### The module (III.21, built)
+
+- `LiveFolders` depends only on `AI`, and nothing in the app uses it yet. What III.22 and III.23 call:
+  - `LiveFolderSource.makeFeed(address:)` checks a typed address and splits off a private feed's whole address for the Keychain; `GitHubSearch.isValidHost(_:)` checks a host for `--hostname`; `LiveFolderConfiguration` keeps item limits and intervals to the allowed values, also when it decodes.
+  - `FeedFetcher.discover(_:)` for the sheet's Add, and `GitHubCLI.shared`'s `status(host:)` and `locate(again:)` for its status line and Check Again.
+  - `LiveFolderService(store:addresses:fetchers:)`: `register(_:)` with every live folder's configuration at launch and after each change, `refresh(_:)` for Refresh Now, `applicationDidBecomeActive()` and `windowDidShowFolders(_:)` for the triggers, `start()` after launch and `stop()` at quit, `didChange` at each start and end of a refresh, and `isRefreshing(_:)` and `nextAttempt(for:)` for the folder's row. `store.update(_:_:)` with `LiveFolderState`'s `markViewed`, `markUnread`, `markAllViewed`, `dismiss`, and `restoreDismissed`, and `unreadItemIDs` for the dots and the count. `addresses` holds private feed addresses: a new private feed's address goes there before its folder is registered, since registering removes the items of folders that are not private feeds'.
+- Decisions made while building it:
+  - Every kept feed item has an address, so the address stands in for a missing ID and no digest is needed. Of two items with one ID the first counts, so each item has one tab.
+  - An Atom title of type `text` keeps a `<` that starts no tag, as in "a < b". RSS titles have no type and often hold escaped markup, so they lose tags as `html` titles do.
+  - An RFC 822 date without a zone, or with a zone name Arch does not know, counts as GMT.
+  - The backoff doubles the interval for each failure in a row up to 6 hours, never below the interval a feed asks for; a rate limit counts as a failure. Creation and Refresh Now refresh at once, even before a `Retry-After` time or a rate limit reset; the timer and activation wait for it. Activation refreshes a GitHub folder whose next attempt is due, or, while it has not failed, after the 5-minute gap, which Low Power Mode doubles as it doubles every interval.
+  - `live-folders.json` also keeps each folder's source, so `register(_:)` starts over a folder whose source changed, whether in Edit Live Folder…, on another Mac, or in an edited file.
+  - A refresh records its attempt when it starts. One that ends after its folder went or its source changed records nothing.
+  - `gh auth status` that cannot run or passes the time limit counts as signed out, and a missing `gh` as not installed. A host other than letters, digits, dots, and hyphens with an optional port is refused before `gh` runs.
+  - A plan retitles every item tab whose item's title changed, with or without its page, since the row shows the item's title while on the saved page.
+  - Removing other folders' Keychain items lists the service's items by their attributes, which reads no address.
 
 ## session.json
 
@@ -284,8 +301,8 @@ query($q: String!, $n: Int!) {
   - `Space.swift`: `TabFolder.parentID` (built) and `TabFolder.live`.
   - `SessionStore.swift`: the fields and migrations above.
   - `BrowserSession.swift`, `BrowserWindowModel.swift`, `TabRowView.swift`, `TabFolderRowView.swift`, `SpaceTabsView.swift`, `FavoritesGridView.swift`, `SidebarDragState.swift`, `SidebarDragAndDrop.swift`, `BrowserWindowController.swift`, `BrowserHooks.swift`, `SessionWebExtensionHost.swift`, `SidebarBottomBar.swift`, and `SidebarImport.swift` as described above.
-- New `Packages/ARCH/Sources/LiveFolders` (depends on `AI`): `LiveFolderSource.swift` (`LiveFolderSource`, `GitHubSearch`, `LiveFolderConfiguration`), `LiveItem.swift` (`LiveItem`, `GitHubItem`, `LiveFolderError`), `FeedParser.swift`, `FeedDiscovery.swift`, `FeedFetcher.swift`, `GitHubCLI.swift`, `LiveFolderKeychain.swift`, `LiveFolderSchedule.swift`, `LiveFolderStore.swift`, `LiveFolderReconciler.swift`, and `LiveFolderService.swift`. `LiveFolderFetching` lets tests replace the fetchers.
-- `Packages/ARCH/Sources/AI`: `LoginShell`, `CommandLineProcess`, and `CommandLineTermination` become public, so there is one copy of the process code, and `LoginShell` also reads `GH_CONFIG_DIR` and `XDG_CONFIG_HOME`.
+- New `Packages/ARCH/Sources/LiveFolders` (built, depends on `AI`): `LiveFolderSource.swift` (`LiveFolderSource`, `GitHubSearch`, `LiveFolderConfiguration`), `LiveItem.swift` (`LiveItem`, `GitHubItem`, `LiveFolderError`), `FeedParser.swift` (with `Feed`), `FeedDiscovery.swift` (with `FeedLink`), `FeedFetcher.swift` (with `FeedValidators`), `GitHubCLI.swift`, `LiveFolderKeychain.swift` (with `LiveFolderAddressStore` and `InMemoryLiveFolderKeychain`), `LiveFolderSchedule.swift`, `LiveFolderStore.swift` (with `LiveFolderState`), `LiveFolderReconciler.swift` (with `LiveItemTab`, `LiveFolderPlan`, and the read state), and `LiveFolderService.swift`. `LiveFolderFetching` lets tests replace the fetchers.
+- `Packages/ARCH/Sources/AI` (built): `LoginShell`, `CommandLineProcess`, and `CommandLineTermination` become public, so there is one copy of the process code, and `LoginShell` also reads `GH_CONFIG_DIR` and `XDG_CONFIG_HOME`.
 - `Packages/ARCHKit/Sources` (built): `ARCHEngine` (`EngineWebContents.swift`, `EngineDelegates.swift`) gains `isCapturingMedia` and `webContentsDidChangeMediaCapture`; `ARCHEngineWebKit` (`WebKitEngine.swift`, `WebKitDelegateBridge.swift`) observes the capture states; `ARCHEngineChromium` (`ChromiumEngine.swift`) and `CEFBridge` (`CEFBridge.h`, `CEFBridgeBrowser.mm`) pass on `OnMediaAccessChange`. `docs/engine-protocol.md` records them.
 - `Packages/ARCH/Sources/Preferences/PreferencesSections.swift`: the unload stepper (built).
 - `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`: the Tab menu's saved page items and the Bookmarks menu (built), and `BrowserSession.openTerminal`.
@@ -301,7 +318,7 @@ query($q: String!, $n: Int!) {
   - Live folders in the session: the snapshot round trip and its repairs; a private feed's address absent from the encoded snapshot and present in an in-memory Keychain store, which loses it with its folder; a plan applied to `PageStub` and stand-in tabs; an item's stand-in requesting no site icon at a plan and at a relaunch; dismissing an item tab with Close and through an extension's `tabs.remove`; a download-only item tab unloading and staying in its folder; moving one out within the pinned tabs keeping its saved page and through Unpin Tab clearing it, after which the next plan adds a tab for the item; a window showing an item tab, and then showing another, setting `viewedAt` both times; `dropTarget` and Move to Folder refusing a live folder; Convert to Folder; Delete Folder and Delete Persona leaving no closed records for item tabs; an imported folder named like a live folder made beside it (`SidebarImportTests`).
   - The sheet's model: addresses accepted and refused (not HTTP or HTTPS, a user name or password), an address with a query marked for the Keychain, default names, the discovery outcomes (a feed, one link, several, none), the `gh` states from a stubbed `GitHubCLI`, Add disabled at 20 live folders, an edit of the source starting over, and the title with one and two Personas.
   - Labels (built, `PersonaTests`): `label(ofSpace:)` with one Persona and with two, two Personas' spaces both named Personal told apart, a Persona-wide label, and the window title with one Persona and with two.
-- `LiveFoldersTests`:
+- `LiveFoldersTests` (built; they also run the service with fetchers that stand in for the network and `gh`: a first fetch read, a private feed's address from the Keychain store, starting over, and the limit of four feeds and one `gh`):
   - Parsing: synthetic RSS 2.0, RSS 1.0, and Atom files with IDs, links, relative links with `xml:base`, titles with markup and character references, RFC 822 and ISO 8601 dates, items without links or with other schemes skipped, titles cut at 300 characters, `ttl` and the syndication interval, newest first when every item has a date, and a file that is not a feed.
   - Discovery: alternate links of both types, relative addresses, other link types ignored, and at most ten.
   - Fetching through a `URLProtocol` stub: validators sent and stored, 304 keeping the items, the 5 MB limit, `Retry-After` in both forms, other statuses, an offline error, and an `http` address tried as `https`.
@@ -309,7 +326,7 @@ query($q: String!, $n: Int!) {
   - Schedule: each interval, the activation gap for GitHub and none for feeds, `ttl` up to 24 hours, the doubling up to 6 hours, offline failures not counted, `Retry-After`, the rate limit reset, and Low Power Mode.
   - Store: a round trip, an unreadable file moved, entries for removed folders dropped, and entries for removed items pruned after a success. `LiveFolderKeychain`'s in-memory store: set, read, and remove.
   - Reconciler: new items added in order, retitled tabs without pages, gone items' tabs removed unless they have pages or are shown, dismissed items left out, the first fetch read, later items unread, GitHub items unread after a newer `updatedAt`, and still read when the update came before the `viewedAt` set as the tab stopped showing.
-- `AITests`: `LoginShell` reading PATH, `GH_CONFIG_DIR`, and `XDG_CONFIG_HOME` from a shell's output with text of the profile before the marker.
+- `AITests` (built): `LoginShell` reading PATH, `GH_CONFIG_DIR`, and `XDG_CONFIG_HOME` from a shell's output with text of the profile before the marker.
 
 ## Implementation order
 
@@ -321,7 +338,7 @@ Each step builds, keeps the app working, passes `swift test`, and forms one comm
 4. III.18 (built): Nested folders: model, rows, and menus.
 5. III.19 (built): Dragging folders.
 6. III.20 (built): The Bookmarks menu.
-7. III.21: The `LiveFolders` module, which nothing in the app uses yet.
+7. III.21 (built): The `LiveFolders` module, which nothing in the app uses yet.
 8. III.22: Live folders in the sidebar.
 9. III.23: The New Live Folder sheet.
 10. III.24, which only the user can do: `gh` signed in for github.com in the built-in terminal, and a pull request that requests the user's review for the Review Requests part of check 7.
