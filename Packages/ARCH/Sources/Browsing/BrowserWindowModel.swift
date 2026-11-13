@@ -1103,10 +1103,15 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows. A restored tab that has no page yet gets it before the window shows it (`BrowserSession.loadPage(of:)`).
     func updateShownTabs() {
-        let shown = paneTabs.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
+        let shown = Self.panesToShow(paneTabs, selectedTabID: selectedTabID, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
         shown.forEach(session.loadPage(of:))
         let ids = shown.map(\.id)
         if ids != shownTabIDs { shownTabIDs = ids }
+    }
+
+    /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.
+    static func panesToShow(_ panes: [Tab], selectedTabID: UUID?, shownTabIDs: [UUID], isShownInAnotherWindow: (Tab) -> Bool) -> [Tab] {
+        panes.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
     }
 
     /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen, sheet, and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen and putting away its sheet here first.

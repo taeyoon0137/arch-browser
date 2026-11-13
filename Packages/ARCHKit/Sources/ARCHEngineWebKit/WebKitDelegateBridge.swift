@@ -64,10 +64,12 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
         }
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
-        // WebKit loads a web extension's pages only in a web view made for that extension and no other page there, so a main frame navigation across that line, from a link, a script, `tabs.update`, or the address field, loads in a replacement. Any other navigation that goes ahead here ends a wait for an extension.
+        let isAppLoad = owner.appLoadURL == url.absoluteURL
+        if isAppLoad { owner.appLoadURL = nil }
+        // WebKit loads a web extension's pages only in a web view made for that extension and no other page there, so a main frame navigation across that line loads in a replacement: one out to a web page from a link, a script, or the address field, and one into an extension's page that the app starts, as the address field and `tabs.update` do, or that a frame may start (`mayStartReplacement`). Any other navigation into an extension's pages, as a web page's link, script, redirect, or new window, loads nothing, as on Chromium. Any other navigation that goes ahead here ends a wait for an extension.
         if owner.needsReplacement(toLoad: url) {
             decisionHandler(.cancel)
-            owner.scheduleReplacement(loading: url)
+            if isAppLoad || owner.mayStartReplacement(toLoad: url, from: Self.sourceOrigin(of: navigationAction)) { owner.scheduleReplacement(loading: url) }
             return
         }
         owner.stopWaitingForExtension()
@@ -81,6 +83,14 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             return .newWindow
         }
         return navigationAction.targetFrame == nil ? .newForegroundTab : .currentTab
+    }
+
+    /// The origin of the frame that started a navigation, as an address with an empty path, or nil when the origin is opaque or unknown, which leaves its protocol empty.
+    private static func sourceOrigin(of navigationAction: WKNavigationAction) -> URL? {
+        let origin = navigationAction.sourceFrame.securityOrigin
+        guard !origin.protocol.isEmpty else { return nil }
+        let port = origin.port == 0 ? "" : ":\(origin.port)"
+        return URL(string: "\(origin.protocol)://\(origin.host)\(port)/")
     }
 
     /// Downloads responses WebKit cannot render or that are served as attachments.
@@ -140,7 +150,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
             return nil
         }
-        // WebKit loads no web page in a web view made for an extension, so a web page that an extension's page opens loads in a web contents of its own, without an opener. A window that a web page opens for an extension's page gets its opener's configuration, and WebKit refuses the page there.
+        // WebKit loads no web page in a web view made for an extension, so a web page that an extension's page opens loads in a web contents of its own, without an opener. A window that a web page opens for an extension's page gets its opener's configuration, and its navigation policy loads the page in a replacement only when the opener may start that navigation (`mayStartReplacement`), as for a page the extension makes web-accessible to the opener's site; otherwise the window stays blank.
         if let url = navigationAction.request.url, owner.extensionBaseURL != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             let child = WebKitWebContents(context: owner.context,
                                           configuration: EngineWebContentsConfiguration(initialURL: url, pageScripts: owner.userContent.pageScripts))

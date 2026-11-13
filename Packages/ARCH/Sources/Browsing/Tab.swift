@@ -116,6 +116,16 @@ public final class Tab: ObservableObject, Identifiable {
         replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
     }
 
+    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
+    func restore(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
+        lastActivatedAt = record.lastActivatedAt ?? Date()
+        customTitle = record.customTitle
+        suggestedTitle = record.suggestedTitle
+        self.folderID = folderID
+        isRestored = true
+        recordedURL = record.url
+    }
+
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {

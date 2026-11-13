@@ -1444,16 +1444,10 @@ public final class BrowserSession: ObservableObject {
                 continue
             }
             let personaID = personaID(ofSpace: record.spaceID)
-            let page = UnloadedWebContents(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
+            let page = UnloadedWebContents(record: record, defaultEngine: defaultEngine)
             page.loadSiteIcon()
             let tab = adopt(page, id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
-            tab.lastActivatedAt = record.lastActivatedAt ?? Date()
-            tab.customTitle = record.customTitle
-            tab.suggestedTitle = record.suggestedTitle
-            tab.folderID = existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned)
-            tab.isRestored = true
-            // Loading a restored page does not count as a visit.
-            tab.recordedURL = record.url
+            tab.restore(record, folderID: existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned))
             restored[index] = tab
         }
         restoreSplitViews(snapshot.splitViews ?? [], from: restored)

@@ -81,6 +81,27 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         return controller.extensionContext(for: url)
     }
 
+    /// Whether a frame of `origin` may take a tab to the loaded extension's page at `url`, as on Chromium: a frame of the same extension may open any of its pages, and another frame only a page that the extension's `web_accessible_resources` lets it reach.
+    func mayOpenPage(at url: URL, from origin: URL?) -> Bool {
+        guard let context = extensionContext(ofPageAt: url) else { return false }
+        let originExtension = origin?.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme ? origin?.host : nil
+        return originExtension == context.uniqueIdentifier
+            || Self.isWebAccessible(url.path, in: context.webExtension.manifest, from: origin, ofExtension: originExtension)
+    }
+
+    /// Whether a manifest's `web_accessible_resources` lets a frame of `origin` reach the resource at `path`, as Chromium reads them; `originExtension` is the frame's extension when it is an extension's frame. A Manifest V2 entry names a resource that any frame reaches. A Manifest V3 entry names `resources` for the frames of the origins that its `matches` match and of the extensions that its `extension_ids` name, where `*` names every extension. In a resource, `*` stands for any characters and `?` for one.
+    static func isWebAccessible(_ path: String, in manifest: [String: Any], from origin: URL?, ofExtension originExtension: String?) -> Bool {
+        guard let entries = manifest["web_accessible_resources"] as? [Any] else { return false }
+        let names = { (resource: String) in fnmatch(resource.hasPrefix("/") ? resource : "/" + resource, path, 0) == 0 }
+        return entries.contains { entry in
+            if let resource = entry as? String { return names(resource) }
+            guard let entry = entry as? [String: Any], (entry["resources"] as? [String])?.contains(where: names) == true else { return false }
+            if let originExtension, (entry["extension_ids"] as? [String])?.contains(where: { $0 == "*" || $0 == originExtension }) == true { return true }
+            guard let origin else { return false }
+            return (entry["matches"] as? [String])?.contains { (try? WKWebExtension.MatchPattern(string: $0))?.matches(origin) == true } == true
+        }
+    }
+
     /// Keeps `contents` until the extension of the page at `url` loads, when `url` is a page of an extension that is not loaded, and says whether it does.
     func wait(for contents: WebKitWebContents, toLoadPageAt url: URL) -> Bool {
         guard url.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme, extensionContext(ofPageAt: url) == nil else { return false }
@@ -514,6 +535,13 @@ extension WebKitWebContents {
         case "http", "https": return extensionBaseURL != nil
         default: return false
         }
+    }
+
+    /// Whether a frame of `origin` may start a main frame navigation to `url` that needs a replacement, as on Chromium: any frame may leave an extension's pages for a web page, and only a frame that the extension lets reach the page may take the tab to an extension's page (`WebKitExtensions.mayOpenPage(at:from:)`). The app's own loads, as the address field's and `tabs.update`'s, need no check.
+    func mayStartReplacement(toLoad url: URL, from origin: URL?) -> Bool {
+        guard url.scheme?.lowercased() == WebKitDelegateBridge.extensionScheme else { return true }
+        guard #available(macOS 15.4, *), let extensions = context.webExtensions else { return false }
+        return extensions.mayOpenPage(at: url, from: origin)
     }
 
     /// Loads `url` in a replacement on the next turn of the run loop, once WebKit's callback has returned, since the UI delegate closes this web contents. Of several such navigations in one turn, the last one loads.

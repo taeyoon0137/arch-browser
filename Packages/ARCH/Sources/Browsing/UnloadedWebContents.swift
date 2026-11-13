@@ -37,6 +37,11 @@ final class UnloadedWebContents: EngineWebContents {
         restorableState = state
     }
 
+    /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state.
+    convenience init(record: SessionSnapshot.TabRecord, defaultEngine: EngineKind) {
+        self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
+    }
+
     /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`).
     func loadSiteIcon() {
         guard let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }

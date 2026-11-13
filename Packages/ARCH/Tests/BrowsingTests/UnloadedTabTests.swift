@@ -19,16 +19,10 @@ import Testing
                                          state: isWebKit ? Data([1, 2, UInt8(number)]) : nil, personaID: personaID, suggestedTitle: isWebKit ? nil : SuggestedTitle(title: "Hook \(number)", url: url))
     }
 
-    /// The tab as `BrowserSession.restoreTabs` makes it from `record`, without the session's callbacks and the site icon.
+    /// The tab as `BrowserSession.restoreTabs` makes it from `record`, with the same stand-in and record fields, in a folder that still exists, and without the session's callbacks and the site icon.
     private func restoredTab(_ record: SessionSnapshot.TabRecord) -> Tab {
-        let page = UnloadedWebContents(url: record.url, title: record.title, engine: record.engine!, state: record.state)
-        let tab = Tab(id: record.id!, webContents: page, spaceID: record.spaceID, isPinned: record.isPinned, personaID: record.personaID!)
-        tab.lastActivatedAt = record.lastActivatedAt!
-        tab.customTitle = record.customTitle
-        tab.suggestedTitle = record.suggestedTitle
-        tab.folderID = record.folderID
-        tab.isRestored = true
-        tab.recordedURL = record.url
+        let tab = Tab(id: record.id!, webContents: UnloadedWebContents(record: record, defaultEngine: .chromium), spaceID: record.spaceID, isPinned: record.isPinned, personaID: record.personaID!)
+        tab.restore(record, folderID: record.folderID)
         return tab
     }
 
@@ -42,17 +36,36 @@ import Testing
         let tabs = records.map(restoredTab)
         #expect(tabs.allSatisfy { !$0.isLoaded })
         #expect(tabs.map(savedRecord) == records)
-        // A window shows the first tab, with the second as a pane of its split view.
+        // One window shows the third tab. Another selects the first, with the second and third as panes of its split view, and leaves the third to the first window.
+        let otherWindow = BrowserWindowModel.panesToShow([tabs[2]], selectedTabID: tabs[2].id, shownTabIDs: [], isShownInAnotherWindow: { _ in false })
+        let window = BrowserWindowModel.panesToShow(Array(tabs.prefix(3)), selectedTabID: tabs[0].id, shownTabIDs: [], isShownInAnotherWindow: { $0 === tabs[2] })
+        #expect(otherWindow.map(\.id) == [tabs[2].id])
+        #expect(window.map(\.id) == [tabs[0].id, tabs[1].id])
         var created: [(url: URL?, engine: EngineKind, state: Data?)] = []
-        for tab in tabs.prefix(2) {
+        for tab in otherWindow + window {
             tab.loadPage { url, engine, state in
                 created.append((url, engine, state))
                 return PageStub(engine: engine, url: url)
             }
         }
-        #expect(created.count == 2)
-        #expect(tabs.map(\.isLoaded) == [true, true] + Array(repeating: false, count: 38))
-        #expect(tabs.dropFirst(2).map(savedRecord) == Array(records.dropFirst(2)))
+        #expect(created.count == 3)
+        #expect(tabs.map(\.isLoaded) == [true, true, true] + Array(repeating: false, count: 37))
+        #expect(tabs.dropFirst(3).map(savedRecord) == Array(records.dropFirst(3)))
+    }
+
+    /// A window keeps showing its selected tab and the panes it shows already, even while another window shows them too.
+    @Test func aWindowKeepsItsSelectedTabAndShownPanes() {
+        let tabs = (0..<3).map(record).map(restoredTab)
+        let shown = BrowserWindowModel.panesToShow(tabs, selectedTabID: tabs[0].id, shownTabIDs: [tabs[1].id], isShownInAnotherWindow: { _ in true })
+        #expect(shown.map(\.id) == [tabs[0].id, tabs[1].id])
+    }
+
+    /// A record from a file without engines gets a stand-in, and so a page, of the default engine.
+    @Test func aRecordWithoutAnEngineGetsTheDefaultEngine() {
+        var record = record(3)
+        record.engine = nil
+        #expect(UnloadedWebContents(record: record, defaultEngine: .webKit).engineKind == .webKit)
+        #expect(UnloadedWebContents(record: record, defaultEngine: .chromium).engineKind == .chromium)
     }
 
     @Test func aTabGetsItsPageOnceAtItsSavedAddressEngineAndState() {

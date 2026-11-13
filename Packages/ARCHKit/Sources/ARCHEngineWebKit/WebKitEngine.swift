@@ -260,6 +260,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     var waitingPage: (url: URL, state: Data?)?
     /// The page that a replacement loads on the next turn of the run loop, with its saved state.
     var pendingReplacement: (url: URL, state: Data?)?
+    /// The address of the app's last load through the navigation controller, as the address field's or `tabs.update`'s, until the navigation policy sees a main frame navigation to it. WebKit asks about the app's loads as about a page's own navigations, so this tells the policy which navigations the app started.
+    var appLoadURL: URL?
 
     /// Version and engine tokens a full browser on this system adds to its user agent. `WKWebView` omits them, so some sites send pages for old browsers. The system's WebKit uses the system's version number.
     static let applicationNameForUserAgent: String = {
@@ -560,6 +562,7 @@ public final class WebKitNavigationController: EngineNavigationController {
     public lazy var backForwardList: any EngineBackForwardList = WebKitBackForwardList(webView: webView)
     public func load(_ request: URLRequest) {
         contents?.dismissDialogBeforeNavigation()
+        contents?.appLoadURL = request.url?.absoluteURL
         webView.load(request)
     }
     public func reload() {
