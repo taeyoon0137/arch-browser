@@ -51,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         self.session = session
         session.showSettings = { PreferencesWindowController.shared.show() }
-        session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($1, in: $0, installingVersionFor: $2) }
+        session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($2, in: $0, space: $1, installingVersionFor: $3) }
+        session.installFromWebStore = { PreferencesWindowController.shared.showWebStoreInstall(of: $2, in: $0, space: $1) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.session = session

@@ -10,6 +10,13 @@ public final class WebStoreInstaller {
         self.client = client
     }
 
+    /// The plugin among `plugins` that holds the extension `id`, from the Web Store or not, a version of a pair among them, or nil, also for text that is not an identifier. A store page's row in the site settings popover names it as installed.
+    nonisolated public static func installedPlugin(of id: String, among plugins: [InstalledPlugin]) -> InstalledPlugin? {
+        guard let id = WebStore.identifier(id) else { return nil }
+        let pluginID = WebExtensionManifest.pluginID(of: id)
+        return plugins.first { $0.kind == .webExtension && $0.manifest.id == pluginID }
+    }
+
     /// Downloads the current package of the extension `id`, an identifier as `WebStore.extensionID(from:)` reads it, and stages it in the Persona of `plugins` with the origin `webStore(id)`, for the review. Throws `WebStoreError` when the store offers no package, when the Persona has the store's current version installed from the store, which downloads nothing, and when the download fails its checks; `PluginError` when staging refuses the package, and `PluginError.closed`, without asking or downloading, once the session has closed `plugins` as it deleted the Persona; and the system's error when the network fails. Cancelling the task throws `CancellationError` at whatever step it comes: it stops the request or the download, and a package that staging finished meanwhile is discarded. The downloaded file is deleted once the package is staged or refused, and on every failure.
     public func stage(_ id: String, in plugins: PluginManager) async throws -> PluginPackage {
         do {

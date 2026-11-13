@@ -1,5 +1,7 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. The subtitle names where the package came from: a file, the Web Store, or AI. An update from another place than the installed plugin's comes with a warning, as only the signatures of a `.crx` file prove an identifier and such a package takes over the plugin's data, and an unsigned update of a plugin whose package was signed adds another. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
+// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. The subtitle names where the package came from: a file, the Web Store, or AI, and with two or more Personas the review names the Persona it installs in (Persona rule 7 in `docs/windows-personas.md`). A package from the Web Store comes from the store sheet, the sheet's first step, which the review replaces. An update from another place than the installed plugin's comes with a warning, as only the signatures of a `.crx` file prove an identifier and such a package takes over the plugin's data, and an unsigned update of a plugin whose package was signed adds another. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
 import ARCHEngine
+import Browsing
+import Extensions
 import LocalAuthentication
 import Plugins
 import SwiftUI
@@ -12,31 +14,63 @@ struct PluginReview: Identifiable {
     var engine: EngineKind?
 }
 
-/// The review, then, for a new plugin that asks for another engine's version, the last step, whose Install <Engine> Version… puts that version's review in the sheet's place.
+/// The store sheet for a package from the Web Store, then the review, then, for a new plugin that asks for another engine's version, the last step, whose Install <Engine> Version… puts that version's review or the store sheet for it in the sheet's place.
 struct PluginInstallSheet: View {
     @ObservedObject var plugins: PluginManager
+    /// The sentence that names the Persona the package installs in, with two or more Personas.
+    private let personaSentence: String?
+    /// Stages packages from the Web Store, for the store sheet and From the Web Store….
+    private let webStore: WebStoreInstaller?
     /// Takes the user back to the composer of a plugin that AI wrote, to ask for a change.
     private let askForChanges: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var step: Step
 
+    /// The sheet's first step.
+    enum Start {
+        case review(PluginReview)
+        /// The store sheet, which stages a package from the Web Store for the review.
+        case webStore(WebStoreStart)
+    }
+
     private enum Step {
+        case webStore(WebStoreStart)
         case review(PluginReview)
         /// The plugin installed and asks for the engine's version.
         case installed(PluginID, EngineKind)
     }
 
-    init(plugins: PluginManager, review: PluginReview, askForChanges: (() -> Void)? = nil) {
+    /// `webStore` stages the store sheet's packages; a sheet without one starts with a review and offers no package from the Web Store.
+    init(plugins: PluginManager, start: Start, personaSentence: String? = nil, webStore: WebStoreInstaller? = nil, askForChanges: (() -> Void)? = nil) {
         self.plugins = plugins
+        self.personaSentence = personaSentence
+        self.webStore = webStore
         self.askForChanges = askForChanges
-        _step = State(initialValue: .review(review))
+        switch start {
+        case let .review(review): _step = State(initialValue: .review(review))
+        case let .webStore(storeStart): _step = State(initialValue: .webStore(storeStart))
+        }
+    }
+
+    init(plugins: PluginManager, review: PluginReview, askForChanges: (() -> Void)? = nil) {
+        self.init(plugins: plugins, start: .review(review), askForChanges: askForChanges)
+    }
+
+    /// How the review names the Persona from where the install started (Persona rule 7): "Installs in the Persona of “Work / Research” for all its spaces." from a tab or a window, with its space, "Installs in “Work” for all its spaces." from Settings ▸ Plugins, without one, and nil while the default Persona is the only one.
+    static func personaSentence(persona: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+        guard let place = BrowserSession.displayedPlace(ofPersona: persona, space: space, among: personas) else { return nil }
+        return space == nil ? "Installs in \u{201C}\(place)\u{201D} for all its spaces." : "Installs in the Persona of \u{201C}\(place)\u{201D} for all its spaces."
     }
 
     var body: some View {
         Group {
             switch step {
+            case let .webStore(start):
+                if let webStore {
+                    WebStoreInstallSheet(plugins: plugins, installer: webStore, start: start, close: { dismiss() }) { step = .review($0) }
+                }
             case let .review(review):
-                PluginReviewView(plugins: plugins, review: review, askForChanges: askForChanges, close: { dismiss() }) { id, isNewPlugin in
+                PluginReviewView(plugins: plugins, review: review, personaSentence: personaSentence, askForChanges: askForChanges, close: { dismiss() }) { id, isNewPlugin in
                     if isNewPlugin, let engine = plugins.missingEngine(of: id) {
                         step = .installed(id, engine)
                     } else {
@@ -46,13 +80,19 @@ struct PluginInstallSheet: View {
                 // A review that takes the last step's place starts with its own sites and choice.
                 .id(review.id)
             case let .installed(id, engine):
-                VersionLastStep(plugins: plugins, plugin: id, engine: engine, close: { dismiss() }) { step = .review($0) }
+                VersionLastStep(plugins: plugins, plugin: id, engine: engine, offersWebStore: webStore != nil, close: { dismiss() },
+                                review: { step = .review($0) }, storeSheet: { step = .webStore($0) })
             }
         }
         .padding(20)
-        // A plugin that AI wrote shows its sources.
-        .frame(width: isWrittenByAI ? 600 : 480, height: isWrittenByAI ? 640 : 520)
+        // A plugin that AI wrote shows its sources, and the store sheet takes the height of its field and messages.
+        .frame(width: isWrittenByAI ? 600 : 480, height: isStoreSheet ? nil : isWrittenByAI ? 640 : 520)
         .interactiveDismissDisabled()
+    }
+
+    private var isStoreSheet: Bool {
+        guard case .webStore = step else { return false }
+        return true
     }
 
     /// Whether the sheet reviews a plugin that AI wrote.
@@ -66,6 +106,7 @@ struct PluginInstallSheet: View {
 private struct PluginReviewView: View {
     @ObservedObject var plugins: PluginManager
     let review: PluginReview
+    let personaSentence: String?
     let askForChanges: (() -> Void)?
     let close: () -> Void
     /// The installed plugin's identifier, and whether it is a new plugin rather than an update or a version.
@@ -83,9 +124,11 @@ private struct PluginReviewView: View {
         case plugin
     }
 
-    init(plugins: PluginManager, review: PluginReview, askForChanges: (() -> Void)?, close: @escaping () -> Void, installed: @escaping (PluginID, Bool) -> Void) {
+    init(plugins: PluginManager, review: PluginReview, personaSentence: String?, askForChanges: (() -> Void)?, close: @escaping () -> Void,
+         installed: @escaping (PluginID, Bool) -> Void) {
         self.plugins = plugins
         self.review = review
+        self.personaSentence = personaSentence
         self.askForChanges = askForChanges
         self.close = close
         self.installed = installed
@@ -131,6 +174,10 @@ private struct PluginReviewView: View {
                     .font(.headline)
                 Text("Version \(manifest.version) \(origin). \(manifest.summary)")
                     .foregroundStyle(.secondary)
+                if let personaSentence {
+                    Text(personaSentence)
+                        .foregroundStyle(.secondary)
+                }
                 if let note = package.kind.note {
                     Text(note)
                         .foregroundStyle(.secondary)
@@ -373,13 +420,16 @@ private struct PluginReviewView: View {
     }
 }
 
-/// The install sheet's last step for a new plugin that asks for another engine's version: the note, Install <Engine> Version…, which reviews the chosen package in the sheet's place, Don't Ask Again, which dismisses the note for the engine, and Done, which leaves the note in Settings and on the engine's tabs.
+/// The install sheet's last step for a new plugin that asks for another engine's version: the note, Install <Engine> Version…, which reviews the chosen package in the sheet's place or, with From the Web Store…, puts the store sheet there, Don't Ask Again, which dismisses the note for the engine, and Done, which leaves the note in Settings and on the engine's tabs.
 private struct VersionLastStep: View {
     @ObservedObject var plugins: PluginManager
     let plugin: PluginID
     let engine: EngineKind
+    /// Whether Install <Engine> Version… offers From the Web Store….
+    let offersWebStore: Bool
     let close: () -> Void
     let review: (PluginReview) -> Void
+    let storeSheet: (WebStoreStart) -> Void
     /// Why the chosen package could not be staged.
     @State private var failure: String?
 
@@ -402,8 +452,9 @@ private struct VersionLastStep: View {
                     close()
                 }
                 Spacer()
-                Button("Install \(engine.displayName) Version\u{2026}") {
+                InstallVersionMenu(engine: engine, offersWebStore: offersWebStore) { source in
                     guard let installed = plugins.plugins.first(where: { $0.id == plugin }) else { return }
+                    guard source == .file else { return storeSheet(WebStoreStart(versionOf: plugin, engine: engine)) }
                     chooseVersionPackage(of: installed, for: engine, in: plugins, over: NSApp.keyWindow) { result in
                         switch result {
                         case let .success(package): review(PluginReview(package: package, versionOf: plugin, engine: engine))
@@ -421,6 +472,34 @@ private struct VersionLastStep: View {
 /// The note of a plugin that asks for the engine's version, such as "It runs on WebKit tabs. Its developer may offer a separate version for Chromium; install it to use “Reader” on Chromium tabs too."
 func versionNote(for plugin: InstalledPlugin, engine: EngineKind) -> String {
     "It runs on \(EngineKind.tabsList(plugin.engines)) tabs. Its developer may offer a separate version for \(engine.displayName); install it to use \u{201C}\(plugin.manifest.name)\u{201D} on \(engine.displayName) tabs too."
+}
+
+/// Where Install <Engine> Version… takes the version's package from.
+enum PackageSource {
+    /// A folder or file that the open panel chooses.
+    case file
+    /// The store sheet.
+    case webStore
+}
+
+/// Install <Engine> Version…: a menu with From a File… and From the Web Store…, or a button for the file alone without the store.
+struct InstallVersionMenu: View {
+    let engine: EngineKind
+    var offersWebStore = true
+    let choose: (PackageSource) -> Void
+
+    var body: some View {
+        let title = "Install \(engine.displayName) Version\u{2026}"
+        if offersWebStore {
+            Menu(title) {
+                Button("From a File\u{2026}") { choose(.file) }
+                Button("From the Web Store\u{2026}") { choose(.webStore) }
+            }
+            .fixedSize()
+        } else {
+            Button(title) { choose(.file) }
+        }
+    }
 }
 
 /// Asks with an open panel over `window` for the package of the plugin's version for the engine, of the engine's package types, and stages it.

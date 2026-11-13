@@ -1,23 +1,29 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version….
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store….
 import AI
 import ARCHEngine
 import Browsing
+import Extensions
 import Plugins
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// A request to show a plugin in Settings ▸ Plugins with the open panel for its version for an engine, from the site settings popover.
-struct PluginVersionRequest: Equatable {
+/// A request to Settings ▸ Plugins from a tab or a window, which the Settings window sets: the open panel for a plugin's version for an engine, from the site settings popover, or the store sheet started for an extension, from a store page or the palette. The review names the Persona with `space`, the tab's or the window's (Persona rule 7 in `docs/windows-personas.md`).
+struct PluginsRequest: Equatable {
+    enum Action: Equatable {
+        case installVersion(PluginID, EngineKind)
+        case installFromWebStore(String)
+    }
+
     let persona: Persona.ID
-    let plugin: PluginID
-    let engine: EngineKind
+    let space: Space.ID?
+    let action: Action
 }
 
 /// The request Settings ▸ Plugins has yet to answer, which the Settings window sets.
 @MainActor
-final class PluginVersionRequests: ObservableObject {
-    static let shared = PluginVersionRequests()
-    @Published var pending: PluginVersionRequest?
+final class PluginsRequests: ObservableObject {
+    static let shared = PluginsRequests()
+    @Published var pending: PluginsRequest?
 }
 
 /// With two or more Personas, a picker chooses whose plugins the section shows. The list scrolls in a section of fixed height.
@@ -45,8 +51,8 @@ struct PluginsSection: View {
         }
         .frame(width: sectionWidth, height: 440)
         .onReceive(session.$personas) { personas = $0 }
-        // A request for another Persona's plugin shows that Persona, whose list then answers it.
-        .onReceive(PluginVersionRequests.shared.$pending) { request in
+        // A request for another Persona shows that Persona, whose list then answers it.
+        .onReceive(PluginsRequests.shared.$pending) { request in
             if let request, request.persona != personaID, session.personas.contains(where: { $0.id == request.persona }) { personaID = request.persona }
         }
     }
@@ -57,7 +63,7 @@ struct PluginsSection: View {
     }
 }
 
-/// Install Plugin… and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
+/// Install Plugin…, Install from Web Store…, and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -65,17 +71,27 @@ private struct PluginList: View {
     let proxy: ScrollViewProxy
     /// The providers and routes, which decide whether AI can write plugins.
     @ObservedObject private var aiSettings = AIService.shared.settings
-    /// The package under review.
-    @State private var staged: PluginReview?
+    /// The install sheet: a staged package's review, or the store sheet.
+    @State private var sheet: InstallSheet?
     /// Whether the sheet of New Feature with AI shows.
     @State private var isComposing = false
     /// Why the last chosen folder or archive could not be staged.
     @State private var failure: String?
 
+    /// How the install sheet starts, with the sentence of its review that names the Persona.
+    private struct InstallSheet: Identifiable {
+        let id = UUID()
+        let start: PluginInstallSheet.Start
+        let personaSentence: String?
+    }
+
     var body: some View {
         Section {
-            LabeledContent("Install a plugin or a web extension from a folder, a .zip archive, or a .crx file") {
-                Button("Install Plugin…", action: choosePackage)
+            LabeledContent("Install a plugin or a web extension from a folder, a .zip archive, a .crx file, or the Web Store") {
+                HStack {
+                    Button("Install Plugin…", action: choosePackage)
+                    Button("Install from Web Store\u{2026}") { showSheet(.webStore(WebStoreStart()), space: nil) }
+                }
             }
             if AIService.shared.isAvailable(.pluginComposer) {
                 LabeledContent("Describe a feature, and AI writes a plugin for it") {
@@ -100,29 +116,50 @@ private struct PluginList: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .sheet(item: $staged) { PluginInstallSheet(plugins: plugins, review: $0) }
-        .onReceive(PluginVersionRequests.shared.$pending) { request in
-            guard let request, request.persona == personaID, let plugin = plugins.leadVersion(of: request.plugin) else { return }
-            // After the window shows the section, and outside the request's own publishing.
-            DispatchQueue.main.async {
-                PluginVersionRequests.shared.pending = nil
-                proxy.scrollTo(plugin.id, anchor: .top)
-                installVersion(of: plugin, for: request.engine)
-            }
+        .sheet(item: $sheet) { sheet in
+            PluginInstallSheet(plugins: plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
         }
+        // A request waits while a sheet of the list shows.
+        .onReceive(PluginsRequests.shared.$pending) { _ in answerPendingRequest() }
+        .onChange(of: sheet == nil && !isComposing) { answerPendingRequest() }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
-            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, installVersion: installVersion)
+            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin) { installVersion(of: $0, for: $1, from: $2, space: nil) }
                 .id(plugin.id)
         }
     }
 
-    /// Install <Engine> Version…: asks for the package with an open panel on the Settings window, then reviews it as the plugin's version for the engine.
-    private func installVersion(of plugin: InstalledPlugin, for engine: EngineKind) {
+    /// Answers the pending request for this Persona once no sheet of the list shows: the version's open panel at its plugin, or the store sheet started for its extension.
+    private func answerPendingRequest() {
+        guard let request = PluginsRequests.shared.pending, request.persona == personaID, sheet == nil, !isComposing else { return }
+        // After the window shows the section, and outside the request's own publishing.
+        DispatchQueue.main.async {
+            guard PluginsRequests.shared.pending == request else { return }
+            PluginsRequests.shared.pending = nil
+            switch request.action {
+            case let .installVersion(id, engine):
+                guard let plugin = plugins.leadVersion(of: id) else { return }
+                proxy.scrollTo(plugin.id, anchor: .top)
+                installVersion(of: plugin, for: engine, from: .file, space: request.space)
+            case let .installFromWebStore(id):
+                showSheet(.webStore(WebStoreStart(text: id, startsAtOnce: true)), space: request.space)
+            }
+        }
+    }
+
+    /// Shows the install sheet, whose review names the Persona with `space`, the tab's or the window's for a request, or alone for a start in this section.
+    private func showSheet(_ start: PluginInstallSheet.Start, space: Space.ID?) {
+        let space = space.flatMap { id in session.spaces.first { $0.id == id } }
+        sheet = InstallSheet(start: start, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: space, among: session.personas))
+        failure = nil
+    }
+
+    /// Install <Engine> Version…: asks for the package with an open panel on the Settings window, or in the store sheet, then reviews it as the plugin's version for the engine.
+    private func installVersion(of plugin: InstalledPlugin, for engine: EngineKind, from source: PackageSource, space: Space.ID?) {
+        guard source == .file else { return showSheet(.webStore(WebStoreStart(versionOf: plugin.id, engine: engine)), space: space) }
         chooseVersionPackage(of: plugin, for: engine, in: plugins, over: PreferencesWindowController.shared.window) { result in
             switch result {
             case let .success(package):
-                staged = PluginReview(package: package, versionOf: plugin.id, engine: engine)
-                failure = nil
+                showSheet(.review(PluginReview(package: package, versionOf: plugin.id, engine: engine)), space: space)
             case let .failure(error):
                 failure = error.localizedDescription
             }
@@ -140,8 +177,7 @@ private struct PluginList: View {
             guard response == .OK, let url = panel.url else { return }
             Task {
                 do {
-                    staged = PluginReview(package: try await plugins.stage(url))
-                    failure = nil
+                    showSheet(.review(PluginReview(package: try await plugins.stage(url))), space: nil)
                 } catch {
                     failure = error.localizedDescription
                 }
@@ -155,13 +191,13 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version… for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
+/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
     let plugin: InstalledPlugin
-    let installVersion: (InstalledPlugin, EngineKind) -> Void
+    let installVersion: (InstalledPlugin, EngineKind, PackageSource) -> Void
     /// Why the last change to a setting, the removal, or a separation failed.
     @State private var failure: String?
     @State private var isConfirmingRemoval = false
@@ -201,7 +237,7 @@ private struct PluginSection: View {
             }
             if !isPair, plugin.kind == .webExtension {
                 ForEach(plugins.versionEngines(of: plugin.id).filter { $0 != missingEngine }, id: \.self) { engine in
-                    Button("Install \(engine.displayName) Version\u{2026}") { installVersion(plugin, engine) }
+                    InstallVersionMenu(engine: engine) { installVersion(plugin, engine, $0) }
                 }
                 if !joinCandidates.isEmpty {
                     Button("Join With\u{2026}") { isJoining = true }
@@ -251,7 +287,7 @@ private struct PluginSection: View {
                     Text(versionNote(for: plugin, engine: missingEngine))
                         .foregroundStyle(.secondary)
                     HStack {
-                        Button("Install \(missingEngine.displayName) Version\u{2026}") { installVersion(plugin, missingEngine) }
+                        InstallVersionMenu(engine: missingEngine) { installVersion(plugin, missingEngine, $0) }
                         Button("Dismiss") { plugins.dismissVersionNote(of: plugin.id, for: missingEngine) }
                     }
                 }

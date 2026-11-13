@@ -107,9 +107,18 @@ public final class PreferencesWindowController: NSWindowController {
         show()
     }
 
-    /// Brings the Settings window to the front on Plugins at the plugin in the Persona, with the open panel for the plugin's version for the engine, for Install <Engine> Version… in the site settings popover.
-    public func showPlugin(_ plugin: PluginID, in persona: Persona.ID, installingVersionFor engine: EngineKind) {
-        PluginVersionRequests.shared.pending = PluginVersionRequest(persona: persona, plugin: plugin, engine: engine)
+    /// Brings the Settings window to the front on Plugins at the plugin in the Persona, with the open panel for the plugin's version for the engine, for Install <Engine> Version… in the site settings popover. The review names the Persona with `space`, the tab's.
+    public func showPlugin(_ plugin: PluginID, in persona: Persona.ID, space: Space.ID?, installingVersionFor engine: EngineKind) {
+        showPlugins(PluginsRequest(persona: persona, space: space, action: .installVersion(plugin, engine)))
+    }
+
+    /// Brings the Settings window to the front on Plugins in the Persona, with the store sheet started for the extension `id`, for the Web Store's entry points in tabs and the palette. The review names the Persona with `space`, the tab's or the window's.
+    public func showWebStoreInstall(of id: String, in persona: Persona.ID, space: Space.ID?) {
+        showPlugins(PluginsRequest(persona: persona, space: space, action: .installFromWebStore(id)))
+    }
+
+    private func showPlugins(_ request: PluginsRequest) {
+        PluginsRequests.shared.pending = request
         if let pluginsSection { pluginsSection.tabView?.selectTabViewItem(pluginsSection) }
         show()
     }

@@ -66,8 +66,10 @@ public final class BrowserSession: ObservableObject {
     public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
-    /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover.
-    public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
+    /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover, with the tab's space, which the review names with the Persona.
+    public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) -> Void)?
+    /// The app sets this to open Settings ▸ Plugins at a Persona with the store sheet started for an extension identifier, for the Web Store's entry points in the site settings popover and the palette (`docs/web-store.md`, Entry points), with the space of the tab or the window, which the review names with the Persona.
+    public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
     /// Downloads extensions from the Web Store and stages them in any Persona's plugins (`docs/web-store.md`).
     public let webStore: WebStoreInstaller
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
@@ -562,8 +564,8 @@ public final class BrowserSession: ObservableObject {
         Self.displayedPlace(ofPersona: id, space: space, among: personas)
     }
 
-    /// `displayedPlace(ofPersona:space:)` among `personas`, also nil for a Persona that is no longer listed, for callers that hold the Personas, such as the sheets' texts and tests.
-    static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+    /// `displayedPlace(ofPersona:space:)` among `personas`, also nil for a Persona that is no longer listed, for callers that hold the Personas, such as the sheets' texts, Settings ▸ Plugins' reviews, and tests.
+    public static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard personas.count > 1, let persona = personas.first(where: { $0.id == id }) else { return nil }
         return space.map { "\(persona.name) / \($0.name)" } ?? persona.name
     }

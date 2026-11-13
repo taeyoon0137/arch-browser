@@ -260,6 +260,24 @@ import Testing
         manager.close()
     }
 
+    /// The plugin that a store page's row in the site settings popover names as installed: the Persona's plugin of the page's extension, from a file as from the store.
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func findsThePersonasPluginOfAStoreExtensionWhateverItsOrigin() async throws {
+        let manager = launch()
+        #expect(WebStoreInstaller.installedPlugin(of: extensionID, among: manager.plugins) == nil)
+        let file = folder.url.appendingPathComponent("Packed.crx")
+        try crx("signed", signedBy: [CRXFile.developer]).write(to: file)
+        let package = try await manager.stage(file)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
+        let installed = WebStoreInstaller.installedPlugin(of: extensionID.uppercased(), among: manager.plugins)
+        #expect(installed?.id == package.manifest.id && installed?.origin == package.origin && package.origin != .webStore(extensionID))
+        // Another identifier, and text that is not one, name no plugin.
+        for text in [String(repeating: "a", count: 32), "Packed", "extension.\(extensionID)"] {
+            #expect(WebStoreInstaller.installedPlugin(of: text, among: manager.plugins) == nil, "\(text)")
+        }
+        manager.close()
+    }
+
     @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
     func refusesWhatTheStoreDoesNotOffer() async throws {
         let manager = launch()

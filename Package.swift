@@ -74,7 +74,7 @@ let package = Package(
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
-        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins"], path: "Packages/ARCH/Sources/Preferences"),
+        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Extensions"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
         .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
@@ -85,7 +85,8 @@ let package = Package(
         .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
-        .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
+        // Reads store pages from hosts that stand in for the Web Store's through `Extensions`.
+        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "HistoryTests", dependencies: ["History"], path: "Packages/ARCH/Tests/HistoryTests"),
@@ -93,7 +94,7 @@ let package = Package(
         .testTarget(name: "ImportTests", dependencies: ["Import", "Browsing", "History"], path: "Packages/ARCH/Tests/ImportTests", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
-        .testTarget(name: "PreferencesTests", dependencies: ["Preferences"], path: "Packages/ARCH/Tests/PreferencesTests"),
+        .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing"], path: "Packages/ARCH/Tests/PreferencesTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20

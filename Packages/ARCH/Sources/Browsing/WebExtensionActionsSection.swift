@@ -1,4 +1,4 @@
-// The site settings popover's section for the web extensions of the tab's Persona: a row for each enabled extension with an action, and for one without while the engine keeps it from the tab's site, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss.
+// The site settings popover's section for the web extensions of the tab's Persona: on a Web Store page, first the store's row, Install This Extension… or, while the Persona has the page's extension installed, its name; then a row for each enabled extension with an action, and for one without while the engine keeps it from the tab's site, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -10,18 +10,53 @@ struct WebExtensionActionsSection: View {
     @ObservedObject var tab: Tab
     /// Closes the popover, so that the popup takes its place.
     let close: () -> Void
+    /// The window of the popover, whose current space a favorite's tab shows in.
+    @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
         let items = webExtensions.actions(for: tab.webContents)
-        if !items.isEmpty {
+        let storeRow = WebStorePageRow(pageURL: tab.url, installedName: installedName)
+        if !items.isEmpty || storeRow != nil {
             let engines = Set(webExtensions.engines.keys)
-            SiteSettingsSection(title: "Extensions", note: engines.contains(tab.engineKind)
+            SiteSettingsSection(title: "Extensions", note: items.isEmpty
+                ? "Opens the extension\u{2019}s review in Settings before it installs."
+                : engines.contains(tab.engineKind)
                 ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
                 : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {
                 VStack(alignment: .leading, spacing: 2) {
+                    if let storeRow { row(for: storeRow) }
                     ForEach(items) { row(for: $0, engineRunsExtensions: engines.contains(tab.engineKind)) }
                 }
             }
+        }
+    }
+
+    /// The space a review that starts from the tab names with its Persona: the tab's, or for a favorite's tab the window's current space (Persona rule 7).
+    private var tabSpace: Space.ID? {
+        BrowserWindowModel.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: session.spaces, currentSpace: windowModel.currentSpace)?.id
+    }
+
+    /// The name of the tab's Persona's plugin of the extension, a pair's name for a version of one.
+    private func installedName(of id: String) -> String? {
+        let plugins = session.plugins(in: tab.personaID)
+        guard let installed = WebStoreInstaller.installedPlugin(of: id, among: plugins.plugins) else { return nil }
+        return plugins.leadVersion(of: installed.id)?.manifest.name ?? installed.manifest.name
+    }
+
+    /// Install This Extension… closes the popover and opens the store sheet in Settings ▸ Plugins for the tab's Persona and space; an installed extension's row only names it.
+    @ViewBuilder private func row(for storeRow: WebStorePageRow) -> some View {
+        switch storeRow {
+        case let .install(id):
+            Button(storeRow.title) {
+                close()
+                session.installFromWebStore?(tab.personaID, tabSpace, id)
+            }
+            .disabled(session.installFromWebStore == nil)
+            .padding(.bottom, 4)
+        case .installed:
+            Text(storeRow.title)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 24)
         }
     }
 
@@ -76,7 +111,7 @@ struct WebExtensionActionsSection: View {
                         HStack {
                             Button("Install \(engine.displayName) Version\u{2026}") {
                                 close()
-                                session.installEngineVersion?(tab.personaID, item.id, engine)
+                                session.installEngineVersion?(tab.personaID, tabSpace, item.id, engine)
                             }
                             Button("Dismiss") { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
                         }
@@ -93,5 +128,34 @@ struct WebExtensionActionsSection: View {
     /// The engines' names in the order of `EngineKind`, such as "WebKit" or "WebKit and Chromium".
     private static func names(_ engines: Set<EngineKind>, joinedBy conjunction: String = "and") -> String {
         EngineKind.allCases.filter(engines.contains).map(\.displayName).joined(separator: " \(conjunction) ")
+    }
+}
+
+/// Reads which extension a store page's address or typed text names (`docs/web-store.md`, Install flow): `WebStore`'s readers, or in tests readers with hosts that stand in for the store's.
+struct WebStoreReader {
+    var page: (URL) -> String? = WebStore.extensionID(in:)
+    var text: (String) -> String? = WebStore.extensionID(from:)
+
+    static let store = WebStoreReader()
+}
+
+/// The Web Store row at the top of the popover's extensions section on a store page (`docs/web-store.md`, Entry points), which names no Persona.
+enum WebStorePageRow: Equatable {
+    /// Install This Extension…, for the extension's identifier.
+    case install(String)
+    /// The name of the Persona's plugin of the page's extension.
+    case installed(String)
+
+    /// The row for a tab at `pageURL`, or nil when it is not a store page. `installedName` names the tab's Persona's plugin of an extension identifier, or gives nil while it has none.
+    init?(pageURL: URL?, installedName: (String) -> String?, reader: WebStoreReader = .store) {
+        guard let pageURL, let id = reader.page(pageURL) else { return nil }
+        self = installedName(id).map(Self.installed) ?? .install(id)
+    }
+
+    var title: String {
+        switch self {
+        case .install: return "Install This Extension\u{2026}"
+        case let .installed(name): return "\u{201C}\(name)\u{201D} is installed."
+        }
     }
 }
