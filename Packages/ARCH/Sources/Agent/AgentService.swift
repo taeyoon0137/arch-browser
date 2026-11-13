@@ -457,8 +457,8 @@ import Foundation
             replyError(connection, requestID, .invalidRequest("hello comes once per connection."))
         case (.ready, AgentControlMethod.toolsList):
             let grant = connection.identity.flatMap(grant(for:))
-            let tools = AgentToolHost.tools(for: grant?.level ?? .readOnly, scopes: grant?.scopes ?? AgentGrantScopes())
-            reply(connection, requestID, ["tools": .array(tools.map(\.mcpDefinition))])
+            let tools = grant.map { AgentToolHost.tools(for: $0.level, scopes: $0.scopes) } ?? AgentToolHost.toolsBeforeGrant
+            reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name))))
         case (.ready, AgentControlMethod.toolsCall):
             call(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):

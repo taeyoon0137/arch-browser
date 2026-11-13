@@ -9,9 +9,9 @@ public enum AgentControlProtocol {
     public static let helloMethod = "hello"
 }
 
-/// The methods a client calls after `hello`, and the notifications Arch sends (docs/agents.md, Local control channel ▸ Framing and methods). The methods of later tasks join as they are built; Arch answers any other method with JSON-RPC error -32601.
+/// The methods a client calls after `hello`, and the notifications of each end (docs/agents.md, Local control channel ▸ Framing and methods). The tool messages' params and results are in `AgentToolMessages.swift`. The methods of later tasks join as they are built; Arch answers any other method with JSON-RPC error -32601.
 public enum AgentControlMethod {
-    /// The tools the connection's grant allows, as MCP's `tools/list` result.
+    /// The names of the tools the connection may call, answered with an `AgentToolList`.
     public static let toolsList = "tools/list"
     /// One tool call, params `AgentToolCall`, answered with an `AgentToolResult`. The request's ID is the call's ID.
     public static let toolsCall = "tools/call"
@@ -20,8 +20,12 @@ public enum AgentControlMethod {
     /// Gives up the client's own grant, answered with `{"released": true}` or false when it had none.
     public static let grantRelease = "grant/release"
 
-    /// A call still waits, as for the grant sheet: params `{"call": <request ID>, "message": "…"}`.
+    /// The client's notification that stops a running call and withdraws its approval: params `AgentToolCancel`.
+    public static let toolsCancelNotification = "tools/cancel"
+    /// A call still waits, as for the grant sheet or an approval: params `AgentToolProgress`, `{"call": <request ID>, "message": "…"}`.
     public static let progressNotification = "progress"
+    /// The connection's tools changed, as after a grant or a mode change.
+    public static let toolsChangedNotification = "tools/changed"
     /// The grant ended: params `{"message": "…"}`. Arch closes the connection after it.
     public static let revokedNotification = "revoked"
 }

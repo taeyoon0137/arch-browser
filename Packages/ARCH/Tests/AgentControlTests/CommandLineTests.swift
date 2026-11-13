@@ -30,6 +30,12 @@ import Testing
         #expect(try AgentCommandLine.parse(["tabs"]) == AgentCLIRequest(command: .tabs(shared: false), json: false))
         #expect(try AgentCommandLine.parse(["tabs", "--shared", "--json"]) == AgentCLIRequest(command: .tabs(shared: true), json: true))
         #expect(try AgentCommandLine.parse(["release"]) == AgentCLIRequest(command: .release, json: false))
+        #expect(try AgentCommandLine.parse(["mcp-config"]).command == .mcpConfig(nil))
+        #expect(try AgentCommandLine.parse(["mcp-config", "codex"]).command == .mcpConfig(.codex))
+        #expect(try AgentCommandLine.parse(["setup", "claude"]).command == .setup(.claude))
+        #expect(try AgentCommandLine.parse(["links", "install"]).command == .links(.install, folder: nil))
+        #expect(try AgentCommandLine.parse(["links", "install", "--dir", "/Users/someone/bin"]).command == .links(.install, folder: "/Users/someone/bin"))
+        #expect(try AgentCommandLine.parse(["--dir", "bin", "links", "remove"]).command == .links(.remove, folder: "bin"))
     }
 
     @Test(arguments: [
@@ -43,6 +49,14 @@ import Testing
         (["spaces", "--shared"], "Only tabs takes --shared."),
         (["tabs", "t1"], "tabs takes no arguments."),
         (["release", "now"], "release takes no arguments."),
+        (["--json", "mcp"], "mcp must be the first argument, as in arch-cli mcp."),
+        (["mcp-config", "cursor"], "mcp-config takes claude, codex, or json."),
+        (["mcp-config", "claude", "codex"], "mcp-config takes at most one of claude, codex, or json."),
+        (["setup"], "setup takes claude or codex."),
+        (["setup", "json"], "setup takes claude or codex."),
+        (["links"], "links takes install or remove."),
+        (["links", "install", "--dir"], "--dir needs a folder."),
+        (["status", "--dir", "bin"], "--dir belongs to links."),
     ])
     func usageErrors(arguments: [String], message: String) {
         #expect(throws: AgentUsageError(message: message)) { try AgentCommandLine.parse(arguments) }
@@ -103,7 +117,7 @@ import Testing
             #expect(cli.contains("  \(code.rawValue)"), "\(code.rawValue)")
             #expect(cli.contains(code.meaning), "\(code.rawValue)")
         }
-        #expect(cli.contains("guide and tools work without Arch running."))
+        #expect(cli.contains("guide, tools, mcp-config, setup, and links work without Arch running."))
         #expect(!cli.contains("\n\n\n"))
     }
 }

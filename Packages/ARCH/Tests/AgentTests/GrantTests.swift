@@ -39,11 +39,10 @@ import Testing
         _ = try await harness.makeOpenService()
         let client = try TestClient(harness.location)
         _ = try await client.hello()
-        let names = try await client.call("tools/list")["tools"].flatMap { tools -> [String]? in
-            guard case .array(let items) = tools else { return nil }
-            return items.compactMap { $0["name"]?.stringValue }
-        }
+        // Before a grant, the list names every served tool, since the sheet may allow any of them.
+        let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
         #expect(names == ["session_info", "list_spaces", "list_tabs"])
+        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == ["session_info", "list_spaces", "list_tabs"])
         #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == ["session_info", "list_spaces", "list_tabs"])
     }
 

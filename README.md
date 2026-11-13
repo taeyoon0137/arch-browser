@@ -92,7 +92,7 @@ git config core.hooksPath .githooks
 - [`docs/windows-personas.md`](./docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
 - [`docs/plugins.md`](./docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
-- [`docs/agents.md`](./docs/agents.md): the agents design (its control channel library, the endpoint with grants and sealed settings, the runner of sessions on the CLIs, and `arch-cli`'s first commands are built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
+- [`docs/agents.md`](./docs/agents.md): the agents design (its control channel library, the endpoint with grants and sealed settings, the runner of sessions on the CLIs, `arch-cli`'s first commands, and `arch-mcp` are built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 
 <a id="scripts"></a>

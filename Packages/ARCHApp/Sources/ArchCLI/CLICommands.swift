@@ -1,4 +1,4 @@
-// The commands `arch-cli` answers: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, and `--help` (docs/agents.md, arch-cli). Text goes to standard output, and an error to standard error as one sentence, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
+// The commands `arch-cli` answers: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `--help`, and the setup commands `mcp-config`, `setup`, and `links` (docs/agents.md, arch-cli). Text goes to standard output, and an error to standard error as one sentence, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
 import AgentControl
 import Foundation
 
@@ -31,10 +31,28 @@ enum CLICommands {
             return runTool(AgentToolCall(name: "list_tabs", arguments: shared ? ["scope": "shared"] : [:]), json: request.json)
         case .release:
             return release(json: request.json)
+        case .mcpConfig(let format):
+            return mcpConfig(format)
+        case .setup(let client):
+            return setup(client)
+        case .links(let action, let folder):
+            return links(action, folder: folder)
         }
     }
 
+    /// The version of the bundle around this executable, as `hello` and arch-mcp's `serverInfo` report it.
+    static var clientVersion: String {
+        bundleLayout?.version ?? "unknown"
+    }
+
+    /// The app bundle around this executable, or nil outside one, as for `.build/debug/arch-cli`.
+    private static var bundleLayout: AgentBundleLayout? {
+        AgentBundleLayout.currentExecutable().flatMap(AgentBundleLayout.containing(helper:))
+    }
+
+    /// One sentence on standard error, after what standard output holds so far, so that the two keep their order in a pipe.
     static func printError(_ message: String) {
+        fflush(stdout)
         FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
@@ -49,10 +67,6 @@ enum CLICommands {
     }
 
     // MARK: - Connecting
-
-    private static var clientVersion: String {
-        AgentBundleLayout.currentExecutable().flatMap(AgentBundleLayout.containing(helper:))?.version ?? "unknown"
-    }
 
     /// Connects, checks that the socket is Arch's, says `hello`, and runs `body` on the connection with Arch's answer. Client errors print their sentence and exit with their code.
     private static func withConnection(_ body: (AgentControlConnection, AgentHelloAnswer) throws -> AgentExitCode) -> AgentExitCode {
@@ -132,6 +146,100 @@ enum CLICommands {
         case .whenArchQuits: return "until Arch quits"
         case .whenRevoked: return "until you revoke it"
         case .at(let date): return "until \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+    }
+
+    // MARK: - mcp-config, setup, links
+
+    /// The bundle whose `arch-mcp` the configuration names; outside a bundle there is none, which exits 77 as the client checks do.
+    private static func requireBundle() -> AgentBundleLayout? {
+        guard let layout = bundleLayout else {
+            printError("This arch-cli does not run from inside an Arch bundle. Use Arch.app/Contents/Helpers/arch-cli.")
+            return nil
+        }
+        return layout
+    }
+
+    private static func mcpConfig(_ format: AgentMCPConfigurationFormat?) -> AgentExitCode {
+        guard let layout = requireBundle() else { return .notArch }
+        let path = layout.mcpExecutableURL.path
+        if let format {
+            print(AgentMCPConfiguration.text(format, mcpPath: path))
+        } else {
+            print(AgentMCPConfigurationFormat.allCases.map { "\($0.title):\n\(AgentMCPConfiguration.text($0, mcpPath: path))" }.joined(separator: "\n\n"))
+        }
+        return .done
+    }
+
+    /// Shows the tool's own command, asks, and runs it with this process's terminal, so that the tool writes its own configuration.
+    private static func setup(_ client: AgentMCPSetupClient) -> AgentExitCode {
+        guard let layout = requireBundle() else { return .notArch }
+        let arguments = AgentMCPConfiguration.setupArguments(for: client, mcpPath: layout.mcpExecutableURL.path)
+        print("This adds Arch's MCP server to \(client.title) for your user with:\n  \(AgentMCPConfiguration.shellCommand(arguments))")
+        guard let executable = locate(arguments[0]) else {
+            printError("\(arguments[0]) is not on your PATH. Install \(client.title), or run the command above once it is installed.")
+            return .toolError
+        }
+        print("Run it? [y/N] ", terminator: "")
+        fflush(stdout)
+        guard let answer = readLine(), ["y", "yes"].contains(answer.trimmingCharacters(in: .whitespaces).lowercased()) else {
+            print("Nothing was changed.")
+            return .denied
+        }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = Array(arguments.dropFirst())
+        do {
+            try process.run()
+        } catch {
+            printError("\(executable.path) could not be started: \(error.localizedDescription)")
+            return .toolError
+        }
+        process.waitUntilExit()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            printError("\(arguments[0]) mcp add ended with status \(process.terminationStatus).")
+            return .toolError
+        }
+        print("\(client.title) now starts arch-mcp when it uses Arch's tools.")
+        return .done
+    }
+
+    /// The first executable of that name in PATH's folders.
+    private static func locate(_ name: String) -> URL? {
+        (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").lazy
+            .map { URL(fileURLWithPath: String($0), isDirectory: true).appendingPathComponent(name) }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func links(_ action: AgentLinksAction, folder name: String?) -> AgentExitCode {
+        guard let home = AgentLinkInstaller.userHomeFolder else {
+            printError("The home folder could not be read.")
+            return .internalError
+        }
+        let installer = AgentLinkInstaller(homeFolder: home, searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "")
+        do {
+            switch action {
+            case .install:
+                guard let layout = requireBundle() else { return .notArch }
+                let folder = try installer.installFolder(named: name)
+                let links = AgentLinkInstaller.links(in: folder, for: layout)
+                print("arch-cli and arch-mcp are in \(layout.helpersURL.path).")
+                print("Linking them into \(folder.path):")
+                for link in links { print("  \(link.location.path) -> \(link.destination.path)") }
+                try installer.install(links)
+                if !installer.isOnSearchPath(folder) { print("\(folder.path) is not on your PATH; add it to run arch-cli by name.") }
+            case .remove:
+                let removed = try installer.remove(from: installer.removalFolders(named: name))
+                if removed.isEmpty { print("No links to Arch's tools were found.") }
+                for location in removed { print("Removed \(location.path).") }
+            }
+            return .done
+        } catch let failure as AgentLinkInstaller.Failure {
+            printError(failure.message)
+            return failure.exitCode
+        } catch {
+            printError("\(error)")
+            return .internalError
         }
     }
 

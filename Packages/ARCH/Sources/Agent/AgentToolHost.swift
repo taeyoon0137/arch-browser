@@ -46,7 +46,12 @@ struct AgentHandleTable {
     /// Whether AI may read a page at this address: the site exclusions of `ai.json` (docs/agents.md, Site exclusions).
     let allowsAI: (URL) -> Bool
 
-    /// The served tools that a grant of `level` with `scopes` can ever call, in catalog order, for `tools/list`: Read Only leaves out interactions other than `scroll` and `hover` and sensitive steps, and `search_history` needs its scope. A client without a grant yet sees the Read Only list.
+    /// Every served tool in catalog order, for `tools/list` before a grant, since the grant sheet may allow any of them.
+    static var toolsBeforeGrant: [AgentTool] {
+        AgentToolCatalog.tools.filter { servedTools.contains($0.name) }
+    }
+
+    /// The served tools that a grant of `level` with `scopes` can ever call, in catalog order, for `tools/list`: Read Only leaves out interactions other than `scroll` and `hover` and sensitive steps, and `search_history` needs its scope.
     static func tools(for level: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
         AgentToolCatalog.tools.filter { tool in
             guard servedTools.contains(tool.name) else { return false }

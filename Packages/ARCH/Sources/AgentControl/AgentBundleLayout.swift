@@ -15,7 +15,10 @@ public struct AgentBundleLayout: Equatable, Sendable {
     /// The app's executable, whose code the client expects at the other end of the socket.
     public var archExecutableURL: URL { bundleURL.appendingPathComponent("Contents/MacOS/Arch") }
     /// The bundled `arch-cli`, whose code Arch expects at the other end of the socket.
-    public var cliExecutableURL: URL { bundleURL.appendingPathComponent("Contents/Helpers").appendingPathComponent(Self.cliName) }
+    public var cliExecutableURL: URL { helpersURL.appendingPathComponent(Self.cliName) }
+    /// The bundled `arch-mcp` link, the path an MCP client's configuration names.
+    public var mcpExecutableURL: URL { helpersURL.appendingPathComponent(Self.mcpName) }
+    public var helpersURL: URL { bundleURL.appendingPathComponent("Contents/Helpers") }
 
     /// The bundle around an executable in its `Contents/Helpers` folder, or nil for an executable anywhere else.
     public static func containing(helper executable: URL) -> AgentBundleLayout? {

@@ -21,11 +21,21 @@ public enum AgentCLICommand: Equatable, Sendable {
     case tabs(shared: Bool)
     /// Gives up this client's grant (`grant/release`).
     case release
+    /// The configuration that adds arch-mcp to one client, or to each when nil.
+    case mcpConfig(AgentMCPConfigurationFormat?)
+    case setup(AgentMCPSetupClient)
+    /// PATH links, in the folder `--dir` names or else one PATH chooses.
+    case links(AgentLinksAction, folder: String?)
+}
+
+public enum AgentLinksAction: String, CaseIterable, Sendable {
+    case install
+    case remove
 }
 
 public struct AgentCLIRequest: Equatable, Sendable {
     public var command: AgentCLICommand
-    /// `--json`: print the result's structured value instead of text. `guide` and `--help` print text either way.
+    /// `--json`: print the result's structured value instead of text. `guide`, `--help`, and the setup commands print text either way.
     public var json: Bool
 
     public init(command: AgentCLICommand, json: Bool) {
@@ -60,6 +70,10 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "spaces", arguments: "", summary: "Lists the spaces of this client's Persona. The first command that reaches Arch asks you there to allow this client.", needsArch: true),
         AgentCLICommandSpec(name: "tabs", arguments: "[--shared]", summary: "Lists this client's agent tabs, or with --shared the tabs you shared with it.", needsArch: true),
         AgentCLICommandSpec(name: "release", arguments: "", summary: "Gives up this client's grant, so that its next command asks again.", needsArch: true),
+        AgentCLICommandSpec(name: "mcp", arguments: "[--session]", summary: "Runs as arch-mcp, the MCP server on standard input and output. Arch starts it with --session for its own agent sessions.", needsArch: true),
+        AgentCLICommandSpec(name: "mcp-config", arguments: "[claude|codex|json]", summary: "Prints the configuration that adds arch-mcp, by its absolute path, to Claude Code, Codex, or another MCP client.", needsArch: false),
+        AgentCLICommandSpec(name: "setup", arguments: "claude|codex", summary: "Shows the command that adds arch-mcp to Claude Code or Codex for your user, asks, and runs it.", needsArch: false),
+        AgentCLICommandSpec(name: "links", arguments: "install|remove [--dir folder]", summary: "Links arch-cli and arch-mcp into a writable folder on your PATH inside your home folder, ~/.local/bin first, or removes those links.", needsArch: false),
     ]
 
     /// Tells `arch-mcp` from `arch-cli` by the name the process was started under, which for the link in `Contents/Helpers` or on PATH is `arch-mcp`, and by an `mcp` first argument.
@@ -71,17 +85,22 @@ public enum AgentCommandLine {
         return .cli(rest)
     }
 
-    /// Parses `arch-cli`'s arguments, without the program name. `--json`, `--help`, and `-h` may come anywhere; `help` is `--help`.
+    /// Parses `arch-cli`'s arguments, without the program name. `--json`, `--help`, and `-h` may come anywhere; `help` is `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
         var json = false
         var help = false
         var shared = false
+        var folder: String?
         var words: [String] = []
-        for argument in arguments {
+        var remaining = arguments[...]
+        while let argument = remaining.popFirst() {
             switch argument {
             case "--json": json = true
             case "--help", "-h": help = true
             case "--shared": shared = true
+            case "--dir":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--dir needs a folder.") }
+                folder = value
             case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "Unknown option \(argument).")
             default: words.append(argument)
             }
@@ -119,10 +138,46 @@ public enum AgentCommandLine {
             } else {
                 command = .guide(nil)
             }
+        case "mcp":
+            // `invocation(arguments:)` runs `arch-cli mcp` as arch-mcp; here it followed an option.
+            throw AgentUsageError(message: "mcp must be the first argument, as in arch-cli mcp.")
+        case "mcp-config":
+            guard operands.count <= 1 else { throw AgentUsageError(message: "mcp-config takes at most one of claude, codex, or json.") }
+            if let formatName = operands.first {
+                guard let format = AgentMCPConfigurationFormat(rawValue: formatName) else { throw AgentUsageError(message: "mcp-config takes claude, codex, or json.") }
+                command = .mcpConfig(format)
+            } else {
+                command = .mcpConfig(nil)
+            }
+        case "setup":
+            guard operands.count == 1, let client = AgentMCPSetupClient(rawValue: operands[0]) else { throw AgentUsageError(message: "setup takes claude or codex.") }
+            command = .setup(client)
+        case "links":
+            guard operands.count == 1, let action = AgentLinksAction(rawValue: operands[0]) else { throw AgentUsageError(message: "links takes install or remove.") }
+            command = .links(action, folder: folder)
         default:
             throw AgentUsageError(message: "Unknown command \(name).")
         }
+        switch command {
+        case .links: break
+        default: if folder != nil { throw AgentUsageError(message: "--dir belongs to links.") }
+        }
         return AgentCLIRequest(command: command, json: json)
+    }
+
+    /// arch-mcp's mode from its arguments and `ARCH_AGENT_TICKET`: an outside client without arguments, or an in-app session's server with `--session`, which needs the ticket. An outside client ignores a ticket in its environment.
+    public static func mcpMode(_ arguments: [String], ticket: String?) throws -> AgentMCPServer.Mode {
+        switch arguments {
+        case []:
+            return .outside
+        case ["--session"]:
+            guard let ticket, !ticket.isEmpty else {
+                throw AgentUsageError(message: "arch-mcp --session needs \(AgentMCPServer.ticketVariable), which Arch sets for the agent sessions it starts.")
+            }
+            return .session(ticket: ticket)
+        default:
+            throw AgentUsageError(message: "arch-mcp takes no arguments other than --session.")
+        }
     }
 
     private static func expectNoOperands(_ operands: [String], for name: String) throws {
