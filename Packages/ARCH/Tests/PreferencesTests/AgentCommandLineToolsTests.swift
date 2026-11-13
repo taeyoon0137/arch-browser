@@ -159,6 +159,14 @@ private final class ScratchHome {
         #expect(sentence.contains("\(scratch.bundle.cliExecutableURL.path) links remove removes Arch's links."))
     }
 
+    @Test func aBundleThatMacOSRunsFromATemporaryFolderIsTranslocated() throws {
+        let scratch = try ScratchHome()
+        #expect(!AgentCommandLineTools.isTranslocated(scratch.bundle))
+        #expect(AgentCommandLineTools.isTranslocated(AgentBundleLayout(bundleURL: URL(fileURLWithPath: "/private/var/folders/xy/abc/T/AppTranslocation/6D1E2F30-0000-4000-8000-000000000000/d/Arch.app"))))
+        // Only a folder of that name counts, not a name that contains it.
+        #expect(!AgentCommandLineTools.isTranslocated(AgentBundleLayout(bundleURL: scratch.home.appendingPathComponent("NotAppTranslocation/Arch.app"))))
+    }
+
     @Test func onlyABundleWithItsCLIHasToolsToShow() throws {
         let scratch = try ScratchHome()
         #expect(!AgentCommandLineTools.hasTools(scratch.bundle))

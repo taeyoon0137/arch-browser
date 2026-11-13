@@ -322,21 +322,40 @@ import Testing
     }
 
     @Test func readsOnlyExportedVariablesAndStopsAtTheEndMarker() async throws {
-        // A stand-in login shell whose profile prints text, exports one variable and sets another without exporting it, and leaves a background process holding the output open, then runs the command it was given.
+        // A stand-in login shell whose profile prints text, exports one variable and sets another without exporting it, and starts a background process holding the output open; it runs the command it was given and then waits for that process, so only the end marker ends the read in under eight seconds.
         let shell = try toolScript("""
             echo 'Welcome back'
             export CLAUDE_CONFIG_DIR=/opt/claude-config
             CODEX_HOME=/opt/unexported
             sleep 8 &
-            exec /bin/sh -c "$4"
+            /bin/sh -c "$4"
+            wait
             """)
         let clock = ContinuousClock()
         let started = clock.now
-        let environment = await LoginShell.readEnvironment(shell: shell)
+        let environment = await LoginShell.readEnvironment(shell: shell, environment: LoginShell.readingEnvironment(inherited: [:]))
         #expect(clock.now - started < .seconds(6))
         #expect(environment?["CLAUDE_CONFIG_DIR"] == "/opt/claude-config")
         #expect(environment?["CODEX_HOME"] == nil)
         #expect(environment?["PATH"] != nil)
+    }
+
+    @Test func startsTheShellWithTheFolderVariablesThisAppHasForAProfileToChange() async throws {
+        // As `launchctl setenv` gives them to every app; other variables of the app stay out.
+        let start = LoginShell.readingEnvironment(inherited: ["CLAUDE_CONFIG_DIR": "/opt/app-claude", "CODEX_HOME": "/opt/app-codex", "TOKEN": "secret", "HOME": "/opt/elsewhere"])
+        #expect(start["CLAUDE_CONFIG_DIR"] == "/opt/app-claude")
+        #expect(start["CODEX_HOME"] == "/opt/app-codex")
+        #expect(start["TOKEN"] == nil)
+        #expect(start["HOME"] == NSHomeDirectory())
+        #expect(LoginShell.readingEnvironment(inherited: [:]) == LoginShell.baseEnvironment)
+        // A profile that exports its own value wins; the other comes through from the app.
+        let shell = try toolScript("""
+            export CODEX_HOME=/opt/profile-codex
+            exec /bin/sh -c "$4"
+            """)
+        let environment = await LoginShell.readEnvironment(shell: shell, environment: start)
+        #expect(environment?["CLAUDE_CONFIG_DIR"] == "/opt/app-claude")
+        #expect(environment?["CODEX_HOME"] == "/opt/profile-codex")
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {

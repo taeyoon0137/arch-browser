@@ -1,4 +1,4 @@
-// The user's login shell and the environment it sets up. GUI apps get a short PATH, while command-line tools usually live in folders that a shell profile adds, such as a package manager's, and a profile may also export where Claude Code and Codex keep their settings. The built-in terminal runs the same login shell, so a tool installed there is found here.
+// The user's login shell and the environment it sets up. GUI apps get a short PATH, while command-line tools usually live in folders that a shell profile adds, such as a package manager's, and a profile may also export where Claude Code and Codex keep their settings. The built-in terminal runs the same login shell with this app's environment, so the read starts the shell with the tools' folder variables this app has, and a tool installed there is found here.
 import Darwin
 import Foundation
 
@@ -29,6 +29,8 @@ actor LoginShell {
 
     /// The exported variables read from the login shell: PATH, where tools are found, and the folders under which Claude Code and Codex read their skills.
     static let variableNames = ["PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]
+    /// The variables of `variableNames` that name the tools' folders and that the read takes from this app's environment, as `launchctl setenv` gives them to every app and the built-in terminal passes them on to its shell; a profile can still change or unset them. HOME stays the account's, as in `baseEnvironment`.
+    static let inheritedVariableNames = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"]
     static let marker = "__ARCH_LOGIN_SHELL__"
     static let endMarker = "__ARCH_LOGIN_SHELL_END__"
 
@@ -53,12 +55,19 @@ actor LoginShell {
         return environment
     }
 
-    /// Runs `shell -l -i -c` with a command that prints a marker line, the exported environment with each entry ended by NUL (`env -0`), and an end marker line, since a profile may print text of its own first. `env` reads only exported variables, as the tools see them, and prints them the same way in every shell, a value that holds a line break included. Reading stops as soon as the end marker's line is complete, because a process the profile starts in the background can keep the output open; the shell and that process then end. Gives up after 10 seconds.
-    static func readEnvironment(shell: URL) async -> [String: String]? {
+    /// The environment the read starts the shell with: `baseEnvironment`, and those of `inheritedVariableNames` that `inherited`, this app's environment, holds. Command-line tools still run in `baseEnvironment` with the login shell's PATH.
+    static func readingEnvironment(inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        inheritedVariableNames.reduce(into: baseEnvironment) { environment, name in
+            if let value = inherited[name] { environment[name] = value }
+        }
+    }
+
+    /// Runs `shell -l -i -c` in `start`, `readingEnvironment()` unless a test names another, with a command that prints a marker line, the exported environment with each entry ended by NUL (`env -0`), and an end marker line, since a profile may print text of its own first. `env` reads only exported variables, as the tools see them, and prints them the same way in every shell, a value that holds a line break included. Reading stops as soon as the end marker's line is complete, because a process the profile starts in the background, or a shell that lingers, can keep the output open; the shell and that process then end. Gives up after 10 seconds.
+    static func readEnvironment(shell: URL, environment start: [String: String] = LoginShell.readingEnvironment()) async -> [String: String]? {
         let process: CommandLineProcess
         do {
             process = try CommandLineProcess(executable: shell, arguments: ["-l", "-i", "-c", "echo \(marker); /usr/bin/env -0; echo \(endMarker)"],
-                                             environment: baseEnvironment, directory: URL(fileURLWithPath: NSHomeDirectory()), input: Data())
+                                             environment: start, directory: URL(fileURLWithPath: NSHomeDirectory()), input: Data())
         } catch {
             return nil
         }

@@ -229,6 +229,13 @@ struct AgentCommandLineTools {
         FileManager.default.isExecutableFile(atPath: bundle.cliExecutableURL.path)
     }
 
+    /// Whether macOS runs the bundle from a temporary folder (App Translocation), as it does for a downloaded app opened before it was moved. The folder changes at each launch, so a link, configuration, or skill that names it stops working; Settings then offers neither Install nor Update, nor the configurations.
+    static func isTranslocated(_ bundle: AgentBundleLayout) -> Bool {
+        bundle.bundleURL.pathComponents.contains("AppTranslocation")
+    }
+
+    static let translocatedSentence = "macOS runs this copy of Arch from a temporary folder that changes at each launch, so Arch gives its path to no other tool. Move Arch to the Applications folder in Finder, then open it again."
+
     /// Both links in the folder that `AgentLinkInstaller` picks from PATH, `~/.local/bin` first.
     func plannedLinks() throws -> [AgentLinkInstaller.Link] {
         AgentLinkInstaller.links(in: try installer.installFolder(named: nil), for: bundle)
@@ -321,8 +328,12 @@ struct AgentCommandLineToolsSection: View {
                     Text(AgentCommandLineTools.confirmation(for: pendingLinks, bundle: bundle))
                 }
                 linksRow
-                ForEach(Self.configurations, id: \.self) { format in
-                    configurationRow(format)
+                if AgentCommandLineTools.isTranslocated(bundle) {
+                    Text(AgentCommandLineTools.translocatedSentence).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Self.configurations, id: \.self) { format in
+                        configurationRow(format)
+                    }
                 }
             } else {
                 Text("This copy of Arch does not run from an app bundle, so it has no arch-cli or arch-mcp to link or configure.").foregroundStyle(.secondary)
@@ -356,8 +367,10 @@ struct AgentCommandLineToolsSection: View {
             Spacer()
             Button("Remove") { remove() }
                 .disabled(isReadingPath || installed.isEmpty)
-            Button("Install Command-Line Tools\u{2026}") { Task { await prepareInstall() } }
-                .disabled(isReadingPath)
+            if !AgentCommandLineTools.isTranslocated(bundle) {
+                Button("Install Command-Line Tools\u{2026}") { Task { await prepareInstall() } }
+                    .disabled(isReadingPath)
+            }
         }
     }
 
@@ -445,19 +458,64 @@ struct AgentCommandLineToolsSection: View {
 
 /// The skills part of Settings ▸ AI ▸ Agents apart from its view, for one bundle and the login shell's environment: where the entry skill goes for Claude Code and Codex, its state there, what each row offers, and the sentences the section shows. `AgentSkillInstaller` makes every decision about folders and files.
 struct AgentSkillPlaces {
-    /// Claude Code's skill folder, and Codex's in `$HOME/.agents/skills` only, since Codex lists the skill twice when the folder under `CODEX_HOME` holds a copy too.
+    /// The rows that offer Install: Claude Code's skill folder, and Codex's in `$HOME/.agents/skills` only, since Codex lists the skill twice when the folder under `CODEX_HOME` holds a copy too.
     static let targets: [AgentSkillInstaller.Target] = [.claude, .codex]
 
     /// The bundle's `arch-cli`, which the skill names.
     let cliPath: String
     let skill: AgentSkill
     let installer: AgentSkillInstaller
+    /// Whether macOS runs the bundle from a temporary folder, whose `arch-cli` path a skill must not name.
+    let isTranslocated: Bool
 
     /// `environment` is the login shell's, since the app's own lacks the `CLAUDE_CONFIG_DIR` and `CODEX_HOME` that a profile exports; `accountHomeFolder` stands in for an unset `HOME`.
     init(bundle: AgentBundleLayout, accountHomeFolder: URL, environment: [String: String]) {
         cliPath = bundle.cliExecutableURL.path
         skill = AgentHarness.entrySkill(cliPath: cliPath)
         installer = AgentSkillInstaller(accountHomeFolder: accountHomeFolder, environment: environment)
+        isTranslocated = AgentCommandLineTools.isTranslocated(bundle)
+    }
+
+    /// A row of the section: a tool's folder and the state there, or why the folder cannot be named, with the buttons the row offers and its sentence.
+    struct Row: Equatable {
+        var target: AgentSkillInstaller.Target
+        var place: Place
+        var actions: [Action]
+        var sentence: String
+
+        var destination: AgentSkillInstaller.Destination? {
+            guard case .found(let destination, _) = place else { return nil }
+            return destination
+        }
+    }
+
+    /// Claude Code's and Codex's rows, and the folder under `CODEX_HOME` while it holds a skill of that name, as `arch-cli skills install --target codex-home` writes it, since Codex reads that one too, unless it is Codex's row's folder itself. That row offers only Remove, and Codex's row offers no Install meanwhile, which would add a copy that Codex lists twice. A translocated bundle offers neither Install nor Update.
+    func rows() -> [Row] {
+        var rows = Self.targets.map(row(for:))
+        let codexHome = row(for: .codexHome)
+        guard case .found(let destination, let state) = codexHome.place, state != .absent,
+              !rows.contains(where: { $0.destination?.folder.path == destination.folder.path }) else { return rows }
+        if let index = rows.firstIndex(where: { $0.target == .codex }), case .found(_, .absent) = rows[index].place {
+            rows[index].actions = []
+            rows[index].sentence = Self.codexHomeCopySentence
+        }
+        rows.append(codexHome)
+        return rows
+    }
+
+    static let codexHomeCopySentence = "Not installed here. Codex reads the skill under CODEX_HOME, and would list a second copy here twice."
+
+    /// A tool's row with the buttons its state offers; Settings writes nothing under `CODEX_HOME`, and nothing that names a translocated bundle.
+    private func row(for target: AgentSkillInstaller.Target) -> Row {
+        let place = place(for: target)
+        switch place {
+        case .found(_, let state):
+            var actions = Self.actions(for: state)
+            if target == .codexHome || isTranslocated { actions.removeAll { $0 != .remove } }
+            return Row(target: target, place: place, actions: actions, sentence: Self.sentence(for: state))
+        case .unresolved(let problem):
+            return Row(target: target, place: place, actions: [], sentence: problem)
+        }
     }
 
     /// A tool's row: the skill's folder and the state there, or why the folder cannot be named, as when a variable is not an absolute path.
@@ -551,13 +609,13 @@ struct AgentSkillPlaces {
     }
 }
 
-/// Settings ▸ AI ▸ Agents ▸ Skills: for Claude Code and Codex, the entry skill's folder from the login shell's environment and the state there, with Install, which shows the file before writing it, Update for an outdated copy, and Remove. A folder Arch did not write, and Arch's copy changed since Arch wrote it, show that Arch leaves them alone, with no buttons.
+/// Settings ▸ AI ▸ Agents ▸ Skills: for Claude Code and Codex, the entry skill's folder from the login shell's environment and the state there, with Install, which shows the file before writing it, Update for an outdated copy, and Remove, and the folder under `CODEX_HOME` with Remove while it holds a skill of that name. A folder Arch did not write, and Arch's copy changed since Arch wrote it, show that Arch leaves them alone, with no buttons; a translocated bundle offers only Remove.
 struct AgentSkillsSection: View {
     var bundle = AgentBundleLayout(bundleURL: Bundle.main.bundleURL)
     /// nil until the login shell's environment is read, and while it cannot be.
     @State private var places: AgentSkillPlaces?
     @State private var isReading = true
-    @State private var rows: [AgentSkillInstaller.Target: AgentSkillPlaces.Place] = [:]
+    @State private var rows: [AgentSkillPlaces.Row] = []
     @State private var pendingWrite: PendingWrite?
     @State private var isConfirmingWrite = false
     @State private var outcome: String?
@@ -587,10 +645,11 @@ struct AgentSkillsSection: View {
                 if isReading {
                     Text("Reading your login shell's environment\u{2026}").foregroundStyle(.secondary)
                 }
-                ForEach(AgentSkillPlaces.targets, id: \.self) { target in
-                    if let place = rows[target] {
-                        AgentSkillRow(title: target.title, place: place) { action, destination in perform(action, for: target, at: destination) }
-                    }
+                ForEach(rows, id: \.target) { row in
+                    AgentSkillRow(row: row) { action, destination in perform(action, for: row.target, at: destination) }
+                }
+                if AgentCommandLineTools.isTranslocated(bundle) {
+                    Text(AgentCommandLineTools.translocatedSentence).foregroundStyle(.secondary)
                 }
                 if let problem {
                     Text(problem).font(.callout).foregroundStyle(.red)
@@ -603,7 +662,7 @@ struct AgentSkillsSection: View {
         } header: {
             Text("Skills")
         } footer: {
-            aiFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills.")
+            aiFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME.")
         }
     }
 
@@ -626,7 +685,7 @@ struct AgentSkillsSection: View {
 
     private func refresh() {
         guard let places else { return }
-        rows = Dictionary(uniqueKeysWithValues: AgentSkillPlaces.targets.map { ($0, places.place(for: $0)) })
+        rows = places.rows()
     }
 
     /// Install and Update show the file first; Remove removes Arch's unchanged copy at the path the row shows.
@@ -660,30 +719,26 @@ struct AgentSkillsSection: View {
     }
 }
 
-/// One tool's row in the Skills section: the skill's folder, the state there, and the buttons that state offers.
+/// One tool's row in the Skills section: the skill's folder, the row's sentence, and the buttons it offers.
 struct AgentSkillRow: View {
-    let title: String
-    let place: AgentSkillPlaces.Place
+    let row: AgentSkillPlaces.Row
     let perform: (AgentSkillPlaces.Action, AgentSkillInstaller.Destination) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title)
+                Text(row.target.title)
                 Spacer()
-                if case .found(let destination, let state) = place {
-                    ForEach(AgentSkillPlaces.actions(for: state), id: \.self) { action in
+                if let destination = row.destination {
+                    ForEach(row.actions, id: \.self) { action in
                         Button(action.buttonTitle) { perform(action, destination) }
                     }
                 }
             }
-            switch place {
-            case .found(let destination, let state):
+            if let destination = row.destination {
                 AgentPathText(destination.folder.path)
-                Text(AgentSkillPlaces.sentence(for: state)).font(.caption).foregroundStyle(.secondary)
-            case .unresolved(let problem):
-                Text(problem).font(.caption).foregroundStyle(.secondary)
             }
+            Text(row.sentence).font(.caption).foregroundStyle(.secondary)
         }
     }
 }
