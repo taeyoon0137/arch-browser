@@ -32,7 +32,7 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
-    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission sheet and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
+    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission card and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
@@ -822,8 +822,8 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
-                self.enqueueSheet(alert, for: tab, completion: response)
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), ask: { content, response in
+                self.enqueuePrompt(content, for: tab, completion: response)
             }, completion: completion)
         }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
@@ -1174,7 +1174,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site permissions
 
-    /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
+    /// Answers the tabs' permission requests from `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
     let permissionAnswers: SitePermissionAnswers
 
     // MARK: Sheets and prompts
