@@ -1,4 +1,4 @@
-// The stand-in for the page of a tab restored from `session.json` until a window first shows the tab. It keeps the address, title, engine, and page state of the tab's record, so saving writes the record back unchanged, and it loads nothing, so no engine starts a page, or a renderer, for a tab that no window shows. The session puts the engine's web contents in its place as a window first shows the tab (`BrowserSession.loadPage(of:)`).
+// The stand-in for the page of a tab without one: a tab restored from `session.json` until a window first shows it, and a tab whose page unloaded (`docs/bookmarks.md`, Unloading). It keeps the address, title, engine, and page state of the tab's record or of the page that unloaded, so saving writes the record back unchanged, and it loads nothing, so no engine starts a page, or a renderer, for a tab that no window shows. The session puts the engine's web contents in its place as a window next shows the tab (`BrowserSession.loadPage(of:)`).
 import AppKit
 import ARCHEngine
 import Foundation
@@ -9,7 +9,7 @@ final class UnloadedWebContents: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
     private(set) var title: String
-    /// The site's usual icon once `loadSiteIcon()` finds one.
+    /// The icon of the page that unloaded, or the site's usual icon once `loadSiteIcon()` finds one.
     private(set) var favicon: NSImage?
     /// The engine's saved state, which the page restores when it loads, or nil after a load replaced the saved page.
     private(set) var restorableState: Data?
@@ -27,14 +27,17 @@ final class UnloadedWebContents: EngineWebContents {
     var canGoBack: Bool { false }
     var canGoForward: Bool { false }
     var isAudible: Bool { false }
+    var isCapturingMedia: Bool { false }
     var closingStopsDownloads: Bool { false }
     var devTools: (any EngineDevTools)? { nil }
 
-    init(url: URL?, title: String, engine: EngineKind, state: Data?) {
+    /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing.
+    init(url: URL?, title: String, engine: EngineKind, state: Data?, icon: NSImage? = nil) {
         self.url = url
         self.title = title
         engineKind = engine
         restorableState = state
+        favicon = icon
     }
 
     /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state.

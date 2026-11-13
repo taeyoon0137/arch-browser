@@ -1,4 +1,4 @@
-// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
+// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
 import AppKit
 import SwiftUI
 
@@ -31,21 +31,27 @@ struct TabRowView: View {
                 SidebarNameField(placeholder: "Tab Name", name: tab.displayTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
             } else {
+                // A tab without its page, as a restored or unloaded one, shows its title in secondary text, so the sidebar shows which tabs have pages.
                 Text(tab.displayTitle)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .foregroundStyle(tab.isLoaded ? HierarchicalShapeStyle.primary : .secondary)
             }
             if tab.isAudible {
                 TabAudioBadge()
             }
             Spacer(minLength: 0)
-            // Show the close button under the pointer, after a back button while a pinned tab is off its saved site (bookmark rule 3); otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
+            // Show the close button under the pointer, after a back button while a pinned tab is off its saved site (bookmark rule 3); a pinned tab's close button unloads it and shows only while it has its page (bookmark rule 4). Otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
             if showsHover {
                 HStack(spacing: 2) {
                     if tab.isOffSavedSite, let saved = tab.savedPage {
                         TabRowButton(symbol: "arrow.uturn.backward", label: "Go Back to Saved Page", help: "Go Back to \(saved.url.absoluteString)") { session.goBackToSavedPage(tab) }
                     }
-                    TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
+                    if !tab.isPinned {
+                        TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
+                    } else if tab.isLoaded {
+                        TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload") { session.requestCloseTab(tab) }
+                    }
                 }
             } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
                 TabShortcutBadge(number: number)
@@ -100,7 +106,11 @@ struct TabRowView: View {
                 Button("Remove from Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.removeFromFolder(tab) } }
             }
             Divider()
+            // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
             Button("Close Tab") { session.requestCloseTab(tab) }
+            if tab.isPinned {
+                Button("Delete Tab") { session.requestDeleteTab(tab) }
+            }
             PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
         }
         .accessibilityElement(children: .combine)

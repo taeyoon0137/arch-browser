@@ -17,6 +17,8 @@ public enum TabCloseReason: String {
     case download
     /// A web extension closed it with `tabs.remove`.
     case webExtension
+    /// Delete Persona closed it with the rest of its Persona.
+    case persona
 
     var title: String {
         switch self {
@@ -26,6 +28,7 @@ public enum TabCloseReason: String {
         case .archive: return "Archive"
         case .download: return "Download"
         case .webExtension: return "Extension"
+        case .persona: return "Persona"
         }
     }
 
@@ -37,6 +40,7 @@ public enum TabCloseReason: String {
         case .archive: return "Archived after the archive delay"
         case .download: return "Closed because it only pointed at a file"
         case .webExtension: return "Closed by a web extension"
+        case .persona: return "Closed because its Persona was deleted"
         }
     }
 }

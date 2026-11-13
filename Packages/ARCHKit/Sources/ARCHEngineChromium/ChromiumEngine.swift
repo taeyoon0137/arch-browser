@@ -336,6 +336,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
     public var restorableState: Data? { nil }
     public private(set) var isAudible = false
+    /// Follows CEF's reports of the page's video and audio sources, which cover the camera and the microphone.
+    public private(set) var isCapturingMedia = false
     /// Whether the page is in the fullscreen that it entered through the Fullscreen API.
     private var isFullscreen = false
     public var mediaSession: any EngineMediaSession { chromiumMediaSession }
@@ -691,6 +693,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserDidChangeMedia(_ media: [String: Any]?, frame: String) {
         chromiumMediaSession.update(document: frame, report: media)
     }
+    public func cefBrowserDidChangeMediaAccess(video: Bool, audio: Bool) {
+        setCapturingMedia(video || audio)
+    }
+    private func setCapturingMedia(_ isCapturing: Bool) {
+        guard isCapturingMedia != isCapturing else { return }
+        isCapturingMedia = isCapturing
+        uiDelegate?.webContentsDidChangeMediaCapture(self)
+    }
 
     /// The video plays in the system's window from a layer below the page. The window's return button asks the UI delegate to show the page.
     public func cefBrowserDidStartPictureInPicture(naturalSize: NSSize, sourceRect: NSRect) {
@@ -738,8 +748,9 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
     public func cefBrowserRenderProcessDidTerminate() {
-        // The page's frames never report their media again.
+        // The page's frames never report their media again, and its capture streams ended with its process.
         chromiumMediaSession.removeAllDocuments()
+        setCapturingMedia(false)
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)
         uiDelegate?.webContentsProcessDidTerminate(self)

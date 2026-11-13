@@ -346,6 +346,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         return webView.interactionState as? Data
     }
     public var isAudible: Bool { !audibleDocuments.isEmpty }
+    /// WebKit reports the camera and the microphone as active or muted while the page holds them; it has no public state for screen sharing.
+    public var isCapturingMedia: Bool { webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none }
     public var zoomFactor: Double {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }

@@ -664,6 +664,10 @@ public:
         [owner_ handleFullscreen:fullscreen];
     }
 
+    void OnMediaAccessChange(CefRefPtr<CefBrowser> browser, bool has_video_access, bool has_audio_access) override {
+        [owner_.delegate cefBrowserDidChangeMediaAccessWithVideo:has_video_access audio:has_audio_access];
+    }
+
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
         if (message->GetName() == kAudibleReport && frame) {

@@ -1,4 +1,4 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, and site search. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, and site search. Archives inactive tabs on a timer, which also unloads inactive pinned tabs and favorites' tabs, as memory pressure unloads every tab that no window shows. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
@@ -68,7 +68,10 @@ public final class BrowserSession: ObservableObject {
     public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
+    /// Archives inactive tabs and unloads inactive bookmarks every 30 minutes.
     private var archiveTimer: Timer?
+    /// Unloads tabs that no window shows when macOS reports memory pressure (bookmark rule 5).
+    private var memoryPressure: MemoryPressureMonitor?
 
     /// The results page of the search engine chosen in Settings.
     public static var searchURL: URL { SearchEngine.current.resultsURL }
@@ -138,7 +141,11 @@ public final class BrowserSession: ObservableObject {
         restoreFavoriteTabs(snapshot)
         observeChanges()
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
-        archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
+        archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.archiveInactiveTabs()
+            self?.unloadInactiveTabs(pressure: nil)
+        }
+        memoryPressure = MemoryPressureMonitor { [weak self] in self?.unloadInactiveTabs(pressure: $0) }
         nowPlaying = NowPlaying(session: self)
         // The session is created on the main thread, where the AI interface and the plugins run.
         MainActor.assumeIsolated {
@@ -614,7 +621,7 @@ public final class BrowserSession: ObservableObject {
             if window.preview?.personaID == id { window.closePreview() }
             if window.kind == .main, window.personaID == id { window.switchToSpace(destination.id) }
         }
-        for tab in allTabs where tab.personaID == id { closeTab(tab) }
+        for tab in allTabs where tab.personaID == id { closeTab(tab, reason: .persona) }
         undoableCloseCount = 0
         // Its unfinished downloads stop, and the pages kept for them close. Finished rows stay in the library.
         downloads.filter { $0.personaID == id && !$0.isFinished }.forEach { $0.item.cancel() }
@@ -716,7 +723,8 @@ public final class BrowserSession: ObservableObject {
     private func endFavoriteTab(_ favorite: Favorite, then didEnd: @escaping () -> Void) {
         savedFavoriteTabs[favorite.id] = nil
         guard let tab = favoriteTabs[favorite.id] else { return didEnd() }
-        closeWhenPageAgrees(tab) { [weak self] in
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            self?.closeTab(tab)
             self?.forgetUndoableCloses()
             didEnd()
         }
@@ -735,9 +743,9 @@ public final class BrowserSession: ObservableObject {
         return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
 
-    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the page scripts of the Persona's enabled plugins, which Chromium receives only with the browser it creates.
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        let pageScripts = MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts }
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts })
         return runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state, pageScripts: pageScripts))
     }
 
@@ -816,14 +824,14 @@ public final class BrowserSession: ObservableObject {
             self.scheduleSave()
             self.applyZoom(to: tab)
         }
-        // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
+        // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop. A pinned tab unloads to its saved page and keeps its place.
         tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
             guard let self, let tab else { return }
             if downloads {
                 self.downloadOnlyTabIDs.insert(tab.id)
             } else {
                 DispatchQueue.main.async { [weak self, weak tab] in
-                    if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
+                    if let self, let tab { self.closeTab(tab, reason: .download) }
                 }
             }
         }
@@ -899,31 +907,52 @@ public final class BrowserSession: ObservableObject {
         scheduleSave()
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
+    /// Closes a tab the user asked to close once its page agrees, as ⌘W, the row's button, Close Tab, Close Other Tabs, and a small window's close do: a page with a `beforeunload` handler can ask to stay. What closing does follows the tab's kind (`TabCloseAction`): a pinned tab unloads, a favorite's tab ends and opens again from its favorite, and any other tab joins the closed list, which ⌘Z reopens.
     public func requestCloseTab(_ tab: Tab) {
-        let isUndoable = tab.spaceID != nil
-        closeWhenPageAgrees(tab) { [weak self] in
-            // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
-            if isUndoable { self?.undoableCloseCount += 1 } else { self?.forgetUndoableCloses() }
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            guard let self else { return }
+            let action = TabCloseAction.of(tab, reason: .user)
+            self.perform(action, on: tab, reason: .user)
+            // ⌘Z reopens only a tab that joined the closed list, so after an unload or a favorite's end it reopens none of the tabs closed before either, rather than an older tab in its place.
+            if action == .close(remember: true) { self.undoableCloseCount += 1 } else { self.forgetUndoableCloses() }
         }
     }
 
-    /// Closes a tab once its page agrees to close, then runs `didClose`.
-    private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
-        // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
-        guard !tab.webContents.closingStopsDownloads else {
-            closeTab(tab)
-            return didClose()
-        }
-        tab.webContents.tryToClose { [weak self, weak tab] closing in
-            guard closing, let self, let tab else { return }
-            self.closeTab(tab)
-            didClose()
+    /// Delete Tab: takes a pinned tab out of its list into the closed list once its page agrees, where closing it only unloads it (bookmark rule 4). ⌘Z reopens it pinned in its folder with its saved page. A favorite's tab has no row to delete.
+    public func requestDeleteTab(_ tab: Tab) {
+        guard tab.spaceID != nil else { return }
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            guard let self else { return }
+            self.perform(.close(remember: true), on: tab, reason: .user)
+            self.undoableCloseCount += 1
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
-    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
+    /// Runs `leave` with the tab once its page agrees to leave, which a page with a `beforeunload` handler can refuse. The user's request replaces an automatic unload's that waits for the page, so the page's question shows.
+    private func whenPageAgreesToLeave(_ tab: Tab, then leave: @escaping (Tab) -> Void) {
+        tab.answersBeforeUnloadWithStay = false
+        // Asking means closing the browser, which would stop its downloads, so such a tab leaves at once; its kept page answers the handlers with Leave when it moves to a blank page.
+        guard !tab.webContents.closingStopsDownloads else { return leave(tab) }
+        tab.webContents.tryToClose { [weak tab] agrees in
+            guard agrees, let tab else { return }
+            leave(tab)
+        }
+    }
+
+    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`: a pinned tab unloads, a favorite's tab ends, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a tab that only pointed at a file, Delete Persona, and archiving. `reason` goes to the tab close log when the tab leaves its list.
+    public func closeTab(_ tab: Tab, reason: TabCloseReason = .user) {
+        perform(TabCloseAction.of(tab, reason: reason), on: tab, reason: reason)
+    }
+
+    private func perform(_ action: TabCloseAction, on tab: Tab, reason: TabCloseReason) {
+        switch action {
+        case .unload: unloadToSavedPage(tab, reason: reason)
+        case .end, .close: removeTab(tab, closedRecord: action.closedRecord(of: tab), reason: reason)
+        }
+    }
+
+    /// Takes a tab out of its space's list or its favorite: it leaves the tab close log's `reason` and each window's switcher order, a window that shows its page in fullscreen leaves it, its sheets get their safe answers, its page closes (`retire`), `closedRecord` joins the closed list, and each window that selected it selects another tab (`moveSelections(awayFrom:reason:)`).
+    private func removeTab(_ tab: Tab, closedRecord: SessionSnapshot.TabRecord?, reason: TabCloseReason) {
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return }
@@ -935,11 +964,24 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
-        if remember, let spaceID = tab.spaceID {
-            addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind,
-                                                      personaID: tab.personaID, savedPage: tab.savedPage))
-        }
-        // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
+        if let closedRecord { addToClosedList(closedRecord) }
+        moveSelections(awayFrom: tab, reason: reason)
+    }
+
+    /// Closing a pinned tab (bookmark rule 4): its page closes as a closed tab's does, but the tab keeps its place, folder, and ID with a stand-in at its saved page, without page state, that shows the site's icon. A window that shows its page in fullscreen leaves it, its sheets get their safe answers, and it leaves its split view; each window that selected it selects another tab before the stand-in takes its place, so that no window loads the page again. Nothing joins the closed list or the tab close log.
+    private func unloadToSavedPage(_ tab: Tab, reason: TabCloseReason) {
+        guard tabs.contains(where: { $0 === tab }) else { return }
+        windows.forEach { $0.setPageFullscreen(false, of: tab) }
+        sheets.cancel(for: tab)
+        downloadOnlyTabIDs.remove(tab.id)
+        moveSelections(awayFrom: tab, reason: reason)
+        retire(tab.unloadToSavedPage(), of: tab.personaID)
+        (tab.webContents as? UnloadedWebContents)?.loadSiteIcon()
+        loadPageIfShown(tab)
+    }
+
+    /// Each main window that selected a tab that closes or unloads selects another that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first.
+    private func moveSelections(awayFrom tab: Tab, reason: TabCloseReason) {
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         for window in windows where window.selectedTabID == tab.id {
@@ -947,10 +989,15 @@ public final class BrowserSession: ObservableObject {
                 window.close()
                 continue
             }
-            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
+            let siblings = tabs.filter { $0 !== tab && $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
-            window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
+            window.selectTab(candidates.first { $0 !== tab && !window.isShownInAnotherWindow($0) }?.id)
         }
+    }
+
+    /// Gives an unloaded tab its page again at once when a window shows it after all, as one that a window selected while its page was asked to leave, or while a sheet that a selection ended ran the run loop.
+    private func loadPageIfShown(_ tab: Tab) {
+        if window(showing: tab) != nil { loadPage(of: tab) }
     }
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
@@ -988,9 +1035,7 @@ public final class BrowserSession: ObservableObject {
         }
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
-        tab.customTitle = record.customTitle
-        tab.savedPage = record.savedPage
-        tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
+        tab.reopen(record, folderID: existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned))
     }
 
     /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate.
@@ -1545,6 +1590,56 @@ public final class BrowserSession: ObservableObject {
     }
 }
 
+// MARK: Unloading
+
+extension BrowserSession {
+    /// Unloads the loaded tabs that no window shows and that `TabUnloading.tabsToUnload` picks (bookmark rule 5): for the archive timer without `pressure`, after the hours that Settings ▸ Sidebar saves under `TabUnloading.unloadAfterHoursKey`, or at the memory pressure source's level.
+    func unloadInactiveTabs(pressure: UnloadPressure?) {
+        let candidates = allTabs.compactMap(unloadCandidate)
+        for id in TabUnloading.tabsToUnload(candidates, now: Date(), after: TabUnloading.unloadAfterHours, pressure: pressure) {
+            if let tab = allTabs.first(where: { $0.id == id }) { unloadAutomatically(tab) }
+        }
+    }
+
+    /// The tab as automatic unloading weighs it, with what keeps it loaded, or nil for a tab without its page, one that a window shows, and one whose page has not answered an earlier unload yet.
+    private func unloadCandidate(_ tab: Tab) -> UnloadCandidate? {
+        guard tab.isLoaded, window(showing: tab) == nil, !tab.answersBeforeUnloadWithStay else { return nil }
+        let page = tab.webContents
+        var exclusions: Set<UnloadExclusion> = []
+        if tab.isAudible || page.mediaSession.playbackState == .playing { exclusions.insert(.media) }
+        if tab.isCapturingMedia { exclusions.insert(.capture) }
+        if tab.hasTypedInput { exclusions.insert(.typedInput) }
+        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
+            exclusions.insert(.notifications)
+        }
+        if sheets.hasSheets(for: tab.id) { exclusions.insert(.sheet) }
+        if page.closingStopsDownloads || downloadOnlyTabIDs.contains(tab.id) { exclusions.insert(.downloads) }
+        if tab.isInSmallWindow { exclusions.insert(.smallWindow) }
+        if page.devTools?.isOpen == true { exclusions.insert(.developerTools) }
+        let kind: UnloadCandidate.Kind = tab.spaceID == nil ? .favorite : tab.isPinned ? .pinned : .open
+        return UnloadCandidate(id: tab.id, kind: kind, lastActivatedAt: tab.lastActivatedAt, exclusions: exclusions)
+    }
+
+    /// Asks the tab's page to leave as closing does, but answers a Chromium page's leave-page question with Stay without a sheet, and unloads the tab in place once the page agrees; a page that stays keeps its tab loaded until the next try. WebKit agrees at once, so there its typed text exclusion keeps a draft. A close the user asks for meanwhile takes over the question (`whenPageAgreesToLeave`), and the page's answer then reaches only that close.
+    private func unloadAutomatically(_ tab: Tab) {
+        let page = tab.webContents
+        tab.answersBeforeUnloadWithStay = true
+        page.tryToClose { [weak self, weak tab] agrees in
+            guard let self, let tab, tab.webContents === page, tab.answersBeforeUnloadWithStay else { return }
+            tab.answersBeforeUnloadWithStay = false
+            if agrees { self.unloadKeepingPage(tab) }
+        }
+    }
+
+    /// An automatic unload: the tab keeps its place, folder, split view, and ID, and a favorite's tab its favorite, with a stand-in that keeps its address, title, icon, and its engine's page state (`Tab.unloadKeepingPage()`), while its page closes. Nothing joins the closed list or the tab close log, and its row keeps its icon, so it requests none. A window loads each pane again as it shows the split view.
+    private func unloadKeepingPage(_ tab: Tab) {
+        guard allTabs.contains(where: { $0 === tab }) else { return }
+        sheets.cancel(for: tab)
+        retire(tab.unloadKeepingPage(), of: tab.personaID)
+        loadPageIfShown(tab)
+    }
+}
+
 public enum CommandPaletteMode {
     case editCurrent
     case newTab
@@ -1654,7 +1749,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         downloadOnlyTabIDs.remove(tab.id)
         // The engine is still choosing the file's destination, so the tab closes once that callback returns.
         DispatchQueue.main.async { [weak self, weak tab] in
-            if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
+            if let self, let tab { self.closeTab(tab, reason: .download) }
         }
     }
 

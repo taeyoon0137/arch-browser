@@ -20,6 +20,11 @@ final class TabSheetQueue {
     /// Ends a sheet without answering it, so that it can show again.
     private static let deferredResponse = NSApplication.ModalResponse(rawValue: -1_100)
 
+    /// Whether a sheet of the tab waits or shows, which keeps the tab loaded (bookmark rule 5).
+    func hasSheets(for tabID: UUID) -> Bool {
+        pending[tabID]?.isEmpty == false || windows().contains { $0.visibleSheet?.tabID == tabID }
+    }
+
     func enqueue(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         pending[tab.id, default: []].append(TabSheet(tabID: tab.id, alert: alert, isPageDialog: isPageDialog, completion: completion))
         showNext()

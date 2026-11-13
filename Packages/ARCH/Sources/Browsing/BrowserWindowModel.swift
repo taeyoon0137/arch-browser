@@ -1180,12 +1180,15 @@ public final class BrowserWindowModel: ObservableObject {
         session.windows.contains { $0 !== self && $0.shows(tab) }
     }
 
-    /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows. A restored tab that has no page yet gets it before the window shows it (`BrowserSession.loadPage(of:)`).
+    /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows. A tab without its page gets it before the window shows it (`BrowserSession.loadPage(of:)`). A tab that leaves the window was in view until now, as archiving and automatic unloading count it.
     func updateShownTabs() {
         let shown = Self.panesToShow(paneTabs, selectedTabID: selectedTabID, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
         shown.forEach(session.loadPage(of:))
         let ids = shown.map(\.id)
-        if ids != shownTabIDs { shownTabIDs = ids }
+        guard ids != shownTabIDs else { return }
+        let now = Date()
+        for tab in session.allTabs where shownTabIDs.contains(tab.id) && !ids.contains(tab.id) { tab.lastActivatedAt = now }
+        shownTabIDs = ids
     }
 
     /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.

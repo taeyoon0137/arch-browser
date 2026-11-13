@@ -141,7 +141,7 @@ import Testing
     }
 }
 
-/// An engine's page as far as the tab tests need one: its engine, address, and title, a load in progress, and the loads asked of it. `report(url:title:)` tells the tab what the page shows, as an engine does.
+/// An engine's page as far as the tab tests need one: its engine, address, title, icon, page state, and capture, a load in progress, and the loads asked of it. `report(url:title:)` tells the tab what the page shows, as an engine does.
 final class PageStub: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
@@ -162,11 +162,13 @@ final class PageStub: EngineWebContents {
     /// The addresses loaded through the navigation controller, in order.
     var loadedURLs: [URL?] { navigation.loadedURLs }
 
-    let favicon: NSImage? = nil
+    /// The page's icon, page state, and capture, which a test sets as an engine's page would have them.
+    var favicon: NSImage?
+    var restorableState: Data?
+    var isCapturingMedia = false
     let isLoading = true
     let canGoBack = false
     let canGoForward = false
-    let restorableState: Data? = nil
     let isAudible = false
     var zoomFactor = 1.0
     lazy var view = NSView()
