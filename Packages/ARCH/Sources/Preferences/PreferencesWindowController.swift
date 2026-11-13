@@ -62,7 +62,7 @@ public final class PreferencesWindowController: NSWindowController {
         sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
         sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
         if let session {
-            sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection(store: session.sitePermissions, notifications: session.notificationAuthorization)))
+            sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection(store: session.sitePermissions)))
             // AI writes plugins only from Settings ▸ Plugins, so its feature joins Settings ▸ AI with the section.
             AIService.shared.register(.pluginComposer)
             let plugins = Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session))

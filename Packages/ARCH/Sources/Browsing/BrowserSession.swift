@@ -32,7 +32,7 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
-    /// Whether macOS lets Arch show notifications, which the download notifier, the permission sheet, and Settings ▸ Websites share.
+    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission sheet and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
@@ -107,7 +107,7 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
