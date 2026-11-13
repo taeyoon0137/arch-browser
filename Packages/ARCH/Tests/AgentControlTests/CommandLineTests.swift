@@ -1,0 +1,99 @@
+// `arch-cli`'s side of the control channel without a socket: the `argv[0]` dispatch to `arch-mcp`, the command table's parsing and usage errors, the exit codes and the statuses and client errors they report, and the first harness with its `cli` topic generated from the command table and the exit codes.
+import AgentControl
+import Foundation
+import Testing
+
+@Suite struct CommandLineTests {
+    @Test func argv0TellsArchMCPFromArchCLI() {
+        #expect(AgentCommandLine.invocation(arguments: ["arch-mcp"]) == .mcp([]))
+        #expect(AgentCommandLine.invocation(arguments: ["/Applications/Arch.app/Contents/Helpers/arch-mcp", "--session"]) == .mcp(["--session"]))
+        #expect(AgentCommandLine.invocation(arguments: ["/Users/someone/.local/bin/arch-mcp"]) == .mcp([]))
+        #expect(AgentCommandLine.invocation(arguments: ["arch-cli", "mcp", "--session"]) == .mcp(["--session"]))
+        #expect(AgentCommandLine.invocation(arguments: ["/Applications/Arch.app/Contents/Helpers/arch-cli", "status"]) == .cli(["status"]))
+        // SwiftPM's build folder and any other name run as arch-cli.
+        #expect(AgentCommandLine.invocation(arguments: [".build/debug/arch-cli", "guide", "cli"]) == .cli(["guide", "cli"]))
+        #expect(AgentCommandLine.invocation(arguments: ["arch-mcp-old"]) == .cli([]))
+        #expect(AgentCommandLine.invocation(arguments: ["arch-cli", "status", "mcp"]) == .cli(["status", "mcp"]))
+        #expect(AgentCommandLine.invocation(arguments: []) == .cli([]))
+    }
+
+    @Test func commandsParse() throws {
+        #expect(try AgentCommandLine.parse(["status"]) == AgentCLIRequest(command: .status, json: false))
+        #expect(try AgentCommandLine.parse(["--json", "status"]) == AgentCLIRequest(command: .status, json: true))
+        #expect(try AgentCommandLine.parse(["tools", "--json"]) == AgentCLIRequest(command: .tools, json: true))
+        #expect(try AgentCommandLine.parse(["guide"]) == AgentCLIRequest(command: .guide(nil), json: false))
+        #expect(try AgentCommandLine.parse(["guide", "cli"]) == AgentCLIRequest(command: .guide(.cli), json: false))
+        #expect(try AgentCommandLine.parse(["--help"]).command == .help)
+        #expect(try AgentCommandLine.parse(["help"]).command == .help)
+        #expect(try AgentCommandLine.parse(["status", "-h"]).command == .help)
+    }
+
+    @Test(arguments: [
+        ([], "Name a command."),
+        (["open", "https://example.org"], "Unknown command open."),
+        (["status", "now"], "status takes no arguments."),
+        (["tools", "all"], "tools takes no arguments."),
+        (["guide", "cli", "browsing"], "guide takes at most one topic."),
+        (["guide", "secrets"], "There is no guide topic named secrets. Topics: cli."),
+        (["--verbose", "status"], "Unknown option --verbose."),
+    ])
+    func usageErrors(arguments: [String], message: String) {
+        #expect(throws: AgentUsageError(message: message)) { try AgentCommandLine.parse(arguments) }
+    }
+
+    @Test func exitCodesFollowTheDesign() {
+        let expected: [(AgentExitCode, Int32)] = [
+            (.done, 0), (.toolError, 1), (.usage, 2), (.denied, 3), (.refused, 4), (.timedOut, 5), (.noGrant, 6),
+            (.unavailable, 69), (.internalError, 70), (.protocolMismatch, 75), (.notArch, 77),
+        ]
+        #expect(AgentExitCode.allCases.map(\.rawValue) == expected.map(\.1))
+        for (code, value) in expected { #expect(code.rawValue == value) }
+    }
+
+    @Test func resultStatusesMapToExitCodes() {
+        #expect(AgentExitCode(status: .ok) == .done)
+        #expect(AgentExitCode(status: .error) == .toolError)
+        #expect(AgentExitCode(status: .stale) == .toolError)
+        #expect(AgentExitCode(status: .denied) == .denied)
+        #expect(AgentExitCode(status: .refused) == .refused)
+        #expect(AgentExitCode(status: .timeout) == .timedOut)
+        #expect(AgentExitCode(status: .approvalPending) == .timedOut)
+    }
+
+    @Test func clientErrorsMapToExitCodes() {
+        #expect(AgentClientError.notRunning.exitCode == .unavailable)
+        #expect(AgentClientError.refused(AgentRefusal(reason: .outsideAccessOff, message: "Outside access is off.")).exitCode == .unavailable)
+        #expect(AgentClientError.notArch(.otherCode).exitCode == .notArch)
+        #expect(AgentClientError.notArch(.noExpectedCode).exitCode == .notArch)
+        #expect(AgentClientError.protocolMismatch(arch: 2).exitCode == .protocolMismatch)
+        #expect(AgentClientError.refused(AgentRefusal(reason: .protocolMismatch, message: "")).exitCode == .protocolMismatch)
+        #expect(AgentClientError.refused(AgentRefusal(reason: .ticket, message: "")).exitCode == .noGrant)
+        #expect(AgentClientError.refused(AgentRefusal(reason: AgentRefusal.Reason(rawValue: "later"), message: "")).exitCode == .noGrant)
+        #expect(AgentClientError.closedBeforeAnswer.exitCode == .noGrant)
+        #expect(AgentClientError.closed.exitCode == .unavailable)
+        #expect(AgentClientError.timedOut.exitCode == .internalError)
+        #expect(AgentClientError.noSocketLocation.exitCode == .internalError)
+        #expect(AgentClientError.protocolMismatch(arch: 2).message.contains("version 2") && AgentClientError.protocolMismatch(arch: 2).message.contains("version 1"))
+    }
+
+    @Test func theGuideAndItsCLITopic() {
+        #expect(AgentHarness.text(for: nil) == AgentHarness.instructions)
+        #expect(AgentHarness.instructions.contains("session_info"))
+        #expect(AgentHarness.instructions.contains("<untrusted source=\"page\""))
+        for topic in AgentGuideTopic.allCases {
+            #expect(AgentHarness.instructions.contains(topic.rawValue))
+            #expect(!AgentHarness.text(for: topic).isEmpty)
+        }
+        let cli = AgentHarness.text(for: .cli)
+        for command in AgentCommandLine.commands {
+            #expect(cli.contains("  \(command.name)"), "\(command.name)")
+            #expect(cli.contains(command.summary), "\(command.name)")
+        }
+        for code in AgentExitCode.allCases {
+            #expect(cli.contains("  \(code.rawValue)"), "\(code.rawValue)")
+            #expect(cli.contains(code.meaning), "\(code.rawValue)")
+        }
+        #expect(cli.contains("guide and tools work without Arch running."))
+        #expect(!cli.contains("\n\n\n"))
+    }
+}

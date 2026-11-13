@@ -1,6 +1,6 @@
 # Agents design
 
-This note describes the design for agents in Arch, feature rows 58 to 63. The user instructs an AI agent inside the browser through their existing ChatGPT or Claude subscription, with a harness and skills built on `arch-cli`. Outside agents and scripts use the browser through `arch-cli` and `arch-mcp`. Nothing here is built; Phase VII tasks VII.10 to VII.22 and Phase VI task VI.6 in `docs/plan.md` build it. The recorded CLI streams that the session decoders are written against are in `Packages/ARCH/Tests/AITests/Fixtures/Agent` (Tests ▸ Fixtures). Facts lists what was checked; Not verified lists what the tasks check first.
+This note describes the design for agents in Arch, feature rows 58 to 63. The user instructs an AI agent inside the browser through their existing ChatGPT or Claude subscription, with a harness and skills built on `arch-cli`. Outside agents and scripts use the browser through `arch-cli` and `arch-mcp`. Plan task VII.10 built the `AgentControl` library (framing, JSON-RPC, `hello`, the socket location, the code identity checks, the tool catalog, the untrusted wrapper, the exit codes, and a first harness) and `arch-cli` with `status`, `guide`, and `tools`; the rest is not built. The remaining Phase VII tasks in `docs/plan.md` (VII.10.1 to VII.22) and Phase VI task VI.6 build it. The recorded CLI streams that the session decoders are written against are in `Packages/ARCH/Tests/AITests/Fixtures/Agent` (Tests ▸ Fixtures). Facts lists what was checked; Not verified lists what the tasks check first.
 
 Terms: "the user's CLI" is Claude Code's `claude` or OpenAI's Codex CLI `codex`, which the user installs and signs in to in the built-in terminal (row 56). An "in-app session" is an agent session that Arch starts. An "outside client" is a program that reaches Arch through `arch-cli` or `arch-mcp` without Arch having started it.
 
@@ -64,21 +64,21 @@ Arch.app (one process)
 | `AgentControl` | `Packages/ARCH/Sources/AgentControl` | library | Wire messages and framing, JSON-RPC, the socket location rule, code identity checks for both ends, the tool catalog (names, schemas, MCP annotations, access classes, limits), the untrusted wrapper, exit codes, the harness text (`AgentHarness.swift`), the I/O-free MCP server core, the CLI command table, the skill and PATH link installers, the client | Foundation, Security |
 | `Agent` | `Packages/ARCH/Sources/Agent` | library | `AgentService`, `AgentEndpoint`, grants (`agent.json`), sessions, `AgentPolicy`, `AgentApprovals`, `AgentToolHost` over `AgentBrowserHost`, `AgentPageScripts`, the activity log, the API-key session, and the panel, card, composer, and grant sheet views | `ARCHEngine`, `AI`, `AgentControl` |
 | `ArchCLI` | `Packages/ARCHApp/Sources/ArchCLI` | executable, product `arch-cli` | `arch-cli`, and `arch-mcp` when started under that name or as `arch-cli mcp` | `AgentControl` |
-| `AgentControlTests` | `Packages/ARCH/Tests/AgentControlTests` | tests | Framing, catalog, MCP transcripts, CLI parsing, installers, escaping | `AgentControl` |
+| `AgentControlTests` | `Packages/ARCH/Tests/AgentControlTests` | tests | Framing, catalog, the client against a test listener, MCP transcripts, CLI parsing, installers, escaping | `AgentControl` |
 | `AgentTests` | `Packages/ARCH/Tests/AgentTests` | tests, with `Fixtures` | Endpoint, grants, policy table, approvals, tool host over a fake host, page scripts in WebKit | `Agent`, `ARCHEngineWebKit` |
 
 - `Browsing`, `Preferences`, and `Arch` add `Agent`. `AI` gains no dependency: `Agent` gives it a description of the MCP server to start (`AIAgentToolServer`). `Agent` depends on neither `Browsing` nor `Plugins`; `Browsing` implements `AgentBrowserHost` and places the views.
 - The names follow Arch's conventions: feature modules in `Packages/ARCH/Sources` without a prefix, app-side executables as `Arch*`. The products carry the user's names (decision 2).
 - The harness lives in `AgentControl/AgentHarness.swift` as string literals, like the plugin composer's reference in `PluginComposerInstructions.swift`. The app and executable carry the same text without a resource bundle.
 
-`Package.swift` additions, by hand:
+`Package.swift` additions, by hand (VII.10 added the `AgentControl` product and targets and `ArchCLI`; `Agent` and `AgentTests` come with VII.11). `audit_token_to_pid` and `audit_token_to_pidversion` are in libbsm, which `AgentControl` links:
 
 ```swift
 .library(name: "AgentControl", targets: ["AgentControl"]),
 .library(name: "Agent", targets: ["Agent"]),
 .executable(name: "arch-cli", targets: ["ArchCLI"]),
 
-.target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security")]),
+.target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
 .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Agent"),
 // `scripts/bundle_app.sh` copies it into Contents/Helpers as arch-cli, with arch-mcp as a link to it.
 .executableTarget(name: "ArchCLI", dependencies: ["AgentControl"], path: "Packages/ARCHApp/Sources/ArchCLI"),
@@ -87,7 +87,7 @@ Arch.app (one process)
 .testTarget(name: "AgentTests", dependencies: ["Agent", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/AgentTests", resources: [.copy("Fixtures")]),
 ```
 
-Bundle: `scripts/bundle_app.sh` copies the built `arch-cli` to `Arch.app/Contents/Helpers/arch-cli`, makes `Contents/Helpers/arch-mcp` a relative symbolic link to it, and signs as it does now (`codesign --force --deep`). VII.10 checks whether SwiftPM names the binary after the product; the script copies the name SwiftPM writes.
+Bundle: `scripts/bundle_app.sh` copies the built `arch-cli` to `Arch.app/Contents/Helpers/arch-cli`, makes `Contents/Helpers/arch-mcp` a relative symbolic link to it, and signs as it does now (`codesign --force --deep`), which signs `arch-cli` as nested code and seals the link as a link (Facts). SwiftPM names the executable after its product, `.build/<configuration>/arch-cli`, the name the script copies.
 
 ## Local control channel
 
@@ -106,7 +106,7 @@ Allowed: this socket, while the app runs; child processes that Arch starts with 
 ### Framing and methods
 
 - Frames: a 4-byte big-endian length, then a UTF-8 JSON-RPC 2.0 message, at most 16 MiB (a full-page screenshot fits); a larger frame closes the connection. Length framing keeps page text from splitting messages.
-- The client's first message is `hello` with `protocol` (1), `client` (`arch-cli` or `arch-mcp`), the client's version, and an in-app session ticket if it has one. Arch answers with its version and the connection's status: `bound` (an in-app session), `granted` (level, Persona, expiry), `none` (no grant yet), or `refused` with a reason. Another protocol version is refused with both versions named, and the client exits with code 75.
+- The client's first message is `hello` with `protocol` (1), `client` (`arch-cli` or `arch-mcp`), the client's version, and an in-app session ticket if it has one. Arch answers with its protocol and version and the connection's status, flat in one object (`AgentHelloAnswer`): `bound` (an in-app session), `granted` with `grant` (`level` `readOnly`, `askBeforeActing`, or `actInAgentTabs`, the Persona's name, and `expiry` `quit`, `revoke`, or an ISO 8601 date), `none` (no grant yet), or `refused` with `refusal` (a `reason` code and a sentence), after which Arch closes the connection. `hello` and its answer keep this shape in every protocol version. Another protocol version is refused with reason `protocol` and Arch's version in the answer's `protocol`, so the client names both versions and exits with code 75; whatever the status, an answer with another `protocol` ends the client so. Reason `outsideAccessOff` exits 69 and `ticket` or any other reason 6. A connection that Arch closes before it answers `hello`, as after its peer check refused the client, also exits 6, and one that closes later exits 69. The client waits 10 seconds for the answer, then exits 70.
 - Methods: `tools/list`, `tools/call`, `tools/cancel`, `task/start`, `task/send`, `task/events` (a stream of notifications), `task/stop`, `sessions/list`, `grant/show`, `grant/release` (a client may give up its own grant and can never widen one), and `guide/get`. Notifications from Arch: `progress` (a call ID and a sentence such as "Waiting for your approval in Arch"), `tools/changed` (the client's tool list changed, as after a grant), `revoked` (then Arch closes the connection), and `task/event`.
 - Every `tools/call` carries a client-chosen call ID; Arch answers each once. A connection runs at most four calls at a time; more are refused with `busy`.
 
@@ -123,6 +123,8 @@ A connection that fails a check is closed at once and logged as refused with the
 ### Client checks of Arch
 
 `arch-cli` and `arch-mcp` apply the same checks to the listening process before sending `hello`: same user, valid code, and the code directory hash of `Contents/MacOS/Arch` in the app bundle containing the client. They find the bundle from the client's own path (`_NSGetExecutablePath`, then `realpath`, which follows a PATH link). A client that finds anything else, or runs outside an app bundle, exits with code 77 ("the socket is not Arch's") and sends nothing. A program that binds the path first therefore collects no ticket or call.
+
+The client connects first. When nothing listens at the path (no file there, or a refused `connect`), it exits 69 before any check, so a client outside a bundle, such as `.build/debug/arch-cli`, still says that Arch is not running. The bundle is the `.app` folder above `Contents/Helpers`, and the client reads the expected hash from it only once something listens. Both ends make the check through `AgentPeerCheck` in `AgentControl`: `LOCAL_PEERCRED` for the user (on the connecting side, the listener's credentials), `LOCAL_PEERTOKEN` for the audit token, then the running code's validity and hash through Security; only the expected hash differs.
 
 ### In-app sessions: tickets
 
@@ -385,9 +387,9 @@ One catalog in `AgentControl` serves `tools/list`, the MCP server, the CLI's com
 | `select_option` | `tab`, `ref`, `values` | The selected values | I |
 | `scroll` | `tab`, `ref?` or `direction` with `amount?` | The new position | I, allowed in Read Only because it changes no data |
 | `hover` | `tab`, `ref` | The events | I, allowed in Read Only likewise |
-| `wait_for` | `tab`, one of `load`, `text`, `url`, `ref`; `timeout_ms` (at most 30,000) | Met or timed out | R |
+| `wait_for` | `tab`, one of `load`, `text`, `url`, `ref`; `timeout_ms?` (at most 30,000, the default) | Met or timed out | R |
 | `list_downloads` | — | Downloads the session's tabs started: name, size, state, no path | R |
-| `search_history` | `query`, `limit` (at most 20) | Titles and addresses without query or fragment; excluded sites left out | R, needs the scope or setting |
+| `search_history` | `query`, `limit?` (at most 20, the default) | Titles and addresses without query or fragment; excluded sites left out | R, needs the scope or setting |
 | `ask_user` | `question`, `choices?` | The user's answer | R, waits for the user |
 | `request_approval` | `summary`, `kind` (`submit`, `purchase`, `send`, `delete`, `download`, `other`), `tab?` | `approved`, `denied`, or the user's instruction | S |
 | `hand_to_user` | `tab`, `reason` (`sign_in`, `verification`, `payment`, `other`), `message` | The user's Done or Cancel, with what the user wrote | R, waits for the user |
@@ -396,7 +398,8 @@ One catalog in `AgentControl` serves `tools/list`, the MCP server, the CLI's com
 
 - Absent (decision 6): running JavaScript or other code in a page, fetching outside a tab, reading or writing files, reading cookies, passwords, autofill, or the clipboard, opening internal pages, extension pages, `file:` addresses, or other apps, installing or running plugins and extensions, changing any setting, permission, grant, exclusion, route, key, or Persona, starting other agents, and scheduling. `open_tab` and `navigate` accept only `http` and `https`.
 - `tools/list` leaves out tools that the connection's mode or grant never allows, so a Read Only client does not see `click`. When a grant or mode changes, the list changes with a `tools/changed` notification. Outside a session, `ask_user` and `hand_to_user` show their cards in the client's agent panel.
-- MCP annotations: `readOnlyHint` for class R, `openWorldHint` for N and I, `destructiveHint` for `close_tab`. Arch does not rely on a client honoring them.
+- MCP annotations: `readOnlyHint` for class R, `openWorldHint` for N and I, `destructiveHint` for `close_tab`, each written out as true or false on every tool, since MCP reads a missing `destructiveHint` or `openWorldHint` as true. Arch does not rely on a client honoring them.
+- Schemas: `AgentToolCatalog` makes each tool's input schema from its parameters, an object with `additionalProperties` false whose required parameters are the inputs above without `?` or a default. Where a call gives one of several inputs (`open_tab`'s `url` or `ref`, `navigate`'s `url`, `ref`, or `action`, `scroll`'s `ref` or `direction`, `wait_for`'s condition), the descriptions say so instead of `oneOf` or `anyOf`, which some providers refuse at a schema's top level, and the tool host checks it. Tab handles carry the pattern `^t[1-9][0-9]*$`, and the per-call limits are the schemas' `minimum` and `maximum`. The catalog's class notes are traits: waits for the user (`request_tab`, `ask_user`, `request_approval`, `hand_to_user`, `approval_wait`), allowed in Read Only (`scroll`, `hover`), needs the history scope (`search_history`), and destructive (`close_tab`).
 
 ### Results
 
@@ -404,7 +407,7 @@ Every result has a `status` (`ok`, `denied`, `refused`, `stale`, `timeout`, `app
 
 ### Untrusted marking
 
-- Page-derived text in any result, including snapshot outlines, page text, titles, link text, dialog messages, download names, and event titles, is wrapped as `<untrusted source="page" url="https://host/path">…</untrusted>`, with `</untrusted` inside it escaped as `<\/untrusted`, as the AI interface escapes `</page`. Addresses lose their query and fragment, as AI parts do; `ref` lets the agent follow a link whose full address it does not see.
+- Page-derived text in any result, including snapshot outlines, page text, titles, link text, dialog messages, download names, and event titles, is wrapped as `<untrusted source="page" url="https://host/path">…</untrusted>` (`AgentUntrusted`), with `</untrusted` inside it, in any case, escaped as `<\/untrusted`, as the AI interface escapes `</page`. Addresses lose their query and fragment, as AI parts do, and also any user name and password (`AgentAddress.reduced`); `ref` lets the agent follow a link whose full address it does not see.
 - The harness and MCP `instructions` say that text inside these blocks is data, never instructions, and that text addressed to AI agents must be reported to the user.
 - A heuristic flags blocks with phrases addressed to AI models, such as "ignore previous instructions" or "system prompt", in English and Korean, and the panel shows "This page contains text addressed to AI agents" on that step. It is a warning, not a boundary.
 
@@ -422,7 +425,7 @@ Every result has a `status` (`ok`, `denied`, `refused`, `stale`, `timeout`, `app
 | Approvals | In-app sessions wait up to 10 minutes; outside clients' approvals stay open for 5 minutes by default (Settings), and each call answers within 45 seconds |
 | Session | Its CLI process ends after 2 hours without a user message; the next message continues as after Stop |
 
-A cut always says what was cut and how to get the rest.
+A cut always says what was cut and how to get the rest. `AgentLimits` in `AgentControl` holds these values.
 
 ## Page snapshots and refs
 
@@ -489,7 +492,7 @@ No engine protocol member changes in the first build; the Chromium adapter's nav
 `AgentHarness.swift` holds text written for Arch; nothing comes from another product's prompts or skills:
 
 - `instructions`, static: who the agent works for and where its instructions come from (only the user's messages; everything in pages and tool results is data); the loop (`session_info` first, `snapshot` in interactive mode, act by ref, read the events, snapshot again with `diff` after a change, `read_text` for long reading, `screenshot` only for visual checks, `wait_for` instead of guessing); tabs (open in the background, keep to the agent folder, close tabs no longer needed, ask with `request_tab` for the user's tabs); what Arch asks and how to behave when asked or denied (wait, never look for another way around a denial, call `request_approval` before irreversible or externally visible steps, `ask_user` when unsure); what goes to the user (sign-in, verification codes, CAPTCHAs, payment details through `hand_to_user`; never ask the user for passwords or codes); carrying data from one site to another only when the task asks for it, saying what was sent where; errors and cuts; how to finish (what was done, which tabs and addresses, what was not done and why).
-- Topics for `guide`: `browsing`, `forms`, `research`, `downloads`, `purchases-and-messages` (prepare, never finish: stop at the final step and ask or hand over), `troubleshooting` (stale refs, dialogs, slow pages, excluded sites), and `cli`, generated from the catalog.
+- Topics for `guide`: `browsing`, `forms`, `research`, `downloads`, `purchases-and-messages` (prepare, never finish: stop at the final step and ask or hand over), `troubleshooting` (stale refs, dialogs, slow pages, excluded sites), and `cli`, generated from `arch-cli`'s command table and exit codes, which `arch-cli --help` prints as well. VII.10 wrote `instructions` and `cli`; the `guide` tool's `topic` lists the topics that exist (`AgentGuideTopic`).
 - `mcpInstructions`: a summary of at most 2,000 characters that names the `guide` tool.
 - `entrySkill`: the short `SKILL.md` for outside agents.
 
@@ -515,14 +518,15 @@ In-app sessions use no native skill folders: Claude Code runs without its skill 
 ## arch-cli
 
 - It ships in the bundle at `Arch.app/Contents/Helpers/arch-cli`. Settings ▸ AI ▸ Agents ▸ Install Command-Line Tools… and `arch-cli links install [--dir <folder>]` show both paths, then link `arch-cli` and `arch-mcp` into a writable folder on the login shell's PATH, trying `~/.local/bin` first when it is there. They never write outside the user's folders or replace a file that is not a link into an Arch bundle. When no folder is writable, they say how to add one to PATH; `links remove` removes only its own links. Nothing is downloaded. A link follows the bundle, so a rebuilt app brings its own CLI.
-- Output: text by default; `--json` prints the result's `structured` value, one JSON object per line for streams. Text to type can come from standard input (`--text -`), so it stays out of argument lists and shell history. Handles belong to the grant, so `t3` from one `arch-cli open` works in the next `arch-cli click`.
-- Exit codes: 0 done, 1 tool error (such as a stale ref), 2 usage error, 3 denied by the user, 4 refused by a rule, 5 timed out, 6 no grant or the grant was refused, 69 Arch is not running or agent access is off, 70 internal error, 75 protocol mismatch, 77 the socket is not Arch's.
+- Output: text by default; `--json` prints the result's `structured` value, one JSON object per line for streams. `status --json` prints Arch's answer to `hello`, and `tools --json` the catalog as MCP's `tools/list` result; `guide` and `--help` print text. An error is one sentence on standard error. Text to type can come from standard input (`--text -`), so it stays out of argument lists and shell history. Handles belong to the grant, so `t3` from one `arch-cli open` works in the next `arch-cli click`.
+- Exit codes (`AgentExitCode`): 0 done, 1 tool error (such as a stale ref), 2 usage error, 3 denied by the user, 4 refused by a rule, 5 timed out, 6 no grant, the grant was refused, or Arch refused the connection, 69 Arch is not running or agent access is off, 70 internal error, 75 protocol mismatch, 77 the socket is not Arch's. A result's status maps to them: `ok` 0, `error` and `stale` 1, `denied` 3, `refused` 4, and `timeout` 5, as is `approvalPending` should a command still end on one.
 
 | Command | Does |
 |---|---|
 | `arch-cli status` | Whether Arch runs, agent access, this client's grant, versions |
 | `arch-cli guide [topic]` | The harness or a topic; works without Arch running |
-| `arch-cli tools` | The catalog with parameters |
+| `arch-cli tools` | The compiled-in catalog with classes and parameters; works without Arch running |
+| `arch-cli --help`, `arch-cli help` | The `cli` topic |
 | `arch-cli spaces`, `arch-cli tabs [--shared]` | Lists |
 | `arch-cli open <url>`, `navigate <tab> <url>`, `back`, `forward`, `reload`, `close <tab>` | Agent tabs |
 | `arch-cli snapshot <tab> [--full] [--ref r] [--diff]`, `text <tab> [--offset n]`, `screenshot <tab> [--full\|--ref r] -o <file>` | Reading; a screenshot is written only to the file named, or to `arch-screenshot-<time>.png` in the current folder |
@@ -537,7 +541,7 @@ In-app sessions use no native skill folders: Claude Code runs without its skill 
 | `arch-cli mcp-config [claude\|codex\|json]` | Prints the configuration with the absolute path of `arch-mcp`: `claude mcp add --scope user arch -- <path>`, or Codex's `[mcp_servers.arch]` table with `tool_timeout_sec = 120` |
 | `arch-cli setup claude\|codex` | Shows `claude mcp add --scope user arch -- <path>/arch-mcp` or `codex mcp add arch -- <path>/arch-mcp`, asks y/N, and runs it; Arch never edits another tool's configuration files itself |
 | `arch-cli release` | Gives up this client's grant |
-| `arch-cli mcp` | Runs as `arch-mcp` |
+| `arch-cli mcp` | Runs as `arch-mcp`; until VII.14, it and `arch-mcp` say that `arch-mcp` is not available and exit 70 |
 
 There is no command for signing in, settings, grants other than releasing one's own, remote hosts, or starting Arch; `arch-cli status` says to open Arch when it is not running.
 
@@ -745,7 +749,7 @@ The first build adds no engine protocol member; `executeJavaScript(_:inWorld:com
 
 ## Tests
 
-- `AgentControlTests`: framing and the 16 MiB limit; JSON-RPC errors; the catalog (names valid for MCP and `AITool`, schemas that parse, annotations that match classes); escaping of `</untrusted`; query and fragment removal; the socket location rule with the long-home fallback; the MCP core against hand-written transcripts (`initialize` with each version, `server/discover` before `initialize` answered with -32601 and the `initialize` after it accepted, `tools/list` per grant and `list_changed`, `tools/call` with text and image results, `approvalPending` at the cap and `approval_wait`, progress, cancellation, an unknown tool, `ping`, Arch not running), also through pipes against the built executable; the command table and exit codes; `argv[0]` dispatch; the harness (every topic exists, front matter with only `name` and `description`, the version line, MCP instructions within 2,000 characters); the skill and link installers in temporary folders (named targets only, refusal of foreign folders and files, removal of their own only, stale copies reported).
+- `AgentControlTests`: framing and the 16 MiB limit; JSON-RPC errors; `hello` and its answer in each status; the catalog (the table's tools, classes, and notes, names valid for MCP and `AITool`, schemas that parse, annotations that match classes, the per-call limits); escaping of `</untrusted`; query and fragment removal; the socket location rule with the long-home fallback and the bundle layout; the client against a listener in a temporary folder (no listener, the check before any byte with the listener's own code passing and other code and a client outside an app bundle failing, `hello`'s answer, another protocol version, a refusal with outside access off, a connection closed before the answer, and an answer that does not come); the MCP core against hand-written transcripts (`initialize` with each version, `server/discover` before `initialize` answered with -32601 and the `initialize` after it accepted, `tools/list` per grant and `list_changed`, `tools/call` with text and image results, `approvalPending` at the cap and `approval_wait`, progress, cancellation, an unknown tool, `ping`, Arch not running), also through pipes against the built executable; the command table and exit codes; `argv[0]` dispatch; the harness (every topic exists, front matter with only `name` and `description`, the version line, MCP instructions within 2,000 characters); the skill and link installers in temporary folders (named targets only, refusal of foreign folders and files, removal of their own only, stale copies reported).
 - `AgentTests`:
   - Endpoint: a connection from the test process is refused because it is not Arch's tool; an injected verifier accepts; another user ID is refused; a folder with the wrong mode or a symbolic link is refused; a stale socket is replaced only when nothing answers; the listener exists only while needed; a client refuses a listener whose code does not match; with Allow Outside Clients off, a `hello` without a ticket gets `refused` and no grant sheet.
   - Tickets: refused from a process outside the session's tree (a fake ancestry provider) and after the session ended; constant-time comparison.
@@ -775,7 +779,7 @@ Each task that needs the app adds its check to the regression checklist in `docs
 
 Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePattern.defaultExclusions`), so P16 refuses fixtures served from `file:` or the Mac itself. Checks 61 and 66 serve `Packages/ARCH/Tests/AgentTests/Fixtures` with a small HTTP server written for the check and kept out of the commit, on `127.0.0.1`, with one path that answers 302 to the same server under `localhost`, a different site. Each check first removes `local-network` in Settings ▸ AI's excluded sites and puts it back afterward.
 
-59. With Allow Outside Clients on, `arch-cli status` from Terminal reports Arch; `arch-cli tabs` shows the grant sheet naming the client, Don't Allow exits 6, and Allow with Read Only and the Agents Persona lists that Persona's tabs; a grant in another Persona asks for Touch ID. `lsof -nP -p <Arch pid> -i` lists no listening port. With outside access off and no session, the socket file does not exist; with outside access off during an in-app session, `arch-cli tabs` exits 69 without a sheet. A script that binds the socket's path before Arch starts makes `arch-cli status` exit 77. A hand-edited `agent.json` is renamed at the next launch and outside access is off.
+59. From the bundle with Arch closed: `codesign --verify --deep --strict build/Arch.app` passes; `Contents/Helpers/arch-mcp` is a relative link to `arch-cli`; `Contents/Helpers/arch-cli guide` prints the guide and `--help` the `cli` topic, `status` exits 69 with its sentence, and `arch-mcp` exits 70 until VII.14. VII.10 added this part to the plan's checklist, and VII.11 adds the rest. With Allow Outside Clients on, `arch-cli status` from Terminal reports Arch; `arch-cli tabs` shows the grant sheet naming the client, Don't Allow exits 6, and Allow with Read Only and the Agents Persona lists that Persona's tabs; a grant in another Persona asks for Touch ID. `lsof -nP -p <Arch pid> -i` lists no listening port. With outside access off and no session, the socket file does not exist; with outside access off during an in-app session, `arch-cli tabs` exits 69 without a sheet. A script that binds the socket's path before Arch starts makes `arch-cli status` exit 77. A hand-edited `agent.json` is renamed at the next launch and outside access is off.
 60. `arch-cli open https://example.org` opens a background tab in the client's agent folder without selecting it; `text` and `close` work. An excluded site is refused, as is `arch-cli open http://127.0.0.1:<port>/` while `local-network` is excluded; a tab the user did not share returns not found. The agent tab records no visit, does not join ⇧⌘T's list when closed, and is gone after a relaunch unless kept.
 61. On the fixture form in Ask Before Acting: `snapshot` lists its fields with refs and hides the password field's value; after the user fills the password field by hand, `screenshot -o` writes an image with that field and the personal fields painted over; `arch-cli type` and `click` on its submit button ask in the panel, Deny exits 3, and Allow types and submits; typing into the password field is refused; Return on a sensitive card does nothing; a download asks; a camera request is denied without a sheet; a `confirm` dialog waits for the user.
 62. `arch-cli setup claude` in the built-in terminal adds the server; `claude` there lists tabs and reads one after the grant. An approval left for a minute returns `approvalPending`, and `approval_wait` returns its result after Allow. The same holds with `arch-cli setup codex` and `codex`.
@@ -807,12 +811,18 @@ Checked with the same versions in short model runs on the user's subscriptions (
 - Codex under the session arguments: the events and fields under Codex ▸ Events; `developer_instructions` honored; the ticket passed through `env_vars`; `click`, a tool without `readOnlyHint`, ran under `default_tools_approval_mode="approve"` and was refused without it; `arch-mcp` started outside the read-only sandbox, in a process group of its own, as a child of the spawned `codex`, in the first and the resumed turn. With `code_mode_host` disabled too, the turn called no tool, as under Codex ▸ Feature derivation. None of the prompts reached `$CODEX_HOME/history.jsonl`, and the ephemeral turns saved no thread. `codex --no-daemon delete --force <thread id>` removed the thread's rollout file, and Codex's databases had no row for it afterward; without `--force` it refused outside a terminal.
 - Codex probes in an empty `CODEX_HOME`: the session's 17 `-c` and 132 `--disable` arguments, `skills.include_instructions=false` among them and `code_mode_host` kept, pass the configuration probe (303 words with `codex`, `--no-daemon`, `--strict-config`, and `app-server --print-startup-config`; exit 0), as does any string for `model_reasoning_effort`; `agents_md.*` keys fail it. `codex debug prompt-input` with the session's arguments shows the static harness, the permissions and collaboration mode instructions, and, without `skills.include_instructions=false`, the skills of `~/.agents/skills` and the bundled ones; a scratch `$CODEX_HOME/AGENTS.md` or `AGENTS.override.md` joined under every argument tried (Codex ▸ The user's own instructions). `codex debug models --bundled` lists 11 models; all but `gpt-5.5` have `tool_mode` `code_mode_only`, the gpt-6 models have `multi_agent_version` `v2`, and their effort levels are as under Model choice and fallbacks. `--disable` of the deprecated `use_legacy_landlock`, `web_search_cached`, or `web_search_request` adds a deprecation `error` item to the turn.
 
+Checked by VII.10 with this repository's build, outside the app bundle:
+
+- SwiftPM writes the `arch-cli` product as `.build/debug/arch-cli`, under the product's name rather than the target's.
+- A scratch app bundle held copies of one executable at `Contents/MacOS/Arch` and `Contents/Helpers/arch-cli`, with `Contents/Helpers/arch-mcp` as the relative link `arch-mcp -> arch-cli`. `codesign --force --deep --sign -` signed the helper as nested code and sealed the link in `CodeResources` as `"Helpers/arch-mcp" => { "symlink" => "arch-cli" }`, and `codesign --verify --deep --strict` passed. In such a bundle, a program's running code (`SecCodeCopySelf`) had the code directory hash that `SecStaticCodeCreateWithPath` reads from its file, for the main executable and for the helper, also when started through the link.
+- `SecCodeCopySigningInformation` gives `kSecCodeInfoUnique` with its default flags, for a running and a static code. On the connecting side of a Unix domain socket, `LOCAL_PEERCRED` and `LOCAL_PEERTOKEN` name the listening process. `audit_token_to_pid` and `audit_token_to_pidversion` need libbsm.
+
 ## Not verified
 
 Each item names the task that checks it first. A differing result changes the design in this note and the affected task row.
 
-- VII.10: whether SwiftPM names the executable after its product; whether `codesign --deep` seals the symbolic link in `Contents/Helpers`.
-- VII.11: whether the code directory hash that `SecStaticCodeCreateWithPath` reads from the bundled file equals the one the running peer's code reports.
+- VII.10.1: the signing and link facts of the scratch bundle (Facts) in `build/Arch.app` as `scripts/bundle_app.sh` signs it, which is regression check 59's first part.
+- VII.11: whether the code directory hash that `SecStaticCodeCreateWithPath` reads from the bundled file equals the one the running peer's code reports in `build/Arch.app` as the script signs it, with the Apple Development identity when the Mac has one; in a scratch bundle signed ad hoc they were equal (Facts).
 - VII.12: whether the WebKit adapter's navigation policy runs at each server redirect, and whether the Chromium adapter can answer every main frame navigation and redirect from `OnBeforeBrowse`. An engine that cannot ask before a hop leaves the hop to the read checks: its agent tab stops when the hop commits, and the page reaches no agent.
 - VII.13: captures of agent tabs that no window shows on both engines; whether a click's event source process distinguishes hardware clicks from posted ones.
 - VII.15: the skill folders each tool reads.

@@ -46,8 +46,10 @@ let package = Package(
         .library(name: "Plugins", targets: ["Plugins"]),
         .library(name: "Extensions", targets: ["Extensions"]),
         .library(name: "Terminal", targets: ["Terminal"]),
+        .library(name: "AgentControl", targets: ["AgentControl"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
+        .executable(name: "arch-cli", targets: ["ArchCLI"]),
     ],
     targets: [
         .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine"),
@@ -74,11 +76,15 @@ let package = Package(
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
+        // libbsm reads process IDs from audit tokens.
+        .target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
         .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
+        // `scripts/bundle_app.sh` copies it into Contents/Helpers as arch-cli, with arch-mcp as a link to it.
+        .executableTarget(name: "ArchCLI", dependencies: ["AgentControl"], path: "Packages/ARCHApp/Sources/ArchCLI"),
         // Needs no CEF framework: the bridge loads it at run time, and these tests start no engine.
         .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),
         // `Fixtures/Agent` holds the Claude Code and Codex streams that the agent session decoders are written against.
@@ -86,6 +92,7 @@ let package = Package(
         .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
+        .testTarget(name: "AgentControlTests", dependencies: ["AgentControl"], path: "Packages/ARCH/Tests/AgentControlTests"),
         .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),

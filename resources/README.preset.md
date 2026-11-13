@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AgentControl`, `AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -92,7 +92,7 @@ git config core.hooksPath .githooks
 - [`docs/windows-personas.md`](../docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
 - [`docs/plugins.md`](../docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](../docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
-- [`docs/agents.md`](../docs/agents.md): the agents design (not built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
+- [`docs/agents.md`](../docs/agents.md): the agents design (its control channel library and `arch-cli`'s first commands are built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](../docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 
 <a id="scripts"></a>
@@ -108,7 +108,7 @@ git config core.hooksPath .githooks
 | Command | Description |
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
-| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, `arch-cli` with its `arch-mcp` link, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 
 <a id="repository-structure"></a>
@@ -119,9 +119,9 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
-│   ├── ARCHApp/Sources/            # App target and CEF helper executable
+│   ├── ARCH/Sources/               # Feature modules: AgentControl, AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
+│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCHApp/Sources/            # App target, CEF helper executable, and arch-cli
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers
 │   │   ├── ARCHEngineChromium/     # Chromium adapter using CEF

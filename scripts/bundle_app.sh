@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`.
+# Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products, among them `arch-cli`, and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`.
 # Usage: scripts/bundle_app.sh [debug|release]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,6 +14,7 @@ MIN_MACOS="14.0"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
+[ -x "$BIN/arch-cli" ] || { echo "missing $BIN/arch-cli" >&2; exit 1; }
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 [ -f "$ICON_SOURCE" ] || { echo "missing app icon source at $ICON_SOURCE" >&2; exit 1; }
 [ -f "$SDEF" ] || { echo "missing scripting definition at $SDEF" >&2; exit 1; }
@@ -62,8 +63,11 @@ APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
 	</array>'
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN/Arch" "$APP/Contents/MacOS/Arch"
+# The agents' command-line tool, under the name SwiftPM gives it after its product. `arch-mcp` is the same executable through a relative link, which the signature seals as a link, so that Arch checks one code directory hash (docs/agents.md, agent decision 2).
+cp "$BIN/arch-cli" "$APP/Contents/Helpers/arch-cli"
+ln -s arch-cli "$APP/Contents/Helpers/arch-mcp"
 # SwiftPM records the deployment target as the SDK version, and macOS then runs the app with that older SDK's design, such as the old window buttons. Recording the SDK the app was built with gives it the current system design. vtool warns that this invalidates the signature; the bundle is signed at the end.
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 xcrun vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
