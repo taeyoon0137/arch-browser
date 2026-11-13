@@ -1002,7 +1002,10 @@ import Foundation
     private func answer(for identity: AgentClientIdentity) -> AgentHelloAnswer {
         guard let grant = grant(for: identity) else { return AgentHelloAnswer(version: version, status: .noGrant) }
         let persona = host.personas.first { $0.id == grant.personaID }?.name ?? ""
-        return AgentHelloAnswer(version: version, status: .granted(AgentGrantSummary(level: grant.level, persona: persona, expiry: grant.expiry)))
+        // The grant's space, or the Persona's first space once that one is gone, as the tool host takes it.
+        let spaces = host.spaces(in: grant.personaID)
+        let space = (spaces.first { $0.id == grant.spaceID } ?? spaces.first)?.name
+        return AgentHelloAnswer(version: version, status: .granted(AgentGrantSummary(level: grant.level, persona: persona, space: space, expiry: grant.expiry)))
     }
 
     private func call(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {

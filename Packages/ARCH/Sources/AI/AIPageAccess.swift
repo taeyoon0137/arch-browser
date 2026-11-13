@@ -34,11 +34,19 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         if pattern.hasSuffix(":") {
             return url.scheme?.lowercased() == String(pattern.dropLast())
         }
-        guard let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")), !host.isEmpty else { return false }
+        guard let host = url.host.map(Self.comparableHost), !host.isEmpty else { return false }
         if pattern == Self.localNetwork.value {
             return host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || Self.isLocalAddress(host)
         }
-        return host == pattern || host.hasSuffix(".\(pattern)")
+        let site = Self.comparableHost(pattern)
+        return host == site || host.hasSuffix(".\(site)")
+    }
+
+    /// A host as patterns compare it: lowercased, without IPv6 brackets, and without the trailing dots of a fully qualified name, which reaches the same host, as `localhost.` reaches the Mac and both engines keep the dot in the address.
+    static func comparableHost(_ host: String) -> String {
+        var host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        while host.hasSuffix(".") { host.removeLast() }
+        return host
     }
 
     public init(from decoder: any Decoder) throws {

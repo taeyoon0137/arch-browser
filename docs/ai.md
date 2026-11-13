@@ -568,6 +568,7 @@ public struct AISitePattern: Codable, Hashable, Sendable {
 
 - Only `http`, `https`, and `file` pages can be sent. Internal pages such as `flags://` and other schemes are always excluded and are not listed.
 - New settings exclude `file:` and `local-network`; the user can remove both.
+- Hosts compare without a trailing dot, so `localhost.` and `example.org.` meet the same exclusions as `localhost` and `example.org`: both reach the same host, and both engines keep the dot in the address.
 - The site settings popover in the address pill has an Allow AI on This Site switch that removes or adds the current host. Settings ▸ AI lists the exclusions to edit.
 - Exclusions apply to every feature, hook event, and plugin page call. An event from an excluded site reaches no hook.
 - When the user opens the page reader on an excluded site, the panel says AI is off for the site and offers the switch instead of sending anything.

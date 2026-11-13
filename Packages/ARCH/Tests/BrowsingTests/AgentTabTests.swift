@@ -1,4 +1,4 @@
-// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), and asks the agent monitor about each navigation (P16).
+// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), and asks the agent monitor about each navigation (P16).
 import AppKit
 import Agent
 import ARCHEngine
@@ -87,13 +87,30 @@ import Testing
         userPage.load(URL(string: "https://example.org/user")!, in: userTab)
         #expect(visits == [URL(string: "https://example.org/user")!])
 
-        // Closing keeps nothing of an agent tab: no closed-list record for ⇧⌘T and no tab close log entry, whatever the caller asks.
+        // Closing keeps nothing of an agent tab: no closed-list record for ⇧⌘T and no tab close log entry, whatever the caller asks. `requestCloseTab` counts a close for ⌘Z only when the closed list keeps it, so ⌘Z after an agent tab closes reopens no older tab in its place.
         #expect(BrowserSession.closeKeeps(agentTab, remember: true) == (closedList: false, closeLog: false))
         #expect(BrowserSession.closeKeeps(agentTab, remember: false) == (closedList: false, closeLog: false))
         #expect(BrowserSession.closeKeeps(userTab, remember: true) == (closedList: true, closeLog: true))
         #expect(BrowserSession.closeKeeps(userTab, remember: false) == (closedList: false, closeLog: true))
         let favoritesTab = Tab(id: UUID(), webContents: PageDouble(url: nil), spaceID: nil, isPinned: false, personaID: Persona.defaultID)
         #expect(BrowserSession.closeKeeps(favoritesTab, remember: true) == (closedList: false, closeLog: true))
+    }
+
+    @Test func anAgentFolderGoesOnceItsLastTabLeavesIt() {
+        let folders = Folders()
+        let agentFolder = TabFolder(spaceID: space.id, name: "claude \u{00B7} Terminal", isPinned: false, agentSessionID: owner)
+        let userFolder = TabFolder(spaceID: space.id, name: "Reading", isPinned: false)
+        folders.folders = [agentFolder, userFolder]
+        let (first, _) = tab(in: agentFolder, folders: folders)
+        let (second, _) = tab(in: agentFolder, folders: folders)
+        #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: [first, second]).isEmpty)
+        // The user drags one tab out, then moves the other into a folder of theirs: the agent folder is empty then, and an empty folder of the user's stays.
+        first.folderID = nil
+        #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: [first, second]).isEmpty)
+        second.folderID = userFolder.id
+        #expect(first.agentOwnerID == nil && second.agentOwnerID == nil)
+        #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: [first, second]) == [agentFolder.id])
+        #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: []) == [agentFolder.id])
     }
 
     @Test func anAgentTabAppliesItsRulesAndReportsThem() {

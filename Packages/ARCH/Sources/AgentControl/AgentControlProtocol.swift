@@ -90,11 +90,14 @@ public struct AgentGrantSummary: Codable, Equatable, Sendable {
     public var level: AgentAccessLevel
     /// The name of the grant's Persona.
     public var persona: String
+    /// The name of the grant's space, where its agent folder goes, so that the grant reads as "Agents / Home"; nil from an Arch that does not send it.
+    public var space: String?
     public var expiry: AgentGrantExpiry
 
-    public init(level: AgentAccessLevel, persona: String, expiry: AgentGrantExpiry) {
+    public init(level: AgentAccessLevel, persona: String, space: String? = nil, expiry: AgentGrantExpiry) {
         self.level = level
         self.persona = persona
+        self.space = space
         self.expiry = expiry
     }
 }

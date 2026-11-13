@@ -133,6 +133,7 @@ struct AgentSettingsPage: View {
         let persona = service.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
         let spaces = service.host.spaces(in: grant.personaID)
         let space = (spaces.first { $0.id == grant.spaceID } ?? spaces.first)?.name
+        // A Persona's place reads as "Persona / Space".
         var parts = [grant.level.title, space.map { "\(persona) / \($0)" } ?? persona]
         if grant.scopes.searchHistory { parts.append("searches history") }
         if grant.scopes.startTasks { parts.append("starts agent tasks") }

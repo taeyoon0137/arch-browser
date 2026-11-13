@@ -47,9 +47,14 @@ import Foundation
     func run(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         let start = state.lastSequence
         var outcome = await outcome(of: call, for: grant, state: state)
+        // A result that would still pass its limit, as a page's very long address can make one, says so in its place, so that no result takes a client's connection past the frame limit.
+        if outcome.result.text.utf8.count > AgentLimits.resultTextBytes { outcome.result = Self.tooLong(outcome.result, tool: call.name) }
         attachEvents(to: &outcome, since: start, state: state)
         return outcome
     }
+
+    /// The bytes a result leaves, within its limit, for the sentences around a page's text and for the events.
+    static let resultRoom = 2_000
 
     private func outcome(of call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
@@ -184,15 +189,16 @@ import Foundation
                 line += "  (a page agents do not read)"
             } else {
                 let reduced = tab.url.map(AgentAddress.reduced)
-                row["title"] = .string(AgentUntrusted.wrap(tab.title, url: tab.url))
+                let title = Self.pageName(tab.title, url: tab.url)
+                row["title"] = .string(title)
                 if shared {
                     row["host"] = tab.url?.host.map(AgentJSON.string) ?? .null
-                    line += "  \(AgentUntrusted.wrap(tab.title, url: tab.url))  \(tab.url?.host ?? "")"
+                    line += "  \(title)  \(tab.url?.host ?? "")"
                 } else {
                     row["url"] = reduced.map { .string($0.absoluteString) } ?? .null
                     row["loading"] = .bool(tab.isLoading)
                     row["engine"] = .string(tab.engine.rawValue)
-                    line += "  \(AgentUntrusted.wrap(tab.title, url: tab.url))  \(reduced?.absoluteString ?? "")\(tab.isLoading ? "  loading" : "")"
+                    line += "  \(title)  \(reduced?.absoluteString ?? "")\(tab.isLoading ? "  loading" : "")"
                 }
             }
             rows.append(.object(row))
@@ -205,7 +211,28 @@ import Foundation
         case 1: summary = "1 \(kind) tab."
         default: summary = "\(tabs.count) \(kind) tabs."
         }
-        return AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["scope": .string(kind), "tabs": .array(rows)])
+        let list = Self.fitted(summary, lines, rows, noun: "tab")
+        var structured: [String: AgentJSON] = ["scope": .string(kind), "tabs": .array(list.rows)]
+        if let limits = list.limits { structured["limits"] = limits }
+        return AgentToolResult(status: .ok, text: list.text, structured: .object(structured))
+    }
+
+    /// A list result's text and rows within the result's limit, with room for the events: the last rows go while the text is too long, as with long addresses, and a last line and `limits` say how many.
+    static func fitted(_ summary: String, _ lines: [String], _ rows: [AgentJSON], noun: String) -> (text: String, rows: [AgentJSON], limits: AgentJSON?) {
+        // The last line takes at most 100 bytes.
+        let room = AgentLimits.resultTextBytes - resultRoom - 100
+        var used = summary.utf8.count
+        var kept = 0
+        for line in lines {
+            used += line.utf8.count + 1
+            guard used <= room else { break }
+            kept += 1
+        }
+        let left = lines.count - kept
+        guard left > 0 else { return (([summary] + lines).joined(separator: "\n"), rows, nil) }
+        let note = "\(left) more \(left == 1 ? noun : "\(noun)s") left out to keep the result within its limit."
+        return (([summary] + lines.prefix(kept) + [note]).joined(separator: "\n"), Array(rows.prefix(kept)),
+                ["resultTextBytes": .number(Double(AgentLimits.resultTextBytes)), "leftOut": .number(Double(left))])
     }
 
     // MARK: Navigation
@@ -309,7 +336,7 @@ import Foundation
             return Outcome(result: Self.refusal(.p16, "\(handle) shows a page that agents do not read.", handle: handle), reportedTabID: tabID)
         }
         let address = tab.url.map { AgentAddress.reduced($0).absoluteString } ?? ""
-        let title = AgentUntrusted.wrap(tab.title, url: tab.url)
+        let title = Self.pageName(tab.title, url: tab.url)
         let structured = Self.tabJSON(tab, handle: handle)
         let status: AgentResultStatus
         let text: String
@@ -346,7 +373,7 @@ import Foundation
         }
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let content: EngineReadableContent
-        switch await read(tab, handle: handle) {
+        switch await read(tab, handle: handle, grant, state: state) {
         case .value(let read): content = read
         case .outcome(let failure):
             var outcome = failure
@@ -358,7 +385,7 @@ import Foundation
         var count = min(arguments["max_chars"].flatMap(Self.integer) ?? AgentLimits.readTextCharactersPerCall, characters.count - offset)
         // The whole result's text stays within its limit, which a long page of wide characters can pass before the character limit; the room left covers the sentences around the text and the events.
         var block = AgentUntrusted.wrap(String(characters[offset ..< offset + count]), url: content.url)
-        while count > 0, block.utf8.count + 2_000 > AgentLimits.resultTextBytes {
+        while count > 0, block.utf8.count + Self.resultRoom > AgentLimits.resultTextBytes {
             count = count * 3 / 4
             block = AgentUntrusted.wrap(String(characters[offset ..< offset + count]), url: content.url)
         }
@@ -374,14 +401,15 @@ import Foundation
             limits["readTextMaximum"] = .number(Double(AgentLimits.readTextMaximumCharacters))
         }
         var structured: [String: AgentJSON] = ["tab": .string(handle), "url": .string(AgentAddress.reduced(content.url).absoluteString),
-                                               "title": .string(AgentUntrusted.wrap(content.title, url: content.url)), "offset": .number(Double(offset)),
+                                               "title": .string(Self.pageName(content.title, url: content.url)), "offset": .number(Double(offset)),
                                                "end": .number(Double(end)), "length": .number(Double(characters.count)), "text": .string(block)]
         if !limits.isEmpty { structured["limits"] = .object(limits) }
         return Outcome(result: AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: .object(structured)), site: site)
     }
 
-    /// The page's text, at most `AgentLimits.readTextMaximumCharacters`, refused when the tab's page, before or after the read, is one agents do not read (P16), and timed out when the page does not answer within `scriptWait`.
-    private func read(_ tab: AgentTabInfo, handle: String) async -> Resolved<EngineReadableContent> {
+    /// The page's text, at most `AgentLimits.readTextMaximumCharacters`, refused when the tab's page, before or after the read, is one agents do not read (P16) or the tab, before or after it, is no longer the client's to read (P17), as when the user takes it over meanwhile, and timed out when the page does not answer within `scriptWait`.
+    private func read(_ tab: AgentTabInfo, handle: String, _ grant: AgentGrant, state: AgentGrantState) async -> Resolved<EngineReadableContent> {
+        guard mayStillRead(tab, grant, state: state) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
         if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
             return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
         }
@@ -398,12 +426,20 @@ import Foundation
         case .failure?:
             return .outcome(Outcome(result: AgentToolResult(status: .error, code: "unreadable", text: "\(handle) has no document Arch can read, as while it shows an engine's error page.")))
         case .success(let content)?:
-            // The page may have moved on during the read.
+            // The page may have moved on during the read, and the user may have taken the tab over; a tab that closed meanwhile was still the client's.
+            if let current = host.tabs(withIDs: [tab.id]).first, !mayStillRead(current, grant, state: state) {
+                return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)))
+            }
             if case .refused(let rule, let sentence) = AgentPolicy.mayRead(content.url, allowsAI: allowsAI) {
                 return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
             }
             return .value(content)
         }
+    }
+
+    /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it.
+    private func mayStillRead(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
+        tab.agentOwnerID == grant.id || state.handles.sharedTabIDs.contains(tab.id)
     }
 
     private func waitFor(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
@@ -421,11 +457,12 @@ import Foundation
         let deadline = Date().addingTimeInterval(seconds)
         let waited: String
         var isMet = false
+        // A tab the user takes over during the wait is no longer the client's to watch: the read, or the check after the poll, refuses it (P17).
         if let text = arguments["text"]?.stringValue {
             waited = "the text \u{201C}\(text)\u{201D} to appear"
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
-                switch await read(current, handle: handle) {
+                switch await read(current, handle: handle, grant, state: state) {
                 case .value(let content): isMet = content.text.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 case .outcome(let failure) where failure.result.status == .refused: return Outcome(result: failure.result, site: site)
                 case .outcome: break
@@ -437,13 +474,14 @@ import Foundation
             let address = arguments["url"]?.stringValue
             waited = address.map { "its address to contain \u{201C}\($0)\u{201D}" } ?? "its document to load"
             isMet = await Self.poll(for: deadline.timeIntervalSinceNow) {
-                guard let current = host.tabs(withIDs: [tab.id]).first else { return true }
+                guard let current = host.tabs(withIDs: [tab.id]).first, mayStillRead(current, grant, state: state) else { return true }
                 guard let address else { return !current.isLoading && current.url != nil }
                 // The address as results show it, without its query and fragment, which agents never see, and never that of a page agents do not read.
                 guard AgentPolicy.showsTitle(of: current.url, allowsAI: allowsAI), let url = current.url else { return false }
                 return AgentAddress.reduced(url).absoluteString.contains(address)
             }
-            guard host.tabs(withIDs: [tab.id]).first != nil else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
+            guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
+            guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
         }
         let structured: AgentJSON = ["tab": .string(handle), "met": .bool(isMet)]
         if isMet { return Outcome(result: AgentToolResult(status: .ok, text: "\(handle): the wait for \(waited) is over; it happened.", structured: structured), site: site) }
@@ -465,12 +503,15 @@ import Foundation
             let address = AgentAddress.reduced(page.url).absoluteString
             guard address.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil || page.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil,
                   seen.insert(address).inserted else { continue }
-            let title = AgentUntrusted.wrap(page.title, url: page.url)
+            let title = Self.pageName(page.title, url: page.url)
             rows.append(["title": .string(title), "url": .string(address)])
             lines.append("\(title)  \(address)")
         }
         let summary = rows.isEmpty ? "No history page matches \u{201C}\(query)\u{201D}." : "\(rows.count == 1 ? "1 history page matches" : "\(rows.count) history pages match") \u{201C}\(query)\u{201D}."
-        return Outcome(result: AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["pages": .array(rows)]))
+        let list = Self.fitted(summary, lines, rows, noun: "history page")
+        var structured: [String: AgentJSON] = ["pages": .array(list.rows)]
+        if let limits = list.limits { structured["limits"] = limits }
+        return Outcome(result: AgentToolResult(status: .ok, text: list.text, structured: .object(structured)))
     }
 
     // MARK: Tabs
@@ -490,7 +531,7 @@ import Foundation
     }
 
     private static func tabJSON(_ tab: AgentTabInfo, handle: String) -> [String: AgentJSON] {
-        ["tab": .string(handle), "url": tab.url.map { .string(AgentAddress.reduced($0).absoluteString) } ?? .null, "title": .string(AgentUntrusted.wrap(tab.title, url: tab.url)),
+        ["tab": .string(handle), "url": tab.url.map { .string(AgentAddress.reduced($0).absoluteString) } ?? .null, "title": .string(pageName(tab.title, url: tab.url)),
          "loading": .bool(tab.isLoading), "engine": .string(tab.engine.rawValue)]
     }
 
@@ -552,12 +593,13 @@ import Foundation
         outcome.result.structured = .object(structured)
     }
 
-    /// An event's sentence and JSON. The page's text in it is an untrusted block, and a page agents do not read gives none.
+    /// An event's sentence and JSON. Whatever the page chose in it, its text and the names it gives, such as a title, a link's scheme, a download's file name, or the host that asks for a sign-in, is an untrusted block, and a page agents do not read gives none.
     private func describe(_ event: AgentEvent, state: AgentGrantState) -> (line: String, json: AgentJSON)? {
         let handle = state.handles.tabs.handle(for: event.tabID)
         let pageURL = host.tabs(withIDs: [event.tabID]).first?.url
         let readable = AgentPolicy.showsTitle(of: pageURL, allowsAI: allowsAI)
         func pageText(_ text: String) -> String? { readable && !text.isEmpty ? AgentUntrusted.wrap(text, url: pageURL) : nil }
+        func pageName(_ name: String) -> String? { readable && !name.isEmpty ? Self.pageName(name, url: pageURL) : nil }
         var json: [String: AgentJSON] = ["tab": .string(handle)]
         let line: String
         switch event.kind {
@@ -566,8 +608,9 @@ import Foundation
             if AgentPolicy.showsTitle(of: url, allowsAI: allowsAI), let url {
                 let address = AgentAddress.reduced(url).absoluteString
                 json["url"] = .string(address)
-                json["title"] = .string(AgentUntrusted.wrap(title, url: url))
-                line = "\(handle) loaded \(AgentUntrusted.wrap(title, url: url)) at \(address)."
+                let title = Self.pageName(title, url: url)
+                json["title"] = .string(title)
+                line = "\(handle) loaded \(title) at \(address)."
             } else {
                 line = "\(handle) loaded a page that agents do not read."
             }
@@ -593,12 +636,13 @@ import Foundation
             json["kind"] = "dialogWaiting"
             json["rule"] = "P9"
             json["dialog"] = .string(kind.rawValue)
-            let text = pageText(message)
+            // A sign-in names its host only when it is the page's own, so that neither a proxy's host nor another site's, as a frame's on a site excluded from AI, reaches the agent.
+            let text = kind != .signIn ? pageText(message) : message.lowercased() == pageURL?.host?.lowercased() ? pageName(message) : nil
             if let text { json["message"] = .string(text) }
             switch kind {
             case .confirm, .prompt: line = "\(handle) shows a \(kind.rawValue) dialog, which waits for the user in Arch (P9)" + (text.map { ": \($0)" } ?? ".")
             case .leavePage: line = "\(handle) asks whether to leave its page, which waits for the user in Arch (P9)."
-            case .signIn: line = "\(handle) asks for a user name and password\(readable ? " for \(message)" : ""), which the user answers in Arch (P9)."
+            case .signIn: line = "\(handle) asks for a user name and password\(text.map { " for \($0)" } ?? ""), which the user answers in Arch (P9)."
             }
         case .report(.alertDismissed(let message)):
             json["kind"] = "alertDismissed"
@@ -609,18 +653,24 @@ import Foundation
         case .report(.downloadRefused(let name)):
             json["kind"] = "downloadRefused"
             json["rule"] = "P6"
-            let text = pageText(name)
+            let text = pageName(name)
             if let text { json["name"] = .string(text) }
             line = "\(handle) started a download\(text.map { " of \($0)" } ?? ""), which Arch refused (P6). \(AgentPolicy.downloadSentence)"
         case .report(.externalAppRefused(let scheme)):
             json["kind"] = "externalAppRefused"
             json["rule"] = "P11"
-            line = "\(handle) tried to open a \(scheme): link in another app, which Arch refused (P11). \(AgentPolicy.externalAppSentence)"
+            let text = pageName(scheme)
+            if let text { json["scheme"] = .string(text) }
+            line = "\(handle) tried to open a link in another app\(text.map { " with the scheme \($0)" } ?? ""), which Arch refused (P11). \(AgentPolicy.externalAppSentence)"
         case .refused(let url):
             json["kind"] = "navigationRefused"
             json["rule"] = "P16"
             let isWeb = url.scheme.map { AgentPolicy.webSchemes.contains($0.lowercased()) } ?? false
-            line = isWeb ? "Arch stopped \(handle) from loading a site excluded from AI (P16)." : "Arch stopped \(handle) from loading an address with the scheme \(url.scheme ?? "none"):, which agents never open (P16)."
+            // The scheme is the page's choice, as the address of its own navigation.
+            let scheme = isWeb ? nil : pageName(url.scheme ?? "")
+            if let scheme { json["scheme"] = .string(scheme) }
+            line = isWeb ? "Arch stopped \(handle) from loading a site excluded from AI (P16)."
+                : "Arch stopped \(handle) from loading an address with \(scheme.map { "the scheme \($0), which" } ?? "a scheme that") agents never open (P16)."
         case .closedOverLimit:
             json["kind"] = "closedOverLimit"
             line = "A page in \(handle) opened another tab, which Arch closed: a client has at most \(AgentLimits.agentTabs) agent tabs open."
@@ -629,6 +679,21 @@ import Foundation
     }
 
     // MARK: Helpers
+
+    /// A name a page gives, such as its title, a link's scheme, or a download's file name, as an untrusted block of at most `AgentLimits.pageNameCharacters` characters; a longer one is cut and ends with an ellipsis. Pages choose them freely, and WebKit does not cut titles.
+    static func pageName(_ name: String, url: URL?) -> String {
+        let cut = name.prefix(AgentLimits.pageNameCharacters)
+        return AgentUntrusted.wrap(cut.endIndex < name.endIndex ? String(cut) + "\u{2026}" : name, url: url)
+    }
+
+    /// What a call answers in place of a result whose text would pass its limit; a tab's handle stays.
+    static func tooLong(_ result: AgentToolResult, tool: String) -> AgentToolResult {
+        var structured: [String: AgentJSON] = ["limits": ["resultTextBytes": .number(Double(AgentLimits.resultTextBytes))]]
+        if let handle = result.structured?["tab"]?.stringValue, handle.count <= 16 { structured["tab"] = .string(handle) }
+        return AgentToolResult(status: .error, code: "limitReached",
+                               text: "\(tool)'s result would pass \(AgentLimits.resultTextBytes / 1024) KB of text, the most a result carries, as a page's very long address can make it.",
+                               structured: .object(structured))
+    }
 
     /// Polls `condition` on the main actor every 50 milliseconds until it holds or `seconds` pass, and says whether it held.
     static func poll(for seconds: TimeInterval, until condition: () -> Bool) async -> Bool {

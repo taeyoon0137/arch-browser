@@ -10,6 +10,11 @@ import Testing
         #expect(pattern.matches(URL(string: "https://news.EXAMPLE.org/a")!))
         #expect(!pattern.matches(URL(string: "https://notexample.org/")!))
         #expect(!pattern.matches(URL(string: "https://example.org.evil.test/")!))
+        // A fully qualified name's trailing dot reaches the same site.
+        #expect(pattern.matches(URL(string: "https://example.org./plans")!))
+        #expect(pattern.matches(URL(string: "https://news.example.org../")!))
+        #expect(AISitePattern("example.org.").matches(URL(string: "https://example.org/")!))
+        #expect(!pattern.matches(URL(string: "https://example.org.evil.test./")!))
     }
 
     @Test func schemesMatchByName() {
@@ -19,7 +24,8 @@ import Testing
 
     @Test func localNetworkCoversLoopbackLinkLocalAndPrivateAddresses() {
         let local = AISitePattern.localNetwork
-        for address in ["http://localhost:3000", "http://printer.local", "http://app.localhost", "http://127.0.0.1", "http://10.1.2.3", "http://172.16.0.1", "http://172.31.255.1", "http://192.168.1.1", "http://169.254.1.1", "http://[::1]/", "http://[fe80::1]/", "http://[fd12::1]/", "http://[::ffff:192.168.0.1]/"] {
+        for address in ["http://localhost:3000", "http://printer.local", "http://app.localhost", "http://127.0.0.1", "http://10.1.2.3", "http://172.16.0.1", "http://172.31.255.1", "http://192.168.1.1", "http://169.254.1.1", "http://[::1]/", "http://[fe80::1]/", "http://[fd12::1]/", "http://[::ffff:192.168.0.1]/",
+                        "http://localhost.:3000/", "http://foo.localhost./", "http://printer.local./", "http://127.0.0.1./", "http://192.168.1.1../"] {
             #expect(local.matches(URL(string: address)!), "\(address)")
         }
         for address in ["https://example.org", "http://172.32.0.1", "http://8.8.8.8", "http://[2001:db8::1]/"] {

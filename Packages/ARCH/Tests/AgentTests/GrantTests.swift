@@ -26,7 +26,7 @@ import Testing
         #expect(harness.host.madeAgentsPersonas == 1)
         #expect(harness.host.agentOnlyPersonaID == agentsID)
         #expect(service.launchGrants.count == 1 && service.settings.grants.isEmpty)
-        #expect(try await TestClient(harness.location).hello().status == .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", expiry: .whenArchQuits)))
+        #expect(try await TestClient(harness.location).hello().status == .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", space: "Personal", expiry: .whenArchQuits)))
         // A later call uses the grant without asking, and so does a call for another grant in the existing Agents Persona.
         #expect(try await client.callTool("session_info").status == .ok)
         #expect(harness.prompt.requests.count == 1)

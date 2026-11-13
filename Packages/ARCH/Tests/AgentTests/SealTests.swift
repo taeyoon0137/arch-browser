@@ -37,7 +37,7 @@ import Testing
         #expect(service.settings.grants.map(\.id) == [written.grantID])
         #expect(service.settings.grants.first?.lastUsedAt != nil)
         #expect(harness.socketExists)
-        #expect(try await TestClient(harness.location).hello().status == .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", expiry: .whenRevoked)))
+        #expect(try await TestClient(harness.location).hello().status == .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", space: "Personal", expiry: .whenRevoked)))
     }
 
     @Test(arguments: ["edited", "unreadable", "keyGone"])

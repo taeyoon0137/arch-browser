@@ -911,11 +911,11 @@ public final class BrowserSession: ObservableObject {
         scheduleSave()
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
+    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite, and an agent's tab not at all.
     public func requestCloseTab(_ tab: Tab) {
-        let isUndoable = tab.spaceID != nil
+        let isUndoable = Self.closeKeeps(tab, remember: true).closedList
         closeWhenPageAgrees(tab) { [weak self] in
-            // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
+            // ⌘Z cannot reopen a tab that the closed list does not keep, a favorite's or an agent's, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
             if isUndoable { self?.undoableCloseCount += 1 } else { self?.forgetUndoableCloses() }
         }
     }
@@ -953,7 +953,7 @@ public final class BrowserSession: ObservableObject {
         }
         if let owner = tab.agentOwnerID {
             agentMonitor?.agentTabDidClose(tab, owner: owner)
-            removeAgentFolderIfEmpty(tab.folderID)
+            removeEmptyAgentFolders()
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
@@ -969,7 +969,7 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// What closing `tab` keeps of it: a record in the closed list, which ⇧⌘T reopens, for a space's tab when `remember` holds, and an entry in the tab close log. An agent's tab leaves neither (docs/agents.md, In the browser ▸ Agent folders).
+    /// What closing `tab` keeps of it: a record in the closed list, which ⇧⌘T and ⌘Z reopen, for a space's tab when `remember` holds, and an entry in the tab close log. An agent's tab leaves neither (docs/agents.md, In the browser ▸ Agent folders).
     static func closeKeeps(_ tab: Tab, remember: Bool) -> (closedList: Bool, closeLog: Bool) {
         guard tab.agentOwnerID == nil else { return (false, false) }
         return (remember && tab.spaceID != nil, true)
@@ -1057,6 +1057,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = target.folderID
         reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
         tabs = reordered
+        removeEmptyAgentFolders()
     }
 
     /// Settings ▸ Sidebar saves under this key how many hours an unpinned tab stays open without being selected; 0 turns archiving off.
@@ -1088,6 +1089,7 @@ public final class BrowserSession: ObservableObject {
         objectWillChange.send()
         tab.folderID = nil
         tab.isPinned.toggle()
+        removeEmptyAgentFolders()
     }
 
     /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or a dotted host without spaces. Adds `https://` to a dotted host. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
@@ -1308,6 +1310,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = nil
         reordered.append(tab)
         tabs = reordered
+        removeEmptyAgentFolders()
         for window in windows where window.selectedTabID == tab.id { window.currentSpaceID = spaceID }
     }
 
@@ -1320,6 +1323,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = nil
         reordered.append(tab)
         tabs = reordered
+        removeEmptyAgentFolders()
     }
 
     // MARK: Folders
@@ -1368,6 +1372,7 @@ public final class BrowserSession: ObservableObject {
         tab.folderID = folderID
         reordered.append(tab)
         tabs = reordered
+        removeEmptyAgentFolders()
     }
 
     /// Takes a tab out of its folder.
@@ -1393,11 +1398,18 @@ public final class BrowserSession: ObservableObject {
         updateFolder(id) { $0.agentSessionID = nil }
     }
 
-    /// Removes an agent folder once its last tab has closed or left it.
-    private func removeAgentFolderIfEmpty(_ id: UUID?) {
-        guard let id, folders.contains(where: { $0.id == id && $0.isAgentFolder }), !tabs.contains(where: { $0.folderID == id }) else { return }
-        folders.removeAll { $0.id == id }
-        windows.forEach { $0.endRenamingFolder(id) }
+    /// Removes the agent folders whose last tab has closed or left them, by a drag, a pin, or a move to another folder or space. Each change that takes a tab out of a folder calls it.
+    private func removeEmptyAgentFolders() {
+        let empty = Self.emptyAgentFolderIDs(in: folders, tabs: tabs)
+        guard !empty.isEmpty else { return }
+        folders.removeAll { empty.contains($0.id) }
+        for id in empty { windows.forEach { $0.endRenamingFolder(id) } }
+    }
+
+    /// The agent folders that hold none of `tabs`.
+    static func emptyAgentFolderIDs(in folders: [TabFolder], tabs: [Tab]) -> Set<UUID> {
+        let held = Set(tabs.compactMap(\.folderID))
+        return Set(folders.filter { $0.isAgentFolder && !held.contains($0.id) }.map(\.id))
     }
 
     /// Appends a folder to a space's pinned or open folders.
@@ -1416,6 +1428,7 @@ public final class BrowserSession: ObservableObject {
         let destination = reordered.firstIndex { $0.spaceID == first.spaceID && $0.isPinned == first.isPinned && $0.folderID == nil } ?? reordered.endIndex
         reordered.insert(contentsOf: moved, at: destination)
         tabs = reordered
+        removeEmptyAgentFolders()
     }
 
     func updateFolder(_ id: UUID, _ change: (inout TabFolder) -> Void) {

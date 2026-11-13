@@ -212,7 +212,8 @@ enum CLICommands {
         case .bound:
             access = "This connection belongs to an agent session in Arch."
         case .granted(let grant):
-            access = "Grant: \(grant.level.title) in the \(grant.persona) Persona, \(expiryText(grant.expiry))."
+            // A Persona's place reads as "Persona / Space".
+            access = "Grant: \(grant.level.title) in \(grant.space.map { "\(grant.persona) / \($0)" } ?? "the \(grant.persona) Persona"), \(expiryText(grant.expiry))."
         case .noGrant:
             access = "Grant: none yet. The first tool call asks in Arch."
         case .refused(let refusal):

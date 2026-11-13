@@ -77,6 +77,8 @@ import Testing
              , ["protocol": 1, "version": "0.1.0", "status": "granted", "grant": ["level": "actInAgentTabs", "persona": "Work", "expiry": "2027-01-15T08:00:00Z"]]),
             (AgentHelloAnswer(version: "0.1.0", status: .granted(AgentGrantSummary(level: .askBeforeActing, persona: "Work", expiry: .whenRevoked)))
              , ["protocol": 1, "version": "0.1.0", "status": "granted", "grant": ["level": "askBeforeActing", "persona": "Work", "expiry": "revoke"]]),
+            (AgentHelloAnswer(version: "0.1.0", status: .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", space: "Home", expiry: .whenArchQuits)))
+             , ["protocol": 1, "version": "0.1.0", "status": "granted", "grant": ["level": "readOnly", "persona": "Agents", "space": "Home", "expiry": "quit"]]),
             (AgentHelloAnswer(protocol: 2, version: "0.2.0", status: .refused(AgentRefusal(reason: .protocolMismatch, message: "Arch speaks version 2."))),
              ["protocol": 2, "version": "0.2.0", "status": "refused", "refusal": ["reason": "protocol", "message": "Arch speaks version 2."]]),
         ]

@@ -10,6 +10,8 @@ public enum AgentLimits {
     public static let readTextMaximumCharacters = 400_000
     /// The text of any one result, in bytes (48 KB).
     public static let resultTextBytes = 48 * 1024
+    /// A name a page gives in a result, such as its title, a link's scheme, or a download's file name, in characters; a longer one is cut and ends with an ellipsis.
+    public static let pageNameCharacters = 300
 
     /// A screenshot's longest side in pixels, its JPEG quality, and its size in bytes (1 MB). A full page taller than `screenshotFullPageCSSHeight` CSS pixels is cut there.
     public static let screenshotLongestSide = 1_568
