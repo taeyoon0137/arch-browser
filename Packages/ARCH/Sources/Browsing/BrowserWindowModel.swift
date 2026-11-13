@@ -337,6 +337,85 @@ public final class BrowserWindowModel: ObservableObject {
         session.favoriteTabs.first { $0.value.id == selectedTabID }?.key
     }
 
+    // MARK: Saved pages
+
+    /// Tab ▸ Go Back to Saved Page: the selected tab, a pinned tab or a favorite's tab, is off its saved page (bookmark rule 3), and no internal page or preview covers it, as for Home.
+    public var canGoBackToSavedPage: Bool {
+        !isSelectedPageCovered && selectedTab.map(session.isOffSavedPage) == true
+    }
+
+    public func goBackToSavedPage() {
+        guard canGoBackToSavedPage, let tab = selectedTab else { return }
+        session.goBackToSavedPage(tab)
+    }
+
+    /// Tab ▸ Use Current Page as Saved Page: the selected tab is pinned, or a favorite's tab whose page no other favorite of the Persona has, and has an address.
+    public var canUseCurrentPageAsSavedPage: Bool {
+        selectedTab.map(session.canUseCurrentPageAsSavedPage) == true
+    }
+
+    public func useCurrentPageAsSavedPage() {
+        selectedTab.map(session.useCurrentPageAsSavedPage)
+    }
+
+    /// Tab ▸ Edit Saved Address…: the selected tab is pinned, and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
+    public var canEditSavedAddress: Bool {
+        selectedTab?.isPinned == true && nsWindow?.attachedSheet == nil
+    }
+
+    public func promptToEditSavedAddress() {
+        guard canEditSavedAddress, let tab = selectedTab else { return }
+        promptToEditSavedAddress(of: tab)
+    }
+
+    /// Edit Saved Address…: asks for a pinned tab's saved address in a sheet on the window, prefilled with it. Text that is no address beeps and changes nothing.
+    func promptToEditSavedAddress(of tab: Tab) {
+        guard tab.isPinned else { return }
+        let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
+        askForText(title: "Edit Saved Address", message: "Go Back to Saved Page returns \u{201C}\(tab.displayTitle)\u{201D} to this address.", fields: [("Address", address)], button: "Save") { [weak tab] texts in
+            if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }
+        }
+    }
+
+    /// Edit Favorite…: asks for a favorite's name and address in a sheet on the window, prefilled with them. An empty name keeps the old one; an address that is no address, or another favorite's, beeps and changes nothing.
+    func promptToEditFavorite(_ favorite: Favorite) {
+        askForText(title: "Edit Favorite", message: nil, fields: [("Name", favorite.title), ("Address", favorite.url.absoluteString)], button: "Save") { [weak self] texts in
+            if self?.session.editFavorite(favorite.id, name: texts[0], address: texts[1]) != true { NSSound.beep() }
+        }
+    }
+
+    /// Duplicate: opens a copy of the tab after it and selects it here.
+    func duplicate(_ tab: Tab) {
+        guard let copy = session.duplicateTab(tab) else { return }
+        selectTab(copy.id)
+    }
+
+    /// Asks in a sheet on the window with one text field for each of `fields`, which starts with its value, and passes the fields' text to `use` when the user chooses `button`. Nothing shows while the window shows another sheet.
+    private func askForText(title: String, message: String?, fields: [(placeholder: String, value: String)], button: String, then use: @escaping ([String]) -> Void) {
+        guard let nsWindow, nsWindow.attachedSheet == nil, !fields.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        if let message { alert.informativeText = message }
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancel")
+        let textFields = fields.map { field in
+            let textField = NSTextField(string: field.value)
+            textField.placeholderString = field.placeholder
+            textField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+            return textField
+        }
+        let stack = NSStackView(views: textFields)
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 280, height: CGFloat(24 * textFields.count + 8 * (textFields.count - 1)))
+        zip(textFields, textFields.dropFirst()).forEach { $0.nextKeyView = $1 }
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = textFields[0]
+        alert.beginSheetModal(for: nsWindow) { response in
+            if response == .alertFirstButtonReturn { use(textFields.map(\.stringValue)) }
+        }
+    }
+
     // MARK: Previews
 
     /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front leave the tab alone.

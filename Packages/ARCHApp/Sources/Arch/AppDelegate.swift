@@ -246,6 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let splitViewItem = tabMenu.addItem(withTitle: "Open in Split View", action: #selector(openInSplitView), keyEquivalent: "=")
         splitViewItem.keyEquivalentModifierMask = [.command, .option]
         tabMenu.addItem(.separator())
+        // The saved page items have no default shortcuts; Settings ▸ Shortcuts can give them one.
+        tabMenu.addItem(withTitle: "Go Back to Saved Page", action: #selector(goBackToSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: "Use Current Page as Saved Page", action: #selector(useCurrentPageAsSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: "Edit Saved Address\u{2026}", action: #selector(editSavedAddress), keyEquivalent: "")
+        tabMenu.addItem(.separator())
         let nextTabItem = tabMenu.addItem(withTitle: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
         nextTabItem.keyEquivalentModifierMask = [.command, .shift]
         let previousTabItem = tabMenu.addItem(withTitle: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
@@ -429,6 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func togglePinned() { frontSidebarTarget().selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.activeWindow?.selectedTab.map(session.addFavorite) }
     @objc private func openInSplitView() { frontSidebarTarget().openSelectedTabInSplitView() }
+    // The saved page items act on the sidebar target's selected tab, a pinned tab or a favorite's tab.
+    @objc private func goBackToSavedPage() { frontSidebarTarget().goBackToSavedPage() }
+    @objc private func useCurrentPageAsSavedPage() { frontSidebarTarget().useCurrentPageAsSavedPage() }
+    @objc private func editSavedAddress() { frontSidebarTarget().promptToEditSavedAddress() }
     @objc private func newSpace() { frontSidebarTarget().addSpace() }
     @objc private func nextSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: true) }
     @objc private func previousSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: false) }
@@ -514,6 +523,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
+        }
+        // Go Back needs a tab off its saved page with no internal page or preview over it, Use Current Page a page to save, and Edit Saved Address a pinned tab and no other sheet on its window.
+        if item.action == #selector(goBackToSavedPage) {
+            return session?.lastMainWindow?.canGoBackToSavedPage == true
+        }
+        if item.action == #selector(useCurrentPageAsSavedPage) {
+            return session?.lastMainWindow?.canUseCurrentPageAsSavedPage == true
+        }
+        if item.action == #selector(editSavedAddress) {
+            return session?.lastMainWindow?.canEditSavedAddress == true
         }
         // Clearing site data needs a web page in front and no sheet on its window.
         if item.action == #selector(clearSiteData) {

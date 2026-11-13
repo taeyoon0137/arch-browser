@@ -1,4 +1,4 @@
-// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the close button and the badges shown in its place, the Command key state that shows the shortcut numbers, and the new tab row.
+// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
 import AppKit
 import SwiftUI
 
@@ -39,9 +39,14 @@ struct TabRowView: View {
                 TabAudioBadge()
             }
             Spacer(minLength: 0)
-            // Show the close button under the pointer; otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
+            // Show the close button under the pointer, after a back button while a pinned tab is off its saved site (bookmark rule 3); otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
             if showsHover {
-                TabCloseButton { session.requestCloseTab(tab) }
+                HStack(spacing: 2) {
+                    if tab.isOffSavedSite, let saved = tab.savedPage {
+                        TabRowButton(symbol: "arrow.uturn.backward", label: "Go Back to Saved Page", help: "Go Back to \(saved.url.absoluteString)") { session.goBackToSavedPage(tab) }
+                    }
+                    TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
+                }
             } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
                 TabShortcutBadge(number: number)
                     .transition(.modifier(active: BlurFade(isHidden: true), identity: BlurFade(isHidden: false)))
@@ -70,6 +75,17 @@ struct TabRowView: View {
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
             Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
             Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+            Divider()
+            // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
+            if tab.isPinned {
+                if session.isOffSavedPage(tab) {
+                    Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+                }
+                Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
+                Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
+            }
+            Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
+            Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
             Divider()
             Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
             let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []
@@ -232,13 +248,17 @@ final class CommandKeyState: ObservableObject {
     }
 }
 
-struct TabCloseButton: View {
+/// A round button at the end of a tab row under the pointer, such as Close Tab or the way back to a pinned tab's saved page.
+struct TabRowButton: View {
+    let symbol: String
+    let label: String
+    let help: String
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark")
+            Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.primary.opacity(isHovering ? 0.1 : 0)))
@@ -247,8 +267,8 @@ struct TabCloseButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .onHover { isHovering = $0 }
-        .help("Close Tab")
-        .accessibilityLabel("Close Tab")
+        .help(help)
+        .accessibilityLabel(label)
     }
 }
 

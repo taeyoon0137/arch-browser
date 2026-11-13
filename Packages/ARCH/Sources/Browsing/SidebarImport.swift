@@ -241,12 +241,14 @@ extension SidebarImport {
         var favorites: [Favorite]
         var tabs: [TabState]
 
-        /// A space's tab: pinned ones are found by address, and recorded ones by ID.
+        /// A space's tab: pinned ones are found by their current address and their saved page's, and recorded ones by ID.
         struct TabState {
             var id: UUID
             var spaceID: UUID
             var isPinned: Bool
             var url: URL?
+            /// A pinned tab's saved page, which stays its bookmark wherever its page went (bookmark rule 2).
+            var savedURL: URL?
         }
 
         /// The IDs of the Persona's spaces, pinned folders, favorites, and tabs. A recorded item counts only while it is among them, so an item the user removed imports again.
@@ -261,7 +263,7 @@ extension SidebarImport {
 
     /// What a row adds to the session: its Persona, and the spaces, folders, favorites, and pinned tabs that are not there yet, resolved against the sidebar and the row's record entry without changing either.
     ///
-    /// A recorded item counts while it is in the Persona, wherever the user moved it, and keeps out the source item it came from. Without a recorded item, names and addresses decide: a space merges into one of the Persona's with its name, a folder into a pinned folder of the space with its name, and favorites and pinned tabs come once per address in the Persona's favorites or in the space's pinned tabs, inside or outside folders.
+    /// A recorded item counts while it is in the Persona, wherever the user moved it, and keeps out the source item it came from. Without a recorded item, names and addresses decide: a space merges into one of the Persona's with its name, a folder into a pinned folder of the space with its name, and favorites and pinned tabs come once per address in the Persona's favorites or in the space's pinned tabs, inside or outside folders, where a pinned tab's saved page counts as well as its current address.
     struct Plan {
         /// The Persona to add, for a new destination or for one deleted since the user picked it.
         let newPersona: Persona?
@@ -277,9 +279,11 @@ extension SidebarImport {
         /// The row's entry with the Persona as the last one used and the IDs of what the row brought to it.
         let entry: Record.Entry
 
+        /// A pinned tab to open, saved at its imported address and title (bookmark rule 2).
         struct PinnedTab: Equatable {
             let id: UUID
             let url: URL
+            let title: String
             let customTitle: String?
             let spaceID: UUID
             let folderID: UUID?
@@ -328,7 +332,7 @@ extension SidebarImport {
             private var personaSpaces: [Space]
             private var pinnedFolders: [TabFolder]
             private var favoriteAddresses: Set<URL>
-            /// The addresses pinned in each space, inside or outside folders.
+            /// The addresses pinned in each space, inside or outside folders: each pinned tab's current address and saved page.
             private var pinnedAddresses: [UUID: Set<URL>] = [:]
 
             init(personaID: Persona.ID, recorded: Record.Items?, in sidebar: Sidebar) {
@@ -340,7 +344,7 @@ extension SidebarImport {
                 pinnedFolders = sidebar.folders.filter { folder in folder.isPinned && personaSpaces.contains { $0.id == folder.spaceID } }
                 favoriteAddresses = Set(sidebar.favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
                 for tab in sidebar.tabs where tab.isPinned {
-                    if let url = tab.url { pinnedAddresses[tab.spaceID, default: []].insert(url) }
+                    pinnedAddresses[tab.spaceID, default: []].formUnion([tab.url, tab.savedURL].compactMap { $0 })
                 }
             }
 
@@ -427,7 +431,7 @@ extension SidebarImport {
 
             private mutating func pin(_ items: [Item], in spaceID: UUID, folderID: UUID?) {
                 for item in items {
-                    let tab = PinnedTab(id: UUID(), url: item.url, customTitle: item.customTitle, spaceID: spaceID, folderID: folderID)
+                    let tab = PinnedTab(id: UUID(), url: item.url, title: item.title, customTitle: item.customTitle, spaceID: spaceID, folderID: folderID)
                     pinnedTabs.append(tab)
                     counts.pinnedTabs += 1
                     if let id = item.sourceID { made.pinnedTabs[id] = tab.id }

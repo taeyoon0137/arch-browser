@@ -214,6 +214,30 @@ import Testing
         #expect(try #require(folder.store.load()).tabs.map(\.suggestedTitle) == loaded.tabs.map(\.suggestedTitle))
     }
 
+    @Test func version12FilesSavePinnedTabsAtThePagesTheyShow() throws {
+        let folder = try SessionFolder()
+        try folder.write(version12File)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.tabs.map(\.isPinned) == [true, false, false])
+        #expect(loaded.tabs.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/a")!, title: "A"), nil, nil])
+        #expect(loaded.closedTabs?.map(\.savedPage) == [nil])
+    }
+
+    @Test func savedPagesLoadAndSaveWithOpenAndClosedRecords() throws {
+        let folder = try SessionFolder()
+        try folder.write(version13File)
+        let loaded = try #require(folder.store.load())
+        let saved = SavedPage(url: URL(string: "https://example.org/saved")!, title: "Saved")
+        // The unpinned records' saved pages go, and the pinned ones keep theirs wherever their pages went.
+        #expect(loaded.tabs.map(\.url) == ["a", "b", "c"].map { URL(string: "https://example.org/\($0)") })
+        #expect(loaded.tabs.map(\.savedPage) == [saved, nil, nil])
+        #expect(loaded.closedTabs?.map(\.savedPage) == [saved, nil])
+        folder.store.saveNow(loaded)
+        let reloaded = try #require(folder.store.load())
+        #expect(reloaded.tabs.map(\.savedPage) == loaded.tabs.map(\.savedPage))
+        #expect(reloaded.closedTabs?.map(\.savedPage) == loaded.closedTabs?.map(\.savedPage))
+    }
+
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
         let folder = try SessionFolder()
         let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": [1, 2],"#)
@@ -498,3 +522,10 @@ private let version12File = version8File
     .replacingOccurrences(of: #""version": 8,"#, with: #""version": 12,"#)
     .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "suggestedTitle": { "title": "Example Article", "url": "https://example.org/a" }, "isPinned": true,"#)
     .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "suggestedTitle": { "url": "https://example.org/b" }, "isPinned": false,"#)
+
+/// A version 13 file whose pinned tab, saved at another page, and an unpinned tab carry saved pages, as do a pinned and an unpinned closed record.
+private let version13File = version8File
+    .replacingOccurrences(of: #""version": 8,"#, with: #""version": 13,"#)
+    .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" },"#)
+    .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "isPinned": false, "savedPage": { "url": "https://example.org/stray", "title": "Stray" },"#)
+    .replacingOccurrences(of: #""closedTabs": [ { "#, with: #""closedTabs": [ { "id": "\#(UUID())", "spaceID": "\#(spaceA)", "url": "https://example.org/gone", "title": "Gone", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" } }, { "savedPage": { "url": "https://example.org/stray", "title": "Stray" }, "#)

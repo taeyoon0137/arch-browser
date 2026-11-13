@@ -32,6 +32,16 @@ struct FavoritesGridView: View {
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
                     .contextMenu {
+                        // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
+                        let tab = session.openTab(ofFavorite: favorite)
+                        if let tab, session.isOffSavedPage(tab) {
+                            Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+                        }
+                        Button("Use Current Page as Saved Page") { tab.map(session.useCurrentPageAsSavedPage) }
+                            .disabled(tab.map(session.canUseCurrentPageAsSavedPage) != true)
+                        Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
+                        Button("Copy Address") { BrowserSession.copyAddress(favorite.url) }
+                        Divider()
                         Button("Close") { session.closeFavorite(favorite) }
                             .disabled(!session.hasTab(favorite))
                         Divider()
@@ -95,9 +105,16 @@ struct FavoriteTileView: View {
             .accessibilityLabel(favorite.title)
             .accessibilityValue(isOpen ? "Open" : "")
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-            .onAppear {
-                guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
-                FaviconLoader.load(url) { icon = $0 }
+            .onAppear(perform: loadIcon)
+            // Use Current Page as Saved Page and Edit Favorite… can move the favorite to another site.
+            .onChange(of: favorite.url) {
+                icon = nil
+                loadIcon()
             }
+    }
+
+    private func loadIcon() {
+        guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
+        FaviconLoader.load(url) { icon = $0 }
     }
 }

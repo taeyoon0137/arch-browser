@@ -15,7 +15,15 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public internal(set) var isInSmallWindow = false
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
-    @Published public var isPinned: Bool
+    /// Pinning saves the page the tab shows as its saved page, or the first address its page reports when it shows none yet, and unpinning forgets it (bookmark rule 2). Pin Tab, Unpin Tab, and drops among the pinned or open tabs or into a folder of either list all set it, so each follows the rule; a tab made pinned, as one that restores or reopens, takes its saved page from the caller.
+    @Published public var isPinned: Bool {
+        didSet {
+            guard isPinned != oldValue else { return }
+            savedPage = isPinned ? currentPage : nil
+        }
+    }
+    /// The page a pinned tab returns to (bookmark rule 2): set as the tab becomes pinned, from its record when it restores or reopens, and by Use Current Page as Saved Page and Edit Saved Address…. Nil for every other tab. `docs/bookmarks.md`, Saved pages, describes the rest.
+    @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
     /// The window that selects the tab updates this. Archiving closes unpinned tabs whose dates are too old.
@@ -116,23 +124,24 @@ public final class Tab: ObservableObject, Identifiable {
         replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
     }
 
-    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
+    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
     func restore(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
         lastActivatedAt = record.lastActivatedAt ?? Date()
         customTitle = record.customTitle
         suggestedTitle = record.suggestedTitle
+        savedPage = record.savedPage
         self.folderID = folderID
         isRestored = true
         recordedURL = record.url
     }
 
-    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
+    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
             // A published value also sends its current value to each new subscriber, which is no change.
             publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
-        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($folderID), changes($url), changes($title),
+        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($url), changes($title),
                                     changes($customTitle), changes($suggestedTitle))
             .eraseToAnyPublisher()
     }
@@ -151,11 +160,17 @@ public final class Tab: ObservableObject, Identifiable {
 }
 
 extension Tab: EngineWebContentsUIDelegate {
-    public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
+    /// A saved page taken before its page showed a title takes the first title the page shows at the saved address.
+    public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {
+        title = webContents.title
+        if let saved = savedPage, saved.title.isEmpty, !title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) == true { savedPage?.title = title }
+    }
+    /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2).
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+        if isPinned, savedPage == nil, let page = currentPage { savedPage = page }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
@@ -326,7 +341,8 @@ extension Tab: EngineWebContentsUIDelegate {
         return ActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
     }
 
-    private static func copyToPasteboard(_ url: URL) {
+    /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.
+    static func copyToPasteboard(_ url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let item = NSPasteboardItem()

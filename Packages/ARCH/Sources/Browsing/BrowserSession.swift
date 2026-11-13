@@ -670,6 +670,12 @@ public final class BrowserSession: ObservableObject {
         return added.count
     }
 
+    /// Changes the favorite with the ID, as Use Current Page as Saved Page and Edit Favorite… do (`SavedPage.swift`).
+    func updateFavorite(_ id: UUID, _ change: (inout Favorite) -> Void) {
+        guard let index = favorites.firstIndex(where: { $0.id == id }) else { return }
+        change(&favorites[index])
+    }
+
     /// Removes a favorite once its tab, if it has one, agrees to close.
     public func removeFavorite(_ favorite: Favorite) {
         endFavoriteTab(favorite) { [weak self] in
@@ -930,7 +936,8 @@ public final class BrowserSession: ObservableObject {
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
         if remember, let spaceID = tab.spaceID {
-            addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
+            addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind,
+                                                      personaID: tab.personaID, savedPage: tab.savedPage))
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
@@ -968,7 +975,7 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab under its own ID in its original space and folder, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
+    /// Reopens the newest closed tab under its own ID in its original space and folder, with its saved page when it was pinned, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
@@ -982,7 +989,18 @@ public final class BrowserSession: ObservableObject {
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
         tab.customTitle = record.customTitle
+        tab.savedPage = record.savedPage
         tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
+    }
+
+    /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate.
+    func duplicateTab(_ tab: Tab) -> Tab? {
+        guard let spaceID = tab.spaceID, tab.isListedInSidebar, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        let copy = makeTab(makeWebContents(url: tab.url, engine: tab.engineKind, state: nil, in: tab.personaID), id: UUID(), spaceID: spaceID, personaID: tab.personaID, pinned: tab.isPinned)
+        copy.folderID = tab.folderID
+        copy.savedPage = tab.savedPage
+        tabs.insert(copy, at: index + 1)
+        return copy
     }
 
     /// Pressing another key or clicking in the page makes ⌘Z undo there instead of reopening tabs.
@@ -1371,7 +1389,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Browser import
 
-    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected. `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
+    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected and saved at its imported address (bookmark rule 2). `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
     public func addImport(_ row: SidebarImport, to destination: SidebarImport.Destination, record: inout SidebarImport.Record) -> SidebarImport.Counts {
         let plan = SidebarImport.Plan(row, to: destination, entry: record.entry(for: row.profile), in: importSidebar)
         if let persona = plan.newPersona {
@@ -1385,6 +1403,7 @@ public final class BrowserSession: ObservableObject {
             let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
             tab.folderID = pinned.folderID
             tab.customTitle = pinned.customTitle
+            tab.savedPage = SavedPage(url: pinned.url, title: pinned.title)
             // It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing. So it is marked before it joins the list that the hooks follow.
             tab.isRestored = true
             tab.recordedURL = pinned.url
@@ -1398,7 +1417,7 @@ public final class BrowserSession: ObservableObject {
     /// The sidebar as the browser import's plan resolves a row against it.
     private var importSidebar: SidebarImport.Sidebar {
         SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap { tab in
-            tab.spaceID.map { SidebarImport.Sidebar.TabState(id: tab.id, spaceID: $0, isPinned: tab.isPinned, url: tab.url) }
+            tab.spaceID.map { SidebarImport.Sidebar.TabState(id: tab.id, spaceID: $0, isPinned: tab.isPinned, url: tab.url, savedURL: tab.savedPage?.url) }
         })
     }
 

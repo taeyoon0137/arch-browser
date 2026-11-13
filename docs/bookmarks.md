@@ -12,7 +12,7 @@
 
 ### Arch today
 
-- A pinned tab is a tab with `isPinned`. `session.json` keeps only its current address and title, so a pinned tab has no address of its own to return to. Closing it moves it to the closed list.
+- A pinned tab is a tab with `isPinned` and, since III.16, a saved page (`Tab.savedPage`), which `session.json` keeps beside its current address and title. Closing it moves it to the closed list, whose record keeps the saved page.
 - A favorite's `url` and `title` already act as its saved page: Close ends the favorite's tab, and the next click opens the favorite's address. `savedFavoriteTabs` keeps the last session's tabs as records (address, engine, page state) until their favorites are clicked.
 - A restored tab has an `UnloadedWebContents` stand-in until a window first shows it (III.14). A load on the stand-in replaces its saved page without loading. Nothing yet unloads a loaded tab's page.
 - A tab's page state is its engine's `restorableState`: on WebKit, `interactionState`, which brings back the back list and the scroll position. The Chromium adapter keeps none (`restorableState` is nil), so a restored Chromium tab loads its last address without its back list (regression check 58).
@@ -22,11 +22,11 @@
 - `BrowserSession.closeTab(_:remember:reason:)` has these callers: `requestCloseTab` once the page agrees (⌘W, the row's button, Close Tab, Close Other Tabs, which skips pinned tabs, and a small window's close); `tab.didClose`, when the page closes itself or the engine closes its crashed page; `SessionWebExtensionHost.close`, for an extension's `tabs.remove`; `didOpenOnlyDownload` with `remember: false`, for a tab that only pointed at a file, which a restored tab (`isRestored`) reaches without fetching the file; `deletePersona`, which closes each of the Persona's tabs into the closed list without asking; and archiving, which closes only unpinned tabs. The closed list keeps 100 records.
 - Folders are one level deep, in a space's pinned or open list. Browser import joins nested folder names into one level ("Work / Docs"). Folder rows do not drag.
 - `Tab.isUnread` puts a dot on the row of a tab that a page opened in the background; selecting the tab clears it. It is not saved.
-- `session.json` is at version 12. Each step that adds fields takes the next free version number when it lands and migrates through `normalized()`. VII.12 adds `TabFolder.agentSessionID`, which is not encoded, for agent folders among the open tabs.
+- `session.json` is at version 13, which III.16 took for saved pages. Each step that adds fields takes the next free version number when it lands and migrates through `normalized()`. VII.12 adds `TabFolder.agentSessionID`, which is not encoded, for agent folders among the open tabs.
 - `AI` runs command-line tools through `CommandLineProcess` (`posix_spawn`, its own process group, pipes, a minimal environment) and finds them with `LoginShell.locateExecutable(named:)` in the login shell's PATH. Both are internal to `AI`. `LoginShell` reads only PATH from the login shell, and `baseEnvironment` holds `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`, `TMPDIR`, and `TERM=dumb`; a command-line provider adds the non-secret variables of its configuration (`docs/ai.md`). Settings opens the built-in terminal through a closure the app shell sets (`PreferencesWindowController.openTerminal`).
 - `FaviconLoader` caches icons by icon address, shares concurrent downloads, and clears its cache once it holds 200. At every launch `restoreTabs` has each restored tab's stand-in request its site's `/favicon.ico` (`loadSiteIcon()`), and a load on a stand-in requests the new site's.
 - The app's Info.plist sets no App Transport Security exception, so the app's own `URLSession` refuses plain HTTP, as for site icons.
-- Browser import counts an address as already pinned in a space by each pinned tab's current address (`tab.url`), and merges an imported folder into a pinned folder of the same name (`SidebarImport`).
+- Browser import counts an address as already pinned in a space by each pinned tab's current address (`tab.url`) and, since III.16, its saved page, and merges an imported folder into a pinned folder of the same name (`SidebarImport`).
 - The bottom bar lists every Persona's spaces, and each symbol's tooltip and accessibility label is the space's name alone (`SidebarBottomBar`). New Persona gives every new Persona a space named Personal.
 
 ### Feeds
@@ -70,7 +70,7 @@ Code comments and documents cite these rules by number, as in "bookmark rule 4".
 7. Limits: 10, 25 (default), or 50 items per folder; 20 live folders in the app; 5 MB per feed response; 8 MB of `gh` output; 30 seconds per fetch; titles cut at 300 characters; item addresses only `http` and `https`; feed addresses without a user name or password, since feeds load without credentials (a token in the query is kept as rule 8 says).
 8. A feed address with a query can carry a token, as private feeds do (`?token=…`), so Arch keeps such an address only in a Keychain item. `session.json` keeps the address without its query and fragment, marked as kept in the Keychain, and the folder stays on its Mac, since Keychain items never sync (`docs/sync.md`). Errors and tooltips show the address without its query. Arch cannot tell a token in an address's path from the rest of the path, so such an address is kept and synced as any other (risk 7).
 
-## Saved pages (III.16)
+## Saved pages (III.16, built)
 
 - `SavedPage` holds an address and a title. `Tab.savedPage` follows bookmark rule 2: `isPinned` turning on sets it from the tab's address and page title, turning off clears it, and a pinned tab without one takes the first address its page reports. `restore(_:folderID:)` takes the saved page from the record.
 - `URL.isSamePage(as:)` and `URL.isSameSite(as:)` compare according to bookmark rule 3. `Tab.isOffSavedPage` and `Tab.isOffSavedSite` use them; a favorite's tab compares with its favorite's address, which the session supplies.
@@ -80,6 +80,14 @@ Code comments and documents cite these rules by number, as in "bookmark rule 4".
 - Copy Address copies the tab's current address, or the favorite's, as a URL and as text. Duplicate opens and selects a copy after the tab, in the same list and folder, at its current address in its engine; a pinned copy keeps the original's saved page.
 - Where: the tab row's context menu (Go Back to Saved Page, Use Current Page as Saved Page, Edit Saved Address…, Copy Address, Duplicate), the favorite tile's (Go Back to Saved Page, Use Current Page as Saved Page, Edit Favorite…, Copy Address), and the Tab menu (Go Back to Saved Page, Use Current Page as Saved Page, Edit Saved Address…, acting on the selected tab). They have no default shortcuts; Settings ▸ Shortcuts can assign one. Item tabs offer Go Back to Saved Page and Copy Address only, since the source owns their address.
 - While a tab is off its saved site, its row shows a back button (`arrow.uturn.backward`) before the close button when under the pointer, with a tooltip naming the saved address.
+- Decisions made while building it:
+  - A saved page's title is the page's title as the tab reports it, which is empty for a page that has shown none yet, as for a tab pinned before its page reported an address. An empty saved title takes the first title the page shows at the saved address.
+  - Edit Saved Address… keeps the saved title while the new address names the same page and leaves it empty otherwise, so the page's own title fills it once the tab shows it there. Text that `url(forInput:)` rejects beeps. Edit Favorite… keeps the name when its field is left empty, and refuses, with a beep, an address that another favorite of the Persona has, as Use Current Page as Saved Page does, since a Persona's favorites come once per address (`addFavorite(_:)`).
+  - The favorite commands act on the favorite's open tab. A tab saved for the favorite from the last session, which has no page until the favorite's first click, counts once that click opens it.
+  - The context menus show Go Back to Saved Page only while it applies; the Tab menu keeps it and disables it otherwise, and also while an internal page or the preview panel covers the tab, as Home does. The Tab menu's Edit Saved Address… is for pinned tabs only; a favorite's tile has Edit Favorite….
+  - Duplicate does not copy the user's name for the tab, and the window whose row it came from selects the copy.
+  - A tab row's menu keeps the Page Address plugin's own Copy Address in that plugin's section, which can copy a Markdown link; the row's Copy Address copies the address alone and does not depend on the plugin.
+  - Code: `SavedPage.swift` holds `SavedPage`, the comparisons, the tab's saved page methods (`isOffSavedPage`, `isOffSavedSite`, `goBack(toSavedPage:)`, `useCurrentPageAsSavedPage()`, `setSavedAddress(fromInput:)`), and the session's saved page commands; `BrowserSession.duplicateTab(_:)` and `updateFavorite(_:_:)`, which change the session's lists, live in `BrowserSession.swift`. `Tab.isPinned` saves and forgets the saved page as it changes, so every way of pinning and unpinning follows bookmark rule 2.
 
 ## Unloading (III.17)
 
@@ -204,7 +212,7 @@ query($q: String!, $n: Int!) {
 
 ## session.json
 
-- III.16 (the next free version): `TabRecord.savedPage`. `normalized()` gives a pinned open record without one its address and title, when it has an address, and drops it from an unpinned record. `TabRecord.closed` keeps it, so a reopened pinned tab returns with its saved page.
+- III.16 (version 13, built): `TabRecord.savedPage`. `normalized()` gives a pinned open record without one its address and title, when it has an address, and drops it from an unpinned record. `TabRecord.closed` keeps it, so a reopened pinned tab returns with its saved page.
 - III.18 (the next free version): `TabFolder.parentID`. `normalized()` clears a parent that is missing, in another space or list, part of a cycle, or deeper than the fourth level. Agent folders are never encoded (VII.12).
 - III.22 (the next free version): `TabFolder.live` and `TabRecord.liveItemID`; a private feed's source holds its address without the query and a flag that the Keychain holds the whole address (live folder rule 8). `normalized()` moves a live folder in the open list to the pinned list, clears its `parentID` when its parent is a live folder, drops `liveItemID` from records outside live folders, and takes records without an item ID out of live folders.
 - Older builds ignore these fields. When they save, saved pages, parents, and live folders are dropped. The next load gives pinned tabs their current pages as saved pages again, the folders become one level deep, and live folders become ordinary folders that keep their tabs.
@@ -216,7 +224,7 @@ query($q: String!, $n: Int!) {
 ## Interactions with other features
 
 - Sync (V.9): a pinned tab syncs its saved page, the user's name, engine, order, space, and folder, not its current address, which settles open decision 2 of `docs/sync.md`. Folders sync their parent and their live configuration, except a feed folder whose address is in the Keychain, which stays on its Mac (live folder rule 8). Item tabs, `live-folders.json`, and every tab's current page stay on each Mac; each Mac fetches its own items.
-- Browser import (V.12, built): each imported pinned tab's saved page is its imported address, and an address counts as already pinned in a space when one of its pinned tabs has it as its saved page, wherever that tab's page went (III.16). Folders stay one level deep (bookmark rule 6). From III.22, an imported folder never merges into a live folder of the same name, since nothing else enters a live folder (live folder rule 4); it becomes an ordinary folder beside it. `docs/import-browsers.md`, Duplicates, says the same.
+- Browser import (V.12, built): each imported pinned tab's saved page is its imported address, and an address counts as already pinned in a space when one of its pinned tabs has it as its saved page, wherever that tab's page went (III.16, built). Folders stay one level deep (bookmark rule 6). From III.22, an imported folder never merges into a live folder of the same name, since nothing else enters a live folder (live folder rule 4); it becomes an ordinary folder beside it. `docs/import-browsers.md`, Duplicates, says the same.
 - Agents (VII.12): agent folders stay at the top level of the open list and hold no folders; their tabs never unload automatically. A folder is ordinary, live, or an agent folder, never two kinds at once. III.17, III.18, and VII.12 may land in either order; whichever lands later adds the agent cases with their tests: `TabCloseAction`'s forget for an unkept agent tab on every close path, Delete Persona closing agent tabs without the closed list, `FolderTree`'s refusal of a move into an agent folder or of a folder into one, and the unloading exclusion.
 - Web extensions: a tab without its page is left out of the windows the host reports, as a restored tab is today, so unloading a tab removes it from the extensions' view until it loads again. An extension's `tabs.remove` goes through `TabCloseAction`, so it unloads a pinned tab and dismisses an item (Unloading).
 - AI hooks: unloading posts nothing; item tabs post no `tabOpened`; Tab Names does not name item tabs.
@@ -229,13 +237,13 @@ query($q: String!, $n: Int!) {
 ## Types and files
 
 - `Packages/ARCH/Sources/Browsing`:
-  - New `SavedPage.swift`: `SavedPage`, `URL.isSamePage(as:)`, `URL.isSameSite(as:)`, and the saved page commands' session methods.
+  - New `SavedPage.swift` (built): `SavedPage`, `URL.isSamePage(as:)`, `URL.isSameSite(as:)`, `Tab.isOffSavedPage`, `Tab.isOffSavedSite`, the tab's saved page methods, and the saved page commands' session methods.
   - New `TabUnloading.swift`: `TabCloseAction`, `UnloadCandidate`, `TabUnloading.tabsToUnload(_:now:after:pressure:)`, `TabUnloading.inputScript`, the memory pressure source, and `ARCHUnloadAfterHours`.
   - New `FolderTree.swift`: the tree, its rows with levels, its moves, `dropTarget(for:at:)`, and its repairs.
   - New `BookmarkMenu.swift`: `BookmarkMenu.entries(for:)`.
   - New `LiveFolderTabs.swift`: the session's side of live folders: registering folders, applying plans, read state, dismissal, conversion, deletion, and triggers.
   - New `LiveFolderSheet.swift`: the sheet and its model.
-  - `Tab.swift`: `savedPage`, `liveItemID`, `isOffSavedPage`, `isOffSavedSite`, unloading into a stand-in, `answersBeforeUnloadWithStay`, `hasTypedInput`, `isCapturingMedia`, and `displayTitle` for item tabs.
+  - `Tab.swift`: `savedPage` (built), `liveItemID`, unloading into a stand-in, `answersBeforeUnloadWithStay`, `hasTypedInput`, `isCapturingMedia`, and `displayTitle` for item tabs.
   - `UnloadedWebContents.swift`: an initializer that takes an icon, and a stand-in that requests no site icon for item tabs.
   - `Space.swift`: `TabFolder.parentID` and `TabFolder.live`.
   - `SessionStore.swift`: the fields and migrations above.
@@ -250,7 +258,7 @@ query($q: String!, $n: Int!) {
 ## Tests
 
 - `BrowsingTests`:
-  - Saved pages: a version 12 file whose pinned records get their address and title as saved pages and whose open records get none; a round trip and the closed list keep them; pinning a `PageStub` tab saves its page, unpinning clears it, and a pinned tab without an address takes the first one reported; the comparisons (fragment, scheme, `www.`, host case, trailing slash, a different query or path, another host); Go Back on a tab without a page moves its stand-in without loading; Use Current Page; Edit Saved Address with accepted and rejected text; a favorite's Use Current Page disabled when another favorite of its Persona has the address; browser import skipping an address that a pinned tab keeps as its saved page after the tab moved elsewhere (`SidebarImportTests`).
+  - Saved pages (built, `SavedPageTests`, `SessionSnapshotTests`, `SidebarImportTests`): a version 12 file whose pinned records get their address and title as saved pages and whose open records get none; a round trip and the closed list keep them; pinning a `PageStub` tab saves its page, unpinning clears it, and a pinned tab without an address takes the first one reported; the comparisons (fragment, scheme, `www.`, host case, trailing slash, a different query or path, another host); Go Back on a tab without a page moves its stand-in without loading; Use Current Page; Edit Saved Address with accepted and rejected text; a favorite's Use Current Page disabled when another favorite of its Persona has the address; browser import skipping an address that a pinned tab keeps as its saved page after the tab moved elsewhere (`SidebarImportTests`).
   - Unloading: `TabCloseAction` for each kind of tab on each close path (⌘W and the row, `window.close()`, an extension's `tabs.remove`, a download-only tab, Delete Persona); Close on a pinned `PageStub` tab leaves a stand-in at its saved page without state, in the same place, folder, and ID, and no closed record; a download-only pinned tab unloads and downloads its file when opened again; an automatic unload keeps the address, title, and icon, with a WebKit `PageStub`'s state and none for a Chromium one; `tabsToUnload` with hours passed and not, 0 hours, a warning with 30 minutes, critical, and each exclusion, capture, typed text, and allowed notifications among them; the input script's `typed` message turning `hasTypedInput` on and `start` turning it off; Delete Tab's closed record reopens pinned with its saved page.
   - Folders: repairs of `parentID`; rows with levels (folders before tabs at every level); a collapsed ancestor showing only the selected tab; allowed and refused moves; Delete Folder moving folders and tabs up; a file without `parentID` loads flat; `dropTarget` between rows at each level, on a folder row, inside the dragged folder's own tree, and past the fourth level.
   - Bookmarks menu: one Persona (space names alone, spaces without pinned tabs left out, nested folders in order, live folders with their counts, No Bookmarks) and two (submenus titled "Work / Research", the favorites headed "Work", Personas in order).
@@ -272,7 +280,7 @@ query($q: String!, $n: Int!) {
 Each step builds, keeps the app working, passes `swift test`, and forms one commit with the subject `Task(<ID>): …`. Each finishes by removing its row, updating Current State and the rows in `docs/features.md`, and adding its checks below to the regression checklist as the next free numbers.
 
 1. III.15 (built): Persona / Space labels on the existing surfaces.
-2. III.16: Saved pages.
+2. III.16 (built): Saved pages.
 3. III.17: Unloading.
 4. III.18: Nested folders: model, rows, and menus.
 5. III.19: Dragging folders.
@@ -287,7 +295,7 @@ Each step builds, keeps the app working, passes `swift test`, and forms one comm
 
 Run from the bundle launched through `open`, on both engines, with a fresh Application Support folder:
 
-1. A pinned tab that follows a link to another site shows the back button under the pointer, and the button returns to the saved page. Following a link within the saved site shows none, while Tab ▸ Go Back to Saved Page is enabled. After Use Current Page as Saved Page, ⌘W, and a relaunch, the tab opens at the new saved page.
+1. A pinned tab that follows a link to another site shows the back button under the pointer, and the button returns to the saved page. Following a link within the saved site shows none, while Tab ▸ Go Back to Saved Page is enabled. After Use Current Page as Saved Page, ⌘W, and a relaunch, the tab opens at the new saved page. Regression check 59 in `docs/plan.md` holds the saved page part of this check, without ⌘W, which unloads the tab only from III.17, and adds Edit Saved Address…, Copy Address, Duplicate, the favorite tile's items, and a second browser import.
 2. ⌘W on a selected pinned tab that left its saved page keeps its row in secondary text and selects another tab; clicking the row loads the saved page; ⌘Z does not bring the old page back. Delete Tab removes it, and ⌘Z reopens it pinned in its folder.
 3. With `ARCHUnloadAfterHours` at 1, a pinned WebKit tab with three pages in its back list and a Chromium favorite's tab, left unshown past the next archive timer after an hour, unload; selecting the WebKit tab returns to the same page with its back list, and the Chromium tab loads its last address without one. A pinned tab that plays audio stays loaded. A simulated critical memory pressure (`memory_pressure -S -l critical`) unloads every tab that no window shows except, on each engine, a tab with text typed into a field and a tab in a video call with its camera on.
 4. Folders nest four levels deep through New Folder Inside, and the fifth level is refused. A collapsed folder shows only the selected tab within it. Dragging a folder into another and onto another space's symbol moves it with its contents. The tree survives a relaunch.
@@ -298,6 +306,7 @@ Run from the bundle launched through `open`, on both engines, with a fresh Appli
 
 ## Not verified
 
+- Whether a favorite tile's context menu follows a page change of the favorite's tab while another tab is selected: the favorites grid redraws with the window's selected tab and the session's lists, not with other tabs' addresses, so the menu's Go Back to Saved Page could reflect the tab's address from when it was last selected (regression check 59).
 - Whether App Transport Security makes the bundle's `URLSession` refuse an `http` feed (expected), and how often feeds offer HTTPS at the same address.
 - How `NSBackgroundActivityScheduler` spaces its runs while Arch is in the background or the Mac is on battery.
 - Whether `memory_pressure -S` reaches the app's memory pressure source.

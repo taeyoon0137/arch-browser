@@ -67,6 +67,21 @@ import Testing
         #expect(Set(items.favorites.keys) == ["fb"])
     }
 
+    @Test func anAddressAPinnedTabKeepsAsItsSavedPageStaysOutAfterTheTabMovedElsewhere() throws {
+        var sidebar = Self.sidebar()
+        let work = Space(name: "Work", personaID: Persona.defaultID)
+        sidebar.spaces.append(work)
+        // c is the saved page of a pinned tab whose page went to another site, and d the page of an open tab, which pins nothing.
+        sidebar.tabs.append(SidebarImport.Sidebar.TabState(id: UUID(), spaceID: work.id, isPinned: true, url: Self.url("elsewhere.example"), savedURL: Self.url("c.example")))
+        sidebar.tabs.append(SidebarImport.Sidebar.TabState(id: UUID(), spaceID: work.id, isPinned: false, url: Self.url("d.example")))
+
+        let plan = Self.plan(in: sidebar)
+        #expect(plan.pinnedTabs.map(\.url) == [Self.url("d.example"), Self.url("e.example")])
+        #expect(plan.pinnedTabs.map(\.spaceID).first == work.id)
+        // Each pinned tab the import opens is saved at its imported address and title.
+        #expect(plan.pinnedTabs.map(\.title) == ["d.example", "e.example"])
+    }
+
     @Test func aSecondIdenticalImportAddsNothing() {
         var sidebar = Self.sidebar()
         let first = Self.plan(in: sidebar)
@@ -243,7 +258,7 @@ private extension SidebarImport.Sidebar {
         spaces += plan.spaces
         folders += plan.folders
         favorites += plan.favorites
-        tabs += plan.pinnedTabs.map { TabState(id: $0.id, spaceID: $0.spaceID, isPinned: true, url: $0.url) }
+        tabs += plan.pinnedTabs.map { TabState(id: $0.id, spaceID: $0.spaceID, isPinned: true, url: $0.url, savedURL: $0.url) }
     }
 }
 
