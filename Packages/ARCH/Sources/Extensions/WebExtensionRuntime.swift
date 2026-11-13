@@ -24,6 +24,8 @@ public protocol WebExtensionHost: AnyObject {
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
     /// Shows the alert as a sheet for the tab, or for the front window's tab for no tab, and answers with the button the user chose.
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
+    /// Starts Arch's install of the extension `id` from the Web Store in the Persona, as the store's own install button on the tab's store page asks: the store sheet in Settings ▸ Plugins, whose review names the Persona with the tab's space (`docs/web-store.md`, Chromium's store button).
+    func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebContents)
 }
 
 /// An enabled extension's action for one tab, as the site settings popover lists it: one for each plugin, and one for a pair, whose identifier and name are those of its version installed first. An extension without an action in its manifest has one only while the tab's engine keeps it from the tab's site.
@@ -69,6 +71,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     private var keyedPackages: [PluginID: Date] = [:]
     /// The removals whose storage an engine still keeps because it did not run for the Persona when the user removed the extension, in the order they happened, as `runtimeFile` keeps them.
     private var missedRemovals: [MissedRemoval] = []
+    /// The identifier of the extension whose store page an address is, or nil for another address, which decides where the store's own install button may start a store install. The tests read store pages on hosts that stand in for the store's.
+    var storePageReader: (URL) -> String? = WebStore.extensionID(in:)
 
     /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach.
     public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL) {
@@ -119,8 +123,9 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         changeEngines { await $0.loadEnabledExtensions() }
     }
 
-    /// While no extension is enabled, stops what a profile of the Persona that has just started runs from an earlier launch. No pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
+    /// Answers the engine for a profile of the Persona that has just started, and, while no extension is enabled, stops what the profile runs from an earlier launch. The runtime becomes the profile's delegate at once, before any extension attaches it, so that the store's own install button, which asks before the Persona has an extension, reaches it. No pass of loads reaches the profile while no extension is enabled, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
     public func profileDidStart(with extensions: any EngineExtensions) {
+        extensions.delegate = self
         guard !plugins.contains(where: \.isEnabled) else { return }
         extensions.stopUnloadedExtensions()
     }
@@ -428,10 +433,14 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
     }
 
-    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
+    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for. An install is refused, so that the engine installs nothing outside the plugin list; from a tab on a store page, it starts Arch's store install of the identifier in the Persona with the tab instead, whose review comes before anything installs.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
         guard let host else { return completion(false) }
         switch prompt.kind {
+        case .install:
+            completion(false)
+            guard let tab = prompt.tab, let page = tab.url, storePageReader(page) != nil, let storeID = WebStore.identifier(id) else { return }
+            host.installFromWebStore(storeID, persona: persona, tab: tab)
         case let .reload(names):
             host.presentSheet(WebExtensionEnginePrompt.reloadAlert(names: names), for: prompt.tab) { completion($0 == .alertFirstButtonReturn) }
         case let .permissions(messages):

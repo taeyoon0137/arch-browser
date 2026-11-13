@@ -79,6 +79,8 @@ final class RecordingHost: WebExtensionHost {
     /// Each window request: the addresses, engine, and whether focused.
     private(set) var openedWindows: [(urls: [URL], engine: EngineKind, focused: Bool)] = []
     var openedWindow: UUID?
+    /// Each store install that the runtime started: the identifier, the Persona, and the tab.
+    private(set) var storeInstalls: [(id: String, persona: PersonaID, tab: any EngineWebContents)] = []
 
     var extensionRuntimeVersions: [EngineKind: String] {
         Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
@@ -112,6 +114,10 @@ final class RecordingHost: WebExtensionHost {
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         sheets.append(alert)
         completion(sheetAnswer)
+    }
+
+    func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebContents) {
+        storeInstalls.append((id, persona, tab))
     }
 }
 

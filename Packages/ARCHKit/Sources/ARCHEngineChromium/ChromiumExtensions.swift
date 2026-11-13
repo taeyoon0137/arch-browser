@@ -262,12 +262,17 @@ extension ChromiumExtensions: ARCHCEFExtensionsDelegate {
         return true
     }
 
-    /// Install prompts, from the store install flow, are refused without asking.
+    /// Every prompt goes to the delegate. An install from the store install flow comes with the identifier of the extension it would install, from the manifest the store page passed, and the store page's tab; its messages, the permissions' sentences, are left out, since the app installs through its own review.
     func cefExtensionsShowPrompt(_ kind: ARCHCEFExtensionPromptKind, extension extensionIdentifier: String, browser: ARCHCEFBrowser?, messages: [String],
                                  completion: @escaping (Bool) -> Void) -> Bool {
-        guard let delegate, kind != .install else { return false }
+        guard let delegate else { return false }
         let tab = browser.flatMap { $0.delegate as? ChromiumWebContents }
-        let prompt = EngineExtensionPrompt(kind: kind == .reload ? .reload(messages) : .permissions(messages), tab: tab)
+        let question: EngineExtensionPrompt.Kind = switch kind {
+        case .install: .install
+        case .reload: .reload(messages)
+        default: .permissions(messages)
+        }
+        let prompt = EngineExtensionPrompt(kind: question, tab: tab)
         delegate.extensions(self, extension: extensionIdentifier, asks: prompt, completion: completion)
         return true
     }

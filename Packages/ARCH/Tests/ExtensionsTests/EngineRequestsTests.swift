@@ -1,4 +1,4 @@
-// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
+// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, the store's install button, which starts Arch's store install only from a store page, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
 import AppKit
 import ARCHEngine
 import CryptoKit
@@ -187,6 +187,30 @@ struct EngineRequestsTests {
         #expect(try #require(WebExtensionManifest.runTimeAccess(of: granted)).sites.isEmpty)
     }
 
+    @Test func refusesTheStoresInstallAndStartsArchsOwnFromAStorePage() throws {
+        // Store pages on a host that stands in for the store's, so that this file names no store host.
+        runtime.storePageReader = { WebStore.extensionID(in: $0, pageHosts: ["store.example"]) }
+        let id = WebExtensionManifest.extensionID(ofBytes: Data("store extension".utf8))
+        // Before the Persona has any extension, a profile's start makes the runtime the engine's delegate, which the store's button asks.
+        runtime.profileDidStart(with: chromium)
+        let delegate = try #require(chromium.delegate)
+        #expect(delegate === runtime)
+        let storeTab = PageStub(url: URL(string: "https://store.example/detail/sample-name/\(id)"))
+        var answer: Bool?
+        delegate.extensions(chromium, extension: id.uppercased(), asks: EngineExtensionPrompt(kind: .install, tab: storeTab)) { answer = $0 }
+        #expect(answer == false && host.storeInstalls.count == 1)
+        let started = try #require(host.storeInstalls.first)
+        #expect(started.id == id && started.persona == persona && started.tab === storeTab)
+        // Another page, no tab, and an identifier that is not one are refused and start nothing.
+        let otherTab = PageStub(url: URL(string: "https://example.org/detail/sample-name/\(id)"))
+        for (asking, tab) in [(id, otherTab), (id, PageStub(url: nil)), (id, nil), ("", storeTab), (String(id.dropLast()), storeTab)] as [(String, PageStub?)] {
+            answer = nil
+            delegate.extensions(chromium, extension: asking, asks: EngineExtensionPrompt(kind: .install, tab: tab)) { answer = $0 }
+            #expect(answer == false, "\(asking) \(String(describing: tab?.url))")
+        }
+        #expect(host.storeInstalls.count == 1 && host.sheets.isEmpty && chromium.loaded.isEmpty)
+    }
+
     // MARK: Site access
 
     @Test func allowsAnExtensionOnTheTabsSite() async throws {
@@ -335,5 +359,68 @@ enum CRXFile {
             bytes.append(byte)
         } while value != 0
         return Data(bytes)
+    }
+}
+
+/// A tab as far as the store button's tests need one: its address.
+private final class PageStub: EngineWebContents {
+    let url: URL?
+    init(url: URL?) {
+        self.url = url
+    }
+
+    let engineKind = EngineKind.chromium
+    let title = ""
+    let favicon: NSImage? = nil
+    let isLoading = false
+    let canGoBack = false
+    let canGoForward = false
+    let restorableState: Data? = nil
+    let isAudible = false
+    var zoomFactor = 1.0
+    lazy var view = NSView()
+    let navigationController: any EngineNavigationController = NavigationStub()
+    let mediaSession: any EngineMediaSession = MediaStub()
+    weak var uiDelegate: (any EngineWebContentsUIDelegate)?
+    weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
+    weak var pageScriptDelegate: (any EnginePageScriptDelegate)?
+    let closingStopsDownloads = false
+    let devTools: (any EngineDevTools)? = nil
+
+    func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {}
+    func stopFind() {}
+    func setPageScripts(_ scripts: [EnginePageScript]) {}
+    func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
+    func postPageScriptMessage(_ json: String, toWorld world: String) {}
+    func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {}
+    func captureViewport(completion: @escaping (NSImage?) -> Void) {}
+    func captureFullPage(completion: @escaping (NSImage?) -> Void) {}
+    func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {}
+    func exitFullscreen() {}
+    func tryToClose(completion: @escaping (Bool) -> Void) {}
+
+    private final class MediaStub: EngineMediaSession {
+        weak var delegate: (any EngineMediaSessionDelegate)?
+        let playbackState = EngineMediaPlaybackState.none
+        let position: EngineMediaPosition? = nil
+        let metadata: EngineMediaMetadata? = nil
+        let canGoToNextTrack = false
+        let canGoToPreviousTrack = false
+        func play() {}
+        func pause() {}
+        func nextTrack() {}
+        func previousTrack() {}
+    }
+
+    private final class NavigationStub: EngineNavigationController, EngineBackForwardList {
+        var backForwardList: any EngineBackForwardList { self }
+        let backList: [any EngineBackForwardListItem] = []
+        func load(_ request: URLRequest) {}
+        func reload() {}
+        func reloadWithoutCache() {}
+        func stop() {}
+        func goBack() {}
+        func goForward() {}
+        func go(to item: any EngineBackForwardListItem) {}
     }
 }

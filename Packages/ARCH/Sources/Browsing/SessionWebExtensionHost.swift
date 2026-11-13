@@ -1,4 +1,4 @@
-// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups and sheets in its windows, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
+// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups and sheets in its windows, starts the store install that the store's own install button asks for, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -172,6 +172,15 @@ final class SessionWebExtensionHost: WebExtensionHost {
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab } else { return completion(.cancel) }
         session.enqueueSheet(alert, for: tab, completion: completion)
+    }
+
+    /// Opens the store sheet in Settings ▸ Plugins through the session's `installFromWebStore`, as the site settings popover's Web Store row does: in the Persona, with the tab's space, or for a favorite's tab the space of the window that shows it, which the review names with the Persona (Persona rule 7). A tab that has closed starts nothing.
+    func installFromWebStore(_ id: String, persona: PersonaID, tab webContents: any EngineWebContents) {
+        guard let session, session.personas.contains(where: { $0.id == persona }), let tab = self.tab(webContents) else { return }
+        let space = session.window(showing: tab).flatMap { window in
+            BrowserWindowModel.sheetSpace(ofTabIn: tab.spaceID, personaID: persona, spaces: session.spaces, currentSpace: window.currentSpace)
+        } ?? session.spaces.first { $0.id == tab.spaceID }
+        session.installFromWebStore?(persona, space?.id, id)
     }
 
     /// The open tab whose web contents `webContents` is.
