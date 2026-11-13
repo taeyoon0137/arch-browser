@@ -1,4 +1,4 @@
-// The Web Store client and staging (`docs/web-store.md`, Tests): store addresses and pasted identifiers, the Chromium version in a CEF version, the endpoint's requests and answers, the package download's checks, and the installer's staging with the origin `webStore`. `StoreStub` answers every request of the tests' sessions, so no test reaches the network. Store pages are built from hosts the tests choose and from `WebStore.pageHosts`, so this file names no store host.
+// The Web Store client, staging, and updates (`docs/web-store.md`, Tests): store addresses and pasted identifiers, the Chromium version in a CEF version, the endpoint's requests and answers, the package download's checks, the installer's staging with the origin `webStore`, and its update checks and staged updates. `StoreStub` answers every request of the tests' sessions, so no test reaches the network. Store pages are built from hosts the tests choose and from `WebStore.pageHosts`, so this file names no store host.
 import ARCHEngine
 import CryptoKit
 @testable import Extensions
@@ -379,6 +379,149 @@ import Testing
         offer(package)
         await #expect(throws: PluginError.closed) { try await installer.stage(extensionID, in: manager) }
         #expect(StoreStub.requests.isEmpty && !FileManager.default.fileExists(atPath: stagingURL.path))
+    }
+
+    // MARK: Updates
+
+    @Test func comparesVersionsInChromiumsOrder() {
+        for (version, installed) in [("1.10", "1.9"), ("2", "1.9.9.9"), ("1.2.3.5", "1.2.3.4"), ("1.0.0.1", "1"), ("8.12.44.33", "8.11.2")] {
+            #expect(WebStoreInstaller.version(version, isNewerThan: installed), "\(version) after \(installed)")
+            #expect(!WebStoreInstaller.version(installed, isNewerThan: version), "\(installed) before \(version)")
+        }
+        // Missing numbers count as 0, and text that is not one to four numbers is never newer.
+        for (version, installed) in [("1.0", "1"), ("1", "1.0.0.0"), ("1.2", "1.2")] {
+            #expect(!WebStoreInstaller.version(version, isNewerThan: installed) && !WebStoreInstaller.version(installed, isNewerThan: version))
+        }
+        for version in ["1.2.3.4.5", "1..2", "", "1.", "2.a", "-3", " 3", "3 ", "1.+2", "4294967296", "²"] {
+            #expect(!WebStoreInstaller.version(version, isNewerThan: "1") && !WebStoreInstaller.version("1", isNewerThan: version), "\(version)")
+        }
+    }
+
+    /// Installs the store's package of the extension at `version`, as its review does, after which the stub offers it.
+    private func installFromStore(_ installer: WebStoreInstaller, in manager: PluginManager, version: String) async throws -> InstalledPlugin {
+        offer(try crx("v\(version)", #""manifest_version": 3, "name": "Packed", "version": "\#(version)""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: version)
+        let package = try await installer.stage(extensionID, in: manager)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        return try #require(manager.plugins.first { $0.origin == .webStore(extensionID) })
+    }
+
+    /// The `x` values of a request to the endpoint.
+    private func askedExtensions(in request: URLRequest) -> [String] {
+        request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }?.filter { $0.name == "x" }.compactMap(\.value) ?? []
+    }
+
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func checksTheStoreInstallsOnceAPersonaPerRunAndOnEveryClick() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        // A Persona with file installs alone asks nothing and records no check.
+        let unpacked = try await manager.installEverything(from: try folder.package("unpacked", ["manifest.json": #"{"manifest_version": 3, "name": "Unpacked", "version": "1"}"#]))
+        StoreStub.answer { _ in StoreStub.Reply(status: 500) }
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: true)
+        #expect(StoreStub.requests.isEmpty && installer.updateChecks[persona] == nil && !WebStoreInstaller.hasStoreInstalls(among: manager.plugins))
+        let installed = try await installFromStore(installer, in: manager, version: "2")
+        #expect(WebStoreInstaller.hasStoreInstalls(among: manager.plugins))
+        // One request asks about the store install with its version, and none about the file install.
+        offer(Data("package".utf8), version: "3")
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: true)
+        #expect(StoreStub.requests.count == 1 && StoreStub.requests.first?.url?.host == WebStore.updateEndpoint.host)
+        #expect(StoreStub.requests.first.map(askedExtensions(in:)) == ["id=\(extensionID)&v=2&installsource=ondemand&uc"])
+        #expect(installer.update(of: installed, in: manager)?.version == "3" && installer.update(of: unpacked, in: manager) == nil)
+        #expect(installer.updates[persona]?.keys.sorted { $0.rawValue < $1.rawValue } == [installed.id])
+        guard case .checked? = installer.updateChecks[persona] else {
+            Issue.record("The check is not recorded: \(String(describing: installer.updateChecks[persona]))")
+            return
+        }
+        // The automatic check runs once per Persona per run, and Check for Updates every time.
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: true)
+        #expect(StoreStub.requests.count == 1)
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+        #expect(StoreStub.requests.count == 3)
+        manager.close()
+    }
+
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func offersOnlyNewerVersionsAndKeepsThemAfterAFailedCheck() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        let installed = try await installFromStore(installer, in: manager, version: "2.1")
+        // The same version, an older one, and `noupdate` show nothing.
+        for version in ["2.1", "2.1.0", "2.0.9", "1"] {
+            offer(Data("package".utf8), version: version)
+            try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+            #expect(installer.update(of: installed, in: manager) == nil, "\(version)")
+        }
+        StoreStub.answer { [extensionID] _ in StoreStub.Reply(body: updateResponse([#"<app appid="\#(extensionID)" status="ok"><updatecheck status="noupdate"/></app>"#])) }
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+        #expect(installer.update(of: installed, in: manager) == nil)
+        // A newer one does, compared as numbers.
+        offer(Data("package".utf8), version: "2.10")
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+        #expect(installer.update(of: installed, in: manager)?.version == "2.10")
+        // A failed check shows why, and keeps the version found before.
+        StoreStub.answer { _ in StoreStub.Reply(status: 503) }
+        await #expect(throws: WebStoreError.httpStatus(503)) { try await installer.checkForUpdates(in: manager, onlyOncePerRun: false) }
+        #expect(installer.updateChecks[persona] == .failed("The Web Store answered with HTTP status 503."))
+        #expect(installer.update(of: installed, in: manager)?.version == "2.10")
+        manager.close()
+    }
+
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func reviewUpdateStagesTheVersionFoundAsAnUpdateOfThePlugin() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        let installed = try await installFromStore(installer, in: manager, version: "2")
+        // Without a newer version found, nothing is asked or downloaded.
+        let requestCount = StoreStub.requests.count
+        await #expect(throws: WebStoreError.alreadyInstalled(name: "Packed", version: "2")) { try await installer.stageUpdate(of: installed.id, in: manager) }
+        #expect(StoreStub.requests.count == requestCount)
+        offer(try crx("v3", #""manifest_version": 3, "name": "Packed", "version": "3""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: "3")
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: true)
+        let update = try await installer.stageUpdate(of: installed.id, in: manager)
+        #expect(update.updates == installed.id && update.origin == .webStore(extensionID) && update.proof == .webStore && update.manifest.version == "3")
+        // It downloads the version that the check found without asking the store again, and leaves no download behind.
+        #expect(StoreStub.requests.map { $0.url?.host } == [WebStore.updateEndpoint.host, "packages.example.test"] && downloadsInStaging.isEmpty)
+        try manager.install(update, grant: PluginGrant(requestedBy: update.manifest), isEnabled: true)
+        let updated = try #require(manager.plugins.first { $0.id == installed.id })
+        #expect(updated.manifest.version == "3" && manager.plugins.count == 1)
+        // Once it is installed, the update shows no more.
+        #expect(installer.update(of: updated, in: manager) == nil)
+        await #expect(throws: WebStoreError.alreadyInstalled(name: "Packed", version: "3")) { try await installer.stageUpdate(of: installed.id, in: manager) }
+        manager.close()
+    }
+
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func deletingAPersonaDropsItsResultsAndACancelledCheckRecordsNothing() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        let installed = try await installFromStore(installer, in: manager, version: "2")
+        offer(Data("package".utf8), version: "3")
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: true)
+        #expect(installer.update(of: installed, in: manager) != nil)
+        installer.forget(persona)
+        #expect(installer.updates[persona] == nil && installer.updateChecks[persona] == nil && installer.update(of: installed, in: manager) == nil)
+        // A cancelled check leaves the Persona as it was, here unchecked.
+        StoreStub.answer { _ in StoreStub.Reply(staysOpen: true) }
+        let check = Task { try await installer.checkForUpdates(in: manager, onlyOncePerRun: true) }
+        #expect(await eventually { StoreStub.requests.count == 1 && installer.updateChecks[persona] == .checking })
+        check.cancel()
+        guard await eventually({ installer.updateChecks[persona] != .checking }) else {
+            Issue.record("The check did not end after its task was cancelled.")
+            return
+        }
+        await #expect(throws: CancellationError.self) { try await check.value }
+        #expect(installer.updateChecks[persona] == nil)
+        // A Persona deleted while the store answers records nothing.
+        StoreStub.answer { [extensionID] _ in
+            DispatchQueue.main.sync { MainActor.assumeIsolated { manager.close() } }
+            return StoreStub.Reply(body: updateResponse([#"<app appid="\#(extensionID)" status="ok"><updatecheck codebase="https://packages.example.test/p.crx" status="ok" version="3"/></app>"#]))
+        }
+        await #expect(throws: PluginError.closed) { try await installer.checkForUpdates(in: manager, onlyOncePerRun: false) }
+        #expect(installer.updates[persona] == nil && installer.updateChecks[persona] == nil && StoreStub.requests.count == 1)
+        // Once it is deleted, nothing is asked.
+        await #expect(throws: PluginError.closed) { try await installer.checkForUpdates(in: manager, onlyOncePerRun: true) }
+        #expect(StoreStub.requests.count == 1)
     }
 }
 

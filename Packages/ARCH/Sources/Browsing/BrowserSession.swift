@@ -70,7 +70,7 @@ public final class BrowserSession: ObservableObject {
     public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a Persona with the store sheet started for an extension identifier, for the Web Store's entry points in the site settings popover and the palette (`docs/web-store.md`, Entry points), with the space of the tab or the window, which the review names with the Persona.
     public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
-    /// Downloads extensions from the Web Store and stages them in any Persona's plugins (`docs/web-store.md`).
+    /// Downloads extensions from the Web Store and stages them in any Persona's plugins, and keeps each Persona's update check for the run (`docs/web-store.md`).
     public let webStore: WebStoreInstaller
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
@@ -637,6 +637,8 @@ public final class BrowserSession: ObservableObject {
             engines.runtimes.values.forEach { $0.browser.closeAllWebContents() }
             retiredPersonaEngines.append(engines)
         }
+        // The Web Store's update results for its plugins go with them.
+        MainActor.assumeIsolated { webStore.forget(id) }
         personaDataRemoval.removeAtNextLaunch(id)
         saveNow()
     }

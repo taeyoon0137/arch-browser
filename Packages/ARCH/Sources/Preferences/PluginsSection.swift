@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store….
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store….
 import AI
 import ARCHEngine
 import Browsing
@@ -70,7 +70,7 @@ struct PluginsSection: View {
     }
 }
 
-/// Install Plugin…, Install from Web Store…, and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
+/// Install Plugin…, Install from Web Store…, Check for Updates while the Persona has store installs, and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -107,6 +107,9 @@ private struct PluginList: View {
                     Button("Install from Web Store\u{2026}") { showSheet(.webStore(WebStoreStart()), space: nil) }
                 }
             }
+            if WebStoreInstaller.hasStoreInstalls(among: plugins.plugins) {
+                UpdateCheckRow(webStore: session.webStore, plugins: plugins)
+            }
             if AIService.shared.isAvailable(.pluginComposer) {
                 LabeledContent("Describe a feature, and AI writes a plugin for it") {
                     Button("New Feature with AI\u{2026}") { isComposing = true }
@@ -135,12 +138,16 @@ private struct PluginList: View {
         .sheet(item: $sheet) { sheet in
             PluginInstallSheet(plugins: plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
         }
+        // Each Persona's list is a view of its own, so this runs as the section first shows the Persona, which the installer checks once in the run. The installer records the outcome, which `UpdateCheckRow` shows.
+        .onAppear {
+            Task { try? await session.webStore.checkForUpdates(in: plugins, onlyOncePerRun: true) }
+        }
         // A request waits while the list is busy. The publisher sends a request before `pending` holds it.
         .onReceive(PluginsRequests.shared.$pending) { answer($0) }
         .onChange(of: isBusy, initial: true) { listIsBusy = $1 }
         .onChange(of: isBusy) { answer(PluginsRequests.shared.pending) }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
-            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin) { installVersion(of: $0, for: $1, from: $2, space: nil) }
+            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:)) { installVersion(of: $0, for: $1, from: $2, space: nil) }
                 .id(plugin.id)
         }
     }
@@ -168,6 +175,11 @@ private struct PluginList: View {
         let space = space.flatMap { id in session.spaces.first { $0.id == id } }
         sheet = InstallSheet(start: start, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: space, among: session.personas))
         failure = nil
+    }
+
+    /// Review Update…: the store sheet downloads the update that the last check found and puts its review in its place.
+    private func reviewUpdate(of plugin: PluginID) {
+        showSheet(.webStore(WebStoreStart(update: plugin, startsAtOnce: true)), space: nil)
     }
 
     /// Install <Engine> Version…: asks for the package with an open panel on the Settings window, or in the store sheet, then reviews it as the plugin's version for the engine.
@@ -217,12 +229,14 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
+/// The plugin's switch with its summary, its grant, a newer version from the Web Store with Review Update…, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
     let plugin: InstalledPlugin
+    /// Review Update… of the plugin or of a version of the pair.
+    let reviewUpdate: (PluginID) -> Void
     let installVersion: (InstalledPlugin, EngineKind, PackageSource) -> Void
     /// Why the last change to a setting, the removal, or a separation failed.
     @State private var failure: String?
@@ -250,9 +264,11 @@ private struct PluginSection: View {
             if isPair {
                 ForEach(versions) { version in
                     VersionRow(plugins: plugins, version: version) { removingVersion = version }
+                    UpdateRow(webStore: session.webStore, plugins: plugins, plugin: version) { reviewUpdate(version.id) }
                 }
             } else {
                 AccessRow(plugin: plugin)
+                UpdateRow(webStore: session.webStore, plugins: plugins, plugin: plugin) { reviewUpdate(plugin.id) }
             }
             ForEach(plugin.manifest.contributions.settings) { setting in
                 PluginSettingRow(plugins: plugins, plugin: plugin.id, setting: setting) { failure = $0.localizedDescription }
@@ -346,6 +362,58 @@ private struct PluginSection: View {
             for id in ids { try plugins.remove(id) }
         } catch {
             failure = error.localizedDescription
+        }
+    }
+}
+
+/// Check for Updates, with when the Persona's store installs were last checked in this run or why the check failed.
+private struct UpdateCheckRow: View {
+    @ObservedObject var webStore: WebStoreInstaller
+    let plugins: PluginManager
+
+    var body: some View {
+        let check = webStore.updateChecks[plugins.persona]
+        LabeledContent {
+            Button("Check for Updates") {
+                // The installer records a failure, which the row shows.
+                Task { try? await webStore.checkForUpdates(in: plugins, onlyOncePerRun: false) }
+            }
+            .disabled(check == .checking)
+        } label: {
+            Text("Check the Web Store for newer versions of the extensions installed from it")
+            switch check {
+            case .checking:
+                Text("Checking for updates\u{2026}")
+            case let .checked(date):
+                Text(Self.lastChecked(date))
+            case let .failed(message):
+                Text(message)
+                    .foregroundStyle(.red)
+            case nil:
+                EmptyView()
+            }
+        }
+    }
+
+    /// "Last checked at 10:42.", with the date for a check on another day, as a run can span days.
+    private static func lastChecked(_ date: Date) -> String {
+        guard Calendar.current.isDateInToday(date) else { return "Last checked on \(date.formatted(date: .abbreviated, time: .shortened))." }
+        return "Last checked at \(date.formatted(date: .omitted, time: .shortened))."
+    }
+}
+
+/// "Version 8.12.0 is available from the Web Store." with Review Update…, while the last update check found a newer version of the plugin installed from the store.
+private struct UpdateRow: View {
+    @ObservedObject var webStore: WebStoreInstaller
+    let plugins: PluginManager
+    let plugin: InstalledPlugin
+    let review: () -> Void
+
+    var body: some View {
+        if let release = webStore.update(of: plugin, in: plugins) {
+            LabeledContent("Version \(release.version) is available from the Web Store.") {
+                Button("Review Update\u{2026}", action: review)
+            }
         }
     }
 }

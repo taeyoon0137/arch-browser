@@ -81,7 +81,8 @@ public final class PluginManager: ObservableObject {
     private static let failureLimit = 3
     private static let failureWindow: TimeInterval = 5 * 60
 
-    private let persona: PersonaID
+    /// The Persona whose plugins the manager keeps.
+    public let persona: PersonaID
     /// `Plugins/<persona id>/` in the app's Application Support folder, with `plugins.json`, a folder for each plugin named by its identifier, `Staging/` for packages under review, and each runtime's own file.
     private let directory: URL
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.

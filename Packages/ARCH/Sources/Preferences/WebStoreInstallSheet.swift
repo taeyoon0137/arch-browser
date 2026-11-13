@@ -1,4 +1,4 @@
-// The store sheet (`docs/web-store.md`, Entry points): a field for a Web Store address or an extension identifier, whose Continue asks the store for the extension's current package and stages it, with progress while it runs and the install flow's failures, after which the package's review takes the sheet's place. `PluginInstallSheet` shows it as its first step for Install from Web Store… and From the Web Store… in Settings ▸ Plugins, and for a start from a store page or the palette, which fills in the identifier and asks at once. Cancel, closing the sheet, and deleting the Persona cancel the install, which then leaves nothing staged.
+// The store sheet (`docs/web-store.md`, Entry points and Updates): a field for a Web Store address or an extension identifier, whose Continue asks the store for the extension's current package and stages it, with progress while it runs and the install flow's failures, after which the package's review takes the sheet's place. `PluginInstallSheet` shows it as its first step for Install from Web Store… and From the Web Store… in Settings ▸ Plugins, for a start from a store page or the palette, which fills in the identifier and asks at once, and, without the field, for a plugin's Review Update…, which downloads the update at once. Cancel, closing the sheet, and deleting the Persona cancel the install, which then leaves nothing staged.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -9,6 +9,8 @@ struct WebStoreStart {
     var text = ""
     var versionOf: PluginID?
     var engine: EngineKind?
+    /// For Review Update…, the plugin installed from the store whose newer version the last update check found (`WebStoreInstaller.stageUpdate(of:in:)`); the sheet then has no field.
+    var update: PluginID?
     /// Asks the store as the sheet appears, for a start from a store page or the palette, whose identifier `text` holds.
     var startsAtOnce = false
 }
@@ -47,10 +49,12 @@ struct WebStoreInstallSheet: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            TextField("Web Store address or extension ID", text: $text)
-                .textFieldStyle(.roundedBorder)
-                .disabled(install != nil)
-                .onSubmit(begin)
+            if start.update == nil {
+                TextField("Web Store address or extension ID", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(install != nil)
+                    .onSubmit(begin)
+            }
             if install != nil {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -81,7 +85,7 @@ struct WebStoreInstallSheet: View {
                     .keyboardShortcut(.cancelAction)
                     Button("Continue", action: begin)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(WebStore.extensionID(from: text) == nil || install != nil)
+                        .disabled(!canBegin || install != nil)
                 }
             }
         }
@@ -102,18 +106,32 @@ struct WebStoreInstallSheet: View {
     }
 
     private var title: String {
+        if let update = start.update, let plugin = plugins.plugins.first(where: { $0.id == update }) {
+            return "Update \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store"
+        }
         guard let engine = start.engine, let plugin = start.versionOf.flatMap(plugins.leadVersion(of:)) else { return "Install from the Web Store" }
         return "Install the \(engine.displayName) Version of \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store"
     }
 
-    /// Asks the store for the extension that the field names and stages its package, for the review, unless the install was cancelled, which ends it without a message.
+    /// Whether Continue has something to stage: the update, or the extension that the field names.
+    private var canBegin: Bool {
+        start.update != nil || WebStore.extensionID(from: text) != nil
+    }
+
+    /// Stages the update, or asks the store for the extension that the field names and stages its package, for the review, unless the install was cancelled, which ends it without a message.
     private func begin() {
-        guard install == nil, let id = WebStore.extensionID(from: text) else { return }
+        guard install == nil, canBegin else { return }
+        let id = WebStore.extensionID(from: text)
         failure = nil
         installedNote = nil
         install = Task {
             do {
-                let package = try await installer.stage(id, in: plugins)
+                let package: PluginPackage
+                if let update = start.update {
+                    package = try await installer.stageUpdate(of: update, in: plugins)
+                } else {
+                    package = try await installer.stage(id ?? text, in: plugins)
+                }
                 review(PluginReview(package: package, versionOf: start.versionOf, engine: start.engine))
             } catch is CancellationError {
                 // Cancel, closing the sheet, or deleting the Persona ended it, and the sheet closes without a message.

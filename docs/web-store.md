@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-- This note describes the design for installing web extensions from the Web Store, Google's extension store for browsers built on Chromium, as `webExtension` plugins (`docs/plugins.md`, Web extensions as plugins). It covers queue tasks IV.27, IV.17, and IV.20 in `docs/plan.md`, the package proof that IV.26 built, the client and staging that IV.17 built, the entry points that IV.18 built, Chromium's store button that IV.19 built, and row 44 of `docs/features.md`. The password managers that use it, 1Password and iCloud Passwords, are covered in `docs/password-managers.md` (IV.21, IV.22, and IV.13).
+- This note describes the design for installing web extensions from the Web Store, Google's extension store for browsers built on Chromium, as `webExtension` plugins (`docs/plugins.md`, Web extensions as plugins). It covers queue tasks IV.27 and IV.17 in `docs/plan.md`, the package proof that IV.26 built, the client and staging that IV.17 built, the entry points that IV.18 built, Chromium's store button that IV.19 built, the updates that IV.20 built, and row 44 of `docs/features.md`. The password managers that use it, 1Password and iCloud Passwords, are covered in `docs/password-managers.md` (IV.21, IV.22, and IV.13).
 - The user installs an extension from its store page in a tab, from a store address or an extension identifier pasted into Settings or the palette, and from the install sheet. Arch downloads the package from Google's public update endpoint for that identifier, checks the CRX3 package's signatures and its identifier, stages it for review in the existing sheet, and installs it for the engines its package supports, as with a `.crx` file the user selects.
 - This reverses the open decision in `docs/plugins.md` that allowed no direct installs from an online store. Arch still runs no server or vendor backend of its own: it calls Google's public endpoints, and only when the user acts.
 - Arch's interface, code, and documents call the store the Web Store. Its page addresses name another browser product in their host names, which `AGENTS.md` allows only in the README's opening and in browser import. The user's step IV.27 adds an exception for them to `AGENTS.md`. Until then, this note and the queue describe those hosts without writing them, and `WebStore.pageHosts` stays empty, so no address counts as a store page, while a pasted identifier and the rest of the install flow work; the rest of IV.17 then writes the hosts there and here. Afterwards they appear only in `WebStore.swift`, as constants that the tests also use, and in this note. The update endpoint's address names no browser product.
@@ -68,10 +68,12 @@ Built in IV.19; it finds no store page until IV.27 (Purpose and scope).
 
 ## Updates
 
-- Check for Updates in Settings ▸ Plugins, shown while the Persona has extensions installed from the store, checks up to 25 per request, with their installed versions, and shows when it last checked in the run or why it failed. Settings ▸ Plugins also checks once per Persona per run, when it first shows the Persona.
-- Only installs with the origin `webStore` are checked. Each version of a pair is checked under its engine identifier, which its package names.
-- A newer version, by Chromium's version order (one to four dot-separated numbers, compared as numbers), appears in the plugin's section: "Version 8.12.0 is available from the Web Store." with Review Update…, which downloads it as in the install flow, stages it as an update of that plugin (`PluginPackage.updates`), and opens the review, with newly requested permissions and sites marked New. A version that is not newer shows nothing.
-- The results last for the run and belong to the Persona's entry in `WebStoreInstaller.updates`, which is deleted with the Persona.
+Built in IV.20.
+
+- Check for Updates in Settings ▸ Plugins, shown while the Persona has extensions installed from the store (`WebStoreInstaller.hasStoreInstalls(among:)`), checks them every time, up to 25 per request, with their installed versions. Its row says "Checking for updates…", "Last checked at 10:42." (with the date for a check on another day), or why the last check failed in red, such as "The Web Store answered with HTTP status 503.". Settings ▸ Plugins also checks once per Persona per run, when it first shows the Persona (`checkForUpdates(in:onlyOncePerRun:)` with `true`). A check under way for a Persona is never joined by a second one.
+- Only installs with the origin `webStore` are checked, each under the identifier of its origin, which its package names, so each version of a pair is checked under its own. Two versions under one identifier make one query with the older version. A Persona without a store install asks nothing and records no check.
+- A newer version, by Chromium's version order (one to four dot-separated numbers, compared as numbers, a missing number as 0), appears in the plugin's section, or under a pair's version row: "Version 8.12.0 is available from the Web Store." with Review Update…. Review Update… opens the store sheet without its field, titled "Update “1Password” from the Web Store", which downloads that version as in the install flow without asking the store again (`stageUpdate(of:in:)`), stages it as an update of that plugin (`PluginPackage.updates`, also where two versions of a pair share its identifier), and puts the review in its place, with newly requested permissions and sites marked New; with no newer version known it says the installed version is the store's current one. A version that is not newer shows nothing, nor does one whose update has installed (`update(of:in:)`).
+- A check that succeeds replaces the Persona's results. One that fails records its message and keeps the versions found before, and one that is cancelled leaves the Persona's last check as it was. The results last for the run and belong to the Persona's entries in `WebStoreInstaller.updates` and `updateChecks`, which `forget(_:)` deletes as the session deletes the Persona; a check that ends after the Persona's plugin manager closed records nothing and throws `PluginError.closed`.
 
 ## Types
 
@@ -139,25 +141,39 @@ public final class WebStoreClient: Sendable {
     func download(_ release: WebStoreRelease, to file: URL) async throws
 }
 
-// Extensions, WebStoreInstaller.swift: one per app, which the session owns. `stage(_:in:)` built in IV.17 and `installedPlugin(of:among:)` in IV.18; IV.20 adds the rest and `ObservableObject`.
+// Extensions, WebStoreInstaller.swift: one per app, which the session owns. `stage(_:in:)` built in IV.17, `installedPlugin(of:among:)` in IV.18, and the updates in IV.20.
+/// A Persona's last update check in the run, as Settings ▸ Plugins shows it.
+public enum WebStoreUpdateCheck: Equatable, Sendable { case checking, checked(Date), failed(String) }
+
 @MainActor
 public final class WebStoreInstaller: ObservableObject {
     nonisolated public init(client: WebStoreClient)
     /// The plugin that holds the extension `id`, from the store or not, a version of a pair among them; nil also for text that is not an identifier.
     nonisolated public static func installedPlugin(of id: String, among plugins: [InstalledPlugin]) -> InstalledPlugin?
+    /// Whether any of the plugins came from the store, which Check for Updates covers.
+    nonisolated public static func hasStoreInstalls(among plugins: [InstalledPlugin]) -> Bool
     /// Downloads the current package of the identifier into `PluginManager.stagingDirectory`, unless the Persona has that version installed from the store, and stages it in the Persona of `plugins` with the origin `webStore`. Throws `PluginError.closed` for a closed manager without asking, and `CancellationError` when its task is cancelled, leaving nothing staged.
     public func stage(_ id: String, in plugins: PluginManager) async throws -> PluginPackage
-    /// The newer versions found for each Persona's store installs in this run.
+    /// The newer versions that each Persona's last check found, by the plugin they update, for the run.
     @Published public private(set) var updates: [PersonaID: [PluginID: WebStoreRelease]]
-    /// Asks about the Persona's store installs; `onlyOncePerRun` skips a Persona already checked in the run.
+    /// Each Persona's last check in the run; none for a Persona not checked yet.
+    @Published public private(set) var updateChecks: [PersonaID: WebStoreUpdateCheck]
+    /// Asks about the store installs of the Persona of `plugins` (`PluginManager.persona`); `onlyOncePerRun` skips a Persona already checked in the run. Records the outcome in `updateChecks` and throws a failure, `PluginError.closed` for a deleted Persona, and `CancellationError`.
     public func checkForUpdates(in plugins: PluginManager, onlyOncePerRun: Bool) async throws
+    /// The newer version found for the plugin while it is installed from the store at an older version.
+    public func update(of plugin: InstalledPlugin, in plugins: PluginManager) -> WebStoreRelease?
+    /// Downloads the version found for the plugin and stages it as an update of that plugin; throws `WebStoreError.alreadyInstalled` with none, and otherwise as `stage(_:in:)`.
     public func stageUpdate(of plugin: PluginID, in plugins: PluginManager) async throws -> PluginPackage
     public func forget(_ persona: PersonaID)
+    /// Chromium's version order: one to four dot-separated numbers, compared as numbers.
+    nonisolated static func version(_ version: String, isNewerThan installed: String) -> Bool
 }
 
 // Plugins, PluginManager, built in IV.17: `Staging/` in the Persona's folder, where the store's downloads wait, and whether the session closed the manager as it deleted the Persona.
 public var stagingDirectory: URL
 public private(set) var isClosed: Bool
+// Plugins, PluginManager, public in IV.20: the Persona, by which the installer keeps its update results.
+public let persona: PersonaID
 
 // Plugins, built in IV.26
 public enum PluginProof: String, Hashable, Sendable { case developer, webStore }
@@ -186,6 +202,8 @@ public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInP
 /// Built in IV.18. Set by the app shell: opens Settings ▸ Plugins at the Persona with the store sheet started for the identifier, and a review that names the Persona with the space, if any. `installEngineVersion` passes the tab's space too.
 public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
 public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) -> Void)?
+/// IV.20: deleting a Persona also calls `webStore.forget(_:)`.
+func deletePersona(_ id: Persona.ID)
 /// Public for Settings ▸ Plugins' reviews.
 public static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String?
 
@@ -202,8 +220,8 @@ struct PaletteWebStoreRows: Equatable {
     init(text: String, pageURL: URL?, reader: WebStoreReader = .store)
 }
 
-// Preferences, built in IV.18: the store sheet, the first step of `PluginInstallSheet`, which starts with `.review(_:)` or `.webStore(_:)` and names the Persona in its review.
-struct WebStoreStart { var text: String; var versionOf: PluginID?; var engine: EngineKind?; var startsAtOnce: Bool }
+// Preferences, built in IV.18: the store sheet, the first step of `PluginInstallSheet`, which starts with `.review(_:)` or `.webStore(_:)` and names the Persona in its review. IV.20 adds `update`, the plugin of Review Update…, for which the sheet has no field and calls `stageUpdate(of:in:)`.
+struct WebStoreStart { var text: String; var versionOf: PluginID?; var engine: EngineKind?; var update: PluginID?; var startsAtOnce: Bool }
 struct WebStoreInstallSheet: View
 static func personaSentence(persona: Persona.ID, space: Space?, among personas: [Persona]) -> String?  // PluginInstallSheet
 // PreferencesWindowController
@@ -219,7 +237,7 @@ public func showPlugin(_ plugin: PluginID, in persona: Persona.ID, space: Space.
 - Store (`ExtensionsTests`, `WebStoreTests.swift`, built in IV.17), with `StoreStub`, a `URLProtocol` that answers every request of the tests' sessions, so no test reaches the network; the tests that use it run one at a time. `extensionID(in:)` reads both page forms with and without a slug, query, fragment, or trailing slash, in any case, and no identifier from the store's other pages, the other host's form, other hosts and schemes, extra path components, or identifiers that are not one, with store addresses built from hosts that stand in for the store's and from `WebStore.pageHosts` once it lists them, so that `WebStoreTests.swift` names no host; `extensionID(from:)` reads addresses with and without `https://` and bare identifiers in any case with spaces at either end, and refuses 31 or 33 letters, letters past `p` or with a mark, digits, and inner spaces. `chromiumVersion(inCEFVersion:)` reads the pinned CEF version's form and refuses others. The requests have the parameters above, one `x` per identifier with `v=0.0.0.0` or the installed version, 25 to a request, with an empty `Accept-Language`, and the session has no cookie storage, sets no cookies, accepts none, and has no cache or credential storage. The test checks the configuration because URLSession neither stores nor sends cookies through a `URLProtocol`, even with cookie storage; checking the cookies themselves would need a listener on the loopback address. The response's statuses map to answers, with several `app` elements in one response and answers only for the identifiers asked about; offers without an address or version, digests that are not one, and other documents do not read; a status other than 200 and a client without a Chromium version throw. A download matches, also after a redirect to another HTTPS address, and is refused without HTTPS, past the size limit, as the answer states it or as the body arrives, with a different digest or size, with another status, or after a redirect to HTTP, leaving no file. The installer stages the store's package with the origin and proof `webStore`, leaves no download in `Staging/`, and installs it with `webStore` in `plugins.json`; with that version installed it downloads nothing and gives the installed message, and a newer version stages as an update. It refuses an unknown identifier, `noupdate`, another status, an answer without the identifier, and text that is not an identifier with their messages, and a package without the publisher proof, for another identifier, of a theme, or with a different digest; cancelling its task while the endpoint answers, during the download, or while the engines check the package throws `CancellationError` and leaves nothing in `Staging/`, with each wait bounded so that a cancellation that never arrives fails the test. For a manager that closes while the endpoint answers, or that is closed, it throws `PluginError.closed` without downloading or asking.
 - Entry points (built in IV.18): `BrowsingTests`, `WebStoreEntryTests.swift`, with store pages built from a host that stands in for the store's: the palette offers Install from the Web Store for a store address with or without `https://` and a bare identifier in any case, and nothing for other text, another host's address, or a letter past `p`; with a store page in the selected tab, its address, its identifier, and words that begin the row's name give Install Extension from This Page alone, another identifier gives Install from the Web Store, and other text, another page, or no page gives neither; the popover's row installs a store page's extension or names the installed plugin, and is nil off a store page. `ExtensionsTests`, `WebStoreTests.swift`: `installedPlugin(of:among:)` finds a plugin of the identifier installed from a `.crx` file, in any case, and nothing for another identifier or text that is not one. `PreferencesTests`, `PluginReviewPersonaTests.swift`: the review's Persona sentence with a space, for a start from a tab or the palette, without one, for Settings ▸ Plugins, and none with one Persona or for a Persona no longer listed.
 - Chromium's store button (`ExtensionsTests`, `EngineRequestsTests.swift`, built in IV.19), with store pages on a host that stands in for the store's: before the Persona has an extension, a profile's start makes the runtime the recording engine's delegate; its install prompt on a store page is answered false and reaches the host with the identifier in lowercase, the Persona, and the tab; one on another page, from a tab without an address, without a tab, or with an empty or short identifier is answered false and does not reach the host; none shows a sheet or loads anything.
-- Updates (`ExtensionsTests`, IV.20): one request for the Persona's store installs with their versions and none for file installs; the automatic check runs once per Persona per run, and Check for Updates runs every time; only newer versions show; Review Update stages an update of that plugin; deleting a Persona drops its results.
+- Updates (`ExtensionsTests`, `WebStoreTests.swift`, built in IV.20), with `StoreStub`: Chromium's version order, with numbers compared as numbers, a missing number as 0, and text that is not one to four numbers never newer. A Persona with a file install alone asks nothing and records no check; with a store install, one request asks about it with its installed version and nothing about the file install, and the newer version shows for the store install alone; the automatic check runs once per Persona per run, and Check for Updates every time. The same version, an older one, and `noupdate` show nothing, and a newer one does; a failed check records the store's message and keeps the version found before. Review Update… with no newer version known throws the installed message and asks nothing; with one, it downloads that version without asking the store again, stages it with the origin and proof `webStore` as an update of that plugin, leaves no download in `Staging/`, and once installed the update shows no more. `forget(_:)` drops the Persona's results and check; a cancelled check leaves the Persona unchecked, with each wait bounded; and a Persona whose manager closes while the store answers, or is closed, records nothing and throws `PluginError.closed`, asking nothing once closed. The session's call of `forget(_:)` as it deletes a Persona needs a store answer that no session test can stub, so regression check 63 covers it.
 
 ## Checks with the app
 
@@ -227,7 +245,7 @@ Check 1 also covers the client with the Chromium version that the app shell pass
 
 1. Settings ▸ Plugins ▸ Install from Web Store… with a public extension's store address, and with its bare identifier, shows its review with "from the Web Store", installs it, and it runs on the engines its review names. Cancel during the spinner leaves `Staging/` empty, and the identifier again says it is installed with Done. A plugin's Install <Engine> Version… ▸ From the Web Store… reviews the store's package as that engine's version.
 2. On a store page in a WebKit tab and in a Chromium tab, the site settings popover's Web Store row and the palette's Install Extension from This Page open the same review in the tab's Persona, and a pasted identifier's Install from the Web Store opens it in the window's Persona. Each opens it again after Settings ▸ Plugins was opened and closed once. With two Personas, the review names "the Persona of “Work / Research”", deleting the Persona while its store sheet downloads closes the sheet and leaves its `Staging/` empty, and a start for another Persona while a store sheet downloads waits until that sheet closes. On Chromium, note whether the store offers its own install button; if it does, the button opens the same review in the tab's Persona, naming "the Persona of “Work / Research”" with two Personas, also in a Persona without any extension, and Chromium installs nothing until the review's Install. The store pages need IV.27.
-3. Check for Updates finds nothing for a current extension. After the `version` in the installed copy's `manifest.json` is lowered while Arch is not running, it offers Review Update….
+3. Check for Updates finds nothing for a current extension and says when it checked. After the `version` in the installed copy's `manifest.json` is lowered while Arch is not running, opening Settings ▸ Plugins checks once and offers Review Update…, whose review updates the plugin; showing another Persona and back asks nothing again, Check for Updates asks again, and offline it shows the system's message (regression check 63).
 4. A pasted theme identifier is refused with its message.
 
 ## Risks
