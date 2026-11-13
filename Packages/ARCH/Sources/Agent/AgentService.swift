@@ -382,8 +382,16 @@ import Foundation
             }
         }
         // Outside access, or the Persona chosen, may have gone while the sheet showed.
-        guard acceptsOutsideClients else { return nil }
-        return makeGrant(choice, for: identity)
+        guard acceptsOutsideClients, let grant = makeGrant(choice, for: identity) else { return nil }
+        toolsDidChange(for: identity.key)
+        return grant
+    }
+
+    /// Sends `tools/changed` to the client's connections after a grant: their list before it named every served tool, and the grant's level and scopes may leave some out.
+    private func toolsDidChange(for key: AgentClientIdentity.Key) {
+        for connection in connections.values where connection.stage == .ready && connection.identity?.key == key {
+            endpoint?.send(.notification(method: AgentControlMethod.toolsChangedNotification, params: nil), to: connection.id)
+        }
     }
 
     private func decline(_ identity: AgentClientIdentity) {
@@ -444,7 +452,7 @@ import Foundation
     // MARK: Messages
 
     private func handle(_ message: AgentRPCMessage, on connection: ClientConnection) {
-        // Clients send no notifications Arch acts on yet, and Arch asks clients nothing.
+        // Arch acts on clients' `tools/cancel` from plan task VII.13 on, and asks clients nothing.
         guard case .request(let requestID, let method, let params) = message else { return }
         switch (connection.stage, method) {
         case (.new, AgentControlProtocol.helloMethod):

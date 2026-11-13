@@ -1,4 +1,4 @@
-// Grants for outside clients (docs/agents.md, Outside clients: identity, grants, revocation): the first tool call asks with the sheet and `hello` then names the grant; the Agents Persona is made on demand, recorded, and agent-only; Touch ID or the login password guards every grant except Read Only in the Agents Persona with no scope until quit; Don't Allow asks again only after a minute; revocation, release, expiry, a grant's process ending, and its Persona's deletion end the grant and close its connections with `revoked`.
+// Grants for outside clients (docs/agents.md, Outside clients: identity, grants, revocation): the first tool call asks with the sheet and `hello` then names the grant, and the client's connections get `tools/changed`; the Agents Persona is made on demand, recorded, and agent-only; Touch ID or the login password guards every grant except Read Only in the Agents Persona with no scope until quit; Don't Allow asks again only after a minute; revocation, release, expiry, a grant's process ending, and its Persona's deletion end the grant and close its connections with `revoked`.
 import AgentControl
 import Foundation
 import Testing
@@ -44,6 +44,22 @@ import Testing
         #expect(names == ["session_info", "list_spaces", "list_tabs"])
         #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == ["session_info", "list_spaces", "list_tabs"])
         #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == ["session_info", "list_spaces", "list_tabs"])
+    }
+
+    @Test func aGrantSendsToolsChangedToTheClientsConnections() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        _ = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice()]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let idle = try TestClient(harness.location)
+        _ = try await idle.hello()
+        #expect(try await client.callTool("list_tabs").status == .ok)
+        // The connection that made no call learns that its list changed, and lists again for the grant.
+        #expect(try await idle.receive() == .notification(method: "tools/changed", params: nil))
+        let names = try await idle.call("tools/list").decode(as: AgentToolList.self).tools
+        #expect(names == AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name))
     }
 
     @Test(arguments: [
