@@ -45,7 +45,9 @@ struct WebStoreInstallSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                Text("Arch downloads the extension\u{2019}s current package from the Web Store, and you review what it asks for before it installs.")
+                Text(start.update == nil
+                     ? "Arch downloads the extension\u{2019}s current package from the Web Store, and you review what it asks for before it installs."
+                     : "Arch downloads the version that the last check found, without asking the Web Store for a newer one, and you review what it asks for before it installs.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

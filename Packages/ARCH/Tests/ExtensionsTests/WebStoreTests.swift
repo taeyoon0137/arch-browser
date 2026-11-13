@@ -491,6 +491,34 @@ import Testing
         manager.close()
     }
 
+    /// In a pair whose versions share the identifier, the rule of `PluginManager` sends a package that both engines run to the version whose answers it equals; Review Update… sends it to the version it was clicked for.
+    @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
+    func reviewUpdateStagesAnUpdateOfTheClickedVersionOfAPairThatSharesTheIdentifier() async throws {
+        let manager = launch()
+        let installer = WebStoreInstaller(client: client())
+        let webKit = try #require(host.engines[.webKit] as? RecordingEngine)
+        webKit.refusedNames = ["Packed for Chromium"]
+        // A developer's folder with the store's identifier, which both engines run, then the store's package, which WebKit refuses, as its Chromium version.
+        let key = CRXFile.developer.publicKey.base64EncodedString()
+        let folderVersion = try await manager.installEverything(from: try folder.package("developer", ["manifest.json": #"{"manifest_version": 3, "name": "Packed", "version": "2", "key": "\#(key)"}"#]))
+        offer(try crx("chromium", #""manifest_version": 3, "name": "Packed for Chromium", "version": "2""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: "2")
+        let staged = try await installer.stage(extensionID, in: manager)
+        #expect(staged.counterpart == folderVersion.id && staged.joinableEngines == [.chromium])
+        let storeVersion = try manager.install(staged, grant: PluginGrant(requestedBy: staged.manifest), isEnabled: true, asVersionOf: folderVersion.id, for: .chromium)
+        // The store offers a version that both engines run, whose answers equal the folder version's.
+        offer(try crx("v3", #""manifest_version": 3, "name": "Packed", "version": "3""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: "3")
+        try await installer.checkForUpdates(in: manager, onlyOncePerRun: false)
+        let found = try #require(manager.plugins.first { $0.id == storeVersion })
+        #expect(installer.update(of: found, in: manager)?.version == "3" && installer.update(of: folderVersion, in: manager) == nil)
+        let update = try await installer.stageUpdate(of: storeVersion, in: manager)
+        #expect(update.updates == storeVersion && update.updateChoices.isEmpty)
+        try manager.install(update, grant: PluginGrant(requestedBy: update.manifest), isEnabled: true)
+        #expect(manager.plugins.first { $0.id == storeVersion }?.manifest.version == "3")
+        let other = try #require(manager.plugins.first { $0.id == folderVersion.id })
+        #expect(other.manifest.version == "2" && other.origin == folderVersion.origin)
+        manager.close()
+    }
+
     @Test(.enabled(if: systemRunsWebExtensions, "Web extensions run from macOS 15.4"))
     func deletingAPersonaDropsItsResultsAndACancelledCheckRecordsNothing() async throws {
         let manager = launch()

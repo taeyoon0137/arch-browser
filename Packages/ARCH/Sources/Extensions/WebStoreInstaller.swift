@@ -133,7 +133,7 @@ public final class WebStoreInstaller: ObservableObject {
         return release
     }
 
-    /// Review Update…: downloads the newer version that the last check found for the plugin, as `stage(_:in:)` downloads a package, and stages it as an update of that plugin (`PluginPackage.updates`), also where two versions of a pair share its identifier. Throws `WebStoreError.alreadyInstalled` when no newer version is known, and otherwise as `stage(_:in:)`, cancellation among it; asks the store nothing.
+    /// Review Update…: downloads the newer version that the last check found for the plugin, as `stage(_:in:)` downloads a package, and stages it as an update of that plugin (`PluginPackage.updates`) while the package has the plugin's identifier, also where two versions of a pair share it and the rule of `PluginManager` would send it to the other one. Throws `WebStoreError.alreadyInstalled` when no newer version is known, and otherwise as `stage(_:in:)`, cancellation among it; asks the store nothing.
     public func stageUpdate(of plugin: PluginID, in plugins: PluginManager) async throws -> PluginPackage {
         try await staged(in: plugins) {
             guard !plugins.isClosed else { throw PluginError.closed }
@@ -144,7 +144,7 @@ public final class WebStoreInstaller: ObservableObject {
                 throw WebStoreError.alreadyInstalled(name: installed.manifest.name, version: installed.manifest.version)
             }
             var package = try await downloadAndStage(release, in: plugins)
-            if package.updateChoices.contains(plugin) { package.updates = plugin }
+            if package.manifest.id == installed.manifest.id { package.updates = plugin }
             return package
         }
     }
