@@ -41,9 +41,9 @@ import Testing
         _ = try await client.hello()
         // Before a grant, the list names every served tool, since the sheet may allow any of them.
         let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
-        #expect(names == ["session_info", "list_spaces", "list_tabs"])
-        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == ["session_info", "list_spaces", "list_tabs"])
-        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == ["session_info", "list_spaces", "list_tabs"])
+        #expect(names == ["session_info", "list_spaces", "list_tabs", "guide"])
+        #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == ["session_info", "list_spaces", "list_tabs", "guide"])
+        #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == ["session_info", "list_spaces", "list_tabs", "guide"])
     }
 
     @Test func aGrantSendsToolsChangedToTheClientsConnections() async throws {

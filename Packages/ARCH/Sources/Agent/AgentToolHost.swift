@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). This first host runs the reading tools that need no page: `session_info`, `list_spaces`, and `list_tabs`, for an outside client's grant. Plan task VII.12 adds agent tabs and the reading and navigating tools, with their events, limits, and rules.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). This first host runs the reading tools that need no page: `session_info`, `list_spaces`, `list_tabs`, and `guide`, for an outside client's grant. Plan task VII.12 adds agent tabs and the reading and navigating tools, with their events, limits, and rules.
 import AgentControl
 import Foundation
 
@@ -40,7 +40,7 @@ struct AgentHandleTable {
 
 @MainActor struct AgentToolHost {
     /// The tools this build runs; `tools/list` lists only these, and the others answer that they are not available yet.
-    static let servedTools = ["session_info", "list_spaces", "list_tabs"]
+    static let servedTools = ["session_info", "list_spaces", "list_tabs", "guide"]
 
     let host: any AgentBrowserHost
     /// Whether AI may read a page at this address: the site exclusions of `ai.json` (docs/agents.md, Site exclusions).
@@ -68,6 +68,8 @@ struct AgentHandleTable {
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
             return AgentToolResult(status: .error, code: "unknownTool", text: "Arch has no tool named \(call.name).")
         }
+        // The harness checks guide's arguments itself, so an unknown topic is answered with the topic names, as arch-cli guide answers it, and a null topic gives the guide.
+        if tool.name == "guide" { return AgentHarness.guideResult(arguments: call.arguments) }
         if let problem = Self.problem(with: call.arguments, for: tool) {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }

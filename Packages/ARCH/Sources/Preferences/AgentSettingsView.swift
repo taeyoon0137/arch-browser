@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
+// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
 import Agent
 import AgentControl
 import AI
@@ -47,6 +47,7 @@ struct AgentSettingsPage: View {
             aiFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
         }
         AgentCommandLineToolsSection()
+        AgentSkillsSection()
         grantsSection
         activitySection
     }
@@ -437,5 +438,265 @@ struct AgentCommandLineToolsSection: View {
 
     private func sentence(for error: Error) -> String {
         (error as? AgentLinkInstaller.Failure).map { AgentCommandLineTools.sentence(for: $0, bundle: bundle) } ?? error.localizedDescription
+    }
+}
+
+// MARK: - Skills
+
+/// The skills part of Settings ▸ AI ▸ Agents apart from its view, for one bundle and the login shell's environment: where the entry skill goes for Claude Code and Codex, its state there, what each row offers, and the sentences the section shows. `AgentSkillInstaller` makes every decision about folders and files.
+struct AgentSkillPlaces {
+    /// Claude Code's skill folder, and Codex's in `$HOME/.agents/skills` only, since Codex lists the skill twice when the folder under `CODEX_HOME` holds a copy too.
+    static let targets: [AgentSkillInstaller.Target] = [.claude, .codex]
+
+    /// The bundle's `arch-cli`, which the skill names.
+    let cliPath: String
+    let skill: AgentSkill
+    let installer: AgentSkillInstaller
+
+    /// `environment` is the login shell's, since the app's own lacks the `CLAUDE_CONFIG_DIR` and `CODEX_HOME` that a profile exports; `accountHomeFolder` stands in for an unset `HOME`.
+    init(bundle: AgentBundleLayout, accountHomeFolder: URL, environment: [String: String]) {
+        cliPath = bundle.cliExecutableURL.path
+        skill = AgentHarness.entrySkill(cliPath: cliPath)
+        installer = AgentSkillInstaller(accountHomeFolder: accountHomeFolder, environment: environment)
+    }
+
+    /// A tool's row: the skill's folder and the state there, or why the folder cannot be named, as when a variable is not an absolute path.
+    enum Place: Equatable {
+        case found(AgentSkillInstaller.Destination, AgentSkillInstaller.State)
+        case unresolved(String)
+    }
+
+    enum Action: Hashable {
+        case install, update, remove
+
+        var buttonTitle: String {
+            switch self {
+            case .install: return "Install\u{2026}"
+            case .update: return "Update\u{2026}"
+            case .remove: return "Remove"
+            }
+        }
+    }
+
+    func place(for target: AgentSkillInstaller.Target) -> Place {
+        do {
+            let destination = try installer.destination(for: .target(target), skillName: skill.name)
+            return .found(destination, installer.state(of: destination, skill: skill))
+        } catch {
+            return .unresolved(Self.sentence(for: error))
+        }
+    }
+
+    /// What a row offers: Install where no copy is, Remove and Update for an outdated copy, Remove for a current one, and nothing for a folder that Arch leaves alone.
+    static func actions(for state: AgentSkillInstaller.State) -> [Action] {
+        switch state {
+        case .absent: return [.install]
+        case .current: return [.remove]
+        case .outdated: return [.remove, .update]
+        case .modified, .foreign: return []
+        }
+    }
+
+    static func sentence(for state: AgentSkillInstaller.State) -> String {
+        switch state {
+        case .absent: return "Not installed."
+        case .current: return "Installed, with this Arch's text."
+        case .outdated: return "Installed, but older than this Arch or written by a copy of Arch elsewhere."
+        case .modified: return "Arch's copy with changes made after Arch wrote it, which Arch leaves alone."
+        case .foreign: return "A folder that Arch did not write, which Arch leaves alone."
+        }
+    }
+
+    /// What the confirmation shows before Install or Update writes: the file, and the `arch-cli` that the skill names.
+    func confirmation(for action: Action, at destination: AgentSkillInstaller.Destination) -> String {
+        switch action {
+        case .update: return "Arch replaces its copy at \(destination.file.path) with this Arch's skill, which names \(cliPath)."
+        case .install, .remove: return "Arch writes its skill to \(destination.file.path), a copy that names \(cliPath)."
+        }
+    }
+
+    /// Writes the skill, or replaces Arch's earlier copy; the installer checks the folder again first.
+    func install(at destination: AgentSkillInstaller.Destination) throws {
+        try installer.install(skill, at: [destination])
+    }
+
+    /// Removes Arch's unchanged copy and returns whether there was one.
+    func remove(at destination: AgentSkillInstaller.Destination) throws -> Bool {
+        try installer.remove(at: destination)
+    }
+
+    static func installedSentence(at destination: AgentSkillInstaller.Destination, for target: AgentSkillInstaller.Target) -> String {
+        "Wrote \(destination.file.path). New \(target.title) sessions read it."
+    }
+
+    static func removedSentence(at destination: AgentSkillInstaller.Destination, removed: Bool) -> String {
+        removed ? "Removed \(destination.folder.path)." : "No skill of Arch's is at \(destination.folder.path)."
+    }
+
+    /// The installer's sentence as Settings says it: Arch, not arch-cli, leaves the folder alone.
+    static func sentence(for error: Error) -> String {
+        guard let failure = error as? AgentSkillInstaller.Failure else { return error.localizedDescription }
+        switch failure {
+        case .insideAppBundle(let path): return "\(path) is inside an app bundle, whose signature covers its files, so Arch leaves it alone."
+        case .foreignFolder(let path): return "\(path) holds files that Arch did not write, so Arch leaves it alone."
+        case .modifiedSkill(let path): return "\(path) holds Arch's skill with changes made after Arch wrote it, so Arch leaves it alone."
+        case .notAbsolute, .notAFolder, .system: return failure.message
+        }
+    }
+
+    /// What the section says when it cannot read the login shell's environment, and so cannot tell where the tools read skills: the bundle's commands that write and remove the skill with a terminal's environment.
+    static func unreadEnvironmentSentence(bundle: AgentBundleLayout) -> String {
+        let command = { (action: String) in AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "skills", action, "--target", "claude", "--target", "codex"]) }
+        return "Arch could not read your login shell's environment, which tells where Claude Code and Codex read skills. In a terminal, \(command("install")) writes the skill, and \(command("remove")) removes Arch's copies."
+    }
+}
+
+/// Settings ▸ AI ▸ Agents ▸ Skills: for Claude Code and Codex, the entry skill's folder from the login shell's environment and the state there, with Install, which shows the file before writing it, Update for an outdated copy, and Remove. A folder Arch did not write, and Arch's copy changed since Arch wrote it, show that Arch leaves them alone, with no buttons.
+struct AgentSkillsSection: View {
+    var bundle = AgentBundleLayout(bundleURL: Bundle.main.bundleURL)
+    /// nil until the login shell's environment is read, and while it cannot be.
+    @State private var places: AgentSkillPlaces?
+    @State private var isReading = true
+    @State private var rows: [AgentSkillInstaller.Target: AgentSkillPlaces.Place] = [:]
+    @State private var pendingWrite: PendingWrite?
+    @State private var isConfirmingWrite = false
+    @State private var outcome: String?
+    @State private var problem: String?
+
+    /// An Install or Update waiting for its confirmation.
+    private struct PendingWrite {
+        var action: AgentSkillPlaces.Action
+        var target: AgentSkillInstaller.Target
+        var destination: AgentSkillInstaller.Destination
+    }
+
+    var body: some View {
+        Section {
+            if AgentCommandLineTools.hasTools(bundle) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("The arch-browser skill tells agents how to use Arch, with arch-cli at")
+                    AgentPathText(bundle.cliExecutableURL.path)
+                }
+                .task { await read() }
+                .alert(pendingWrite.map { "\($0.action == .update ? "Update" : "Install") the Skill for \($0.target.title)?" } ?? "", isPresented: $isConfirmingWrite, presenting: pendingWrite) { pending in
+                    Button(pending.action == .update ? "Update" : "Install") { write(pending) }
+                    Button("Cancel", role: .cancel) {}
+                } message: { pending in
+                    Text(places?.confirmation(for: pending.action, at: pending.destination) ?? "")
+                }
+                if isReading {
+                    Text("Reading your login shell's environment\u{2026}").foregroundStyle(.secondary)
+                }
+                ForEach(AgentSkillPlaces.targets, id: \.self) { target in
+                    if let place = rows[target] {
+                        AgentSkillRow(title: target.title, place: place) { action, destination in perform(action, for: target, at: destination) }
+                    }
+                }
+                if let problem {
+                    Text(problem).font(.callout).foregroundStyle(.red)
+                } else if let outcome {
+                    Text(outcome).font(.callout).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli for a skill to name.").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Skills")
+        } footer: {
+            aiFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills.")
+        }
+    }
+
+    /// Reads the login shell's environment and each tool's folder. A failed read leaves the rows out and says how to install from a terminal; the next showing of the section reads again.
+    private func read() async {
+        isReading = true
+        problem = nil
+        defer { isReading = false }
+        guard let home = AgentLinkInstaller.userHomeFolder else {
+            problem = "Arch could not read your home folder."
+            return
+        }
+        guard let environment = await AILoginShell.environment() else {
+            problem = AgentSkillPlaces.unreadEnvironmentSentence(bundle: bundle)
+            return
+        }
+        places = AgentSkillPlaces(bundle: bundle, accountHomeFolder: home, environment: environment)
+        refresh()
+    }
+
+    private func refresh() {
+        guard let places else { return }
+        rows = Dictionary(uniqueKeysWithValues: AgentSkillPlaces.targets.map { ($0, places.place(for: $0)) })
+    }
+
+    /// Install and Update show the file first; Remove removes Arch's unchanged copy at the path the row shows.
+    private func perform(_ action: AgentSkillPlaces.Action, for target: AgentSkillInstaller.Target, at destination: AgentSkillInstaller.Destination) {
+        outcome = nil
+        problem = nil
+        switch action {
+        case .install, .update:
+            pendingWrite = PendingWrite(action: action, target: target, destination: destination)
+            isConfirmingWrite = true
+        case .remove:
+            guard let places else { return }
+            do {
+                outcome = AgentSkillPlaces.removedSentence(at: destination, removed: try places.remove(at: destination))
+            } catch {
+                problem = AgentSkillPlaces.sentence(for: error)
+            }
+            refresh()
+        }
+    }
+
+    private func write(_ pending: PendingWrite) {
+        guard let places else { return }
+        do {
+            try places.install(at: pending.destination)
+            outcome = AgentSkillPlaces.installedSentence(at: pending.destination, for: pending.target)
+        } catch {
+            problem = AgentSkillPlaces.sentence(for: error)
+        }
+        refresh()
+    }
+}
+
+/// One tool's row in the Skills section: the skill's folder, the state there, and the buttons that state offers.
+struct AgentSkillRow: View {
+    let title: String
+    let place: AgentSkillPlaces.Place
+    let perform: (AgentSkillPlaces.Action, AgentSkillInstaller.Destination) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                if case .found(let destination, let state) = place {
+                    ForEach(AgentSkillPlaces.actions(for: state), id: \.self) { action in
+                        Button(action.buttonTitle) { perform(action, destination) }
+                    }
+                }
+            }
+            switch place {
+            case .found(let destination, let state):
+                AgentPathText(destination.folder.path)
+                Text(AgentSkillPlaces.sentence(for: state)).font(.caption).foregroundStyle(.secondary)
+            case .unresolved(let problem):
+                Text(problem).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// A path or command in Settings ▸ AI ▸ Agents: small monospaced text that can be selected and copied.
+struct AgentPathText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
     }
 }

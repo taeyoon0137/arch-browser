@@ -1,4 +1,4 @@
-// The activity log (docs/agents.md, Storage): an entry names a site at most, never an address's path or query, typed text, or page text; it keeps 90 days and sets aside a file that does not read. The first tool host over a fake browser host: `list_tabs` and `list_spaces` in the host's order with handles that last, a tab on an excluded site listed without its title or address, page titles marked as untrusted, and arguments checked against the catalog's parameters.
+// The activity log (docs/agents.md, Storage): an entry names a site at most, never an address's path or query, typed text, or page text; it keeps 90 days and sets aside a file that does not read. The first tool host over a fake browser host: `list_tabs` and `list_spaces` in the host's order with handles that last, a tab on an excluded site listed without its title or address, page titles marked as untrusted, arguments checked against the catalog's parameters, and `guide` with the harness's answers.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -109,5 +109,38 @@ import Testing
         }
         #expect(toolHost.run(AgentToolCall(name: "snapshot", arguments: ["tab": "t1"]), for: grant, handles: &handles).code == "notAvailable")
         #expect(toolHost.run(AgentToolCall(name: "run_script"), for: grant, handles: &handles).code == "unknownTool")
+    }
+
+    @Test func guideAnswersWithTheGuideEachTopicAndTheTopicNames() {
+        let host = FakeHost()
+        let toolHost = AgentToolHost(host: host, allowsAI: { _ in true })
+        let grant = grant(host)
+        var handles = AgentGrantHandles()
+        let topics = AgentJSON.array(AgentGuideTopic.allCases.map { .string($0.rawValue) })
+        let names = AgentGuideTopic.allCases.map(\.rawValue).joined(separator: ", ")
+        func guide(_ arguments: [String: AgentJSON] = [:]) -> AgentToolResult {
+            toolHost.run(AgentToolCall(name: "guide", arguments: arguments), for: grant, handles: &handles)
+        }
+
+        #expect(guide() == AgentToolResult(status: .ok, text: AgentHarness.instructions, structured: ["topics": topics]))
+        // A client may send an optional argument as null; that is the guide too.
+        #expect(guide(["topic": .null]) == guide())
+        for topic in AgentGuideTopic.allCases {
+            #expect(guide(["topic": .string(topic.rawValue)]) == AgentToolResult(status: .ok, text: topic.text, structured: ["topic": .string(topic.rawValue), "topics": topics]), "\(topic)")
+        }
+        // An unknown topic, a topic that is not text, and another argument are answered with the topic names, as arch-cli guide answers them.
+        for (arguments, sentence) in [
+            (["topic": "secrets"], "There is no guide topic named secrets."),
+            (["topic": 3], "topic must be a string."),
+            (["topic": "forms", "tab": "t1"], "guide takes only topic, not tab."),
+        ] as [([String: AgentJSON], String)] {
+            #expect(guide(arguments) == AgentToolResult(status: .error, code: "invalidArguments", text: "\(sentence) Topics: \(names).", structured: ["topics": topics]), "\(sentence)")
+        }
+        // The tool gives no handles, and every level can call it, before a grant too.
+        #expect(handles.tabs.id(for: "t1") == nil && handles.spaces.id(for: "s1") == nil)
+        #expect(AgentToolHost.toolsBeforeGrant.map(\.name).contains("guide"))
+        for level in AgentAccessLevel.allCases {
+            #expect(AgentToolHost.tools(for: level, scopes: AgentGrantScopes()).map(\.name).contains("guide"), "\(level)")
+        }
     }
 }
