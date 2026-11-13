@@ -15,7 +15,8 @@
 | Personas | Name, order | Cookies, site data, installed plugins |
 | Spaces | Name, symbol, tint, order, Persona | Which space is current |
 | Favorites | Address, title, order, Persona | The favorite's live tab (III.13) |
-| Pinned tabs | Address, title, the user's tab name, engine, order, space | Restorable page state, the live page |
+| Pinned tabs | Saved page (address and title, `docs/bookmarks.md`), the user's tab name, engine, order, space, folder | The current page, restorable page state, the live page; live folders' item tabs |
+| Live folders | Source, item limit, and refresh interval with their folder | Items, read state, dismissed items, fetch state (`live-folders.json`) |
 | Settings | The keys in the settings list below | Every other key |
 
 Open (unpinned) tabs stay on each Mac. They archive after the archive delay and change with every page. Syncing them would open and close tabs on one Mac while the user browses on another.
@@ -123,7 +124,7 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 - Within one zone, a new version adds optional fields or record types and raises `schemaVersion`. A missing field means its default: for example, a tab without `engine` uses the default engine. A reader keeps unknown fields because it builds outgoing records from the mirror's full copy. Records of unknown types stay in the mirror untouched. A later build applies them without fetching the zone again.
 - A breaking change, such as a field that changes meaning, moves to a new zone (`ArchSync2`). The first Mac with the new build copies the old zone's records into the new zone in the new format. It then stops reading the old zone. Older builds keep syncing among themselves in the old zone until they are updated.
 - `session.json` versions and `schemaVersion` are independent. The snapshot version describes the local file; `schemaVersion` describes the records. Only the record mapping translates between them.
-- Planned additions: folders (III.3) add a `Folder` record type and an optional `folder` reference on `Tab`; per-space home pages (III.10) and themes (III.9) add optional fields on `Space`. Multiple windows (III.6) and split view layouts (III.5) add nothing, because windows and layouts stay on each Mac.
+- Planned additions: folders (III.3) add a `Folder` record type and an optional `folder` reference on `Tab`; nested folders (III.18) add an optional `parent` reference on `Folder`, and live folders (III.22) add optional source fields on it; saved pages (III.16) add `savedURL` and `savedTitle` on `Tab`; per-space home pages (III.10) and themes (III.9) add optional fields on `Space`. Multiple windows (III.6) and split view layouts (III.5) add nothing, because windows and layouts stay on each Mac.
 
 ## Requirements
 
@@ -155,7 +156,7 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 ## Open decisions
 
 1. Tabs: only pinned tabs sync (this note), or open tabs too.
-2. A pinned tab's address follows its page (this note), or stays at the address it had when pinned.
+2. A pinned tab's address: decided by `docs/bookmarks.md`. A pinned tab syncs its saved page, which stays at the pinned address until the user changes it. Its current page stays on each Mac.
 3. Conflicts merge field by field with last writer wins per field (this note), or strictly per record as V.9 states.
 4. The first sync merges spaces by name and favorites by address (this note), or keeps every item from both Macs.
 5. Switching iCloud accounts merges the local sidebar into the new account (this note), or starts the Mac from the new account's data only.

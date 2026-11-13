@@ -116,6 +116,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 4. Cookies copy between the engines only within a Persona: each Persona has its own `CookieSync`.
 5. A Persona's stored data is removed only through an explicit list in the snapshot, at the next launch, before any engine starts. Removal is never inferred from a missing Persona.
 6. History, remembered permissions, zoom, site search, the search engine, the download settings, and `ai.json` stay app-wide (open decisions 2 and 3).
+7. When the interface names a Persona with one of its spaces, it shows "Persona / Space": the Persona's name, a slash with a space on each side, and the space's name, as in "Work / Research". Interface elements that cover a whole Persona rather than one space, such as its favorites, site data, plugins, and the New, Rename, and Delete Persona sheets, show the Persona's name alone. With only the default Persona, the interface does not name Personas, so a space shows only its name. `BrowserSession.label(ofSpace:)` gives the first label and `displayedName(ofPersona:)` the second. III.15 applies this rule to the space header and window title, and every later feature follows it, as `docs/bookmarks.md` does.
 
 ## Risks and mitigations
 
@@ -343,7 +344,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 
 - Only the session's `makeWindow(from:kind:)` creates one, from a `SessionSnapshot.WindowRecord`: `openWindow()` (⌘N) passes a record with a new ID, no frame, and no tab, restore and `sidebarTarget()`, which also serves the Dock's reopen, pass saved records, and `openSmallWindow` passes a record of its own with the kind `.small`. So all of them take one path. A window without a frame cascades from the window of its kind that last became main. The session keeps the controllers in `windowControllers` and releases each on the turn of the run loop after its window closes, because AppKit is still closing the window then. It lives in `Browsing`, which already builds a window (`TabCloseLogWindowController`) and holds both window views.
 - It hosts `BrowserWindowView(session:window:)`, or `SmallWindowView(session:window:)` for a small window, reaching the session through `model.session`, sets `model.nsWindow`, and hides its own toolbar in full screen. Both kinds keep the empty unified toolbar, so the small window's row sits on the traffic lights' line as the sidebar's top row does. `static func centeredFrame(size:pointer:screens:)` places a small window that has no other small window to cascade from.
-- It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; from step 13, with two or more Personas, followed by " — <Persona name>". It reads the title on the run loop turn after the model or the spaces change, because `objectWillChange` comes before the change.
+- It sets the window's hidden title, which the Window menu and Mission Control show: the selected tab's display title, or the space's name when no tab is selected; from step 13, with two or more Personas, followed by " — <Persona name>". III.15 replaces this suffix with " — <Persona> / <space>", or uses the label alone when no tab is selected (Persona rule 7). It reads the title on the run loop turn after the model or the spaces change, because `objectWillChange` comes before the change.
 - It sets `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false`.
 - Delegate: `windowDidBecomeMain` calls `session.windowDidBecomeMain(model)`. `windowWillClose` calls `session.windowWillClose(model)`. `windowDidMove` and `windowDidResize` record `model.restorableFrame` and schedule a save; resizing covers Zoom and window tiling, which are not live resizes. From `windowWillEnterFullScreen` until `windowDidExitFullScreen` or `windowDidFailToEnterFullScreen`, nothing is recorded, so the frame from before stays, and `windowDidExitFullScreen` records the frame again. From step 11, for a small window, `windowShouldClose` asks to close its tab and returns false; the window closes when the tab does.
 
@@ -388,6 +389,8 @@ public func favorites(in persona: Persona.ID) -> [Favorite]
 func persona(withID id: Persona.ID) -> Persona?
 /// The Persona's name where the interface shows it, or nil while the default Persona is the only one.
 func displayedName(ofPersona id: Persona.ID) -> String?
+/// III.15: the space's label under Persona rule 7, "Persona / Space" with two or more Personas, else the space's name.
+func label(ofSpace space: Space) -> String
 /// The last main window's space when it belongs to the Persona, else the Persona's first space.
 func preferredSpace(in persona: Persona.ID) -> Space
 /// The guard of Persona rule 3. Drop targets use it too.
@@ -638,11 +641,11 @@ Preference
 - With one Persona, nothing visible changes. That is the state after the migration.
 - With two or more Personas:
   - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking.
-  - `SpaceHeaderView` shows the Persona's name above the space name in small secondary text.
+  - `SpaceHeaderView` shows the space's label under Persona rule 7, "Work / Research", with the Persona's name and slash in secondary text. Double-clicking still renames only the space. Until III.15 lands, it shows the Persona's name above the space name in small secondary text.
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
-  - The window title adds the Persona's name.
+  - The window title ends with " — " and the current space's label, "Work / Research", or shows that label alone when no tab is selected (Persona rule 7; until III.15 lands, it adds the Persona's name alone).
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.
-  - The Clear Site Data sheet names the Persona: "…removed from both engines in the Persona “Work”…".
+  - The Clear Site Data sheet names only the Persona because site data belongs to the whole Persona: "…removed from both engines in the Persona “Work”…".
 - Commands, in the space menu (`SpaceMenuItems`) and the Spaces menu, with no Settings section: New Persona…, Rename Persona…, and Delete Persona…. New Persona and Rename ask for a name in an `NSAlert` sheet with a text field on the window the command acts on: the window of the space menu, or for the Spaces menu the sidebar target, which comes forward from behind a small window; an empty name changes nothing. The Spaces menu's items act on the sidebar target's Persona. New Persona appends a Persona with one space named "Personal" (with the next tint of the rotation) and switches the window to it. New Space, from the plus and ⌃⌘N, adds a space at the end of the window's Persona's group. III.12 has no reordering of Personas; a new Persona goes last.
 - Restrictions: Move Left, Move Right, and dragging a space stay within its group. A tab dragged over another Persona's space symbol does not light it, and its drop does nothing (the drop target filter in `SpaceTabsView` uses `canMoveTab`). Delete Space is disabled for a Persona's last space. The palette and the tab switcher list only tabs of the window's Persona, and palette commands run through its plugins. A page that a page or a preview opens joins a space of its own Persona, the window's current space or else `preferredSpace(in:)`, as does Open Link in New Tab from a favorite's page.
 - Delete Persona is disabled for the default Persona. For any other, a confirmation sheet says: "Its N spaces and M favorites are removed, and its K tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens." Then `deletePersona`:
