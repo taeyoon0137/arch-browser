@@ -79,6 +79,14 @@ actor LoginShell {
     }
 }
 
+/// The login shell's PATH for modules outside `AI`, such as Settings ▸ AI ▸ Agents, which links `arch-cli` and `arch-mcp` into one of its folders.
+public enum AILoginShell {
+    /// The PATH that `LoginShell` reads once per launch; nil when the shell could not tell, and the next call tries again.
+    public static func path() async -> String? {
+        await LoginShell.shared.path()
+    }
+}
+
 extension AICommandLineConfiguration {
     /// The absolute path of a tool: `name` itself when it is a path, with `~` expanded, or else the first match in the login shell's PATH. nil when no executable file is there.
     public static func locateExecutable(named name: String) async -> URL? {

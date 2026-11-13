@@ -1,6 +1,8 @@
-// Settings ▸ AI ▸ Agents, its first part (docs/agents.md, Settings ▸ AI ▸ Agents): Allow Outside Clients with what it lets programs do, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
+// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
 import Agent
 import AgentControl
+import AI
+import AppKit
 import SwiftUI
 
 struct AgentSettingsPage: View {
@@ -44,6 +46,7 @@ struct AgentSettingsPage: View {
         } footer: {
             aiFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
         }
+        AgentCommandLineToolsSection()
         grantsSection
         activitySection
     }
@@ -204,5 +207,217 @@ struct AgentSettingsPage: View {
         case .declined: return "Not allowed"
         case .refusedPeer: return "Connection refused: \(entry.outcome ?? "")"
         }
+    }
+}
+
+// MARK: - Command-line tools
+
+/// The command-line tools part of Settings ▸ AI ▸ Agents apart from its view, for one bundle and one PATH: the links that Install Command-Line Tools… writes, the links into an Arch bundle that Remove removes, and the sentences that show them. `AgentLinkInstaller` makes every decision about folders and files.
+struct AgentCommandLineTools {
+    let bundle: AgentBundleLayout
+    let installer: AgentLinkInstaller
+
+    /// `searchPath` is the login shell's PATH, since the app's own PATH lacks the folders a shell profile adds.
+    init(bundle: AgentBundleLayout, homeFolder: URL, searchPath: String) {
+        self.bundle = bundle
+        installer = AgentLinkInstaller(homeFolder: homeFolder, searchPath: searchPath)
+    }
+
+    /// Whether the bundle holds `arch-cli`. An app run from the build folder has no bundle, and so no tools to link or name.
+    static func hasTools(_ bundle: AgentBundleLayout) -> Bool {
+        FileManager.default.isExecutableFile(atPath: bundle.cliExecutableURL.path)
+    }
+
+    /// Both links in the folder that `AgentLinkInstaller` picks from PATH, `~/.local/bin` first.
+    func plannedLinks() throws -> [AgentLinkInstaller.Link] {
+        AgentLinkInstaller.links(in: try installer.installFolder(named: nil), for: bundle)
+    }
+
+    /// Writes the links; the installer checks both places again first.
+    func install(_ links: [AgentLinkInstaller.Link]) throws {
+        try installer.install(links)
+    }
+
+    /// The links into an Arch bundle's `Contents/Helpers` in PATH's folders inside the home folder, each with where it points: what Remove removes.
+    func installedLinks() -> [AgentLinkInstaller.Link] {
+        // Without a named folder, `removalFolders` does not throw.
+        let folders = (try? installer.removalFolders(named: nil)) ?? []
+        return folders.flatMap { folder in
+            AgentLinkInstaller.names.compactMap { name -> AgentLinkInstaller.Link? in
+                let location = folder.appendingPathComponent(name)
+                guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: location.path),
+                      AgentLinkInstaller.isArchLink(destination: destination, in: folder) else { return nil }
+                return AgentLinkInstaller.Link(location: location, destination: URL(fileURLWithPath: destination, relativeTo: folder).standardizedFileURL)
+            }
+        }
+    }
+
+    /// Removes the links that `installedLinks` lists and returns their locations.
+    func removeLinks() throws -> [URL] {
+        try installer.remove(from: installer.removalFolders(named: nil))
+    }
+
+    /// What the confirmation shows before anything is written: where the tools are, and each link with the file it will point to.
+    static func confirmation(for links: [AgentLinkInstaller.Link], bundle: AgentBundleLayout) -> String {
+        let folder = links.first?.location.deletingLastPathComponent().path ?? ""
+        return (["arch-cli and arch-mcp are in \(bundle.helpersURL.path). Arch links them into \(folder):"] + links.map(line)).joined(separator: "\n")
+    }
+
+    static func line(_ link: AgentLinkInstaller.Link) -> String {
+        "\(link.location.path) \u{2192} \(link.destination.path)"
+    }
+
+    /// The installer's sentence. Arch reads the login shell's PATH once per launch, so a folder added to PATH counts only after Arch is opened again.
+    static func sentence(for failure: AgentLinkInstaller.Failure) -> String {
+        guard failure == .noFolder else { return failure.message }
+        return failure.message + " Arch reads PATH from your login shell once per launch, so quit and reopen Arch after changing it."
+    }
+}
+
+/// Settings ▸ AI ▸ Agents ▸ Command-Line Tools: where `arch-cli` and `arch-mcp` are, Install Command-Line Tools…, which shows both paths and then links both tools into a folder on the login shell's PATH, Remove, and the MCP configurations for Claude Code and Codex with Copy. Arch never edits another tool's configuration.
+struct AgentCommandLineToolsSection: View {
+    var bundle = AgentBundleLayout(bundleURL: Bundle.main.bundleURL)
+    /// nil until the login shell's PATH is read, and while it cannot be.
+    @State private var tools: AgentCommandLineTools?
+    @State private var isReadingPath = true
+    @State private var installed: [AgentLinkInstaller.Link] = []
+    @State private var pendingLinks: [AgentLinkInstaller.Link] = []
+    @State private var isConfirmingInstall = false
+    @State private var outcome: String?
+    @State private var problem: String?
+
+    /// The configurations shown; `arch-cli mcp-config` also prints the JSON other MCP clients read.
+    private static let configurations: [AgentMCPConfigurationFormat] = [.claude, .codex]
+
+    var body: some View {
+        Section {
+            if AgentCommandLineTools.hasTools(bundle) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("arch-cli and arch-mcp are in")
+                    pathText(bundle.helpersURL.path)
+                }
+                .task { await readTools() }
+                .alert("Install Command-Line Tools?", isPresented: $isConfirmingInstall) {
+                    Button("Install") { install(pendingLinks) }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(AgentCommandLineTools.confirmation(for: pendingLinks, bundle: bundle))
+                }
+                linksRow
+                ForEach(Self.configurations, id: \.self) { format in
+                    configurationRow(format)
+                }
+            } else {
+                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli or arch-mcp to link or configure.").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Command-Line Tools")
+        } footer: {
+            aiFootnote("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on.")
+        }
+    }
+
+    @ViewBuilder private var linksRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if isReadingPath {
+                Text("Reading PATH from your login shell\u{2026}").foregroundStyle(.secondary)
+            } else if installed.isEmpty {
+                Text("Not linked into a folder on your PATH.").foregroundStyle(.secondary)
+            } else {
+                Text("Linked on your PATH:")
+                ForEach(installed, id: \.location.path) { pathText(AgentCommandLineTools.line($0)) }
+            }
+            if let problem {
+                Text(problem).font(.callout).foregroundStyle(.red)
+            } else if let outcome {
+                Text(outcome).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        HStack {
+            Spacer()
+            Button("Remove") { remove() }
+                .disabled(isReadingPath || installed.isEmpty)
+            Button("Install Command-Line Tools\u{2026}") { Task { await prepareInstall() } }
+                .disabled(isReadingPath)
+        }
+    }
+
+    private func configurationRow(_ format: AgentMCPConfigurationFormat) -> some View {
+        let text = AgentMCPConfiguration.text(format, mcpPath: bundle.mcpExecutableURL.path)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(format.title)
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+            }
+            pathText(text)
+        }
+    }
+
+    private func pathText(_ text: String) -> some View {
+        Text(text).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+    }
+
+    /// Reads the login shell's PATH and the links already on it. A failed read leaves `tools` nil, and Install reads again.
+    private func readTools() async {
+        isReadingPath = true
+        defer { isReadingPath = false }
+        guard let home = AgentLinkInstaller.userHomeFolder else {
+            problem = "Arch could not read your home folder."
+            return
+        }
+        guard let searchPath = await AILoginShell.path() else {
+            problem = "Arch could not read PATH from your login shell. In a terminal, \(AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", "install"])) links the tools with that shell's PATH."
+            return
+        }
+        let tools = AgentCommandLineTools(bundle: bundle, homeFolder: home, searchPath: searchPath)
+        self.tools = tools
+        installed = tools.installedLinks()
+    }
+
+    /// Picks the folder and shows both paths for confirmation before anything is written.
+    private func prepareInstall() async {
+        outcome = nil
+        problem = nil
+        if tools == nil { await readTools() }
+        guard let tools else { return }
+        do {
+            pendingLinks = try tools.plannedLinks()
+            isConfirmingInstall = true
+        } catch {
+            problem = Self.sentence(for: error)
+        }
+    }
+
+    private func install(_ links: [AgentLinkInstaller.Link]) {
+        guard let tools, let folder = links.first?.location.deletingLastPathComponent() else { return }
+        do {
+            try tools.install(links)
+            outcome = "Linked arch-cli and arch-mcp into \(folder.path)."
+            problem = nil
+        } catch {
+            problem = Self.sentence(for: error)
+        }
+        installed = tools.installedLinks()
+    }
+
+    private func remove() {
+        guard let tools else { return }
+        outcome = nil
+        problem = nil
+        do {
+            let removed = try tools.removeLinks()
+            outcome = removed.isEmpty ? "No links to Arch's tools were found." : "Removed \(removed.map(\.path).formatted(.list(type: .and)))."
+        } catch {
+            problem = Self.sentence(for: error)
+        }
+        installed = tools.installedLinks()
+    }
+
+    private static func sentence(for error: Error) -> String {
+        (error as? AgentLinkInstaller.Failure).map(AgentCommandLineTools.sentence(for:)) ?? error.localizedDescription
     }
 }
