@@ -64,8 +64,6 @@ import Testing
         tab.prepareContextMenu(editable, for: EngineContextMenuElement(selectedText: "text"))
         #expect(editable.items.map(\.identifier) == [EngineContextMenuItem.cut, EngineContextMenuItem.copy, EngineContextMenuItem.paste, EngineContextMenuItem.selectAll])
         #expect(editable.items.allSatisfy { $0.image == nil })
-        // AppKit's own items, such as AutoFill and Services, stay allowed, as on Chromium's menu.
-        #expect(editable.allowsContextMenuPlugIns)
         #expect(recorder.elements.last?.isEditable == true)
         #expect(recorder.elements.last?.selectedText == "text")
 

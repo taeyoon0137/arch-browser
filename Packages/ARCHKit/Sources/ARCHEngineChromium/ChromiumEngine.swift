@@ -563,22 +563,21 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return []
     }
 
-    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu for the page's text input view, so that AppKit adds its own items, as it does on WebKit.
+    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu, so that AppKit adds its own items where it adds them on WebKit.
     public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
         guard let uiDelegate, view.window != nil else { return completion() }
         let menu = NSMenu()
         menu.autoenablesItems = false
         let suggestions = params.misspelledWord.isEmpty || !params.spellingSuggestions.isEmpty ? params.spellingSuggestions
             : Self.systemSpellingSuggestions(for: params.misspelledWord)
-        for item in Self.engineMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, isEditable: params.isEditable,
-                                         selectionText: params.selectionText, editCommands: params.editCommands) {
-            item.target = self
-            menu.addItem(item)
-        }
         let element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
                                                mediaURL: params.mediaURL.flatMap(URL.init(engineString:)),
                                                selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable,
                                                isInMainFrame: params.isInMainFrame)
+        for item in Self.engineMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, element: element, editCommands: params.editCommands) {
+            item.target = self
+            menu.addItem(item)
+        }
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu
@@ -587,9 +586,8 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         completion()
     }
 
-    /// The spelling and editing items CEF can run, without a target, in WebKit's order: the misspelled word's suggestions, or No Guesses Found, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one. A suggestion carries its word, and an editing item its command as its tag.
-    static func engineMenuItems(misspelledWord: String, suggestions: [String], isEditable: Bool, selectionText: String,
-                                editCommands: ARCHCEFEditCommand) -> [NSMenuItem] {
+    /// The spelling and editing items CEF can run, without a target, as the WebKit adapter hands them to the tab: the misspelled word's suggestions, or No Guesses Found, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one that is not on a link, image, or media, where WebKit's menu has no Copy. A right click on a text link selects the link's text on both engines. Select All is enabled in any field, as the WebKit adapter's is, also where Chromium would not run it, as in an empty field, where it selects nothing. A suggestion carries its word, and an editing item its command as its tag.
+    static func engineMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         if !misspelledWord.isEmpty {
             for word in suggestions {
@@ -605,8 +603,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
             ("Paste", EngineContextMenuItem.paste, .paste), ("Select All", EngineContextMenuItem.selectAll, .selectAll),
         ]
-        for (title, identifier, command) in commands where isEditable || (command == .copy && !selectionText.isEmpty) {
-            let item = engineMenuItem(title, identifier, #selector(ChromiumWebContents.runEditCommandFromMenu(_:)), isEnabled: editCommands.contains(command))
+        let copiesSelection = !(element.selectedText?.isEmpty ?? true) && element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil
+        for (title, identifier, command) in commands where element.isEditable || (command == .copy && copiesSelection) {
+            let isEnabled = (element.isEditable && command == .selectAll) || editCommands.contains(command)
+            let item = engineMenuItem(title, identifier, #selector(ChromiumWebContents.runEditCommandFromMenu(_:)), isEnabled: isEnabled)
             item.tag = Int(command.rawValue)
             items.append(item)
         }
