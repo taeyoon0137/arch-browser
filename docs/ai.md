@@ -14,7 +14,7 @@ This note designs the AI interface (feature row 43) and the parts of rows 52 to 
 
 | Module | Location | Role | Dependencies |
 |---|---|---|---|
-| `AI` | `Packages/ARCH/Sources/AI` | `AIClient` and its value types, `AIService` (routing, page access checks, fallbacks, rate limits, usage), providers, Keychain storage, `ai.json`, hooks | Foundation, Security |
+| `AI` | `Packages/ARCH/Sources/AI` | `AIClient` and its value types, `AIService` (routing, page access checks, fallbacks, rate limits, usage), providers, Keychain storage, `ai.json`, hooks, and agent sessions on the user's Claude Code or Codex (`AIAgentSession`, `docs/agents.md`) | Foundation, Security |
 | `Preferences` | `Packages/ARCH/Sources/Preferences` | Settings ▸ AI, plus New Feature with AI… and its review in Settings ▸ Plugins | `AI`, `Plugins` |
 | `Terminal` | `Packages/ARCH/Sources/Terminal` | The built-in terminal window | Foundation, AppKit |
 | `Browsing` | `Packages/ARCH/Sources/Browsing` | The page reader, questions in the page, hook events and their actions, and the page source for the interface | `AI` |
@@ -281,7 +281,7 @@ The first features:
 | `hook.downloadName` | VII.6 | automatic | download | - |
 | `pluginComposer` | VII.7 | user | text only | `jsonOutput` |
 | `plugin.<id>` | not built | automatic when the manifest declares hooks, otherwise user | the kinds in the manifest's `ai` permission | - |
-| `agent` | not built (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
+| `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
 
@@ -387,7 +387,11 @@ public struct AICommandLineConfiguration: Codable, Sendable {
     public var output: AICommandLineOutput
     /// The user confirmed that `arguments` turn off the tool's own tools, such as running commands or editing files.
     public var runsWithoutTools: Bool
+    /// Set by the Claude Code and Codex presets; Arch then builds every argument and reads the kind's output, and `arguments`, `output`, and `runsWithoutTools` do not apply. Absent in `ai.json` for other tools.
+    public var agent: AIAgentKind?
 }
+
+public enum AIAgentKind: String, Codable, Sendable, CaseIterable { case claudeCode, codex }
 
 public enum AICommandLineOutput: Codable, Sendable {
     /// Standard output is the reply.
@@ -409,12 +413,15 @@ public struct AIJSONLinePaths: Codable, Sendable {
 - The user installs the tool and signs in to it in the built-in terminal (VII.3). The tool keeps its own sign-in, usually under the user's home folder; Arch never reads it. Settings ▸ AI has an Open Terminal button for this.
 - GUI apps get a short PATH. When the user adds a tool, Arch runs the login shell (`$SHELL -l -i -c` with a command that prints a marker followed by `$PATH`). It reads the line after the marker and looks up the tool's name in that PATH, which the built-in terminal also uses. Arch stores the absolute path.
 - Each request starts the tool with `posix_spawn` in its own process group. Standard input, output, and error use pipes; there is no terminal or window. The environment holds only `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`, `TMPDIR`, `TERM=dumb`, and the configured variables. The working directory is a new empty folder under `TMPDIR`, removed afterward.
-- The prompt goes to standard input, never into the arguments, which other processes can read. It is the request rendered as text: the instructions, then each message labeled `User:` or `Assistant:`, with parts as delimited blocks. Command-line tools get no tools from Arch, and only text files.
+- The prompt goes to standard input, never into the arguments, which other processes can read. It is the request rendered as text: the instructions, then each message labeled `User:` or `Assistant:`, with parts as delimited blocks. Command-line tools get no tools from Arch, except Arch's own in agent sessions (below), and only text files.
 - Arch decodes output as UTF-8 across chunk boundaries. It skips non-JSON lines in `jsonLines` mode. It accepts replies delivered at the end by tools that buffer output without a terminal.
 - Cancellation sends `SIGTERM` to the process group and `SIGKILL` two seconds later if it still runs. Timeouts: 120 seconds until the first output and 60 seconds between outputs. Output ends a second after the tool exits, even when a process the tool started in the background keeps standard output open.
 - A tool that can run commands could be steered by text in a page. Requests that carry page, selection, file, or download parts therefore go to a command-line provider only when `runsWithoutTools` is on. Settings ▸ AI explains this next to the checkbox. Arch cannot check the claim; it only keeps the working directory empty and the environment small.
-- Agent sessions, designed in `docs/agents.md` but not built, are the only exception to the rule that command-line tools get no tools from Arch. The Claude Code and Codex presets set a new `AICommandLineConfiguration.agent` and build every argument: the tool's own tools, settings, hooks, plugins, and other MCP servers are off, except Codex's code-mode host, through which its current models call any tool, and the reviewed built-in Claude Code plugins that no argument turns off, and the session connects only Arch's MCP server. Arch checks the tool's start event or stream and ends a run that shows anything else. The presets' ordinary requests use no tools, so they accept page data without `runsWithoutTools`. `AIModelCapability` gains `agent`, available only to those presets and HTTP models with `tools`; `ai.json` cannot change it, and the `agent` feature requires it.
-- Capabilities: `jsonOutput` (through the instructions, with the reply checked as JSON). A Check button sends a short test request and shows the reply or the error.
+- The Claude Code and Codex presets (Add Provider ▸ Claude Code or Codex) set `agent`. A preset finds `claude` or `codex` in the login shell's PATH, starts with the tool's default model and two concurrent requests, and keeps only its environment, models, and limits editable; its environment never carries `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. The editor shows the version and sign-in from the tool's own status command (`AIAgentToolStatus`) with Sign In, which types the tool's sign-in at the built-in terminal's prompt, and Check runs the status command and the probes, never a model.
+- Agent sessions (`AIService.startAgentSession(_:)`, `docs/agents.md`, Sessions on the user's CLI) are the only exception to the rule that command-line tools get no tools from Arch, and they get only Arch's MCP server. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other MCP servers are off, except Codex's code-mode host, through which its current models call any tool, the reviewed built-in Claude Code plugins that no argument turns off, and a session's own skill folder. Arch checks Claude Code's start event on every turn and watches Codex's stream, and ends a run that shows anything else with `blockedByPolicy(.agentUsedOwnTools(_:))`.
+- A preset's ordinary requests run with Arch's arguments for them and every tool off, after the same probes, and read the reply with the session's decoder: Claude Code's text deltas and Codex's completed messages. A Claude Code `init` that lists any tool or server ends the request before the reply. So the presets accept page data without `runsWithoutTools`.
+- `AIModelCapability.agent` is derived: a preset's models and HTTP models with `tools` have it, and an override in `ai.json` or Settings neither adds nor removes it (`AIProviderConfiguration.capabilities(of:)`). The `agent` feature requires it.
+- Capabilities: `jsonOutput` (through the instructions, with the reply checked as JSON), and `agent` for the presets. A Check button sends a short test request and shows the reply or the error; for a preset it runs no model.
 
 ### Keychain
 
@@ -796,7 +803,7 @@ public enum AIError: Error, Sendable {
 }
 
 public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature }
-public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData }
+public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String) }
 public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 ```
 
@@ -814,6 +821,9 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A missing tool executable, or a working folder that cannot be made | `providerUnavailable` with the reason the tool could not start |
 | A tool's nonzero exit | `providerUnavailable` with the last line of standard error |
 | A tool that exits 0 without output | `malformedReply` |
+| A preset's probe that finds a missing flag, feature, or setting | `providerUnavailable` naming it, such as "Codex 0.164.0 does not accept `web_search`. Update Codex in the terminal." |
+| A preset that is not signed in, before a session starts | `authentication` |
+| A Claude Code `init` that fails the start check, or a Codex item or server that the watcher refuses | `blockedByPolicy(.agentUsedOwnTools(_:))` with a sentence such as "Codex ran a command." |
 | A reply cut by the length limit before any text or tool call, or a `.json` reply cut before its value was complete | `replyTooLong` |
 
 The interface shows each error as one sentence with one action. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, `budgetReached`, and `commandLineToolWithPageData`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; for `contextTooLong`, Start Over in the page reader when earlier questions went out with the question, which clears the conversation and asks it again on its own, and otherwise Open Settings ▸ AI for another model; and Retry for the rest except `cancelled`, which shows nothing.
@@ -892,6 +902,7 @@ public struct AIPrice: Codable, Sendable {
 - VII.2 adds an `AITests` test target in `Packages/ARCH/Tests/AITests` (Swift Testing, run with `swift test`). It depends on `AI`, and on `Plugins` for the composer tests.
 - HTTP provider tests use a `URLProtocol` subclass that replays hand-written server-sent event transcripts for both formats: text deltas, tool calls whose arguments arrive in pieces, usage, error events and the key left out of their messages, 401, 429 with and without `retry-after`, `retry-after` values that are not finite or lie far ahead, 5xx, a cut stream, a server that refuses `max_tokens` (the request sent again with `max_completion_tokens`, which the model's next request sends at once) and a 400 for the resent request or about another field, a `max_completion_tokens` reply that the limit cuts before any text (`replyTooLong` through the service, with its tokens and the error counted) or after its first text (`finished(.lengthLimit)`), and messages without content left out, and they check that the session every HTTP provider uses follows a redirect only within the base URL's scheme, host, and port. No test uses a real key or the network. The tests keep their files in one temporary folder for the run, which the run removes as it exits.
 - Command-line provider tests write a shell script to a temporary folder for each test and run it as a command-line tool. Each script prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone.
+- Agent session tests (`AgentSessionTests`) run shell scripts that answer as `claude` and `codex`, record each call's arguments, environment, and standard input, and replay the recorded streams in `Fixtures/Agent` (`docs/agents.md`, Tests). They check the exact arguments and environments, the start check and the watcher, the feature derivation and the configuration probe, the probes run again for a changed executable, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, the derived capability, and the presets' ordinary requests and Check. `PreferencesTests` check the presets' fields from a search path and the status read from fake status commands.
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, the per-minute bucket, the cool-down a freed slot's next request waits for, doubling only across cool-downs, and an expired wait after a cool-down has ended), the daily and monthly limits, the site and spending limit checks repeated once a waiting request has its slot, a key the Keychain does not give, a provider whose key stays, usage months after the clock goes back, the defaults of fields a hand-written `ai.json` lacks, and usage normalization.
 - Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, also of a hook that does not stop when canceled, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
 - Composer tests (`PluginComposerTests`) run the composer against the scripted provider, one reply per request, and stage in temporary folders: a plugin staged without being installed, with the request and model as its origin and only text sent; a problem sent back and the corrected reply staged; each unusable reply, from the reply's form, sites, page scripts, file names, and text to the checks staging makes, ending after three; a reply over the size limit ending at once; a change sent with the last version and keeping its identifier; and a route without a JSON model. `PluginsTests` cover staging the files AI writes, a path that leaves the package, and installing, listing again at launch, and removing a plugin that AI wrote with its origin.

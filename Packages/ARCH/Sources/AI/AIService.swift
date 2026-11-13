@@ -90,8 +90,11 @@ public final class AIService: ObservableObject, AIClient {
         return try await makeProvider(configuration, resolvedKey).listModels()
     }
 
-    /// Sends a short request to the provider's first model and returns the reply, for the Check button in Settings ▸ AI. The configuration may be unsaved. The request belongs to no feature, so it waits for no rate limiter and counts toward no usage.
+    /// Sends a short request to the provider's first model and returns the reply, for the Check button in Settings ▸ AI. The configuration may be unsaved. The request belongs to no feature, so it waits for no rate limiter and counts toward no usage. A Claude Code or Codex preset runs its status command and probes instead, never a model.
     public func check(_ configuration: AIProviderConfiguration) async throws -> String {
+        if case .commandLine(let tool) = configuration.kind, let kind = tool.agent {
+            return try await checkAgentTool(tool, kind: kind)
+        }
         guard let model = configuration.models.first else { throw AIError.notConfigured(.noModel) }
         let request = AIProviderRequest(model: model.name, instructions: nil, messages: [AIMessage(role: .user, parts: [.text("Reply with one short sentence.")])],
                                         tools: [], output: .text, maxOutputTokens: 256)
@@ -250,7 +253,7 @@ public final class AIService: ObservableObject, AIClient {
         return usage.estimatedCost(in: limit.currency) >= limit.amount
     }
 
-    private func limiter(for provider: AIProviderID) -> AIRateLimiter {
+    func limiter(for provider: AIProviderID) -> AIRateLimiter {
         if let limiter = limiters[provider] { return limiter }
         let limiter = AIRateLimiter(provider: provider, limits: .http)
         limiters[provider] = limiter

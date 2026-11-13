@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Providers: the sheet that adds or edits a command-line tool, with its executable, arguments, environment, output format, whether it runs without its own tools, its models, and its limits. Open Terminal and Check help set it up.
+// Settings ▸ AI ▸ Providers: the sheet that adds or edits a command-line tool, with its executable, arguments, environment, output format, whether it runs without its own tools, its models, and its limits. Open Terminal and Check help set it up. For the Claude Code and Codex presets, Arch builds the arguments and reads the output, so the sheet shows the tool's version and sign-in with Sign In instead (`docs/agents.md`, Connecting a subscription).
 import AI
 import AppKit
 import SwiftUI
@@ -26,6 +26,8 @@ struct AICommandLineDraft: Identifiable {
     /// Kept while plain text is chosen, so switching back to JSON lines restores them.
     var paths: AIJSONLinePaths
     var runsWithoutTools: Bool
+    /// Set for the Claude Code and Codex presets, whose arguments, output, and tools Arch decides.
+    var agent: AIAgentKind?
     var models: [AIModelConfiguration]
     var limits: AIProviderLimits
 
@@ -60,8 +62,19 @@ struct AICommandLineDraft: Identifiable {
             paths = jsonPaths
         }
         runsWithoutTools = tool.runsWithoutTools
+        agent = tool.agent
         models = provider.models
         limits = provider.limits
+    }
+
+    /// A Claude Code or Codex preset with the tool found in the login shell's PATH, or in `searchPath` when given, its default model, and two concurrent requests. Without a match, the executable holds the tool's name for Find.
+    static func preset(_ kind: AIAgentKind, searchPath: String? = nil) async -> AICommandLineDraft {
+        var draft = AICommandLineDraft()
+        draft.name = kind.title
+        draft.agent = kind
+        draft.executable = await kind.locateExecutable(searchPath: searchPath)?.path ?? kind.executableName
+        draft.limits = .agentPreset
+        return draft
     }
 
     /// The executable, if it is an absolute path to a file this user may run.
@@ -74,6 +87,10 @@ struct AICommandLineDraft: Identifiable {
 
     var configuration: AIProviderConfiguration? {
         guard let executableURL, !name.trimmingCharacters(in: .whitespaces).isEmpty, !models.isEmpty else { return nil }
+        if let agent {
+            let tool = AICommandLineConfiguration(executable: executableURL, environment: AINameValue.dictionary(environment), agent: agent)
+            return AIProviderConfiguration(id: id, name: name.trimmingCharacters(in: .whitespaces), kind: .commandLine(tool), models: models, limits: limits)
+        }
         let tool = AICommandLineConfiguration(executable: executableURL,
                                               arguments: arguments.map(\.value).filter { !$0.isEmpty },
                                               environment: AINameValue.dictionary(environment),
@@ -93,24 +110,34 @@ struct AICommandLineEditor: View {
     @State private var checkTask: Task<Void, Never>?
     @State private var checkResult: String?
     @State private var checkFailed = false
+    @State private var status: AIAgentToolStatus?
+    @State private var statusError: String?
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 toolSection
-                argumentsSection
+                if let agent = draft.agent {
+                    statusSection(agent)
+                } else {
+                    argumentsSection
+                }
                 Section {
                     AINameValueRows(rows: $draft.environment, addTitle: "Add Variable")
                 } header: {
                     Text("Environment")
                 } footer: {
-                    aiFootnote("The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets.")
+                    aiFootnote(draft.agent == nil
+                               ? "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets."
+                               : "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, Arch's settings, and these variables, such as CLAUDE_CONFIG_DIR or CODEX_HOME when you moved the tool's folder. They are saved in ai.json, so they must not hold secrets. API keys are never passed, so the tool uses its own sign-in.")
                 }
-                outputSection
-                Section {
-                    Toggle("Runs without its own tools", isOn: $draft.runsWithoutTools)
-                } footer: {
-                    aiFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
+                if draft.agent == nil {
+                    outputSection
+                    Section {
+                        Toggle("Runs without its own tools", isOn: $draft.runsWithoutTools)
+                    } footer: {
+                        aiFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
+                    }
                 }
                 Section {
                     AIModelList(models: $draft.models, defaultCapabilities: AICommandLineConfiguration.capabilities) {
@@ -122,7 +149,7 @@ struct AICommandLineEditor: View {
                 } header: {
                     Text("Models")
                 } footer: {
-                    aiFootnote("The default model leaves out the arguments that name a model, so the tool uses its own choice.")
+                    aiFootnote(modelsNote)
                 }
                 AIProviderLimitsSection(limits: $draft.limits)
                 checkSection
@@ -200,6 +227,73 @@ struct AICommandLineEditor: View {
         }
     }
 
+    // MARK: Status
+
+    /// The version and sign-in from the tool's own status commands, read again when the executable changes.
+    @ViewBuilder private func statusSection(_ agent: AIAgentKind) -> some View {
+        Section {
+            LabeledContent("Version", value: status?.version ?? (statusError == nil && draft.executableURL != nil ? "Checking\u{2026}" : "\u{2014}"))
+            LabeledContent("Sign-in", value: signInText)
+            if let statusError {
+                Text(statusError).font(.callout).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Refresh") { Task { await loadStatus() } }
+                    .disabled(draft.executableURL == nil)
+                if status?.isSignedIn == false, PreferencesWindowController.openTerminalTyping != nil {
+                    Button("Sign In\u{2026}") { Task { await signIn(agent) } }
+                }
+            }
+        } header: {
+            Text("Status")
+        } footer: {
+            aiFootnote("Arch reads the version and the sign-in from \(agent.title)'s own status commands and never reads its credentials. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other servers stay off, so its ordinary requests may get page data, and agent sessions get only Arch's tools. Sign In types the tool's sign-in command in the terminal; press Return there to run it.")
+        }
+        .task(id: draft.executableURL) { await loadStatus() }
+    }
+
+    private var signInText: String {
+        switch status?.isSignedIn {
+        case true?: return "Signed In"
+        case false?: return "Not Signed In"
+        case nil: return status == nil ? "\u{2014}" : "Unknown"
+        }
+    }
+
+    private var modelsNote: String {
+        switch draft.agent {
+        case .claudeCode?: return "Name models as Claude Code accepts them, such as sonnet or opus, or keep the default model, the tool's own choice."
+        case .codex?: return "Name models by their Codex names, or keep the default model, the tool's own choice."
+        case nil: return "The default model leaves out the arguments that name a model, so the tool uses its own choice."
+        }
+    }
+
+    private func loadStatus() async {
+        guard let agent = draft.agent, let executable = draft.executableURL else {
+            status = nil
+            statusError = nil
+            return
+        }
+        do {
+            status = try await AIAgentToolStatus.read(kind: agent, executable: executable, environment: AINameValue.dictionary(draft.environment))
+            statusError = nil
+        } catch {
+            status = nil
+            statusError = error.localizedDescription
+        }
+    }
+
+    /// The tool's name when the login shell finds this executable by it, or else its quoted path, then its sign-in arguments.
+    private func signIn(_ agent: AIAgentKind) async {
+        guard let executable = draft.executableURL, let type = PreferencesWindowController.openTerminalTyping else { return }
+        let found = await AICommandLineConfiguration.locateExecutable(named: agent.executableName)
+        let program = found?.resolvingSymlinksInPath() == executable.resolvingSymlinksInPath()
+            ? agent.executableName
+            : "'" + executable.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        type(([program] + agent.signInArguments).joined(separator: " "))
+    }
+
     // MARK: Arguments and output
 
     @ViewBuilder private var argumentsSection: some View {
@@ -273,7 +367,9 @@ struct AICommandLineEditor: View {
                 Text(checkResult).foregroundStyle(checkFailed ? .red : .secondary).textSelection(.enabled)
             }
         } footer: {
-            aiFootnote("Check sends a short request to the first model and shows the reply or the error.")
+            aiFootnote(draft.agent == nil
+                       ? "Check sends a short request to the first model and shows the reply or the error."
+                       : "Check runs the tool's status command and Arch's checks of the flags, features, and settings it passes, never a model, so it uses none of your subscription.")
         }
     }
 
@@ -291,6 +387,7 @@ struct AICommandLineEditor: View {
                 checkFailed = true
             }
             checkTask = nil
+            if draft.agent != nil { await loadStatus() }
         }
     }
 

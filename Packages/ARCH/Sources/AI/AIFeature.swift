@@ -32,6 +32,11 @@ public enum AIModelCapability: String, Codable, Sendable, CaseIterable {
     case jsonOutput
     case images
     case files
+    /// Runs an agent session (`docs/agents.md`). Derived from the provider and not overridable: see `AIProviderConfiguration.capabilities(of:)`.
+    case agent
+
+    /// The capabilities a model's settings can turn on and off.
+    public static let overridable = allCases.filter { $0 != .agent }
 }
 
 public enum AIDataKind: String, Codable, Sendable, CaseIterable {

@@ -1,4 +1,4 @@
-// Command-line tools as providers. Each request runs the configured tool without a window. The prompt goes to standard input, never into the arguments, which other processes can read, and the reply comes back on standard output as plain text or JSON lines. The user installs the tool and signs in to it in the built-in terminal.
+// Command-line tools as providers. Each request runs the configured tool without a window. The prompt goes to standard input, never into the arguments, which other processes can read, and the reply comes back on standard output as plain text or JSON lines. The user installs the tool and signs in to it in the built-in terminal. The Claude Code and Codex presets run with the arguments Arch builds and the output decoders of their sessions, with every tool off (`docs/agents.md`, Ordinary requests).
 import Darwin
 import Foundation
 
@@ -32,7 +32,7 @@ struct CommandLineProvider: AIProvider {
     /// Runs the tool in a new empty folder under TMPDIR, removed once the tool has ended. Cancellation ends the tool's process group.
     private func run(_ request: AIProviderRequest, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         let input = Data(try Self.prompt(for: request).utf8)
-        let environment = await environment()
+        let invocation = try await invocation(for: request)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Arch-\(UUID().uuidString)", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -43,14 +43,14 @@ struct CommandLineProvider: AIProvider {
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
         do {
-            process = try CommandLineProcess(executable: tool.executable, arguments: tool.arguments(forModel: request.model),
-                                             environment: environment, directory: directory, input: input)
+            process = try CommandLineProcess(executable: tool.executable, arguments: invocation.arguments,
+                                             environment: invocation.environment, directory: directory, input: input)
         } catch let error as POSIXError {
             throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start: \(String(cString: strerror(error.code.rawValue))).")
         }
         do {
             try await withTaskCancellationHandler {
-                try await read(process, to: continuation)
+                try await read(process, decoder: invocation.decoder, to: continuation)
             } onCancel: {
                 process.terminate()
             }
@@ -61,12 +61,42 @@ struct CommandLineProvider: AIProvider {
         }
     }
 
+    /// The arguments, environment, and output decoder of one request: the configured ones, or those Arch builds for a preset after its probes.
+    private struct Invocation {
+        var arguments: [String]
+        var environment: [String: String]
+        var decoder: any CommandLineReplyDecoder
+    }
+
+    private func invocation(for request: AIProviderRequest) async throws -> Invocation {
+        let environment = await tool.runEnvironment()
+        guard let kind = tool.agent else {
+            return Invocation(arguments: tool.arguments(forModel: request.model), environment: environment,
+                              decoder: CommandLineOutputDecoder(output: tool.output, provider: configuration.id))
+        }
+        let probe: AIAgentProbeResult
+        do {
+            probe = try await AIAgentProbeStore.shared.result(kind: kind, executable: tool.executable, environment: environment)
+        } catch let error as AIAgentToolError {
+            throw error.aiError(provider: configuration.id)
+        }
+        switch kind {
+        case .claudeCode:
+            let decoder = ClaudeCodeStreamDecoder(check: ClaudeCodeStartCheck(session: nil), provider: configuration.id)
+            return Invocation(arguments: ClaudeCodeAgent.ordinaryArguments(model: request.model), environment: ClaudeCodeAgent.ordinaryEnvironment(environment),
+                              decoder: AgentReplyDecoder(stream: .claudeCode(decoder)))
+        case .codex:
+            return Invocation(arguments: CodexAgent.ordinaryArguments(disabled: probe.disabledFeatures, model: request.model), environment: environment,
+                              decoder: AgentReplyDecoder(stream: .codex(CodexStreamDecoder(isSession: false, provider: configuration.id))))
+        }
+    }
+
     /// Passes on the reply as standard output arrives, within the output timeouts, then checks how the tool ended.
-    private func read(_ process: CommandLineProcess, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
+    private func read(_ process: CommandLineProcess, decoder: any CommandLineReplyDecoder, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         let timer = StallTimer(timeout: firstOutputTimeout)
         try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { [tool, outputTimeout, provider = configuration.id] in
-                var decoder = CommandLineOutputDecoder(output: tool.output, provider: provider)
+            group.addTask { [outputTimeout] in
+                var decoder = decoder
                 for await chunk in process.output {
                     timer.extend(by: outputTimeout)
                     for event in try decoder.decode(chunk) { continuation.yield(event) }
@@ -135,18 +165,6 @@ struct CommandLineProvider: AIProvider {
         return nil
     }
 
-    /// The minimal environment and the configured variables, which take precedence. PATH is the login shell's, or this app's when the shell cannot tell, after the executable's own folder, so a script finds an interpreter installed beside it; a configured PATH replaces it.
-    private func environment() async -> [String: String] {
-        var environment = LoginShell.baseEnvironment
-        if tool.environment["PATH"] == nil {
-            let searchPath = await LoginShell.shared.path() ?? environment["PATH"] ?? ""
-            var folders = [tool.executable.deletingLastPathComponent().path]
-            for folder in searchPath.split(separator: ":").map(String.init) where !folders.contains(folder) { folders.append(folder) }
-            environment["PATH"] = folders.joined(separator: ":")
-        }
-        environment.merge(tool.environment) { _, configured in configured }
-        return environment
-    }
 }
 
 extension AICommandLineConfiguration {
@@ -161,8 +179,67 @@ extension AICommandLineConfiguration {
 
 // MARK: - Output
 
+/// Turns a tool's standard output into reply events.
+protocol CommandLineReplyDecoder: Sendable {
+    /// Whether any reply text has been passed on.
+    var hasReply: Bool { get }
+    mutating func decode(_ chunk: Data) throws -> [AIEvent]
+    /// Called once the tool has exited.
+    mutating func finish() throws -> [AIEvent]
+}
+
+/// A preset's ordinary request read with its session decoder: the reply's text and usage pass on, and an `init` that fails the start check, a forbidden item, or a failed turn ends the request.
+struct AgentReplyDecoder: CommandLineReplyDecoder {
+    enum Stream {
+        case claudeCode(ClaudeCodeStreamDecoder)
+        case codex(CodexStreamDecoder)
+    }
+
+    private var stream: Stream
+    private var lines = AIAgentLineBuffer()
+    private(set) var hasReply = false
+
+    init(stream: Stream) {
+        self.stream = stream
+    }
+
+    mutating func decode(_ chunk: Data) throws -> [AIEvent] {
+        try lines.lines(in: chunk).flatMap { try decode(line: $0) }
+    }
+
+    mutating func finish() throws -> [AIEvent] {
+        try lines.finish().map { try decode(line: $0) } ?? []
+    }
+
+    private mutating func decode(line: Data) throws -> [AIEvent] {
+        guard let object = agentJSONObject(line) else { return [] }
+        let events: [AIAgentStreamEvent]
+        switch stream {
+        case .claudeCode(var decoder):
+            events = try decoder.decode(object)
+            stream = .claudeCode(decoder)
+        case .codex(var decoder):
+            events = try decoder.decode(object)
+            stream = .codex(decoder)
+        }
+        return try events.compactMap { event in
+            switch event {
+            case .text(let text):
+                hasReply = true
+                return .text(text)
+            case .usage(let usage):
+                return .usage(usage)
+            case .turnFailed(let error):
+                throw error
+            case .started, .thinking, .notice, .turnEnded:
+                return nil
+            }
+        }
+    }
+}
+
 /// Turns standard output into reply events: plain text a line at a time, or the fields JSON lines name. Output is split into lines before it is decoded as UTF-8, so a character split between reads stays whole, and a reply printed all at once at the end reads like a streamed one.
-struct CommandLineOutputDecoder {
+struct CommandLineOutputDecoder: CommandLineReplyDecoder {
     let output: AICommandLineOutput
     let provider: AIProviderID
     /// Whether any reply text has been passed on.

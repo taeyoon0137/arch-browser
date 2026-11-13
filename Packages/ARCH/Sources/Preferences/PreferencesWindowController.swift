@@ -43,6 +43,8 @@ public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
     /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
     public static var openTerminal: (() -> Void)?
+    /// Opens the built-in terminal with a command typed at the prompt but not run, such as a tool's sign-in for Sign In in Settings ▸ AI. The app shell sets it beside `openTerminal`.
+    public static var openTerminalTyping: ((String) -> Void)?
     /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
     public static var session: BrowserSession?
     /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.

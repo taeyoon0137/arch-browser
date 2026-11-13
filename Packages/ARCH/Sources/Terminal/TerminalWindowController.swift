@@ -17,6 +17,9 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
     private var shellHasExited = false
     /// Whether the user confirmed closing the window while a program runs.
     private var closesWithRunningProgram = false
+    /// A command that `show(typing:)` types once the new shell's output has paused, which is when its prompt shows.
+    private var pendingTyping: Data?
+    private var typingWork: DispatchWorkItem?
 
     private init() {
         scrollView.hasVerticalScroller = true
@@ -44,11 +47,38 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Brings the terminal to the front and types `command` at the shell's prompt without running it, so that the user reads it and presses Return, as Sign In in Settings ▸ AI does with a tool's sign-in. Nothing is typed while a program other than the shell runs in front, since the text would go to that program.
+    public func show(typing command: String) {
+        let startsShell = terminal == nil || shellHasExited
+        show()
+        guard let terminal else { return }
+        if startsShell {
+            pendingTyping = Data(command.utf8)
+        } else if !terminal.hasRunningProgram {
+            terminal.write(Data(command.utf8))
+        }
+    }
+
+    /// Types the pending command a moment after the latest output, so that a profile that prints first does not take it.
+    private func scheduleTyping() {
+        guard pendingTyping != nil else { return }
+        typingWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let text = self.pendingTyping, let terminal = self.terminal else { return }
+            self.pendingTyping = nil
+            if !terminal.hasRunningProgram { terminal.write(text) }
+        }
+        typingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(300), execute: work)
+    }
+
     /// A new screen and view for each shell, sized to the window before the shell starts so its first prompt fits.
     private func start() {
         terminal?.close()
         terminal = nil
         shellHasExited = false
+        typingWork?.cancel()
+        pendingTyping = nil
         let screen = TerminalScreen(size: TerminalSize(columns: 80, rows: 24))
         let view = TerminalView(screen: screen)
         scrollView.documentView = view
@@ -67,6 +97,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
             screen.feed(data)
             view?.screenDidChange()
             self?.window?.title = screen.title.isEmpty ? "Terminal" : screen.title
+            self?.scheduleTyping()
         }
         // The window keeps the last output readable, such as a sign-in code.
         terminal.onExit = { [weak self, weak view, weak terminal] in
@@ -97,6 +128,8 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
 
     public func windowWillClose(_ notification: Notification) {
         closesWithRunningProgram = false
+        typingWork?.cancel()
+        pendingTyping = nil
         terminal?.close()
         terminal = nil
     }

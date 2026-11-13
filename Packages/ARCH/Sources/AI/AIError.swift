@@ -30,6 +30,8 @@ public enum AIPolicyReason: Sendable {
     case siteExcluded(String)
     case dataNotDeclared(AIDataKind)
     case commandLineToolWithPageData
+    /// Claude Code or Codex showed a tool, server, skill, or item that Arch did not ask for, so Arch ended it. The text says what, in a sentence.
+    case agentUsedOwnTools(String)
 }
 
 public enum AIBudget: Sendable {
@@ -81,6 +83,8 @@ extension AIError: LocalizedError {
             return "This feature does not declare that it sends \(kind.rawValue) data."
         case .blockedByPolicy(.commandLineToolWithPageData):
             return "This command-line tool may run its own tools, so it gets no page data."
+        case .blockedByPolicy(.agentUsedOwnTools(let detail)):
+            return detail
         case .budgetReached(.automaticRequestsPerDay):
             return "This feature reached its daily limit of automatic requests."
         case .budgetReached(.monthlySpending):

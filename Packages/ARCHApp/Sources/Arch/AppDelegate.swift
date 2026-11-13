@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($1, in: $0, installingVersionFor: $2) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        PreferencesWindowController.openTerminalTyping = { TerminalWindowController.shared.show(typing: $0) }
         PreferencesWindowController.session = session
         // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
         let agents = AgentService(directory: supportDirectory, host: BrowserAgentHost(session: session),

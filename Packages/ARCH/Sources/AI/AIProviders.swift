@@ -50,7 +50,7 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         }
     }
 
-    /// The capabilities a model of this provider has unless it overrides them.
+    /// The capabilities a model of this provider has unless it overrides them. `agent` is not among them, since it is derived (`capabilities(of:)`).
     public var defaultCapabilities: Set<AIModelCapability> {
         switch kind {
         case .http(let http): return http.format.capabilities
@@ -58,15 +58,23 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         }
     }
 
-    func capabilities(of model: AIModelConfiguration) -> Set<AIModelCapability> {
-        model.capabilities ?? defaultCapabilities
+    /// The model's capabilities. `agent` is derived and no override adds or removes it (agent decision 14): a model of a Claude Code or Codex preset has it, and an HTTP model has it while it has `tools`.
+    public func capabilities(of model: AIModelConfiguration) -> Set<AIModelCapability> {
+        var capabilities = (model.capabilities ?? defaultCapabilities).subtracting([.agent])
+        switch kind {
+        case .http:
+            if capabilities.contains(.tools) { capabilities.insert(.agent) }
+        case .commandLine(let tool):
+            if tool.agent != nil { capabilities.insert(.agent) }
+        }
+        return capabilities
     }
 
-    /// Whether requests with page, selection, file, or download parts may go to this provider. A tool that can run commands could be steered by text in a page, so a command-line tool gets page data only when the user confirmed that its arguments turn its own tools off.
+    /// Whether requests with page, selection, file, or download parts may go to this provider. A tool that can run commands could be steered by text in a page, so a command-line tool gets page data only when the user confirmed that its arguments turn its own tools off, or when it is a Claude Code or Codex preset, whose ordinary requests Arch runs with every tool off (agent decision 4).
     var acceptsPageData: Bool {
         switch kind {
         case .http: return true
-        case .commandLine(let tool): return tool.runsWithoutTools
+        case .commandLine(let tool): return tool.runsWithoutTools || tool.agent != nil
         }
     }
 }
@@ -148,6 +156,8 @@ public struct AIProviderLimits: Codable, Sendable, Equatable {
 
     public static let http = AIProviderLimits(concurrentRequests: 4)
     public static let commandLine = AIProviderLimits(concurrentRequests: 1)
+    /// Claude Code and Codex: a running agent turn holds one slot, so the page reader still gets the other.
+    public static let agentPreset = AIProviderLimits(concurrentRequests: 2)
 }
 
 // MARK: - HTTP APIs
@@ -214,9 +224,15 @@ public enum AIWireFormat: String, Codable, Sendable, CaseIterable {
 
 // MARK: - Command-line tools
 
+/// A command-line tool whose arguments and output Arch knows: Claude Code's `claude` or Codex's `codex`, which connect the user's subscription (`docs/agents.md`, Sessions on the user's CLI).
+public enum AIAgentKind: String, Codable, Sendable, CaseIterable {
+    case claudeCode
+    case codex
+}
+
 /// A tool the user installed and signed in to in the built-in terminal. Each request runs it without a window; the tool keeps its own sign-in, which Arch never reads.
 public struct AICommandLineConfiguration: Codable, Sendable, Equatable {
-    /// JSON replies, asked for in the instructions and checked as JSON. Tools get no tools from Arch, and only text files.
+    /// JSON replies, asked for in the instructions and checked as JSON. Tools get no tools from Arch, except Arch's own in an agent session, and only text files.
     public static let capabilities: Set<AIModelCapability> = [.jsonOutput]
     /// The text in `arguments` that becomes the model's name.
     public static let modelPlaceholder = "{model}"
@@ -230,17 +246,20 @@ public struct AICommandLineConfiguration: Codable, Sendable, Equatable {
     public var output: AICommandLineOutput
     /// The user confirmed that `arguments` turn off the tool's own tools, such as running commands or editing files.
     public var runsWithoutTools: Bool
+    /// Set by the Claude Code and Codex presets. Arch then builds every argument and reads the output in the kind's format; `arguments`, `output`, and `runsWithoutTools` do not apply.
+    public var agent: AIAgentKind?
 
-    public init(executable: URL, arguments: [String] = [], environment: [String: String] = [:], output: AICommandLineOutput = .text, runsWithoutTools: Bool = false) {
+    public init(executable: URL, arguments: [String] = [], environment: [String: String] = [:], output: AICommandLineOutput = .text, runsWithoutTools: Bool = false, agent: AIAgentKind? = nil) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.output = output
         self.runsWithoutTools = runsWithoutTools
+        self.agent = agent
     }
 
     private enum CodingKeys: String, CodingKey {
-        case executable, arguments, environment, output, runsWithoutTools
+        case executable, arguments, environment, output, runsWithoutTools, agent
     }
 
     /// The executable is a plain path in `ai.json`, not a `file:` URL.
@@ -251,6 +270,7 @@ public struct AICommandLineConfiguration: Codable, Sendable, Equatable {
         environment = try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         output = try container.decodeIfPresent(AICommandLineOutput.self, forKey: .output) ?? .text
         runsWithoutTools = try container.decodeIfPresent(Bool.self, forKey: .runsWithoutTools) ?? false
+        agent = try container.decodeIfPresent(AIAgentKind.self, forKey: .agent)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -260,6 +280,7 @@ public struct AICommandLineConfiguration: Codable, Sendable, Equatable {
         try container.encode(environment, forKey: .environment)
         try container.encode(output, forKey: .output)
         try container.encode(runsWithoutTools, forKey: .runsWithoutTools)
+        try container.encodeIfPresent(agent, forKey: .agent)
     }
 }
 

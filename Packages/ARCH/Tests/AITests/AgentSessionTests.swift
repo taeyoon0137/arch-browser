@@ -1,0 +1,933 @@
+// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
+import Darwin
+import Foundation
+import Testing
+@testable import AI
+
+private let agentFixtures = Bundle.module.resourceURL!.appendingPathComponent("Fixtures/Agent", isDirectory: true)
+private let harness = "You are a browser agent in Arch.\nUse only Arch's tools; say \"done\" when finished."
+private let ticketServer = AIAgentToolServer(executable: URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-mcp"), arguments: ["--session"],
+                                             environment: ["ARCH_AGENT_TICKET": "ticket-1"], tools: ["click", "list_tabs", "session_info"])
+private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
+
+// MARK: - Arguments and environment
+
+@Suite(.timeLimit(.minutes(1))) @MainActor struct AgentArgumentTests {
+    @Test func claudeCodeSessionArgumentsAndEnvironment() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, model: "haiku", environment: ["ANTHROPIC_API_KEY": "sk-never", "CLAUDE_CONFIG_DIR": "/custom"])
+        let session = try fixture.start(effort: "low")
+        let log = AgentEventLog(session)
+        session.send("Call the session_info tool, then reply with only the code word it returned.")
+        try await log.wait { $0.contains("finished:completed") }
+        await session.end()
+
+        let call = try #require(cli.calls().last)
+        let sessionID = try #require(call.firstIndex(of: "--session-id").map { call[$0 + 1] })
+        #expect(UUID(uuidString: sessionID) != nil)
+        #expect(call == ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages",
+                         "--no-session-persistence", "--session-id", sessionID, "--restricted", "--tools", "", "--strict-mcp-config",
+                         "--mcp-config", fixture.folder.appendingPathComponent("mcp.json").path, "--allowedTools", "mcp__arch__*",
+                         "--permission-mode", "dontAsk", "--permission-prompts", "none", "--disable-slash-commands",
+                         "--append-system-prompt", harness, "--max-turns", "150", "--model", "haiku", "--effort", "low"])
+        #expect(!call.contains("--fallback-model"))
+
+        let environment = cli.environment()
+        #expect(environment["DISABLE_TELEMETRY"] == "1")
+        #expect(environment["DISABLE_ERROR_REPORTING"] == "1")
+        #expect(environment["DISABLE_AUTOUPDATER"] == "1")
+        #expect(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1")
+        #expect(environment["ENABLE_TOOL_SEARCH"] == "false")
+        #expect(environment["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1")
+        #expect(environment["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1")
+        #expect(environment["MCP_TIMEOUT"] == "20000")
+        #expect(environment["MCP_TOOL_TIMEOUT"] == "900000")
+        #expect(environment["CLAUDE_CONFIG_DIR"] == "/custom")
+        #expect(environment["TERM"] == "dumb")
+        #expect(environment["ANTHROPIC_API_KEY"] == nil)
+        #expect(environment["ARCH_AGENT_TICKET"] == nil)
+        #expect(environment["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] == nil)
+    }
+
+    @Test func claudeCodeKeepsTheTicketInModeSixHundredMCPConfiguration() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        let folderMode = try FileManager.default.attributesOfItem(atPath: fixture.folder.path)[.posixPermissions] as? Int
+        #expect(folderMode == 0o700)
+        session.send("Hello")
+        try await log.wait { $0.contains("finished:completed") }
+        let configuration = fixture.folder.appendingPathComponent("mcp.json")
+        let mode = try FileManager.default.attributesOfItem(atPath: configuration.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: configuration)) as? [String: Any])
+        let arch = try #require((object["mcpServers"] as? [String: Any])?["arch"] as? [String: Any])
+        #expect(arch["type"] as? String == "stdio")
+        #expect(arch["command"] as? String == "/Applications/Arch.app/Contents/Helpers/arch-mcp")
+        #expect(arch["args"] as? [String] == ["--session"])
+        #expect(arch["env"] as? [String: String] == ["ARCH_AGENT_TICKET": "ticket-1"])
+        await session.end()
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+    }
+
+    @Test func claudeCodeWithSessionSkillsLoadsTheirFolderWithTheSkillTool() {
+        let skills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/tmp/arch-skills"), plugin: "arch", names: ["arch-browser"])
+        let arguments = ClaudeCodeAgent.sessionArguments(sessionID: UUID(), configuration: URL(fileURLWithPath: "/private/tmp/session/mcp.json"),
+                                                         instructions: harness, model: "", effort: "extreme", skills: skills)
+        #expect(arguments.contains("--plugin-dir"))
+        #expect(arguments[arguments.firstIndex(of: "--plugin-dir")! + 1] == "/private/tmp/arch-skills")
+        #expect(arguments[arguments.firstIndex(of: "--tools")! + 1] == "Skill")
+        #expect(arguments[arguments.firstIndex(of: "--allowedTools")! + 1] == "mcp__arch__*,Skill")
+        #expect(!arguments.contains("--disable-slash-commands"))
+        #expect(!arguments.contains("--model"))
+        // An effort the tool does not take is left out.
+        #expect(!arguments.contains("--effort"))
+        let environment = ClaudeCodeAgent.sessionEnvironment(["HOME": "/h"], skills: skills)
+        #expect(environment["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] == "1")
+        #expect(environment["CLAUDE_CODE_DISABLE_POLICY_SKILLS"] == "1")
+    }
+
+    @Test func codexFirstAndResumedTurnArgumentsAndEnvironment() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna", environment: ["OPENAI_API_KEY": "sk-never"])
+        let session = try fixture.start(effort: "low")
+        let resolved = try #require(realpath(fixture.folder.path, nil))
+        let folder = String(cString: resolved)
+        free(resolved)
+        let log = AgentEventLog(session)
+        session.send("First")
+        try await log.wait { $0.contains("finished:completed") }
+        session.send("Second")
+        try await log.wait { $0.filter { $0 == "finished:completed" }.count == 2 }
+        await session.end(keepingThread: true)
+
+        let disabled = try CodexAgent.disabledFeatures(fromList: String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8))
+        let settings = ["sandbox_mode=\"read-only\"", "approval_policy=\"never\"", "web_search=\"disabled\"", "history.persistence=\"none\"",
+                        "project_doc_max_bytes=0", "skills.include_instructions=false", "analytics.enabled=false", "otel.exporter=\"none\"",
+                        "check_for_update_on_startup=false",
+                        "mcp_servers.arch.command=\"/Applications/Arch.app/Contents/Helpers/arch-mcp\"", "mcp_servers.arch.args=[\"--session\"]",
+                        "mcp_servers.arch.env_vars=[\"ARCH_AGENT_TICKET\"]", "mcp_servers.arch.required=true", "mcp_servers.arch.startup_timeout_sec=20",
+                        "mcp_servers.arch.tool_timeout_sec=900", "mcp_servers.arch.default_tools_approval_mode=\"approve\"",
+                        "developer_instructions=\"You are a browser agent in Arch.\\nUse only Arch's tools; say \\\"done\\\" when finished.\""]
+        let options = ["--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"] + settings.flatMap { ["-c", $0] } + disabled.flatMap { ["--disable", $0] }
+        let model = ["-m", "gpt-6-luna", "-c", "model_reasoning_effort=\"low\""]
+        let turns = cli.calls().filter { $0.contains("exec") }
+        #expect(turns.count == 2)
+        #expect(turns.first == ["--no-daemon", "exec", "--json"] + options + model + ["-C", fixture.folder.path, "-"])
+        #expect(turns.last == ["--no-daemon", "exec", "resume", "00000000-0000-4000-8000-000000000136", "--json"] + options + model + ["-"])
+        #expect(cli.text("stdin-first.log") == "First")
+        #expect(cli.text("stdin-resume.log") == "Second")
+        #expect(cli.text("pwd-resume.log").trimmingCharacters(in: .whitespacesAndNewlines) == folder)
+        let environment = cli.environment("env-first.log")
+        #expect(environment["ARCH_AGENT_TICKET"] == "ticket-1")
+        #expect(environment["OPENAI_API_KEY"] == nil)
+        #expect(environment["TERM"] == "dumb")
+        #expect(!cli.calls().contains { $0.contains("delete") })
+    }
+
+    @Test func codexEffortNeedsTheModelsCatalogToListIt() {
+        let levels = ["gpt-6-luna": ["low", "medium"]]
+        #expect(CodexAgent.modelArguments(model: "gpt-6-luna", effort: "ultra", levels: levels) == ["-m", "gpt-6-luna"])
+        #expect(CodexAgent.modelArguments(model: "gpt-6-luna", effort: "medium", levels: levels) == ["-m", "gpt-6-luna", "-c", "model_reasoning_effort=\"medium\""])
+        #expect(CodexAgent.modelArguments(model: "", effort: "low", levels: levels).isEmpty)
+    }
+
+    @Test func ordinaryRequestArguments() {
+        #expect(ClaudeCodeAgent.ordinaryArguments(model: "sonnet") == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                                                                       "--no-session-persistence", "--restricted", "--tools", "", "--strict-mcp-config",
+                                                                       "--permission-mode", "dontAsk", "--permission-prompts", "none", "--disable-slash-commands",
+                                                                       "--model", "sonnet"])
+        let arguments = CodexAgent.ordinaryArguments(disabled: ["shell_tool"], model: "gpt-6-luna")
+        #expect(arguments.prefix(4) == ["--no-daemon", "exec", "--json", "--ephemeral"])
+        #expect(arguments.suffix(7) == ["--disable", "shell_tool", "--disable", "code_mode_host", "-m", "gpt-6-luna", "-"])
+        #expect(!arguments.contains { $0.hasPrefix("mcp_servers") || $0.hasPrefix("developer_instructions") })
+        #expect(CodexAgent.deleteArguments(thread: "t-1") == ["--no-daemon", "delete", "--force", "t-1"])
+    }
+
+    @Test func tomlStringsCannotBreakOut() {
+        #expect(CodexAgent.tomlString("a\"b\\c\nd\te\u{1}") == "\"a\\\"b\\\\c\\nd\\te\\u0001\"")
+        #expect(CodexAgent.tomlArray(["--session", "x\"y"]) == "[\"--session\",\"x\\\"y\"]")
+    }
+}
+
+// MARK: - Start check and watcher
+
+@Suite struct AgentStartCheckTests {
+    private static let tools = ["click", "list_tabs", "session_info"]
+
+    private func recordedInit(_ file: String = "claude-session") throws -> [String: Any] {
+        let text = try String(contentsOf: agentFixtures.appendingPathComponent("\(file).stdout.jsonl"), encoding: .utf8)
+        for line in text.split(separator: "\n") {
+            if let object = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], object["subtype"] as? String == "init" { return object }
+        }
+        throw CancellationError()
+    }
+
+    private func session(_ offered: [[String]] = [tools], skills: AIAgentSkills? = nil) -> ClaudeCodeStartCheck {
+        ClaudeCodeStartCheck(session: ClaudeCodeStartCheck.Session(offeredTools: offered, skills: skills))
+    }
+
+    @Test func theRecordedInitPasses() throws {
+        #expect(session().failure(of: try recordedInit(), isFirst: true) == nil)
+        #expect(ClaudeCodeStartCheck(session: nil).failure(of: try recordedInit("claude-ordinary"), isFirst: true) == nil)
+    }
+
+    /// Each field's value as JSON, since test arguments must be `Sendable`.
+    @Test(arguments: [
+        ("tools", #"["mcp__arch__click","mcp__arch__list_tabs","mcp__arch__session_info","Bash"]"#, "Bash"),
+        ("tools", #"["mcp__arch__click","mcp__arch__list_tabs","mcp__arch__session_info","mcp__arch__type"]"#, "mcp__arch__type"),
+        ("mcp_servers", #"[{"name":"arch","status":"connected"},{"name":"late","status":"failed"}]"#, "the server late"),
+        ("skills", #"["deep-research"]"#, "the skill deep-research"),
+        ("slash_commands", #"["review"]"#, "the command /review"),
+        ("plugins", #"[{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"}]"#, "the plugin cc-plugin-telemetry"),
+        ("plugins", #"[{"name":"cc-plugin-privacy","path":"/opt/plugins/privacy","source":"cc-plugin-privacy@market"}]"#, "the plugin cc-plugin-privacy"),
+        ("agents", #"["claude","browser-helper"]"#, "the agent type browser-helper"),
+        ("memory_paths", #"{"auto":"/private/tmp/memory"}"#, "its memory"),
+        ("analytics_disabled", "false", "its telemetry"),
+        ("permissionMode", #""default""#, "the permission mode default"),
+    ])
+    func eachFailingInitIsRefused(field: String, json: String, named: String) throws {
+        var event = try recordedInit()
+        event[field] = try JSONSerialization.jsonObject(with: Data(json.utf8), options: .fragmentsAllowed)
+        let failure = try #require(session().failure(of: event, isFirst: true))
+        #expect(failure.hasPrefix("Claude Code started with tools Arch did not ask for:"))
+        #expect(failure.contains(named))
+    }
+
+    @Test func toolsThatDidNotConnectAreRefused() throws {
+        var event = try recordedInit()
+        event["mcp_servers"] = [["name": "arch", "status": "failed"]]
+        #expect(session().failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+        event = try recordedInit()
+        event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs"]
+        #expect(session().failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+    }
+
+    @Test func anOrdinaryRequestMayListNoToolOrServer() throws {
+        #expect(ClaudeCodeStartCheck(session: nil).failure(of: try recordedInit(), isFirst: true)?.contains("mcp__arch__click") == true)
+    }
+
+    @Test func aLaterInitMayListTheEarlierOrTheNewToolList() throws {
+        let raised = [Self.tools, Self.tools + ["type"]]
+        var event = try recordedInit()
+        #expect(session(raised).failure(of: event, isFirst: false) == nil)
+        event["tools"] = (Self.tools + ["type"]).map { "mcp__arch__\($0)" }
+        #expect(session(raised).failure(of: event, isFirst: false) == nil)
+        // Lowered again: the raised list or the lower one.
+        let lowered = [Self.tools + ["type"], Self.tools]
+        #expect(session(lowered).failure(of: event, isFirst: false) == nil)
+        event["tools"] = Self.tools.map { "mcp__arch__\($0)" }
+        #expect(session(lowered).failure(of: event, isFirst: false) == nil)
+        // A tool no answer offered, or one every answer offered left out.
+        event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs", "mcp__arch__session_info", "mcp__arch__press"]
+        #expect(session(raised).failure(of: event, isFirst: false)?.contains("mcp__arch__press") == true)
+        event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs"]
+        #expect(session(raised).failure(of: event, isFirst: false) == "Arch's tools did not connect.")
+        // The first init must list the whole first answer.
+        event["tools"] = Self.tools.map { "mcp__arch__\($0)" }
+        #expect(session([Self.tools + ["type"]]).failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+    }
+
+    @Test func sessionSkillsPassOnlyWithTheirFolderAndTheReviewedOnes() throws {
+        let skills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/tmp/arch-skills"), plugin: "arch", names: ["arch-browser"])
+        var event = try recordedInit()
+        event["tools"] = ["Skill"] + Self.tools.map { "mcp__arch__\($0)" }
+        event["skills"] = ["arch:arch-browser", "doctor", "plugin-authoring"]
+        event["slash_commands"] = ["arch:arch-browser", "doctor", "plugin-authoring", "clear", "compact", "model"]
+        var plugins = event["plugins"] as? [[String: Any]] ?? []
+        plugins.insert(["name": "arch", "path": "/private/tmp/arch-skills", "source": "arch@inline", "version": "1.0.0"], at: 0)
+        event["plugins"] = plugins
+        #expect(session(skills: skills).failure(of: event, isFirst: true) == nil)
+        #expect(session().failure(of: event, isFirst: true)?.contains("Skill") == true)
+        var withUserSkill = event
+        withUserSkill["skills"] = ["arch:arch-browser", "deep-research"]
+        #expect(session(skills: skills).failure(of: withUserSkill, isFirst: true)?.contains("the skill deep-research") == true)
+        var otherFolder = event
+        plugins[0]["path"] = "/private/tmp/other"
+        otherFolder["plugins"] = plugins
+        #expect(session(skills: skills).failure(of: otherFolder, isFirst: true)?.contains("the plugin arch") == true)
+    }
+
+    @Test(arguments: [("command_execution", "Codex ran a command."), ("file_change", "Codex changed a file."),
+                      ("web_search", "Codex searched the web."), ("collab_tool_call", "Codex used collab tool call, which Arch did not ask for.")])
+    func theWatcherEndsOnForbiddenAndUnknownItems(type: String, sentence: String) {
+        for event in ["item.started", "item.completed"] {
+            var decoder = CodexStreamDecoder(isSession: true, provider: AIProviderID())
+            #expect(refusal { try decoder.decode(["type": event, "item": ["id": "item_0", "type": type]]) } == sentence)
+        }
+    }
+
+    @Test func theWatcherAcceptsArchsServerOnlyInASession() throws {
+        let call: [String: Any] = ["type": "item.started", "item": ["id": "item_0", "type": "mcp_tool_call", "server": "arch", "tool": "click"]]
+        var session = CodexStreamDecoder(isSession: true, provider: AIProviderID())
+        #expect(try session.decode(call).isEmpty)
+        var other = call
+        other["item"] = ["id": "item_0", "type": "mcp_tool_call", "server": "files", "tool": "read"]
+        #expect(refusal { try session.decode(other) } == "Codex called a tool of the server files, which Arch did not ask for.")
+        var ordinary = CodexStreamDecoder(isSession: false, provider: AIProviderID())
+        #expect(refusal { try ordinary.decode(call) } != nil)
+        for type in ["agent_message", "reasoning", "todo_list", "error"] {
+            #expect(refusal { try session.decode(["type": "item.completed", "item": ["id": "item_1", "type": type, "text": "x", "message": "x"]]) } == nil)
+        }
+    }
+
+    /// The sentence of the `agentUsedOwnTools` refusal that `body` throws, or nil when it throws none.
+    private func refusal(_ body: () throws -> [AIAgentStreamEvent]) -> String? {
+        do {
+            _ = try body()
+            return nil
+        } catch AIError.blockedByPolicy(.agentUsedOwnTools(let detail)) {
+            return detail
+        } catch {
+            return "unexpected: \(error)"
+        }
+    }
+
+    @Test func featureDerivationFromTheRecordedList() throws {
+        let list = try String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8)
+        let disabled = try CodexAgent.disabledFeatures(fromList: list)
+        #expect(disabled.count == 132)
+        // Features listed as off are disabled too; removed ones, deprecated ones listed as off, and the keep list are not.
+        #expect(disabled.contains("shell_tool") && disabled.contains("unified_exec") && disabled.contains("daemon_auto_start"))
+        #expect(disabled.contains("agent_message_board"))
+        #expect(!disabled.contains("apply_patch_freeform"))
+        #expect(!disabled.contains("web_search_cached") && !disabled.contains("use_legacy_landlock"))
+        #expect(!disabled.contains("code_mode_host"))
+        let withoutShell = list.split(separator: "\n").filter { !$0.hasPrefix("shell_tool ") }.joined(separator: "\n")
+        #expect(throws: AIAgentToolError.self) { try CodexAgent.disabledFeatures(fromList: withoutShell) }
+    }
+
+    @Test func effortLevelsComeFromTheCatalog() {
+        let catalog = Data(#"{"models":[{"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"low"},{"effort":"max"}]},{"slug":"gpt-5.5"}]}"#.utf8)
+        #expect(CodexAgent.effortLevels(fromCatalog: catalog) == ["gpt-6-luna": ["low", "max"], "gpt-5.5": []])
+    }
+
+    @Test func helpCheckNamesMissingFlags() {
+        let help = ClaudeCodeAgent.requiredFlags.filter { $0 != "--restricted" }.map { "  \($0) <value>  Something" }.joined(separator: "\n")
+        #expect(ClaudeCodeAgent.missingFlags(inHelp: help) == ["--restricted"])
+        #expect(ClaudeCodeAgent.missingFlags(inHelp: help + "\n  --restricted-mode  Other").contains("--restricted"))
+    }
+}
+
+// MARK: - Probes
+
+@Suite(.timeLimit(.minutes(1))) @MainActor struct AgentProbeTests {
+    @Test func probesRunAgainWhenTheExecutableChanges() async throws {
+        let cli = try FakeCLI.claude(turns: [])
+        let store = AIAgentProbeStore()
+        let environment = ["PATH": "/usr/bin:/bin"]
+        _ = try await store.result(kind: .claudeCode, executable: cli.executable, environment: environment)
+        _ = try await store.result(kind: .claudeCode, executable: cli.executable, environment: environment)
+        #expect(cli.calls().filter { $0 == ["--help"] }.count == 1)
+        // A new size.
+        let handle = try FileHandle(forWritingTo: cli.executable)
+        handle.seekToEndOfFile()
+        handle.write(Data("# updated\n".utf8))
+        try handle.close()
+        _ = try await store.result(kind: .claudeCode, executable: cli.executable, environment: environment)
+        #expect(cli.calls().filter { $0 == ["--help"] }.count == 2)
+        // A new modification time alone.
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: cli.executable.path)
+        _ = try await store.result(kind: .claudeCode, executable: cli.executable, environment: environment)
+        #expect(cli.calls().filter { $0 == ["--help"] }.count == 3)
+        // A link switched to another release, as the installers update.
+        let link = cli.folder.appendingPathComponent("claude-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: cli.executable)
+        _ = try await store.result(kind: .claudeCode, executable: link, environment: environment)
+        #expect(cli.calls().filter { $0 == ["--help"] }.count == 3)
+        let release = cli.folder.appendingPathComponent("claude-next")
+        try FileManager.default.copyItem(at: cli.executable, to: release)
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: release)
+        _ = try await store.result(kind: .claudeCode, executable: link, environment: environment)
+        #expect(cli.calls().filter { $0 == ["--help"] }.count == 4)
+    }
+
+    @Test func aMissingFlagRefusesTheVersion() async throws {
+        let cli = try FakeCLI.claude(turns: [], help: "  --print  Print\n")
+        await #expect(throws: AIAgentToolError.self) {
+            try await AIAgentProbeStore().result(kind: .claudeCode, executable: cli.executable, environment: ["PATH": "/usr/bin:/bin"])
+        }
+    }
+
+    @Test func codexProbesRunInAnEmptyCodexHome() async throws {
+        let cli = try FakeCLI.codex()
+        let result = try await AIAgentProbeStore().result(kind: .codex, executable: cli.executable, environment: ["PATH": "/usr/bin:/bin", "CODEX_HOME": "/users/own"])
+        #expect(result.version == "0.164.0")
+        #expect(result.disabledFeatures.count == 132)
+        #expect(result.effortLevels["gpt-6-luna"] == ["low", "medium", "high", "xhigh", "max"])
+        let homes = cli.text("codex-home.log").split(separator: "\n").map(String.init)
+        #expect(homes.count == 3)
+        #expect(homes.allSatisfy { $0.contains("/Arch-Codex-Probe-") && !FileManager.default.fileExists(atPath: $0) })
+        let probe = try #require(cli.calls().first { $0.contains("--strict-config") })
+        #expect(probe.prefix(2) == ["--no-daemon", "--strict-config"])
+        #expect(probe.suffix(2) == ["app-server", "--print-startup-config"])
+        #expect(probe.filter { $0 == "-c" }.count == 17)
+        #expect(probe.filter { $0 == "--disable" }.count == 132)
+    }
+
+    @Test(arguments: [("mcp_servers.arch.tool_timeout_sec=900", "mcp_servers.arch"), ("web_search=\"disabled\"", "web_search")])
+    func aFailedConfigurationProbeNamesItsGroup(refused: String, group: String) async throws {
+        let cli = try FakeCLI.codex(refusedSetting: refused)
+        do {
+            _ = try await AIAgentProbeStore().result(kind: .codex, executable: cli.executable, environment: ["PATH": "/usr/bin:/bin"])
+            Issue.record("Expected a refusal")
+        } catch let error as AIAgentToolError {
+            #expect(error.detail == "Codex 0.164.0 does not accept `\(group)`. Update Codex in the terminal.")
+        }
+        // The server's settings go together, so none of them is probed alone.
+        let groups = cli.calls().filter { $0.contains("--strict-config") }.dropFirst()
+        #expect(!groups.contains { $0.filter { $0.hasPrefix("mcp_servers.") }.count == 1 })
+    }
+}
+
+// MARK: - Running sessions
+
+@Suite(.timeLimit(.minutes(1))) @MainActor struct AgentSessionRunTests {
+    @Test func openInputModeWritesSeveralMessages() async throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let process = try CommandLineProcess(executable: URL(fileURLWithPath: "/bin/cat"), arguments: [], environment: ["PATH": "/usr/bin:/bin"],
+                                             directory: directory, input: Data("one\n".utf8), keepsInputOpen: true)
+        process.write(Data("two\n".utf8))
+        process.write(Data("three\n".utf8))
+        process.closeInput()
+        process.write(Data("after\n".utf8))
+        var output = Data()
+        for await chunk in process.output { output.append(chunk) }
+        #expect(String(decoding: output, as: UTF8.self) == "one\ntwo\nthree\n")
+        #expect(await process.termination() == .exited(0))
+    }
+
+    @Test func aClaudeCodeSessionReplaysTheRecordedStreamWithUsageUnderAgent() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, model: "haiku")
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        for message in ["Call the session_info tool.", "Now call list_tabs.", "Write the numbers from 1 to 400.", "Reply with only the word: resumed"] {
+            session.send(message)
+        }
+        try await log.wait { $0.filter { $0.hasPrefix("finished:") }.count == 4 }
+        let ref = AIModelRef(provider: fixture.provider.id, model: "haiku")
+        #expect(log.events.first == "ready:haiku")
+        #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
+        #expect(session.model == ref)
+        #expect(log.events.filter { $0.hasPrefix("finished:") } == ["finished:completed", "finished:completed", "finished:stopped", "finished:completed"])
+        #expect(log.text(ofTurn: 0) == "KESTREL")
+        #expect(log.text(ofTurn: 3) == "resumed")
+        // The interrupted third turn counts each of its requests from the stream, the interrupted one included.
+        #expect(log.events.filter { $0.hasPrefix("usage:") } == ["usage:3269/40/3170", "usage:143/38/6584", "usage:140/54/6808", "usage:190/5/3486"])
+        let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
+        #expect(total.requests == 4)
+        #expect(total.errors == 0)
+        #expect(total.usage == AIUsage(inputTokens: 3742, outputTokens: 137, cachedInputTokens: 20048))
+        // One process; each message one line on standard input.
+        #expect(cli.calls().filter { $0.contains("--input-format") }.count == 1)
+        let input = cli.text("stdin.log").split(separator: "\n")
+        #expect(input.count == 4)
+        #expect(input.allSatisfy { $0.contains(#""type":"user""#) })
+        await session.end()
+    }
+
+    @Test func aFailingLaterInitEndsTheSession() async throws {
+        var turns = try claudeTurns("claude-session")
+        turns[1] = turns[1].replacingOccurrences(of: #""tools":["mcp__arch__click""#, with: #""tools":["Bash","mcp__arch__click""#)
+        let cli = try FakeCLI.claude(turns: turns)
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("One")
+        try await log.wait { $0.contains("finished:completed") }
+        session.send("Two")
+        try await log.waitForEnd()
+        guard case .blockedByPolicy(.agentUsedOwnTools(let detail))? = log.error else {
+            Issue.record("Expected agentUsedOwnTools, got \(String(describing: log.error))")
+            return
+        }
+        #expect(detail == "Claude Code started with tools Arch did not ask for: Bash.")
+        #expect(session.hasEnded)
+        #expect(session.processID == nil)
+        await session.end()
+    }
+
+    @Test func stopSendsTheInterruptAndKeepsTheProcess() async throws {
+        let cli = try FakeCLI.claude(turns: [longTurnStart], interrupt: interruptAnswer)
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("Write a long reply.")
+        try await log.wait { $0.contains("text:1\n2\n") }
+        let process = try #require(session.processID)
+        session.stop()
+        try await log.wait { $0.contains("finished:stopped") }
+        #expect(cli.text("stdin.log").contains(#""subtype":"interrupt""#))
+        #expect(session.processID == process)
+        #expect(kill(process, 0) == 0)
+        await session.end()
+        #expect(await processGroupEnds(process, within: .seconds(4)))
+    }
+
+    @Test func stopEndsTheProcessGroupWhenTheTurnDoesNotEnd() async throws {
+        let cli = try FakeCLI.claude(turns: [longTurnStart, try claudeTurns("claude-session")[3]])
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        session.stopGrace = .milliseconds(300)
+        let log = AgentEventLog(session)
+        session.send("Write a long reply.")
+        try await log.wait { $0.contains("text:1\n2\n") }
+        let process = try #require(session.processID)
+        session.stop()
+        try await log.wait { $0.contains("finished:stopped") }
+        #expect(await processGroupEnds(process, within: .seconds(4)))
+        #expect(session.processID == nil)
+        // The next message starts a new process with the earlier conversation as text.
+        session.send("Continue.")
+        try await log.wait { $0.filter { $0.hasPrefix("finished:") }.count == 2 }
+        #expect(cli.calls().filter { $0.contains("--input-format") }.count == 2)
+        let lastInput = cli.text("stdin.log").split(separator: "\n").last.map(String.init) ?? ""
+        #expect(lastInput.contains("<earlier-conversation>"))
+        #expect(lastInput.contains("User: Write a long reply."))
+        #expect(lastInput.contains(#"Continue.","type":"text"}]"#))
+        await session.end()
+    }
+
+    @Test func theIdleTimerPausesDuringHostCalls() async throws {
+        let cli = try FakeCLI.claude(turns: [longTurnStart])
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        session.outputTimeout = .milliseconds(400)
+        let log = AgentEventLog(session)
+        session.send("Call a tool.")
+        try await log.wait { $0.contains("text:1\n2\n") }
+        session.toolCallDidStart()
+        try await Task.sleep(for: .milliseconds(900))
+        #expect(!log.events.contains { $0.hasPrefix("failed:") })
+        session.toolCallDidEnd()
+        try await log.wait { $0.contains("failed:The provider is unavailable: The provider stopped responding.") }
+        #expect(!session.hasEnded)
+        await session.end()
+    }
+
+    @Test func fallbacksApplyOnlyBeforeReady() async throws {
+        let signedOut = try FakeCLI.claude(turns: [], signedIn: false)
+        var badTurns = try claudeTurns("claude-session")
+        badTurns[0] = badTurns[0].replacingOccurrences(of: #""skills":[]"#, with: #""skills":["deep-research"]"#)
+        let refused = try FakeCLI.claude(turns: badTurns)
+        let good = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(clis: [signedOut, refused, good])
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        #expect(session.model == AIModelRef(provider: fixture.providers[2].id, model: ""))
+        #expect(signedOut.calls().allSatisfy { !$0.contains("--input-format") })
+        #expect(refused.calls().filter { $0.contains("--input-format") }.count == 1)
+        #expect(good.calls().allSatisfy { !$0.contains("--fallback-model") })
+        await session.end()
+    }
+
+    @Test func noModelThatStartsEndsTheSessionWithTheLastError() async throws {
+        let signedOut = try FakeCLI.claude(turns: [], signedIn: false)
+        let fixture = try AgentFixture(cli: signedOut)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("Hello")
+        try await log.waitForEnd()
+        guard case .authentication? = log.error else {
+            Issue.record("Expected authentication, got \(String(describing: log.error))")
+            return
+        }
+        await session.end()
+    }
+
+    @Test func aCodexSessionWatchesItsStreamAndDeletesItsThread() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna")
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        #expect(log.events == ["ready:gpt-6-luna", "text:KESTREL ORCHID", "usage:2948/61/21888", "finished:completed"])
+        #expect(session.threadID == "00000000-0000-4000-8000-000000000136")
+        await session.end()
+        let delete = cli.calls().filter { $0.contains("delete") }
+        #expect(delete == [["--no-daemon", "delete", "--force", "00000000-0000-4000-8000-000000000136"]])
+        let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
+        #expect(total.requests == 1)
+    }
+
+    @Test func aCodexCommandEndsTheSession() async throws {
+        let cli = try FakeCLI.codex(first: """
+        {"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000140"}
+        {"type":"turn.started"}
+        {"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}
+        """, firstSleeps: true)
+        let fixture = try AgentFixture(cli: cli, kind: .codex)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        session.send("List files.")
+        try await log.waitForEnd()
+        guard case .blockedByPolicy(.agentUsedOwnTools("Codex ran a command."))? = log.error else {
+            Issue.record("Expected the watcher, got \(String(describing: log.error))")
+            return
+        }
+        #expect(session.processID == nil)
+        await session.end()
+        #expect(cli.calls().contains { $0.contains("delete") })
+    }
+}
+
+// MARK: - Capabilities and ordinary requests
+
+@Suite(.timeLimit(.minutes(1))) @MainActor struct AgentPresetTests {
+    @Test func theAgentCapabilityIsDerived() throws {
+        let preset = AIAgentKind.claudeCode.preset(executable: URL(fileURLWithPath: "/usr/local/bin/claude"))
+        #expect(preset.capabilities(of: AIModelConfiguration(name: "")).contains(.agent))
+        #expect(preset.capabilities(of: AIModelConfiguration(name: "", capabilities: [])) == [.agent])
+        let tool = AIProviderConfiguration(name: "Tool", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/cat"))), models: [])
+        #expect(!tool.capabilities(of: AIModelConfiguration(name: "", capabilities: [.agent, .jsonOutput])).contains(.agent))
+        let http = provider("HTTP", models: [])
+        #expect(http.capabilities(of: AIModelConfiguration(name: "m")).contains(.agent))
+        #expect(!http.capabilities(of: AIModelConfiguration(name: "m", capabilities: [.jsonOutput, .agent])).contains(.agent))
+        #expect(preset.limits.concurrentRequests == 2)
+        #expect(!AIModelCapability.overridable.contains(.agent))
+    }
+
+    @Test func anOverrideInAIJSONCannotAddAgent() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai.json")
+        try Data("""
+        { "providers": [ { "id": "T1", "name": "Tool", "kind": { "commandLine": { "executable": "/bin/cat" } },
+                           "models": [ { "name": "m", "capabilities": ["jsonOutput", "agent"] } ] } ],
+          "routes": { "agent": { "isEnabled": true, "models": [ { "provider": "T1", "model": "m" } ] } } }
+        """.utf8).write(to: file)
+        let keys = InMemoryKeys()
+        let settings = AISettingsStore(fileURL: file, keys: keys)
+        let service = AIService(settings: settings, usage: AIUsageStore(fileURL: directory.appendingPathComponent("ai-usage.json")), keys: keys) { _, _ in fatalError("No requests") }
+        service.register(agentFeature)
+        #expect(!service.isAvailable(.agent))
+        #expect(throws: AIError.self) { try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer)) }
+    }
+
+    @Test func aPresetsOrdinaryRequestGetsPageDataAndRunsWithoutTools() async throws {
+        let cli = try FakeCLI.claude(turns: [], ordinary: try String(contentsOf: agentFixtures.appendingPathComponent("claude-ordinary.stdout.jsonl"), encoding: .utf8))
+        let fixture = try AgentFixture(cli: cli, model: "haiku", feature: userFeature)
+        let page = AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.page(AIPageContent(url: URL(string: "https://example.org/a")!, title: "A", text: "Text"))])])
+        let result = await collect(fixture.service.stream(page))
+        #expect(result.error == nil)
+        #expect(result.events == ["started:haiku", "text:NONE", "usage:2541/5/0", "finished:completed"])
+        let call = try #require(cli.calls().last)
+        #expect(call == ClaudeCodeAgent.ordinaryArguments(model: "haiku"))
+        #expect(cli.text("stdin-ordinary.log").contains("Text"))
+        #expect(cli.environment("env-ordinary.log")["MCP_TIMEOUT"] == nil)
+        #expect(cli.environment("env-ordinary.log")["DISABLE_TELEMETRY"] == "1")
+    }
+
+    @Test func anOrdinaryRequestWhoseInitListsToolsIsRefused() async throws {
+        let cli = try FakeCLI.claude(turns: [], ordinary: try claudeTurns("claude-session")[0])
+        let fixture = try AgentFixture(cli: cli, feature: userFeature)
+        let result = await collect(fixture.service.stream(textRequest(userFeature)))
+        guard case .blockedByPolicy(.agentUsedOwnTools(let detail))? = result.error else {
+            Issue.record("Expected agentUsedOwnTools, got \(String(describing: result.error))")
+            return
+        }
+        #expect(detail.contains("mcp__arch__click"))
+        #expect(!result.events.contains { $0.hasPrefix("text:") })
+    }
+
+    @Test func aCodexOrdinaryRequestSkipsTheCodeModeItem() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna", feature: userFeature)
+        let result = await collect(fixture.service.stream(textRequest(userFeature)))
+        #expect(result.error == nil)
+        #expect(result.events == ["started:gpt-6-luna", "text:ready (VII9-C8632520)", "usage:1208/13/6912", "finished:completed"])
+        let call = try #require(cli.calls().last { $0.contains("--ephemeral") })
+        #expect(call.suffix(5) == ["--disable", "code_mode_host", "-m", "gpt-6-luna", "-"])
+    }
+
+    @Test func checkRunsNoModel() async throws {
+        let cli = try FakeCLI.claude(turns: [])
+        let fixture = try AgentFixture(cli: cli)
+        #expect(try await fixture.service.check(fixture.provider) == "Claude Code 2.1.323 is signed in and accepts every setting Arch uses.")
+        #expect(cli.calls().allSatisfy { !$0.contains("-p") })
+        let signedOut = try FakeCLI.claude(turns: [], signedIn: false)
+        let other = try AgentFixture(cli: signedOut)
+        await #expect(throws: AIAgentToolError.self) { try await other.service.check(other.provider) }
+    }
+}
+
+// MARK: - Helpers
+
+/// The start of a long reply: an `init`, a message start, and text, after which the tool waits for an interrupt.
+private let longTurnStart = """
+{"type":"system","subtype":"init","cwd":"/private/var/folders/xx/fixture/T/","session_id":"00000000-0000-4000-8000-000000000001","tools":["mcp__arch__click","mcp__arch__list_tabs","mcp__arch__session_info"],"mcp_servers":[{"name":"arch","status":"connected","source":"dynamic"}],"model":"claude-haiku-5-5","permissionMode":"dontAsk","slash_commands":[],"apiKeySource":"none","agents":["claude","Explore"],"skills":[],"plugins":[{"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"}],"analytics_disabled":true}
+{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":100,"output_tokens":1}}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1\\n2\\n"}}}
+"""
+
+private let interruptAnswer = """
+{"type":"control_response","response":{"subtype":"success","request_id":"arch-stop-1","response":{"still_queued":[]}}}
+{"type":"result","subtype":"success","is_error":false,"terminal_reason":"aborted_streaming","result":"","usage":{"input_tokens":0,"output_tokens":0}}
+"""
+
+/// The recorded Claude Code stream split into turns, each ending with its `result`.
+private func claudeTurns(_ name: String) throws -> [String] {
+    let text = try String(contentsOf: agentFixtures.appendingPathComponent("\(name).stdout.jsonl"), encoding: .utf8)
+    var turns: [String] = []
+    var current: [Substring] = []
+    for line in text.split(separator: "\n") {
+        current.append(line)
+        let object = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+        if object?["type"] as? String == "result" {
+            turns.append(current.joined(separator: "\n") + "\n")
+            current = []
+        }
+    }
+    return turns
+}
+
+/// A shell script in a folder of its own that answers as `claude` or `codex` and records each call's arguments, its environment, and its standard input.
+private struct FakeCLI {
+    let kind: AIAgentKind
+    let folder: URL
+    let executable: URL
+
+    private static let logCall = #"{ printf '<<CALL>>'; printf '%s\0' "$@"; printf '\n'; } >> "$DIR/calls.log""#
+
+    static func claude(turns: [String], interrupt: String? = nil, ordinary: String? = nil, signedIn: Bool = true,
+                       help: String? = nil) throws -> FakeCLI {
+        let cli = try FakeCLI(kind: .claudeCode)
+        try cli.write("help.txt", help ?? ClaudeCodeAgent.requiredFlags.map { "  \($0) <value>  Something" }.joined(separator: "\n") + "\n")
+        for (index, turn) in turns.enumerated() { try cli.write("turn-\(index + 1).jsonl", turn) }
+        if let interrupt { try cli.write("interrupt.jsonl", interrupt) }
+        if let ordinary { try cli.write("ordinary.jsonl", ordinary) }
+        try cli.writeScript("""
+        case "$*" in
+          "--version") echo "2.1.323 (Claude Code)"; exit 0;;
+          "auth status --json") echo '{"loggedIn":\(signedIn),"email":"someone@example.org"}'; exit 0;;
+          "--help") cat "$DIR/help.txt"; exit 0;;
+        esac
+        case "$*" in
+          *"--input-format"*) ;;
+          *) env > "$DIR/env-ordinary.log"; cat > "$DIR/stdin-ordinary.log"; cat "$DIR/ordinary.jsonl"; exit 0;;
+        esac
+        env > "$DIR/env.log"
+        # The turn count outlasts the process, so a process started after Stop answers with the next turn.
+        while IFS= read -r line; do
+          printf '%s\\n' "$line" >> "$DIR/stdin.log"
+          case "$line" in
+            *'"control_request"'*) [ -f "$DIR/interrupt.jsonl" ] && cat "$DIR/interrupt.jsonl";;
+            *'"type":"user"'*)
+              n=$(($(cat "$DIR/turn-count" 2>/dev/null || echo 0) + 1)); echo "$n" > "$DIR/turn-count"
+              [ -f "$DIR/turn-$n.jsonl" ] && cat "$DIR/turn-$n.jsonl";;
+          esac
+        done
+        """)
+        return cli
+    }
+
+    static func codex(first: String? = nil, firstSleeps: Bool = false, refusedSetting: String? = nil) throws -> FakeCLI {
+        let cli = try FakeCLI(kind: .codex)
+        try cli.write("features.txt", String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8))
+        try cli.write("models.json", #"{"models":[{"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}]}"#)
+        try cli.write("first.jsonl", first ?? String(contentsOf: agentFixtures.appendingPathComponent("codex-session-first.stdout.jsonl"), encoding: .utf8))
+        try cli.write("resume.jsonl", String(contentsOf: agentFixtures.appendingPathComponent("codex-session-resume.stdout.jsonl"), encoding: .utf8))
+        try cli.write("ordinary.jsonl", String(contentsOf: agentFixtures.appendingPathComponent("codex-ordinary.stdout.jsonl"), encoding: .utf8))
+        if let refusedSetting { try cli.write("refused.txt", refusedSetting) }
+        try cli.writeScript("""
+        case "$*" in
+          "--version") echo "codex-cli 0.164.0"; exit 0;;
+          "--no-daemon login status") echo "Logged in"; exit 0;;
+          "--no-daemon features list") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/features.txt"; exit 0;;
+          "--no-daemon debug models --bundled") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/models.json"; exit 0;;
+          "--no-daemon delete --force "*) exit 0;;
+        esac
+        if [ "$2" = "--strict-config" ]; then
+          echo "$CODEX_HOME" >> "$DIR/codex-home.log"
+          if [ -f "$DIR/refused.txt" ]; then
+            refused=$(cat "$DIR/refused.txt")
+            for argument in "$@"; do
+              if [ "$argument" = "$refused" ]; then echo "Error: startup configuration unavailable" >&2; exit 1; fi
+            done
+          fi
+          exit 0
+        fi
+        case "$*" in
+          *"--ephemeral"*) turn=ordinary;;
+          *"exec resume"*) turn=resume;;
+          *) turn=first;;
+        esac
+        env > "$DIR/env-$turn.log"
+        pwd -P > "$DIR/pwd-$turn.log"
+        cat > "$DIR/stdin-$turn.log"
+        cat "$DIR/$turn.jsonl"
+        \(firstSleeps ? #"[ "$turn" = first ] && sleep 30"# : "")
+        exit 0
+        """)
+        return cli
+    }
+
+    private init(kind: AIAgentKind) throws {
+        self.kind = kind
+        folder = temporaryDirectory()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        executable = folder.appendingPathComponent(kind.executableName)
+    }
+
+    /// A stream ends each line, its last too, as the tools do.
+    private func write(_ name: String, _ text: String) throws {
+        let ending = name.hasSuffix(".jsonl") && !text.hasSuffix("\n") ? "\n" : ""
+        try Data((text + ending).utf8).write(to: folder.appendingPathComponent(name))
+    }
+
+    private func writeScript(_ body: String) throws {
+        try Data("#!/bin/sh\nDIR='\(folder.path)'\n\(Self.logCall)\n\(body)\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+    }
+
+    /// Each call's arguments, in order.
+    func calls() -> [[String]] {
+        text("calls.log").components(separatedBy: "<<CALL>>").dropFirst().map { call in
+            var arguments = call.components(separatedBy: "\0")
+            arguments.removeLast()
+            return arguments
+        }
+    }
+
+    func text(_ name: String) -> String {
+        (try? String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8)) ?? ""
+    }
+
+    /// The environment the script printed, without the variables the shell sets itself.
+    func environment(_ name: String = "env.log") -> [String: String] {
+        var environment: [String: String] = [:]
+        for line in text(name).split(separator: "\n") {
+            guard let equals = line.firstIndex(of: "=") else { continue }
+            environment[String(line[..<equals])] = String(line[line.index(after: equals)...])
+        }
+        for shell in ["PWD", "SHLVL", "_", "OLDPWD"] { environment[shell] = nil }
+        return environment
+    }
+}
+
+/// A service whose route for the feature holds a preset provider for each fake tool, in order.
+@MainActor
+private struct AgentFixture {
+    let service: AIService
+    let providers: [AIProviderConfiguration]
+    let feature: AIFeature
+    let folder: URL
+
+    var provider: AIProviderConfiguration { providers[0] }
+
+    init(cli: FakeCLI, kind: AIAgentKind? = nil, model: String = "", environment: [String: String] = [:], feature: AIFeature = agentFeature) throws {
+        try self.init(clis: [cli], kind: kind, model: model, environment: environment, feature: feature)
+    }
+
+    init(clis: [FakeCLI], kind: AIAgentKind? = nil, model: String = "", environment: [String: String] = [:], feature: AIFeature = agentFeature) throws {
+        providers = clis.map { cli in
+            var configuration = (kind ?? cli.kind).preset(executable: cli.executable)
+            configuration.models = [AIModelConfiguration(name: model)]
+            if case .commandLine(var tool) = configuration.kind {
+                tool.environment = environment.merging(["PATH": "/usr/bin:/bin"]) { configured, _ in configured }
+                configuration.kind = .commandLine(tool)
+            }
+            return configuration
+        }
+        let directory = temporaryDirectory()
+        let keys = InMemoryKeys()
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
+        settings.providers = providers
+        service = AIService(settings: settings, usage: AIUsageStore(fileURL: directory.appendingPathComponent("ai-usage.json")), keys: keys) { configuration, _ in
+            guard case .commandLine(let tool) = configuration.kind else { fatalError("Only presets in these tests") }
+            return CommandLineProvider(configuration: configuration, tool: tool)
+        }
+        service.register(feature)
+        settings.setRoute(AIRoute(isEnabled: true, models: providers.map { AIModelRef(provider: $0.id, model: model) }), for: feature.id)
+        self.feature = feature
+        folder = temporaryDirectory().appendingPathComponent("Arch-Agent-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func start(effort: String? = nil) throws -> AIAgentSession {
+        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer, folder: folder, effort: effort))
+    }
+}
+
+/// A session's events as short strings, collected as they arrive.
+@MainActor
+private final class AgentEventLog {
+    private(set) var events: [String] = []
+    private(set) var error: AIError?
+    private(set) var hasEnded = false
+
+    init(_ session: AIAgentSession) {
+        Task { [weak self] in
+            do {
+                for try await event in session.events { self?.events.append(Self.describe(event)) }
+            } catch {
+                self?.error = error as? AIError
+            }
+            self?.hasEnded = true
+        }
+    }
+
+    /// The text of one turn, by its index among finished turns.
+    func text(ofTurn index: Int) -> String {
+        var turn = 0
+        var text = ""
+        for event in events {
+            if event.hasPrefix("finished:") || event.hasPrefix("failed:") {
+                if turn == index { return text }
+                turn += 1
+                text = ""
+            } else if event.hasPrefix("text:") {
+                text += event.dropFirst("text:".count)
+            }
+        }
+        return text
+    }
+
+    func wait(_ condition: ([String]) -> Bool) async throws {
+        for _ in 0..<1_000 {
+            if condition(events) { return }
+            if hasEnded { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out with events \(events), error \(String(describing: error))")
+        throw CancellationError()
+    }
+
+    func waitForEnd() async throws {
+        for _ in 0..<1_000 {
+            if hasEnded { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("The session did not end; events \(events)")
+        throw CancellationError()
+    }
+
+    static func describe(_ event: AIAgentEvent) -> String {
+        switch event {
+        case .ready(let ref): return "ready:\(ref.model)"
+        case .text(let text): return "text:\(text)"
+        case .thinking: return "thinking"
+        case .usage(let usage): return "usage:\(usage.inputTokens)/\(usage.outputTokens)/\(usage.cachedInputTokens)"
+        case .notice(let text): return "notice:\(text)"
+        case .turnFinished(let end): return "finished:\(end)"
+        case .turnFailed(let error): return "failed:\(error.localizedDescription)"
+        }
+    }
+}
+
+/// Whether every process of the group has ended within `timeout`.
+private func processGroupEnds(_ group: pid_t, within timeout: Duration) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if kill(-group, 0) == -1, errno == ESRCH { return true }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return false
+}
