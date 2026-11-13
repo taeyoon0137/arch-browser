@@ -69,6 +69,8 @@ struct CommandPaletteView: View {
     static let fieldHeight: CGFloat = 62
     /// The space between the search field and the results panel.
     static let surfaceSpacing: CGFloat = 12
+    /// The search field is a rounded rectangle, not a capsule.
+    static let fieldRadius: CGFloat = 18
 
     /// The results appear once there is something to act on, as in Spotlight.
     private var showsResults: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -89,7 +91,7 @@ struct CommandPaletteView: View {
             }
             .padding(.horizontal, 26)
             .frame(height: Self.fieldHeight)
-            .modifier(PaletteSurface(shape: Capsule()))
+            .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
             if showsResults {
                 VStack(spacing: 2) {
                     PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
