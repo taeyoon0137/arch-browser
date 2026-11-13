@@ -119,8 +119,12 @@ struct SidebarSection: View {
                     Text(unloadAfterHours == 0 ? "Unload pinned tabs and favorites: Never" : "Unload pinned tabs and favorites after \(unloadAfterHours) hours")
                 }
             } footer: {
-                // The longer footer wraps through the shared footnote style.
-                aiFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play media, use the camera or microphone, hold text you typed, or may post notifications stay loaded.")
+                // The longer footer wraps through the shared footnote style. Never also keeps every page when the Mac runs low on memory (`TabUnloading.tabsToUnload`).
+                if unloadAfterHours == 0 {
+                    aiFootnote("Tabs keep their pages until you close them, also when the Mac runs low on memory.")
+                } else {
+                    aiFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")
+                }
             }
         }
         .formStyle(.grouped)

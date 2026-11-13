@@ -35,7 +35,7 @@ enum UnloadPressure {
 
 /// What keeps a tab that no window shows loaded whatever the hours or the memory pressure (bookmark rule 5): a call, a page the user is writing in, and a web app that posts notifications must not stop because the user looked elsewhere.
 enum UnloadExclusion: CaseIterable {
-    /// The page plays sound or media.
+    /// The page plays sound through an audio or video element in its document, or its media session reports playing. Both engines learn this from a media script that watches the document's elements (`WebKitAudibleScript`, the bridge's `kAudibleScript`), so sound from Web Audio or from an element outside the document keeps no tab loaded.
     case media
     /// The page uses the camera or the microphone (`EngineWebContents.isCapturingMedia`).
     case capture
@@ -51,6 +51,8 @@ enum UnloadExclusion: CaseIterable {
     case smallWindow
     /// The page's developer tools are open, as in a window of their own, which unloading would close.
     case developerTools
+    /// A window shows a page that this page opened, as a sign-in popup that reports back to it through `window.opener`.
+    case opener
 }
 
 /// A loaded tab that no window shows, as automatic unloading weighs it: its ID, its kind, when a window last showed it, and what keeps it loaded. The session makes these, so tests can drive `TabUnloading.tabsToUnload` without one.
@@ -75,10 +77,9 @@ public enum TabUnloading {
     /// The hours while nothing is saved under `unloadAfterHoursKey`.
     public static let unloadAfterHoursByDefault = 12
 
-    /// The hours saved under `unloadAfterHoursKey`, or `unloadAfterHoursByDefault` while none are.
-    static var unloadAfterHours: Int {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: unloadAfterHoursKey) == nil ? unloadAfterHoursByDefault : max(0, defaults.integer(forKey: unloadAfterHoursKey))
+    /// The hours saved in `defaults` under `unloadAfterHoursKey`, 0 for a negative number, or `unloadAfterHoursByDefault` while none are.
+    static func unloadAfterHours(in defaults: UserDefaults = .standard) -> Int {
+        defaults.object(forKey: unloadAfterHoursKey) == nil ? unloadAfterHoursByDefault : max(0, defaults.integer(forKey: unloadAfterHoursKey))
     }
 
     /// How long a tab must have gone unshown to unload at a memory pressure warning.

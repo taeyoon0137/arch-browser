@@ -1,4 +1,4 @@
-// Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing does to each kind of tab, the stand-in a pinned tab takes when it closes and the one any tab takes when it unloads on its own, which tabs that no window shows unload, the reports that keep a tab loaded, the leave-page answer of an automatic unload, and Delete Tab's record. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine.
+// Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing does to each kind of tab, the stand-in a pinned tab takes when it closes and the one any tab takes when it unloads on its own, the tab a window selects after a close or an unload, which tabs that no window shows unload, the hours setting, the reports that keep a tab loaded, the leave-page answer of an automatic unload, and Delete Tab's record. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine, so the session's side of each close, which keeps a pinned tab at its place in its list without a closed record or a Tab Close Log entry, is regression check 69.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -72,9 +72,10 @@ import Testing
         #expect(record == SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: elsewhere, title: "Other", isPinned: false, engine: .webKit, personaID: personaID))
     }
 
-    // MARK: Close on a pinned tab
+    // MARK: The pinned tab's side of Close
 
-    @Test func closeLeavesAPinnedTabAStandInAtItsSavedPageWithoutState() {
+    /// `Tab.unloadToSavedPage()`, which the session's Close on a pinned tab calls once the tab's windows have selected other tabs.
+    @Test func unloadingToTheSavedPageLeavesThePinnedTabAStandInWithoutState() {
         let (tab, page) = pinnedTabThatLeftHome()
         page.restorableState = Data([1, 2, 3])
         let id = tab.id
@@ -123,6 +124,59 @@ import Testing
         tab.loadPage { url, engine, _ in PageStub(engine: engine, url: url) }
         #expect(tab.webContents(tab.webContents, shouldDownload: file, hasPage: false) == true)
         #expect(downloads == [false, true])
+    }
+
+    // MARK: The selection after a close
+
+    /// The tab a window picks among `tabs` after `tab` closes or unloads, with `shownElsewhere` shown by another window.
+    private func selection(after tab: Tab, among tabs: [Tab], opener: Tab? = nil, splitNeighbor: Tab? = nil, shownElsewhere: [Tab] = []) -> Tab? {
+        BrowserSession.tabToSelect(after: tab, opener: opener, splitNeighbor: splitNeighbor, among: tabs, spaceID: spaceID,
+                                   isShownInAnotherWindow: { tab in shownElsewhere.contains { $0 === tab } })
+    }
+
+    /// A pinned tab of the space without its page, as Close leaves it, at `url`.
+    private func unloadedPinnedTab(at url: URL) -> Tab {
+        let (tab, _) = tab(at: url, title: "", pinned: true)
+        _ = tab.unloadToSavedPage()
+        return tab
+    }
+
+    @Test func twoPinnedTabsWhoseSavedPagesAreFilesDoNotSelectEachOther() {
+        // Unloading the first after its download selects nothing, rather than the second, whose load would download its file and unload it in turn, back to the first.
+        let first = tab(at: URL(string: "https://site.example/a.dmg")!, title: "", pinned: true).tab
+        let second = unloadedPinnedTab(at: URL(string: "https://site.example/b.dmg")!)
+        #expect(selection(after: first, among: [first, second]) == nil)
+        #expect(selection(after: second, among: [first, second]) === first)
+    }
+
+    @Test func closingInASpaceOfPinnedTabsSelectsOnlyOneThatHasItsPage() {
+        let selected = tab(at: home, title: "Home", pinned: true).tab
+        let unloaded = unloadedPinnedTab(at: elsewhere)
+        let loaded = tab(at: elsewhere, title: "Other", pinned: true).tab
+        #expect(selection(after: selected, among: [selected, unloaded]) == nil)
+        #expect(selection(after: selected, among: [selected, unloaded, loaded]) === loaded)
+        #expect(selection(after: selected, among: [selected, unloaded, loaded], shownElsewhere: [loaded]) == nil)
+    }
+
+    @Test func anOpenTabWithoutItsPageStaysAChoiceBeforePinnedTabs() {
+        let selected = tab(at: home, title: "Home", pinned: true).tab
+        let pinned = tab(at: elsewhere, title: "Other", pinned: true).tab
+        let restored = Tab(id: UUID(), webContents: UnloadedWebContents(url: elsewhere, title: "Other", engine: .webKit, state: nil), spaceID: spaceID, isPinned: false, personaID: personaID)
+        let otherSpace = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: elsewhere), spaceID: UUID(), isPinned: false, personaID: personaID)
+        #expect(selection(after: selected, among: [otherSpace, selected, pinned, restored]) === restored)
+        #expect(selection(after: selected, among: [otherSpace, selected, pinned]) === pinned)
+    }
+
+    @Test func theOpenerAndThenTheSplitNeighborComeFirst() {
+        let popup = tab(at: elsewhere, title: "Sign In", pinned: false).tab
+        let opener = tab(at: home, title: "Home", pinned: true).tab
+        let neighbor = tab(at: elsewhere, title: "Other", pinned: false).tab
+        let open = tab(at: elsewhere, title: "Other", pinned: false).tab
+        let tabs = [popup, open, neighbor, opener]
+        #expect(selection(after: popup, among: tabs, opener: opener, splitNeighbor: neighbor) === opener)
+        #expect(selection(after: popup, among: tabs, opener: opener, splitNeighbor: neighbor, shownElsewhere: [opener]) === neighbor)
+        #expect(selection(after: popup, among: tabs, splitNeighbor: neighbor) === neighbor)
+        #expect(selection(after: popup, among: tabs) === open)
     }
 
     // MARK: Automatic unloading
@@ -196,9 +250,20 @@ import Testing
         #expect(TabUnloading.tabsToUnload([kept, other], now: now, after: 12, pressure: .critical) == [other.id])
     }
 
-    @Test func theUnloadSettingDefaultsToTwelveHours() {
+    @Test func theUnloadSettingReadsItsHoursAndDefaultsToTwelve() throws {
         #expect(TabUnloading.unloadAfterHoursKey == "ARCHUnloadAfterHours")
-        #expect(TabUnloading.unloadAfterHoursByDefault == 12)
+        // A domain of the test's own, emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so the name stays the same on every run in a checkout.
+        let name = "test.arch.tab-unloading.\(checkoutID)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(TabUnloading.unloadAfterHours(in: defaults) == 12)
+        defaults.set(5, forKey: TabUnloading.unloadAfterHoursKey)
+        #expect(TabUnloading.unloadAfterHours(in: defaults) == 5)
+        defaults.set(0, forKey: TabUnloading.unloadAfterHoursKey)
+        #expect(TabUnloading.unloadAfterHours(in: defaults) == 0)
+        defaults.set(-3, forKey: TabUnloading.unloadAfterHoursKey)
+        #expect(TabUnloading.unloadAfterHours(in: defaults) == 0)
     }
 
     // MARK: What keeps a tab loaded
@@ -305,3 +370,6 @@ import Testing
         #expect(reopened.isOffSavedPage)
     }
 }
+
+/// A part of the defaults name that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)

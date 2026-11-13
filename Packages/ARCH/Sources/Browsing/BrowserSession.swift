@@ -980,7 +980,7 @@ public final class BrowserSession: ObservableObject {
         loadPageIfShown(tab)
     }
 
-    /// Each main window that selected a tab that closes or unloads selects another that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first.
+    /// Each main window that selected a tab that closes or unloads selects another as `tabToSelect(after:opener:splitNeighbor:among:spaceID:isShownInAnotherWindow:)` picks: for a page that closed itself, the opener is the listed tab of the page that opened it, as a sign-in popup closes once it has reported back. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first.
     private func moveSelections(awayFrom tab: Tab, reason: TabCloseReason) {
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
@@ -989,10 +989,17 @@ public final class BrowserSession: ObservableObject {
                 window.close()
                 continue
             }
-            let siblings = tabs.filter { $0 !== tab && $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
-            let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
-            window.selectTab(candidates.first { $0 !== tab && !window.isShownInAnotherWindow($0) }?.id)
+            let next = Self.tabToSelect(after: tab, opener: opener, splitNeighbor: splitNeighbor, among: tabs, spaceID: tab.spaceID ?? window.currentSpaceID,
+                                        isShownInAnotherWindow: window.isShownInAnotherWindow)
+            window.selectTab(next?.id)
         }
+    }
+
+    /// The tab that a window selects after its selected `tab` closes or unloads, one that no other window shows (window rule 3): `opener`, then `splitNeighbor`, so the rest of a split view stays on screen, or else a listed open tab of `spaceID` among `tabs` before a pinned one, or nil for the empty page. A pinned tab without its page is passed over: it is closed (bookmark rule 4), so selecting it would load a page the user closed or has not opened since launch, and two pinned tabs whose saved pages are files would download them in turn.
+    static func tabToSelect(after tab: Tab, opener: Tab?, splitNeighbor: Tab?, among tabs: [Tab], spaceID: UUID?, isShownInAnotherWindow: (Tab) -> Bool) -> Tab? {
+        let siblings = tabs.filter { $0 !== tab && $0.spaceID == spaceID && $0.isListedInSidebar }
+        let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
+        return candidates.first { $0 !== tab && ($0.isLoaded || !$0.isPinned) && !isShownInAnotherWindow($0) }
     }
 
     /// Gives an unloaded tab its page again at once when a window shows it after all, as one that a window selected while its page was asked to leave, or while a sheet that a selection ended ran the run loop.
@@ -1596,7 +1603,7 @@ extension BrowserSession {
     /// Unloads the loaded tabs that no window shows and that `TabUnloading.tabsToUnload` picks (bookmark rule 5): for the archive timer without `pressure`, after the hours that Settings ▸ Sidebar saves under `TabUnloading.unloadAfterHoursKey`, or at the memory pressure source's level.
     func unloadInactiveTabs(pressure: UnloadPressure?) {
         let candidates = allTabs.compactMap(unloadCandidate)
-        for id in TabUnloading.tabsToUnload(candidates, now: Date(), after: TabUnloading.unloadAfterHours, pressure: pressure) {
+        for id in TabUnloading.tabsToUnload(candidates, now: Date(), after: TabUnloading.unloadAfterHours(), pressure: pressure) {
             if let tab = allTabs.first(where: { $0.id == id }) { unloadAutomatically(tab) }
         }
     }
@@ -1616,6 +1623,7 @@ extension BrowserSession {
         if page.closingStopsDownloads || downloadOnlyTabIDs.contains(tab.id) { exclusions.insert(.downloads) }
         if tab.isInSmallWindow { exclusions.insert(.smallWindow) }
         if page.devTools?.isOpen == true { exclusions.insert(.developerTools) }
+        if allTabs.contains(where: { $0.opener === page && window(showing: $0) != nil }) { exclusions.insert(.opener) }
         let kind: UnloadCandidate.Kind = tab.spaceID == nil ? .favorite : tab.isPinned ? .pinned : .open
         return UnloadCandidate(id: tab.id, kind: kind, lastActivatedAt: tab.lastActivatedAt, exclusions: exclusions)
     }
