@@ -1,4 +1,4 @@
-// Trusted input on WebKit: a page in a window receives the input's clicks, keys, and text with `isTrusted` true, as the user's own, and text also reaches a page that no window shows; a key that comes back to the web view goes neither to the page again nor up the responder chain; input that could reach the app's menus or pass through the user's input source, or that needs the key window or a window at all, is refused; and a wheel delta is clamped or, when it is not finite, refused. The windows are never ordered in, so none is key and none is on screen; wheel turns and pointer moves, which WebKit delivers only to a window on screen or the key window, are checked from the bundle (`docs/agents.md`, check 69). Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network.
+// Trusted input on WebKit: a page in a window receives the input's clicks, keys, and text with `isTrusted` true, as the user's own, and text also reaches a page that no window shows; a key down that the page leaves unhandled comes back through the application as the same event, which the adapter knows as the input's, and one that comes back to the web view goes neither to the page again nor up the responder chain; input that could reach the app's menus or pass through the user's input source, or that needs the key window or a window at all, is refused; and a wheel delta is clamped or, when it is not finite, refused. The windows are never ordered in, so none is key and none is on screen; wheel turns and pointer moves, which WebKit delivers only to a window on screen or the key window, are checked from the bundle (`docs/agents.md`, check 69). Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network.
 import AppKit
 import ARCHEngine
 @testable import ARCHEngineWebKit
@@ -90,18 +90,61 @@ import Testing
         window.makeFirstResponder(nil)
         #expect(throws: EngineInputError.notFocused) { try input.press(.escape, modifiers: []) }
         window.makeFirstResponder(webView)
-        try input.press(.escape, modifiers: [.shift])
-        let sent = try #require(webView.sentKeyDowns.last)
+        let sent = try sentKeyDown { try input.press(.escape, modifiers: [.shift]) }
         let keys = try await events(in: tab, until: "keyup").filter { $0.type.hasPrefix("key") }
         #expect(keys.map(\.type) == ["keydown", "keyup"])
         #expect(keys.allSatisfy { $0.trusted && $0.target == "field" && $0.key == "Escape" })
-        // WebKit hands a key down that the page leaves unhandled back to the application, which sends it to the key window and so to its first responder. With no key window the application sends it nowhere, so the test starts at the window; the application's own step is checked from the bundle (check 69). The web view drops the key: WebKit would otherwise send it to the page again, and `NSView`'s `keyDown(with:)` up the responder chain to the window's content view.
+        // A sent key down that reaches the web view through its window, not through the application, goes no further either: WebKit would otherwise send it to the page again, and `NSView`'s `keyDown(with:)` up the responder chain to the window's content view.
         window.sendEvent(sent)
         try input.press(.enter, modifiers: [])
         let enter = try await events(in: tab, until: "keyup", key: "Enter").filter { $0.type == "keydown" }
         #expect(enter.map(\.key) == ["Escape", "Enter"])
-        #expect(!webView.sentKeyDowns.contains { $0 === sent })
         #expect(chain.keyDowns.isEmpty)
+    }
+
+    /// WebKit hands a key down that the page leaves unhandled, such as Enter with no field focused, back to the application with `NSApplication.sendEvent(_:)`, which offers it to the local event monitors before the menus and the key window: the same event that the input sent. The adapter knows each sent key down for as long as WebKit or anyone else holds it, also after more keys than a few, and no other key, so the application's `sendEvent(_:)` drops exactly these (`WebKitEngine.isTrustedInputKey(_:)`). The application's own step, and where a key would go with the address field or another window key, are checked from the bundle (check 69); with no key window the application sends keys nowhere.
+    @Test func aKeyThatComesBackThroughTheApplicationIsKnownAsTheInputs() async throws {
+        let (tab, window) = try await loadedTab()
+        let input = try #require(tab.input)
+        window.makeFirstResponder(tab.webView)
+        let monitor = KeyMonitor(windowNumber: window.windowNumber)
+        defer { monitor.remove() }
+        let sent = try (0..<10).map { _ in try sentKeyDown { try input.press(.enter, modifiers: []) } }
+        // WebKit sends a web view's key events to the page one at a time and hands a key down back when the page answers it, so every key down has come back once the page has the last key up.
+        let keys = try await events(in: tab, until: "keyup", key: "Enter", count: 10).filter { $0.type == "keydown" }
+        #expect(keys.count == 10 && keys.allSatisfy { $0.trusted && $0.key == "Enter" })
+        #expect(monitor.keyDowns.count == sent.count && zip(monitor.keyDowns, sent).allSatisfy { $0 === $1 })
+        #expect(sent.allSatisfy(WebKitEngine.isTrustedInputKey))
+        let other = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                  context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+        #expect(!WebKitEngine.isTrustedInputKey(other))
+    }
+
+    /// Runs a press and returns the key down it sent. The test then holds the key, so the adapter keeps it among its sent keys (`WebKitSentKeys`).
+    private func sentKeyDown(_ press: () throws -> Void) throws -> NSEvent {
+        let before = WebKitSentKeys.sent
+        try press()
+        let sent = WebKitSentKeys.sent.filter { event in !before.contains { $0 === event } }
+        #expect(sent.count == 1)
+        return try #require(sent.first)
+    }
+
+    /// A local monitor that records the key downs of one window that reach it and lets none go on, so none goes on to a window.
+    private final class KeyMonitor {
+        private(set) var keyDowns: [NSEvent] = []
+        private var token: Any?
+
+        init(windowNumber: Int) {
+            token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                if event.windowNumber == windowNumber { self?.keyDowns.append(event) }
+                return nil
+            }
+        }
+
+        func remove() {
+            token.map(NSEvent.removeMonitor)
+            token = nil
+        }
     }
 
     @Test func inputThatCouldReachTheAppOrAMenuIsRefused() async throws {
@@ -185,15 +228,15 @@ import Testing
         var key: String?
     }
 
-    /// The events the page recorded, once one of `type`, for `key` when it names one, is among them; fails after 5 seconds without one.
-    private func events(in tab: WebKitWebContents, until type: String, key: String? = nil) async throws -> [RecordedEvent] {
+    /// The events the page recorded, once `count` of `type`, for `key` when it names one, are among them; fails after 5 seconds with fewer.
+    private func events(in tab: WebKitWebContents, until type: String, key: String? = nil, count: Int = 1) async throws -> [RecordedEvent] {
         var events: [RecordedEvent] = []
         for _ in 0..<50 {
             events = try await recordedEvents(in: tab)
-            if events.contains(where: { $0.type == type && (key == nil || $0.key == key) }) { return events }
+            if events.filter({ $0.type == type && (key == nil || $0.key == key) }).count >= count { return events }
             try await Task.sleep(for: .milliseconds(100))
         }
-        throw WaitError("The page recorded no \(type) event within 5 seconds; it recorded \(events.map(\.type)).")
+        throw WaitError("The page recorded fewer than \(count) \(type) events within 5 seconds; it recorded \(events.map(\.type)).")
     }
 
     private func recordedEvents(in tab: WebKitWebContents) async throws -> [RecordedEvent] {

@@ -16,6 +16,8 @@ extension WebKitWebContents {
 final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     unowned let owner: WebKitWebContents
     private var observations: [NSKeyValueObservation] = []
+    /// The address the main frame last committed, by which a file chooser's request names the page (`runOpenPanelWith`). WebKit gives `url` that address when it reports the commit; before a navigation commits, `url` already gives the navigation's address, and from the start of a back or forward navigation, also one the page starts with `history.back()`, the back-forward list's current item is the target's.
+    private var committedURL: URL?
 
     init(owner: WebKitWebContents) {
         self.owner = owner
@@ -120,6 +122,10 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         owner.context.webKitDownloads.add(download, from: owner)
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        committedURL = webView.url
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         owner.uiDelegate?.webContentsDidFinishLoadingDocument(owner)
         owner.refreshFavicon()
@@ -187,11 +193,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
     }
 
-    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`). The request names the frame that asks and the page: the web view's address can be one the page is still loading, so the page's origin is the main frame's own, or for a frame inside the page that of the current back-forward item, which changes only when a navigation commits.
+    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`). The request names the frame that asks and the page: the web view's address and its current back-forward item can be those of a navigation the page started and has not committed, so the page's origin is the main frame's own, or for a frame inside the page that of the address the main frame last committed.
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         guard let delegate = owner.uiDelegate else { return completionHandler(nil) }
         let origin = Self.address(of: frame.securityOrigin)
-        let request = WebKitFileChooserAPI.request(for: parameters, origin: origin, pageOrigin: frame.isMainFrame ? origin : webView.backForwardList.currentItem?.url)
+        let request = WebKitFileChooserAPI.request(for: parameters, origin: origin, pageOrigin: frame.isMainFrame ? origin : committedURL)
         let answer = WebKitFileChooserAnswer(completionHandler)
         delegate.webContents(owner, runFileChooser: request) { answer.send(request.answer(from: $0)) }
     }

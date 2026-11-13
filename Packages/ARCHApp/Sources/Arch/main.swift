@@ -1,4 +1,5 @@
 import AppKit
+import ARCHEngineWebKit
 import CEFBridge
 
 /// AppKit does not quit while a window shows a sheet, so the session answers its sheets before AppKit checks. The user confirms a quit that stops downloads or a terminal program first, while the sheets still show, so that Cancel keeps them.
@@ -12,6 +13,12 @@ final class ArchApplication: ARCHCEFApplication {
         super.terminate(sender)
         // AppKit returns only when the app does not quit.
         appDelegate?.setQuitting(false)
+    }
+
+    /// A key down of a WebKit page's trusted input that WebKit hands back unhandled goes no further: AppKit would offer it to the event monitors and the menus and send it to the key window, whichever window and view are key by then.
+    override func sendEvent(_ event: NSEvent) {
+        guard !WebKitEngine.isTrustedInputKey(event) else { return }
+        super.sendEvent(event)
     }
 }
 

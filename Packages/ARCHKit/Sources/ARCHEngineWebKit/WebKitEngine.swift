@@ -26,6 +26,11 @@ public final class WebKitEngine: Engine {
         }
     }
 
+    /// Whether an event is a key down that a web contents' trusted input sent (`EngineWebContents.input`). WebKit hands such a key that the page leaves unhandled back to the application with `NSApplication.sendEvent(_:)` once the page has answered, which the page can put off for seconds. The application would offer it to its local event monitors, in no fixed order, and to the menus, and then send it to whatever window and view are key by then, such as the address field, so the application's `sendEvent(_:)` drops it before all of them.
+    @MainActor public static func isTrustedInputKey(_ event: NSEvent) -> Bool {
+        event.type == .keyDown && WebKitSentKeys.contains(event)
+    }
+
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
         WebKitApplication(configuration: configuration)
     }

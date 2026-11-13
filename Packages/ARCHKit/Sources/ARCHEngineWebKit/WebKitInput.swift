@@ -47,7 +47,7 @@ final class WebKitInput: EngineInput {
         webView.scrollWheel(with: event)
     }
 
-    /// WebKit hands a key down that the page leaves unhandled back to the application, which sends it to the key window's first responder and first offers keys with Command, Control, or the function key flag to the menus and the key window's key equivalents. So a key goes only while its window is key or no window is, only to a web view that is its window's first responder, which drops the key when it comes back (`WebKitWebView.sendKeyEvent(_:)`), never with Command or Control, and with no function key flag. A character key or Space would pass through the user's input source, which may type another character, such as a full-width space, or convert text the input source is composing, so only the other named keys go; `insertText(_:)` types text, a space included.
+    /// WebKit hands a key down that the page leaves unhandled back to the application, which would send it to the key window's first responder and first offer keys with Command, Control, or the function key flag to the menus and the key window's key equivalents; the application's `sendEvent(_:)` drops it first (`WebKitEngine.isTrustedInputKey(_:)`). So a key goes only while its window is key or no window is, only to a web view that is its window's first responder, never with Command or Control, and with no function key flag. A character key or Space would pass through the user's input source, which may type another character, such as a full-width space, or convert text the input source is composing, so only the other named keys go; `insertText(_:)` types text, a space included.
     func press(_ key: EngineKey, modifiers: EngineInputModifiers) throws {
         guard let webView = webView as? WebKitWebView, let window = webView.window else { throw EngineInputError.notInWindow }
         guard modifiers.isDisjoint(with: [.command, .control]), let stroke = key.stroke(with: modifiers) else { throw EngineInputError.unsupported }
@@ -107,4 +107,20 @@ final class WebKitInput: EngineInput {
         if modifiers.contains(.command) { flags.insert(.command) }
         return flags
     }
+}
+
+/// The key downs that `WebKitInput` sent (`WebKitEngine.isTrustedInputKey(_:)`). The table holds each key weakly, so it leaves once WebKit lets it go, after its hand back or once the page handled it, however many keys went since, and no other event at its address is taken for it.
+@MainActor enum WebKitSentKeys {
+    private static let keyDowns = NSHashTable<NSEvent>(options: [.weakMemory, .objectPointerPersonality])
+
+    static func add(_ event: NSEvent) {
+        keyDowns.add(event)
+    }
+
+    static func contains(_ event: NSEvent) -> Bool {
+        keyDowns.contains(event)
+    }
+
+    /// The sent key downs that WebKit or a caller still holds.
+    static var sent: [NSEvent] { keyDowns.allObjects }
 }

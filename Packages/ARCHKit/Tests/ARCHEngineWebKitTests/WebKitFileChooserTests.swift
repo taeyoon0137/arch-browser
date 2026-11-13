@@ -1,4 +1,4 @@
-// A page's file chooser on WebKit: a file input's click reaches the UI delegate as a request with the input's mode and, while the private API flags allow it, its accepted types; the page receives the files the delegate answers with, only the first for an input that takes one, a folder's files for a folder input, and a cancel for nil, also from a delegate that lets the completion go or from no delegate at all. A script's `click()` opens the chooser because `evaluateJavaScript` runs with a user gesture, in the page's world and in a world of the app's own, as `executeJavaScript(_:inWorld:completion:)` runs the agents' page script. The request names the frame that asks and the page, also while the page loads another address. The adapter's favicon lookup runs no code of the page with its gesture. The window is never ordered in. Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network; one keeps a navigation loading from a local port that never answers.
+// A page's file chooser on WebKit: a file input's click reaches the UI delegate as a request with the input's mode and, while the private API flags allow it, its accepted types; the page receives the files the delegate answers with, only the first for an input that takes one, a folder's files for a folder input, and a cancel for nil, also from a delegate that lets the completion go or from no delegate at all. A script's `click()` opens the chooser because `evaluateJavaScript` runs with a user gesture, in the page's world and in a world of the app's own, as `executeJavaScript(_:inWorld:completion:)` runs the agents' page script. The request names the frame that asks and the page its main frame committed, also while the page loads another address and while a page with a frame goes back to one. The adapter's favicon lookup runs no code of the page with its gesture. The window is never ordered in. Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network; two keep a navigation loading on 127.0.0.1, from a port that never answers or from a server that answers only its first request.
 import AppKit
 import ARCHEngine
 @testable import ARCHEngineWebKit
@@ -144,6 +144,36 @@ import Testing
         #expect(recorder.requests.map(\.pageOrigin) == [site])
     }
 
+    /// Going back moves the web view's address and its current back-forward item to the earlier page before that page loads again, so a frame inside the page names the page the main frame committed. A page that the back-forward cache keeps comes back at once, and a tab whose history was restored keeps none, so the test goes back in a tab restored from another tab's state, to a page whose server leaves its second request unanswered. Pages that `loadHTMLString` loads get no back-forward item, so both pages come from local servers, on two ports and so of two origins.
+    @Test func aFrameNamesThePageItsMainFrameCommittedWhileTheTabGoesBack() async throws {
+        let bank = try PageServer(page: "<!doctype html><title>Earlier</title><link rel=\"icon\" href=\"data:,\"><script>window.log = [];</script>", answers: 1)
+        let framed = try PageServer(page: Self.framedPage, answers: 2)
+        let earlier = try #require(URL(string: "http://127.0.0.1:\(bank.number)/bank"))
+        let page = try #require(URL(string: "http://127.0.0.1:\(framed.number)/framed"))
+        let site = try #require(URL(string: "http://127.0.0.1:\(framed.number)/"))
+        let first = try await loadedTab()
+        try await load(earlier, in: first)
+        try await load(page, in: first)
+        let recorder = ChooserRecorder(answer: nil)
+        let tab = try shownTab(EngineWebContentsConfiguration(restorableState: first.restorableState), uiDelegate: recorder)
+        try await waitForPage(at: page.absoluteString, in: tab)
+        _ = try await evaluate("history.back(); 0", in: tab)
+        try await waitUntil("The web view did not report the address it goes back to within 5 seconds.") { tab.url == earlier }
+        #expect(tab.webView.backForwardList.currentItem?.url == earlier)
+        #expect(try await evaluate("document.title", in: tab) as? String == "Framed")
+        _ = try await evaluate("frames[0].document.getElementById('one').click(); 0", in: tab)
+        #expect(try await logEntry(startingWith: "one:", in: tab) == "one:cancel")
+        #expect(recorder.addresses == [earlier])
+        #expect(recorder.requests.map(\.origin) == [site])
+        #expect(recorder.requests.map(\.pageOrigin) == [site])
+    }
+
+    /// A page whose only file input is in a frame of the same origin, which logs its `cancel` in the page.
+    private static let framedPage = """
+        <!doctype html><title>Framed</title><link rel="icon" href="data:,"><script>window.log = [];</script>
+        <iframe srcdoc='<input type="file" id="one"><script>document.getElementById("one").addEventListener("cancel", () => parent.log.push("one:cancel"));</script>'></iframe>
+        """
+
     @Test func withoutADelegateThePageGetsNoFile() async throws {
         let tab = try await loadedTab()
         tab.uiDelegate = nil
@@ -195,19 +225,37 @@ import Testing
 
     /// A tab whose view fills a window that is never ordered in, once the page, the tests' own unless another is given, has loaded at `baseURL`, with `uiDelegate` from the start.
     private func loadedTab(page: String? = nil, baseURL: URL? = nil, uiDelegate: (any EngineWebContentsUIDelegate)? = nil) async throws -> WebKitWebContents {
-        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        let tab = try shownTab(EngineWebContentsConfiguration(), uiDelegate: uiDelegate)
+        tab.webView.loadHTMLString(page ?? Self.page, baseURL: baseURL)
+        try await waitForPage(at: baseURL?.absoluteString ?? "about:blank", in: tab)
+        return tab
+    }
+
+    /// A tab of the configuration whose view fills a window that is never ordered in, with `uiDelegate` from the start.
+    private func shownTab(_ configuration: EngineWebContentsConfiguration, uiDelegate: (any EngineWebContentsUIDelegate)?) throws -> WebKitWebContents {
+        let tab = try #require(browser.createWebContents(configuration) as? WebKitWebContents)
         tab.uiDelegate = uiDelegate
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         windows.all.append(window)
         tab.view.frame = window.contentLayoutRect
         window.contentView?.addSubview(tab.view)
-        tab.webView.loadHTMLString(page ?? Self.page, baseURL: baseURL)
+        return tab
+    }
+
+    /// Loads the address in the tab and returns once its page has loaded.
+    private func load(_ url: URL, in tab: WebKitWebContents) async throws {
+        tab.webView.load(URLRequest(url: url))
+        try await waitForPage(at: url.absoluteString, in: tab)
+    }
+
+    /// Returns once the tab's page at the address has loaded, not while the tab still shows the page before it.
+    private func waitForPage(at address: String, in tab: WebKitWebContents) async throws {
         // A JavaScript error means the page's script has not run yet; a page that does not answer fails with `evaluate`'s error.
         let deadline = ContinuousClock.now + .seconds(5)
         while ContinuousClock.now < deadline {
             do {
-                if try await evaluate("document.readyState === 'complete' && Array.isArray(window.log)", in: tab) as? Bool == true { return tab }
+                if try await evaluate("location.href === '\(address)' && document.readyState === 'complete' && Array.isArray(window.log)", in: tab) as? Bool == true { return }
             } catch let error as WaitError {
                 throw error
             } catch {}
@@ -249,6 +297,15 @@ import Testing
         private let socket: Int32
 
         init() throws {
+            (socket, number) = try Self.listeningSocket()
+        }
+
+        deinit {
+            close(socket)
+        }
+
+        /// A socket that listens on a free port of 127.0.0.1, with the port.
+        static func listeningSocket() throws -> (Int32, UInt16) {
             let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
             var address = sockaddr_in()
             address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -262,12 +319,76 @@ import Testing
                 if socket >= 0 { close(socket) }
                 throw WaitError("No port on 127.0.0.1 could listen: \(String(cString: strerror(errno))).")
             }
-            self.socket = socket
-            number = UInt16(bigEndian: address.sin_port)
+            return (socket, UInt16(bigEndian: address.sin_port))
+        }
+    }
+
+    /// A server on a port of 127.0.0.1 that answers its first requests with a page, which no cache may keep, and leaves every later request unanswered, so a navigation that loads the page again stays loading until the server closes.
+    private final class PageServer {
+        let number: UInt16
+        private let source: DispatchSourceRead
+        private let connections: Connections
+
+        init(page: String, answers: Int) throws {
+            let (socket, number) = try SilentPort.listeningSocket()
+            self.number = number
+            let body = Data(page.utf8)
+            let response = Data("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
+            let connections = Connections(answers: answers)
+            self.connections = connections
+            source = DispatchSource.makeReadSource(fileDescriptor: socket, queue: .global())
+            source.setEventHandler {
+                let connection = accept(socket, nil, nil)
+                guard connection >= 0 else { return }
+                connections.add(connection)
+                // The request is read on a queue of its own, since a connection may send nothing.
+                DispatchQueue.global().async {
+                    var buffer = [UInt8](repeating: 0, count: 4096)
+                    guard read(connection, &buffer, buffer.count) > 0, connections.takeAnswer() else { return }
+                    _ = response.withUnsafeBytes { write(connection, $0.baseAddress, $0.count) }
+                    shutdown(connection, SHUT_RDWR)
+                }
+            }
+            source.setCancelHandler {
+                close(socket)
+                connections.closeAll()
+            }
+            source.resume()
         }
 
         deinit {
-            close(socket)
+            source.cancel()
+        }
+
+        /// The server's connections, which it closes when it ends, and how many requests it still answers.
+        private final class Connections: @unchecked Sendable {
+            private let lock = NSLock()
+            private var all: [Int32] = []
+            private var answers: Int
+
+            init(answers: Int) {
+                self.answers = answers
+            }
+
+            func add(_ connection: Int32) {
+                lock.withLock { all.append(connection) }
+            }
+
+            /// Whether the server answers the request it has just read.
+            func takeAnswer() -> Bool {
+                lock.withLock {
+                    defer { answers -= 1 }
+                    return answers > 0
+                }
+            }
+
+            /// Shutting a connection down ends a read that waits on it.
+            func closeAll() {
+                lock.withLock {
+                    all.forEach { shutdown($0, SHUT_RDWR); close($0) }
+                    all = []
+                }
+            }
         }
     }
 
