@@ -1,4 +1,4 @@
-// macOS's Low Power Mode, which can slow page animation on both engines: its state for the whole app, and a sidebar symbol that shows it while it is on.
+// macOS's Low Power Mode, which can slow page animation on both engines: its state for the whole app, and a symbol in the address bar that shows it while it is on.
 import AppKit
 import SwiftUI
 
@@ -28,7 +28,7 @@ final class LowPowerMode: ObservableObject {
     }
 }
 
-/// The trailing end of the sidebar's bottom bar while Low Power Mode is on: a battery symbol with a yellow level, as macOS marks the mode, whose help says pages may animate more slowly. A click, like the context menu's Low Power Mode Settings…, opens the mode's settings; Arch itself changes nothing.
+/// A button in the address bar while Low Power Mode is on, before the share button of the sidebar's address pill and of a small window's top row: a battery symbol with a yellow level, as macOS marks the mode, sized like the bar's other buttons, whose help says pages may animate more slowly. A click, like the context menu's Low Power Mode Settings…, opens the mode's settings; Arch itself changes nothing.
 struct LowPowerModeIndicator: View {
     @ObservedObject private var mode = LowPowerMode.shared
     @State private var isHovering = false
@@ -38,7 +38,7 @@ struct LowPowerModeIndicator: View {
             Button(action: LowPowerMode.openSettings) {
                 // The outline takes the bar's secondary color, which keeps its contrast in light and dark sidebars; only the level is yellow.
                 Image(systemName: "battery.50percent")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(Color.secondary, Color.yellow)
                     .frame(width: 30, height: 28)

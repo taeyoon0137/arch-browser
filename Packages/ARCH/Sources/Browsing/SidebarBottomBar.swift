@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// The library button at the leading end, one symbol per space in the middle with the new space button floating after them, and the Low Power Mode indicator at the trailing end while the mode is on. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab dragged over another space's symbol of its Persona lights it up.
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab dragged over another space's symbol of its Persona lights it up.
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -12,7 +12,7 @@ struct SidebarBottomBar: View {
     @Environment(\.spaceTheme) private var theme
     @Environment(\.libraryReveal) private var libraryReveal
 
-    /// The maximum centered width of the symbols and new space button. Each side reserves room for a 30-point button and its gap: the library button at the leading end, the Low Power Mode indicator at the trailing end.
+    /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
 
     /// The bar's height, which the library's button row and the line beside the library repeat.
@@ -104,9 +104,6 @@ struct SidebarBottomBar: View {
             .onPreferenceChange(SidebarItemFramesKey.self) { sidebarDrag.spaceSymbolFrames = $0 }
             // An optical correction beside the page: the group looks centered 2 points right of its true center. The floating sidebar uses the true center.
             .offset(x: isFloating ? 0 : 2)
-            // Shown only while macOS's Low Power Mode is on, in the room groupWidth keeps free at the trailing end. Declared after the strip so that VoiceOver reaches it in its place on screen, after the new space button.
-            LowPowerModeIndicator()
-                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(height: Self.height)
     }

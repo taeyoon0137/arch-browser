@@ -79,6 +79,7 @@ private struct SmallWindowTopRow: View {
             } else {
                 SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: windowModel.reload)
             }
+            LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))

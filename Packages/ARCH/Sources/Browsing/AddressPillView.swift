@@ -1,4 +1,4 @@
-// The address pill below the sidebar's top row: the page's site, which opens the command palette, and the buttons that share the page and open the site settings popover.
+// The address pill below the sidebar's top row: the page's site, which opens the command palette, the Low Power Mode symbol while the mode is on, and the buttons that share the page and open the site settings popover.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -55,6 +55,7 @@ struct AddressPillView: View {
             .buttonStyle(.plain)
             .help(url?.absoluteString ?? "")
             .accessibilityLabel(host)
+            LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
