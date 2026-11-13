@@ -2,20 +2,22 @@
 
 ## Purpose and scope
 
-- This note describes the design for installing web extensions from the Web Store, Google's extension store for browsers built on Chromium, as `webExtension` plugins (`docs/plugins.md`, Web extensions as plugins). It covers queue tasks IV.27 and IV.17 to IV.20 in `docs/plan.md`, the package proof that IV.26 built, and row 44 of `docs/features.md`. The password managers that use it, 1Password and iCloud Passwords, are covered in `docs/password-managers.md` (IV.21, IV.22, and IV.13).
+- This note describes the design for installing web extensions from the Web Store, Google's extension store for browsers built on Chromium, as `webExtension` plugins (`docs/plugins.md`, Web extensions as plugins). It covers queue tasks IV.27 and IV.17 to IV.20 in `docs/plan.md`, the package proof that IV.26 built, the client and staging that IV.17 built, and row 44 of `docs/features.md`. The password managers that use it, 1Password and iCloud Passwords, are covered in `docs/password-managers.md` (IV.21, IV.22, and IV.13).
 - The user installs an extension from its store page in a tab, from a store address or an extension identifier pasted into Settings or the palette, and from the install sheet. Arch downloads the package from Google's public update endpoint for that identifier, checks the CRX3 package's signatures and its identifier, stages it for review in the existing sheet, and installs it for the engines its package supports, as with a `.crx` file the user selects.
 - This reverses the open decision in `docs/plugins.md` that allowed no direct installs from an online store. Arch still runs no server or vendor backend of its own: it calls Google's public endpoints, and only when the user acts.
-- Arch's interface, code, and documents call the store the Web Store. Its page addresses name another browser product in their host names, which `AGENTS.md` allows only in the README's opening and in browser import. The user's step IV.27 adds an exception for them to `AGENTS.md`. Until then, this note and the queue describe those hosts without writing them, and IV.17, which needs them, waits. Afterwards they appear only in `WebStore.swift`, as constants that the tests also use, and in this note. The update endpoint's address names no browser product.
+- Arch's interface, code, and documents call the store the Web Store. Its page addresses name another browser product in their host names, which `AGENTS.md` allows only in the README's opening and in browser import. The user's step IV.27 adds an exception for them to `AGENTS.md`. Until then, this note and the queue describe those hosts without writing them, and `WebStore.pageHosts` stays empty, so no address counts as a store page, while a pasted identifier and the rest of the install flow work; the rest of IV.17 then writes the hosts there and here. Afterwards they appear only in `WebStore.swift`, as constants that the tests also use, and in this note. The update endpoint's address names no browser product.
 - This design uses no private API and needs no flag on `flags://`.
 
 ## Facts this design relies on
 
 - An extension's identifier is 32 letters from `a` to `p`: the first 128 bits of the SHA-256 digest of its public key, each hexadecimal digit written as a letter (`docs/plugins.md`, Identifier).
 - An extension's store page is `https://<store host>/detail/<slug>/<identifier>`, on the store's own host. The slug is optional, and a query or fragment may follow. Older addresses, `https://<older host>/webstore/detail/<slug>/<identifier>`, redirect there. The store's other pages, such as categories and search, contain no identifier. Both hosts name another browser product, so IV.17 writes them into `WebStore.swift` and here only after IV.27.
-- Chromium's extension updater requests `https://clients2.google.com/service/update2/crx` with one `x` parameter per extension: a URL-encoded `id=<identifier>&v=<version>&installsource=ondemand&uc`, `v=0.0.0.0` for an extension it does not have, and `prodversion`, the browser's Chromium version, `acceptformat=crx3`, and the Mac's `os` and `arch` values. With `response=updatecheck`, the response is update protocol 2.0 XML: a `gupdate` element with an `app` element per identifier, each with `appid` and `status`, and an `updatecheck` element inside it with `status` (`ok` with `codebase`, `version`, `hash_sha256`, and `size`, `noupdate`, or an error such as `error-unknownApplication`). `codebase` is an HTTPS address of the package. The endpoint's required parameters have not been checked from this Mac: IV.17 checks them once with `curl` for a public extension and records the result here.
+- Chromium's extension updater requests `https://clients2.google.com/service/update2/crx` with one `x` parameter per extension: a URL-encoded `id=<identifier>&v=<version>&installsource=ondemand&uc`, `v=0.0.0.0` for an extension it does not have, and `prodversion`, the browser's Chromium version, `acceptformat=crx3`, and the Mac's `os` and `arch` values. With `response=updatecheck`, the response is update protocol 2.0 XML: a `gupdate` element with an `app` element per identifier, each with `appid` and `status`, and an `updatecheck` element inside it with `status` (`ok` with `codebase`, `version`, `hash_sha256`, and `size`, `noupdate`, or an error such as `error-unknownApplication`). `codebase` is an HTTPS address of the package. An `app` whose `status` is an error has no `updatecheck`.
+- On 2026-11-13, `curl` from this Mac asked the endpoint about 1Password (`aeblfdkhhhdcdjpifhhbdiojplfjncoa`) with `prodversion=156.0.8078.48` and no personal data. With the parameters above, `app` had `status="ok"` and `updatecheck` had `status="ok"`, `version="8.12.44.33"`, an HTTPS `codebase`, `hash_sha256`, and `size="18374695"`, beside what Arch ignores: the attributes `fp`, `protected`, and `cohort`, and a `daystart` element. Without `prodversion` or without `acceptformat=crx3`, `updatecheck` said `noupdate`, as it did with `prodversion=60.0.0.0` and with the current version as `v`; without `uc` in `x`, `app` had no `updatecheck`. Leaving out `os`, `arch`, `installsource=ondemand`, or `response=updatecheck` changed nothing, nor did an empty `Accept-Language` or a user agent in URLSession's form. An unknown identifier got `<app appid="…" status="error-unknownApplication"/>`, and two `x` parameters got both `app` elements in one answer, in the order asked. The package at `codebase` came without a redirect and had the answer's size and SHA-256 digest.
+- URLSession sends the user's preferred languages as `Accept-Language` unless the request sets the header, and a request that sets it to an empty value sends it empty, as a local listener showed on 2026-11-13. It also sends a user agent of the app's name and version and the versions of CFNetwork and Darwin.
 - A CRX3 file is `Cr24`, the format version 3, and the header's length, each a 32-bit little-endian number, then the header, a `CrxFileHeader` protocol buffer message, then a `.zip` archive. The header contains: `sha256_with_rsa` (2) and `sha256_with_ecdsa` (3), repeated `AsymmetricKeyProof`s, each a public key as DER `SubjectPublicKeyInfo` (1) and a signature (2); and `signed_header_data` (10000), a `SignedData` message whose `crx_id` (1) is the first 16 bytes of the developer key's SHA-256 digest. Each signature covers `CRX3 SignedData`, a zero byte, the length of `signed_header_data` as a 32-bit little-endian number, `signed_header_data`, and the archive: RSA PKCS #1 v1.5 or ECDSA P-256 over SHA-256.
 - A store-published package also carries a proof by the store's publisher key, whose SHA-256 digest Chromium's verifier holds (`kPublisherKeyHash` in `components/crx_file/crx_verifier.cc`). In Chromium 156.0.8078.48, the Chromium of the pinned CEF branch, the digest is `61f7f2a6bfcf74cd0bc1fe2497cc9b04254c658f79f2145392867ea8366367cf`, of a P-256 key, which `CRXArchive.webStorePublisherKeyDigest` copies. Chromium's verifier requires every proof in the header to hold and one to be by the developer's key, and with the publisher format also one by the publisher key; it reads RSA proofs as PKCS #1 v1.5 with SHA-256.
-- `components/test/data/crx_file/valid_publisher.crx3` in that source is a store package that Chromium's own tests accept with the publisher proof: two RSA proofs, one the developer's, and an ECDSA proof by the publisher key. On 2026-11-13, `CRXArchive` read it as `webStore` with the identifier `ojjgnpkioondelmggbekfhllhdaimnho`, `valid_no_publisher.crx3` and `valid_test_publisher.crx3`, whose third proof is by Chromium's test publisher key, as `developer`, and refused `unsigned.crx3`, as Chromium's tests expect. IV.17 confirms the digest against a package downloaded from the update endpoint and records the result here.
+- `components/test/data/crx_file/valid_publisher.crx3` in that source is a store package that Chromium's own tests accept with the publisher proof: two RSA proofs, one the developer's, and an ECDSA proof by the publisher key. On 2026-11-13, `CRXArchive` read it as `webStore` with the identifier `ojjgnpkioondelmggbekfhllhdaimnho`, `valid_no_publisher.crx3` and `valid_test_publisher.crx3`, whose third proof is by Chromium's test publisher key, as `developer`, and refused `unsigned.crx3`, as Chromium's tests expect. On 2026-11-13, `CRXArchive` read the package that the endpoint offered for 1Password (above) as `webStore` with its identifier, which confirms the digest against the endpoint, and a temporary test, not kept, staged it through `WebStoreClient` and `WebStoreInstaller` with the proof and origin `webStore`, leaving no download in `Staging/`, and got the unknown identifier's message for `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
 - Since IV.26, `CRXArchive` checks the signatures and writes the developer's key into the manifest (Package proof; `docs/plugins.md`, Identifier). The Chromium adapter refuses the store's install prompts without asking (`ChromiumExtensions.cefExtensionsShowPrompt`). Whether the store's page offers its own install button on Arch's engine needs verification.
 
 ## Decisions
@@ -24,20 +26,20 @@
 2. One path: every source calls `WebStoreInstaller.stage(_:in:)`, which downloads the current package for the identifier and stages it with the origin `webStore`, and every package goes through the review sheet. Nothing installs or updates without the review.
 3. Proof: a store package must carry a valid developer proof for its identifier and a valid proof by the store's publisher key, and its identifier must match the request. A `.crx` file the user chooses must carry a valid developer proof. Either must hold the web extension of the file's identifier, the only identifier its signatures prove. `plugins.json` records the proof in entries that earlier builds keep as they are (Package proof). This settles how Arch tells a real extension from a package that copies its `key` (`docs/plugins.md`, Open decisions), which the password managers' native apps need (`docs/password-managers.md`).
 4. Updates: Arch checks the store for updates to extensions installed from it only when the user clicks Check for Updates in Settings ▸ Plugins and when Settings ▸ Plugins first shows a Persona in an app run. No timer, launch, or background check runs, and an update installs only through its review. Arch therefore adds no update service of its own (row 37).
-5. Privacy: a request carries the identifiers and installed versions of the requested extensions, the Chromium version of Arch's engine, and the Mac's `os` and `arch`. It carries no cookies, language, install dates, or ping parameters. It uses an ephemeral `URLSession` without cookie storage or cache, as plugin fetches do.
+5. Privacy: a request carries the identifiers and installed versions of the requested extensions, the Chromium version of Arch's engine, and the Mac's `os` and `arch`. It carries no cookies, language, install dates, or ping parameters: it sends an empty `Accept-Language` and keeps the system's user agent. It uses an ephemeral `URLSession` without cookie storage, cache, or stored credentials, as the AI providers' requests and site icons do.
 6. Reviews from a tab open in Settings ▸ Plugins in the tab's Persona, like Install <Engine> Version… from the site settings popover, so every review appears in one place.
 7. Personas: a plugin belongs to a whole Persona. With two or more Personas, the review sheet names it by the Persona / Space rule (`docs/windows-personas.md`, Persona rule 7), as the Clear Site Data sheet does: a review that starts from a tab or a window says "Installs in the Persona of “Work / Research” for all its spaces." with the tab's space or the window's current space, and a review started in Settings ▸ Plugins, which shows a Persona without a space, says "Installs in “Work” for all its spaces." Settings ▸ Plugins' picker lists Personas alone. The store row in the site settings popover and the palette names no Persona.
 
 ## Install flow
 
 1. Resolve: `WebStore.extensionID(in:)` reads a store page's address, and `WebStore.extensionID(from:)` reads pasted text: a store address, or a bare identifier, ignoring case and trimming spaces at either end.
-2. Ask: `WebStoreClient.releases(of:)` queries the endpoint for the identifier with `v=0.0.0.0` and returns its `WebStoreRelease`: the version, the package's address, its SHA-256 digest when the response provides one, and its size. An identifier unknown to the store is refused with "The Web Store has no extension with the identifier “…”."; another status with "The Web Store did not offer “…”: <status>.".
+2. Ask: `WebStoreClient.releases(of:)` queries the endpoint for the identifier with `v=0.0.0.0` and returns its `WebStoreRelease`: the version, the package's address, its SHA-256 digest when the response provides one, and its size. An identifier unknown to the store is refused with "The Web Store has no extension with the identifier “…”."; another status, `noupdate` among them, with "The Web Store did not offer “…”: <status>."; an answer that is not the update protocol's XML, or an offer without its address or version, with "The Web Store's answer does not read."; and a status other than HTTP 200 with "The Web Store answered with HTTP status 503.". A client without a Chromium version asks nothing: "Arch cannot ask the Web Store without the version of its Chromium engine."
 3. Compare: when the Persona has that extension version installed from the store, the sheet says "“1Password” 8.11.2 is installed, the Web Store's current version." with Done, and downloads nothing.
-4. Download: into `Staging/<UUID>.crx` in the Persona's folder, from an HTTPS address only, stopping if it exceeds 256 MB. A file whose digest differs from the response's is deleted and refused with "The download from the Web Store is damaged. Try again."
+4. Download: into `Staging/<UUID>.crx` in the Persona's folder (`PluginManager.stagingDirectory`, which the manager clears at launch), from an HTTPS address only, following redirects only to HTTPS addresses ("The Web Store offered the package at an address without HTTPS."), and stopping once it exceeds 256 MB, or before it starts when the response's size does ("The package from the Web Store is larger than 256 MB."). A file whose size or digest differs from the response's is deleted and refused with "The download from the Web Store is damaged. Try again."
 5. Stage: `PluginManager.stage(_:origin:)` stages the file as a `.crx` file with the origin `webStore(<identifier>)`. It refuses a package without the store's publisher proof ("The package is not signed by the Web Store."), one whose identifier differs from the request or that holds no web extension, such as a script plugin with `plugin.json` ("The Web Store sent the package of another extension."), and a theme, whose manifest has `theme` ("“…” is a theme, which Arch does not use."). The engines check it like any web extension package (`docs/plugins.md`, Engine versions ▸ Coverage), and the installer deletes the downloaded file once the package is staged or refused; `stage(_:origin:)` leaves it in place.
 6. Review: the subtitle says "Version 8.11.2 from the Web Store.". The review matches the package against installed plugins like any other package: an installed identifier makes it an update, with the warning about another source when the installed plugin came from a file, and it can join a plugin as an engine version. Install and Install and Enable work as for files, with Touch ID for every website or `nativeMessaging`.
 
-Network failures show the system's message, such as "The Internet connection appears to be offline.". The sheet shows progress during the request and download, and Cancel stops the request and deletes the partial file.
+Network failures show the system's message, such as "The Internet connection appears to be offline.". The sheet shows progress during the request and download, and Cancel stops the request and deletes the partial file, as cancelling the task of `stage(_:in:)` does.
 
 ## Entry points
 
@@ -68,18 +70,26 @@ Network failures show the system's message, such as "The Internet connection app
 ## Types
 
 ```swift
-// Extensions, WebStore.swift: the store's addresses, which no other file names; written after IV.27.
+// Extensions, WebStore.swift, built in IV.17: the store's addresses, which no other file names. `pageHosts` stays empty until IV.27.
 public enum WebStore {
     /// The identifier of the extension whose store page `url` is, or nil for any other address.
     public static func extensionID(in url: URL) -> String?
-    /// The identifier that typed or pasted text names: a store page's address or a bare identifier, without case and spaces at either end.
+    /// The identifier that typed or pasted text names: a store page's address, with or without `https://`, or a bare identifier, without case and spaces at either end.
     public static func extensionID(from text: String) -> String?
     /// The update endpoint.
     static let updateEndpoint: URL
     /// The hosts of store pages, the current one first, from which the tests build their addresses.
     static let pageHosts: [String]
+    /// The path before the slug and identifier on each page host, in the same order: `detail`, and `webstore/detail` on the older host.
+    static let pagePaths: [[String]]
+    /// The readers with page hosts that the tests choose.
+    static func extensionID(in url: URL, pageHosts: [String]) -> String?
+    static func extensionID(from text: String, pageHosts: [String]) -> String?
+    /// The text in lowercase when it is 32 letters from `a` to `p` in any case.
+    static func identifier(_ text: some StringProtocol) -> String?
 }
 
+// Extensions, WebStoreClient.swift, built in IV.17
 public struct WebStoreRelease: Equatable, Sendable {
     public let id: String
     public let version: String
@@ -88,21 +98,46 @@ public struct WebStoreRelease: Equatable, Sendable {
     let size: Int?
 }
 
-// Extensions, WebStoreClient.swift
+/// The store's answer for one identifier.
+enum WebStoreAnswer: Equatable, Sendable {
+    case release(WebStoreRelease)
+    /// Nothing newer than the version asked about, also for an `app` without `updatecheck`.
+    case noUpdate
+    /// `error-unknownApplication`.
+    case unknown
+    /// Another status, which messages quote.
+    case refused(String)
+}
+
+/// The messages of the install flow, as `LocalizedError`.
+public enum WebStoreError: Error, Equatable, Sendable {
+    case unknownExtension(String), notOffered(String, status: String), alreadyInstalled(name: String, version: String)
+    case unreadableAnswer, httpStatus(Int), insecurePackage, packageTooLarge, damagedDownload, noEngineVersion
+}
+
 public final class WebStoreClient: Sendable {
-    /// `productVersion` is the Chromium version in the CEF version of Arch's engine, such as 156.0.8078.17, which the app shell reads without starting CEF.
-    public init(productVersion: String, session: URLSession)
-    /// Asks about each identifier, at most 25 to a request, with its installed version, or 0.0.0.0 for nil.
-    func releases(of queries: [(id: String, version: String?)]) async throws -> [String: WebStoreRelease]
-    /// Writes the package to `file`, which must not exist, checking its size and digest.
+    /// `productVersion` is the Chromium version in the CEF version of Arch's engine, such as 156.0.8078.48; requests go through an ephemeral session without cookies, cache, or stored credentials.
+    public convenience init(productVersion: String)
+    /// Tests pass a session from `makeSession(configuration:)` whose `URLProtocol` answers instead of the network, and a smaller limit.
+    init(productVersion: String, session: URLSession, packageSizeLimit: Int = maximumPackageSize)
+    static func makeSession(configuration: URLSessionConfiguration = .ephemeral) -> URLSession
+    /// The version after `+chromium-` in a CEF version, four dot-separated numbers.
+    public static func chromiumVersion(inCEFVersion cefVersion: String) -> String?
+    /// The requests for the queries, 25 identifiers to each, with an empty `Accept-Language`.
+    func requests(for queries: [(id: String, version: String?)]) -> [URLRequest]
+    /// Asks about each identifier, at most 25 to a request, with its installed version, or 0.0.0.0 for nil; throws `noEngineVersion` without a Chromium version.
+    func releases(of queries: [(id: String, version: String?)]) async throws -> [String: WebStoreAnswer]
+    /// Reads the update protocol's XML with `XMLParser`.
+    static func answers(in data: Data) throws -> [String: WebStoreAnswer]
+    /// Writes the package to `file`, which must not exist, over HTTPS only, checking its size and digest; a failure or cancellation deletes the file.
     func download(_ release: WebStoreRelease, to file: URL) async throws
 }
 
-// Extensions, WebStoreInstaller.swift: one per app, which the session owns.
+// Extensions, WebStoreInstaller.swift: one per app, which the session owns. `stage(_:in:)` built in IV.17; IV.20 adds the rest and `ObservableObject`.
 @MainActor
 public final class WebStoreInstaller: ObservableObject {
-    public init(client: WebStoreClient)
-    /// Downloads the current package of the identifier and stages it in the Persona of `plugins` with the origin `webStore`.
+    nonisolated public init(client: WebStoreClient)
+    /// Downloads the current package of the identifier into `PluginManager.stagingDirectory`, unless the Persona has that version installed from the store, and stages it in the Persona of `plugins` with the origin `webStore`.
     public func stage(_ id: String, in plugins: PluginManager) async throws -> PluginPackage
     /// The newer versions found for each Persona's store installs in this run.
     @Published public private(set) var updates: [PersonaID: [PluginID: WebStoreRelease]]
@@ -111,6 +146,9 @@ public final class WebStoreInstaller: ObservableObject {
     public func stageUpdate(of plugin: PluginID, in plugins: PluginManager) async throws -> PluginPackage
     public func forget(_ persona: PersonaID)
 }
+
+// Plugins, PluginManager, built in IV.17: `Staging/` in the Persona's folder, where the store's downloads wait.
+public var stagingDirectory: URL
 
 // Plugins, built in IV.26
 public enum PluginProof: String, Hashable, Sendable { case developer, webStore }
@@ -131,9 +169,10 @@ case install
 // Extensions, WebExtensionHost: `tab` gives the review its space.
 func installFromWebStore(_ id: String, persona: PersonaID, tab: (any EngineWebContents)?)
 
-// Browsing, BrowserSession
+// Browsing, BrowserSession, built in IV.17: the app shell passes `ChromiumEngine.extensionRuntimeVersion`, the CEF version, read without starting CEF.
 public let webStore: WebStoreInstaller
-/// Set by the app shell: opens Settings ▸ Plugins at the Persona with the store sheet started for the identifier, and a review that names the Persona with the space, if any.
+public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?) throws
+/// IV.18. Set by the app shell: opens Settings ▸ Plugins at the Persona with the store sheet started for the identifier, and a review that names the Persona with the space, if any.
 public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
 ```
 
@@ -142,14 +181,14 @@ public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
 ## Tests
 
 - Proof (`ExtensionsTests`, `CRXProofTests.swift`, built in IV.26): `.crx` files the test signs with a generated RSA key and a P-256 key stage with the proof `developer`; an added proof by a test publisher key, which the verifier and the manager take as a parameter, gives `webStore`. A file whose archive or signed header changed after signing, whose signature uses another key, with a second proof that does not hold or a P-256 key among the RSA proofs, whose `crx_id` matches no proof key, or whose header does not read or holds the signature of a `.zip` archive's end record is refused. Folders and `.zip` archives have no proof. A `.crx` file of a script plugin, with `plugin.json` alone or beside a `manifest.json`, stages nothing, and the same plugin stages from a folder without proof. `stage(_:origin:)` with `webStore` refuses a package without the store's proof, with another identifier, holding a script plugin, with `theme`, or as a folder, and stages the store's package with the origin `webStore`. `plugins.json` writes a proven `.crx` install with `signedSource` and `proof` and a store install with `webStore` and `proof`, never with `source`, and reads them back; an entry with `source` and a `proof` key has no proof and keeps the key; an unknown proof value survives a write. An unsigned update of a signed plugin gets the review's sentence and records no proof. The tests sit beside the web extension runtime, whose manifests `.crx` packages hold, and the test `CRXFile` in `EngineRequestsTests.swift` signs their files and those of the engine request tests.
-- Store (`ExtensionsTests`, IV.17), with a `URLProtocol` that answers for the endpoint, so no test reaches the network: `extensionID(in:)` reads both page forms with and without a slug, query, or fragment, and no identifiers from other store pages or hosts, with every store address built from `WebStore.pageHosts`, so that `WebStoreTests.swift` names no host; `extensionID(from:)` reads addresses and bare identifiers in any case and refuses 31 or 33 letters and letters past `p`. The request has the parameters above, one `x` per identifier, 25 to a request, and no cookie header. The response's statuses map to releases and messages, with several `app` elements in one response. A download is refused if it uses HTTP, exceeds the size limit, or has a different digest. A store package without the publisher proof, with another identifier, or with `theme` is refused; one with both proofs stages with the origin `webStore` and installs with it in `plugins.json`.
+- Store (`ExtensionsTests`, `WebStoreTests.swift`, built in IV.17), with `StoreStub`, a `URLProtocol` that answers every request of the tests' sessions, so no test reaches the network; the tests that use it run one at a time. `extensionID(in:)` reads both page forms with and without a slug, query, fragment, or trailing slash, in any case, and no identifier from the store's other pages, the other host's form, other hosts and schemes, extra path components, or identifiers that are not one, with store addresses built from hosts that stand in for the store's and from `WebStore.pageHosts` once it lists them, so that `WebStoreTests.swift` names no host; `extensionID(from:)` reads addresses with and without `https://` and bare identifiers in any case with spaces at either end, and refuses 31 or 33 letters, letters past `p` or with a mark, digits, and inner spaces. `chromiumVersion(inCEFVersion:)` reads the pinned CEF version's form and refuses others. The requests have the parameters above, one `x` per identifier with `v=0.0.0.0` or the installed version, 25 to a request, an empty `Accept-Language`, and no cookie header, also after a response that sets one, and the session has no cookie storage, cache, or credential storage. The response's statuses map to answers, with several `app` elements in one response and answers only for the identifiers asked about; offers without an address or version, digests that are not one, and other documents do not read; a status other than 200 and a client without a Chromium version throw. A download matches, also after a redirect to another HTTPS address, and is refused without HTTPS, past the size limit, as the answer states it or as the body arrives, with a different digest or size, with another status, or after a redirect to HTTP, leaving no file. The installer stages the store's package with the origin and proof `webStore`, leaves no download in `Staging/`, and installs it with `webStore` in `plugins.json`; with that version installed it downloads nothing and gives the installed message, and a newer version stages as an update. It refuses an unknown identifier, `noupdate`, another status, an answer without the identifier, and text that is not an identifier with their messages, and a package without the publisher proof, for another identifier, of a theme, or with a different digest; cancelling its task during the download throws `CancellationError` and deletes the file.
 - Entry points (`ExtensionsTests` and `BrowsingTests`, IV.18): the palette's rows for a store address and for a bare identifier, the popover's Web Store row for a store page, installed or not, and the review's Persona sentence for a start from a tab, from the palette, and from Settings ▸ Plugins.
 - Chromium's store button (`ExtensionsTests`, IV.19): a recording engine's install prompt on a store page is answered false and reaches the host with the identifier, the Persona, and the tab; one on another page is answered false and does not reach the host.
 - Updates (`ExtensionsTests`, IV.20): one request for the Persona's store installs with their versions and none for file installs; the automatic check runs once per Persona per run, and Check for Updates runs every time; only newer versions show; Review Update stages an update of that plugin; deleting a Persona drops its results.
 
 ## Checks with the app
 
-Run from the bundle launched through `open`, using a test Persona or a fresh Application Support folder:
+IV.17 adds nothing that the app shows, so these checks run once IV.18 adds the entry points; check 1 also covers the client with the Chromium version that the app shell passes. Run from the bundle launched through `open`, using a test Persona or a fresh Application Support folder:
 
 1. Settings ▸ Plugins ▸ Install from Web Store… with a public extension's store address shows its review with "from the Web Store", installs it, and it runs on the engines its review names.
 2. On a store page in a WebKit tab and in a Chromium tab, the site settings popover's Web Store row and the palette's Install Extension from This Page open the same review in the tab's Persona. On Chromium, note whether the store offers its own install button and whether it opens the review.

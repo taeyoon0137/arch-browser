@@ -353,8 +353,8 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Installing script plugins
 
-    /// `Staging/` in the Persona's folder, where packages wait for review.
-    private var stagingDirectory: URL {
+    /// `Staging/` in the Persona's folder, where packages wait for review and the Web Store's downloads wait for staging. The manager clears it at launch.
+    public var stagingDirectory: URL {
         directory.appendingPathComponent("Staging", isDirectory: true)
     }
 

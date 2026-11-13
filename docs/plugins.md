@@ -1174,7 +1174,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 2. Menus, shortcuts, sidebar items, panels for built-in plugins, and Settings ▸ Plugins in `Preferences`.
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
-5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof; installs from the Web Store (IV.27 and IV.17 to IV.20) and the password managers (IV.21, IV.22, and IV.13) follow.
+5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof and IV.17 the Web Store's client and staging; the rest of the store installs (IV.27, IV.17's page hosts, and IV.18 to IV.20) and the password managers (IV.21, IV.22, and IV.13) follow.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
 
 ## Open decisions

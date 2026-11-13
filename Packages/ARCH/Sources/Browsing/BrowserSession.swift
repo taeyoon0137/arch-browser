@@ -68,6 +68,8 @@ public final class BrowserSession: ObservableObject {
     public var showSettings: (() -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover.
     public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
+    /// Downloads extensions from the Web Store and stages them in any Persona's plugins (`docs/web-store.md`).
+    public let webStore: WebStoreInstaller
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     private var archiveTimer: Timer?
@@ -98,11 +100,12 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships.
-    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type]) throws {
+    /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships. `cefVersion` is the CEF version of Arch's Chromium engine, whose Chromium version `webStore` asks the Web Store with, or nil without that engine.
+    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
+        webStore = WebStoreInstaller(client: WebStoreClient(productVersion: cefVersion.flatMap(WebStoreClient.chromiumVersion(inCEFVersion:)) ?? ""))
         store = SessionStore(directory: userDataDirectory)
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
