@@ -94,7 +94,7 @@ git config core.hooksPath .githooks
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
 - [`docs/agents.md`](./docs/agents.md): the agents design (not built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
-- [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks and live folders design (saved pages, unloading, nested folders with their dragging, and the Bookmarks menu built, live folders not yet): saved pages, unloading, nested folders, the Bookmarks menu, and folders filled from feeds and GitHub.
+- [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks and live folders design (saved pages, unloading, nested folders with their dragging, the Bookmarks menu, and the `LiveFolders` module built, live folders in the sidebar not yet): saved pages, unloading, nested folders, the Bookmarks menu, and folders filled from feeds and GitHub.
 
 <a id="scripts"></a>
 
