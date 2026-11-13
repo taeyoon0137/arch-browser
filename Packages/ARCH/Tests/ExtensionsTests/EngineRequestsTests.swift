@@ -289,6 +289,8 @@ enum CRXFile {
         /// The `SignedData` message, with the identifier.
         var signedHeader: Data
         var archive: Data
+        /// Header fields that no proof signs and Arch does not read, such as `verified_contents` (4), between the proofs and the signed header.
+        var unsignedFields = Data()
 
         /// What each proof signs: the context, the signed header's length as a 32-bit little-endian number, the signed header, and the archive.
         var message: Data { Data("CRX3 SignedData\0".utf8) + littleEndian(UInt32(signedHeader.count)) + signedHeader + archive }
@@ -296,7 +298,7 @@ enum CRXFile {
         /// The file: `Cr24`, the version, and the header's length, then the header and the archive.
         var data: Data {
             let proofFields = proofs.map { field($0.key.isRSA ? 2 : 3, field(1, $0.key.publicKey) + field(2, $0.signature)) }
-            let header = proofFields.reduce(Data(), +) + field(10000, signedHeader)
+            let header = proofFields.reduce(Data(), +) + unsignedFields + field(10000, signedHeader)
             return Data("Cr24".utf8) + littleEndian(3) + littleEndian(UInt32(header.count)) + header + archive
         }
     }

@@ -1,4 +1,4 @@
-// A `.crx` file, the form in which Chromium packs an extension: a header with the package's signatures (format version 3), then a `.zip` archive of the package. Arch checks the signatures as Chromium's verifier does (`components/crx_file/crx_verifier.cc`): every proof in the header must hold, and one must be by the developer's key, whose digest begins with the identifier in the header's signed part. A proof by the Web Store's publisher key as well shows that the store published the package (`docs/web-store.md`, Package proof). Arch installs the package in the archive and writes the developer's key into its manifest, over a `key` the manifest has, as Chromium does, so that the extension keeps the identifier that its developer's key gives it on both engines.
+// A `.crx` file, the form in which Chromium packs an extension: a header with the package's signatures (format version 3), then a `.zip` archive of the package. Arch checks the file as Chromium's verifier does (`components/crx_file/crx_verifier.cc`): the header must not hold the signature of a `.zip` archive's end record, every proof in it must hold, and one must be by the developer's key, whose digest begins with the identifier in the header's signed part. A proof by the Web Store's publisher key as well shows that the store published the package (`docs/web-store.md`, Package proof). Arch installs the package in the archive and writes the developer's key into its manifest, over a `key` the manifest has, as Chromium does, so that the extension keeps the identifier that its developer's key gives it on both engines.
 import CryptoKit
 import Foundation
 import Security
@@ -12,7 +12,11 @@ struct CRXArchive {
     ])
     /// What each proof signs first: `CRX3 SignedData` and a zero byte.
     static let signatureContext = Data("CRX3 SignedData\0".utf8)
+    /// The signatures, `PK` and two bytes, of a `.zip` archive's end of central directory record, ZIP64 end of central directory locator, and ZIP64 end of central directory record, which Chromium's verifier refuses in a header (`kEocd`, `kEocd64`, and `kEocd64Record`), since an unzipper could take the header for the archive's end.
+    static let zipEndSignatures: [[UInt8]] = [[0x50, 0x4B, 0x05, 0x06], [0x50, 0x4B, 0x06, 0x07], [0x50, 0x4B, 0x06, 0x06]]
 
+    /// The file's name, which the messages about its package use.
+    let name: String
     /// The developer's public key, as DER `SubjectPublicKeyInfo`, whose SHA-256 digest begins with the extension's identifier.
     let publicKey: Data
     /// The extension's identifier: the first 16 bytes of the developer key's digest, each hexadecimal digit written as a letter from `a` to `p`.
@@ -22,7 +26,7 @@ struct CRXArchive {
     /// The `.zip` archive after the header.
     let archive: Data
 
-    /// Throws `PluginError.invalidPackage` naming `name`, the file's name, for data that is not a `.crx` file of format version 3, for a file without a proof by the key of its identifier, and for one with a proof that does not hold, as Chromium refuses them. A proof by the key whose SHA-256 digest is `publisherKeyDigest` gives `webStore`; tests pass the digest of a key of their own.
+    /// Throws `PluginError.invalidPackage` naming `name`, the file's name, for data that is not a `.crx` file of format version 3, for a header that does not read or holds one of `zipEndSignatures`, for a file without a proof by the key of its identifier, and for one with a proof that does not hold, as Chromium refuses them. A proof by the key whose SHA-256 digest is `publisherKeyDigest` gives `webStore`; tests pass the digest of a key of their own.
     init(_ data: Data, name: String, publisherKeyDigest: Data = webStorePublisherKeyDigest) throws {
         let start = data.startIndex
         // "Cr24", the format version, and the header's length, each a 32-bit little-endian number.
@@ -33,7 +37,9 @@ struct CRXArchive {
         guard headerEnd <= data.endIndex else { throw PluginError.invalidPackage("\(name) is not a complete .crx file.") }
         // The header is a `CrxFileHeader` message: RSA proofs (field 2) and ECDSA proofs on P-256 (field 3), each with a public key (field 1) and a signature (field 2), and the signed header (field 10000), a `SignedData` message whose field 1 is the identifier as the first 16 bytes of the developer key's digest. Of a field that repeats where the message has one, the last counts, as protocol buffers read it.
         let unreadable = PluginError.invalidPackage("The header of \(name) does not read.")
-        guard let header = Self.fields([UInt8](data[start + 12..<headerEnd])) else { throw unreadable }
+        let headerBytes = [UInt8](data[start + 12..<headerEnd])
+        guard !Self.zipEndSignatures.contains(where: { headerBytes.firstRange(of: $0) != nil }),
+              let header = Self.fields(headerBytes) else { throw unreadable }
         let signedHeader = header.last { $0.number == 10000 }?.value ?? []
         guard let signedFields = Self.fields(signedHeader) else { throw unreadable }
         var proofs: [Proof] = []
@@ -57,6 +63,7 @@ struct CRXArchive {
             throw PluginError.invalidPackage("The signature of \u{201C}\(name)\u{201D} does not match its contents.")
         }
         let letters = Array("abcdefghijklmnop")
+        self.name = name
         publicKey = developer.key
         extensionID = crxID.map { "\(letters[Int($0 >> 4)])\(letters[Int($0 & 0xF)])" }.joined()
         proof = proofs.contains { Data(SHA256.hash(data: $0.key)) == publisherKeyDigest } ? .webStore : .developer

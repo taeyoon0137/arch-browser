@@ -1,4 +1,4 @@
-// Package proof (`docs/web-store.md`, Package proof): the signatures of `.crx` files that `CRXFile` signs with RSA and P-256 keys, the developer's proof and the publisher's, the files refused as Chromium refuses them, staging with the origin `webStore`, the proof in `plugins.json` with `signedSource` and `webStore`, entries this build keeps unchanged, and the review's warning for an unproven update. A test key stands in for the Web Store's publisher key, and a recording engine for Chromium.
+// Package proof (`docs/web-store.md`, Package proof): the signatures of `.crx` files that `CRXFile` signs with RSA and P-256 keys, the developer's proof and the publisher's, the files refused as Chromium refuses them, staging only the web extension of a file's identifier, staging with the origin `webStore`, the proof in `plugins.json` with `signedSource` and `webStore`, entries this build keeps unchanged, and the review's warning for an unproven update. A test key stands in for the Web Store's publisher key, and a recording engine for Chromium.
 import ARCHEngine
 import CryptoKit
 @testable import Extensions
@@ -68,6 +68,18 @@ import Testing
         #expect(throws: PluginError.invalidPackage("The header of Packed.crx does not read.")) { try read(data) }
     }
 
+    @Test func refusesHeadersWithTheSignatureOfAZipArchivesEnd() throws {
+        // A field that no proof signs reads, but not with the signature of an end of central directory record, a ZIP64 locator, or a ZIP64 record, which Chromium refuses as an unzipper could take the header for the archive's end.
+        var parts = CRXFile.parts(archive: archive)
+        parts.unsignedFields = CRXFile.field(4, Data("PK contents".utf8))
+        #expect(try read(parts.data).proof == .developer)
+        for signature in CRXArchive.zipEndSignatures {
+            parts.unsignedFields = CRXFile.field(4, Data("contents ".utf8) + Data(signature))
+            #expect(throws: PluginError.invalidPackage("The header of Packed.crx does not read.")) { try read(parts.data) }
+        }
+        #expect(CRXArchive.zipEndSignatures.map { Data($0) } == [Data("PK\u{05}\u{06}".utf8), Data("PK\u{06}\u{07}".utf8), Data("PK\u{06}\u{06}".utf8)])
+    }
+
     @Test func readsThePKCS1KeyOfAnRSAKeyOnly() throws {
         let pkcs1 = try #require(CRXArchive.rsaPublicKey(inSubjectPublicKeyInfo: CRXFile.developer.publicKey))
         #expect(CRXFile.developer.publicKey.suffix(pkcs1.count) == pkcs1)
@@ -104,7 +116,12 @@ struct CRXProofStagingTests {
     /// A `.crx` file named `name` of an extension with the manifest's fields, signed by the keys.
     private func crx(_ name: String, _ fields: String = #""manifest_version": 3, "name": "Packed", "version": "2""#,
                      signedBy keys: [CRXFile.Key] = [CRXFile.developer]) throws -> URL {
-        let package = try folder.package(name, ["manifest.json": "{\(fields)}"])
+        try crx(name, files: ["manifest.json": "{\(fields)}"], signedBy: keys)
+    }
+
+    /// A `.crx` file named `name` of a package with the files, signed by the keys.
+    private func crx(_ name: String, files: [String: String], signedBy keys: [CRXFile.Key]) throws -> URL {
+        let package = try folder.package(name, files)
         let archive = folder.url.appendingPathComponent("\(name).zip")
         try compress(package, to: archive)
         let file = folder.url.appendingPathComponent("\(name).crx")
@@ -178,6 +195,27 @@ struct CRXProofStagingTests {
         #expect(package.origin == origin && package.proof == .webStore && package.manifest.id.rawValue == "extension." + extensionID)
         #expect(FileManager.default.fileExists(atPath: published.path))
         manager.discard(package)
+        manager.close()
+    }
+
+    @Test func stagesFromACRXFileOnlyTheWebExtensionOfItsIdentifier() async throws {
+        let manager = launch()
+        // The signatures prove only the identifier of the web extension whose key they carry, not a script plugin's in `plugin.json`, alone or beside a `manifest.json`.
+        let script = ["plugin.json": #"{"id": "com.example.tool", "name": "Tool", "version": "1", "apiVersion": 1, "summary": "T."}"#]
+        await #expect(throws: PluginError.invalidPackage("tool.crx holds no web extension.")) {
+            try await manager.stage(crx("tool", files: script, signedBy: [CRXFile.developer]))
+        }
+        let both = try crx("both", files: script.merging(["manifest.json": #"{"manifest_version": 3, "name": "Tool", "version": "1"}"#]) { $1 },
+                           signedBy: [CRXFile.developer, CRXFile.publisher])
+        await #expect(throws: PluginError.invalidPackage("both.crx holds no web extension.")) { try await manager.stage(both) }
+        await #expect(throws: PluginError.invalidPackage("The Web Store sent the package of another extension.")) {
+            try await manager.stage(both, origin: .webStore(extensionID))
+        }
+        #expect(stagingIsEmpty && manager.plugins.isEmpty)
+        // The script plugin stages from a folder, without proof.
+        let plain = try await manager.stage(folder.package("tool folder", script))
+        #expect(plain.kind == .script && plain.proof == nil)
+        manager.discard(plain)
         manager.close()
     }
 

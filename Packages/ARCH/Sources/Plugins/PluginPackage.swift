@@ -97,7 +97,7 @@ public struct PluginPackage: Identifiable, Sendable {
         [ScriptManifest.fileName] + runtimes.map(\.manifestFileName)
     }
 
-    /// Copies the folder at `source`, or extracts the `.zip` archive or `.crx` file there, to `root`, which must not exist yet, and reads the package as `init(at:origin:proof:runtimes:)` does, with `origin`, or else the source as a file the user chose. An archive's package is its top level or its only top folder, as an archive of a package folder has. A `.crx` file's signatures must hold, and its key goes into its manifest (`CRXArchive`, whose publisher key `publisherKeyDigest` names). With the origin `webStore`, the package must be a `.crx` file with the store's proof for that identifier, and not a theme. A failure leaves nothing at `root`.
+    /// Copies the folder at `source`, or extracts the `.zip` archive or `.crx` file there, to `root`, which must not exist yet, and reads the package as `init(at:origin:proof:runtimes:)` does, with `origin`, or else the source as a file the user chose. An archive's package is its top level or its only top folder, as an archive of a package folder has. A `.crx` file's signatures must hold, its key goes into its manifest (`CRXArchive`, whose publisher key `publisherKeyDigest` names), and its package must be the web extension of its identifier. With the origin `webStore`, the package must be a `.crx` file with the store's proof for that identifier, and not a theme. A failure leaves nothing at `root`.
     static func stage(_ source: URL, at root: URL, origin: PluginOrigin? = nil, runtimes: [any PluginRuntime] = [],
                       publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest) throws -> PluginPackage {
         let origin = origin ?? .file(source.absoluteURL)
@@ -114,8 +114,8 @@ public struct PluginPackage: Identifiable, Sendable {
         }
     }
 
-    /// Checks the file's signatures, and for the origin `webStore` its proof and identifier, then extracts the `.zip` archive after its header as `extractArchive(_:to:runtimes:failure:)` does and writes the header's key into the package's `manifest.json`, over the manifest's own, as Chromium does. Returns the file's proof.
-    private static func extractCRX(_ file: URL, to root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime], publisherKeyDigest: Data) throws -> PluginProof {
+    /// Checks the file's signatures, and for the origin `webStore` its proof and identifier, then extracts the `.zip` archive after its header as `extractArchive(_:to:runtimes:failure:)` does and writes the header's key into the package's `manifest.json`, over the manifest's own, as Chromium does. Returns the file as `CRXArchive` read it.
+    private static func extractCRX(_ file: URL, to root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime], publisherKeyDigest: Data) throws -> CRXArchive {
         let crx = try CRXArchive(Data(contentsOf: file), name: file.lastPathComponent, publisherKeyDigest: publisherKeyDigest)
         if case let .webStore(id) = origin {
             guard crx.proof == .webStore else { throw PluginError.invalidPackage("The package is not signed by the Web Store.") }
@@ -127,11 +127,13 @@ public struct PluginPackage: Identifiable, Sendable {
         try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
         let manifest = root.appendingPathComponent(crxManifestFileName)
         if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
-        return crx.proof
+        return crx
     }
 
     /// The manifest of the package in a `.crx` file, a web extension's.
     private static let crxManifestFileName = "manifest.json"
+    /// What a web extension's plugin identifier has before its engine identifier, as the web extension runtime names it (`docs/plugins.md`, Identifier).
+    private static let webExtensionIDPrefix = "extension."
 
     /// Whether the package's `manifest.json` declares a `theme`, colors and images for a browser's frame rather than an extension, which the Web Store also offers.
     private var isTheme: Bool {
@@ -154,11 +156,17 @@ public struct PluginPackage: Identifiable, Sendable {
         }
     }
 
-    /// Has `fill` create the folder at `root` and return the proof of the package it put there, then reads the package there as `init(at:origin:proof:runtimes:)` does, refusing a theme from the Web Store. When either fails, it removes what `fill` left.
-    private static func stage(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = [], filling fill: () throws -> PluginProof?) throws -> PluginPackage {
+    /// Has `fill` create the folder at `root` and return the `.crx` file whose package it extracted there, if any, then reads the package there as `init(at:origin:proof:runtimes:)` does, with the file's proof. It refuses a `.crx` file whose package is not the web extension of the file's identifier, the only identifier that the file's signatures prove, such as a script plugin with `plugin.json`, and a theme from the Web Store. When either fails, it removes what `fill` left.
+    private static func stage(at root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime] = [], filling fill: () throws -> CRXArchive?) throws -> PluginPackage {
         try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
-            let package = try PluginPackage(at: root, origin: origin, proof: try fill(), runtimes: runtimes)
+            let crx = try fill()
+            let package = try PluginPackage(at: root, origin: origin, proof: crx?.proof, runtimes: runtimes)
+            if let crx, package.kind != .webExtension || package.manifest.id.rawValue != webExtensionIDPrefix + crx.extensionID {
+                if case .webStore = origin { throw PluginError.invalidPackage("The Web Store sent the package of another extension.") }
+                // A web extension takes the identifier of the key that staging wrote into its manifest, so this guards against a runtime that names it otherwise.
+                throw PluginError.invalidPackage(package.kind == .webExtension ? "\(crx.name) has no key for its extension's identifier." : "\(crx.name) holds no web extension.")
+            }
             if case .webStore = origin, package.isTheme {
                 throw PluginError.invalidPackage("\u{201C}\(package.manifest.name)\u{201D} is a theme, which Arch does not use.")
             }
