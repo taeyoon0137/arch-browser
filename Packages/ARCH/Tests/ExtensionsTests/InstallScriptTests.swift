@@ -1,4 +1,4 @@
-// `scripts/install_app.sh` (`docs/password-managers.md`, Installing Arch into /Applications, and Tests): its syntax; with `ARCH_INSTALL_FUNCTIONS_ONLY=1`, `signed_with_team` on fixed `codesign -dv` text, and `may_replace` and `replace_app` on minimal bundles in temporary folders; and whole runs into a temporary destination: a bundle signed ad hoc is refused and the destination stays as it was, and, with a `codesign` on the path that stands for a team's signature, another app at the destination stays while an earlier Arch is replaced. No run reaches `/Applications`, and the made-up team is not a real one.
+// `scripts/install_app.sh` (`docs/password-managers.md`, Installing Arch into /Applications, and Tests): its syntax; with `ARCH_INSTALL_FUNCTIONS_ONLY=1`, `signed_with_team` on fixed `codesign -dv` text, and `may_replace`, `replace_app`, and `undo_replace` on minimal bundles in temporary folders; and whole runs into a temporary destination: a bundle signed ad hoc is refused and the destination stays as it was, and, with a `codesign` on the path that stands for a team's signature, another app at the destination stays, an earlier Arch stays when the copy's signature does not verify, and an earlier Arch is replaced. No run reaches `/Applications`, and the made-up team is not a real one.
 import Foundation
 import Testing
 
@@ -127,7 +127,8 @@ private struct ShellRun {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: app, withDestinationURL: linked)
         try writeBundle(at: source, identifier: "xyz.taeyoon.arch", marker: "new")
-        let replace = #"replace_app "$DIR/Source/Arch.app" "$DIR/Destination/Arch.app"; echo "status $?""#
+        // The minimal bundles carry no signature, so a `codesign` that passes stands in for one.
+        let replace = #"codesign() { return 0; }; replace_app "$DIR/Source/Arch.app" "$DIR/Destination/Arch.app"; echo "status $?""#
         // A link goes, and what it leads to stays.
         #expect(try functions(replace).output == "status 0\n")
         #expect(!isLink(app) && marker(at: app) == "new" && marker(at: linked) == "linked" && destinationNames == ["Arch.app"])
@@ -140,6 +141,24 @@ private struct ShellRun {
         // An earlier bundle goes once the copy is in place.
         #expect(try functions(replace).output == "status 0\n")
         #expect(marker(at: app) == "newer" && destinationNames == ["Arch.app"])
+    }
+
+    @Test func undoMovesTheEarlierBundleBackOnlyWhileTheCopyHasNotTakenItsPlace() throws {
+        let app = destination.appendingPathComponent("Arch.app")
+        let previous = destination.appendingPathComponent(".Arch.app.previous.1")
+        let undo = #"replace_copy="$DIR/Destination/.Arch.app.installing.1"; replace_previous="$DIR/Destination/.Arch.app.previous.1"; undo_replace "$DIR/Destination/Arch.app"; echo "status $?""#
+        // Before the last move, the copy goes and the earlier bundle moves back.
+        try writeBundle(at: destination.appendingPathComponent(".Arch.app.installing.1"), identifier: "xyz.taeyoon.arch", marker: "new")
+        try writeBundle(at: previous, identifier: "xyz.taeyoon.arch", marker: "earlier")
+        #expect(try functions(undo).output == "status 0\n")
+        #expect(marker(at: app) == "earlier" && destinationNames == ["Arch.app"])
+        // After it, as when a signal arrives before the trap is removed, the earlier bundle stays aside instead of moving into the new one.
+        try FileManager.default.moveItem(at: app, to: previous)
+        try writeBundle(at: app, identifier: "xyz.taeyoon.arch", marker: "new")
+        let late = try functions(undo)
+        #expect(late.output == "The new copy is at \(app.path), and the earlier copy stays at \(previous.path); delete it by hand.\nstatus 0\n")
+        #expect(marker(at: app) == "new" && marker(at: previous) == "earlier" && destinationNames == [".Arch.app.previous.1", "Arch.app"])
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: app.path)) ?? []) == ["Contents"])
     }
 
     @Test func refusesABundleSignedAdHocAndLeavesTheDestinationAsItWas() throws {
@@ -158,7 +177,7 @@ private struct ShellRun {
     }
 
     @Test func installsOverAnEarlierArchOnlyWithATeamsSignature() throws {
-        // A `codesign` that answers for a team's signature, written for the test, and records each verification.
+        // A `codesign` that answers for a team's signature, written for the test, and records each verification, which fails with `VERIFY_FAILS` set.
         let bin = folder.url.appendingPathComponent("Bin", isDirectory: true)
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let codesign = bin.appendingPathComponent("codesign")
@@ -166,7 +185,7 @@ private struct ShellRun {
         #!/bin/sh
         case "$1" in
           -dv) printf '%s\\n' "$TEAM_OUTPUT" >&2 ;;
-          --verify) echo "$*" >> "$DIR/verified" ;;
+          --verify) echo "$*" >> "$DIR/verified"; [ -z "${VERIFY_FAILS:-}" ] || { echo "$4: a sealed resource is missing or invalid" >&2; exit 1; } ;;
           *) exit 1 ;;
         esac
 
@@ -182,10 +201,16 @@ private struct ShellRun {
         #expect(destinationNames == ["Arch.app"] && marker(at: app) == "other")
         try FileManager.default.removeItem(at: app)
         try writeBundle(at: app, identifier: "xyz.taeyoon.arch", marker: "earlier")
+        // A copy whose signature does not verify, such as one of a bundle changed after signing, leaves the earlier Arch in place.
+        let broken = try shell(#"sh "$SCRIPT""#, install.merging(["VERIFY_FAILS": "1"]) { $1 })
+        #expect(broken.status != 0 && broken.output.hasSuffix("The signature of \(source.path) does not verify, so \(app.path) stays as it was. Run scripts/bundle_app.sh again, then run the script again.\n"))
+        #expect(destinationNames == ["Arch.app"] && marker(at: app) == "earlier")
+        try FileManager.default.removeItem(at: folder.url.appendingPathComponent("verified"))
         let installed = try shell(#"sh "$SCRIPT""#, install)
         #expect(installed.status == 0 && installed.output == "\(app.path)\n")
         #expect(destinationNames == ["Arch.app"] && marker(at: app) == "new" && !isLink(app))
+        // The copy is verified under its temporary name, before it replaces anything.
         let verified = try String(contentsOf: folder.url.appendingPathComponent("verified"), encoding: .utf8)
-        #expect(verified == "--verify --deep --strict \(app.path)\n")
+        #expect(verified.hasPrefix("--verify --deep --strict \(destination.path)/.Arch.app.installing.") && verified.filter { $0 == "\n" }.count == 1)
     }
 }

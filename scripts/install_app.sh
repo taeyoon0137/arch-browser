@@ -1,7 +1,7 @@
 #!/bin/sh
-# Copy the signed `build/Arch.app` into `/Applications` as a real bundle, since native apps such as 1Password accept only a signed browser there that is not reached through a symbolic link (docs/password-managers.md, Installing Arch into /Applications). Run it after scripts/bundle_app.sh. It replaces only an earlier Arch or a link, and keeps the earlier bundle until the new one is in place.
+# Copy the signed `build/Arch.app` into `/Applications` as a real bundle, since native apps such as 1Password accept only a signed browser there that is not reached through a symbolic link (docs/password-managers.md, Installing Arch into /Applications). Run it after scripts/bundle_app.sh. It replaces only an earlier Arch or a link, verifies the copy's signature before it replaces anything, and keeps the earlier bundle until the new one is in place.
 # Usage: scripts/install_app.sh
-# `ARCH_APP_SOURCE` names another bundle to copy and `ARCH_INSTALL_DIR` another destination folder, for checks. With `ARCH_INSTALL_FUNCTIONS_ONLY=1`, sourcing the script defines `signed_with_team`, `may_replace`, and `replace_app` and runs nothing.
+# `ARCH_APP_SOURCE` names another bundle to copy and `ARCH_INSTALL_DIR` another destination folder, for checks. With `ARCH_INSTALL_FUNCTIONS_ONLY=1`, sourcing the script defines `signed_with_team`, `may_replace`, `replace_app`, and `undo_replace` and runs nothing.
 # The script never prints the signing identity or the team.
 set -eu
 
@@ -34,21 +34,26 @@ may_replace() {
 }
 
 undo_replace() {
-  # Argument: `$1` is the path of `Arch.app` in the destination. Deletes the temporary copy of `replace_app` and moves what was at `$1` back.
+  # Argument: `$1` is the path of `Arch.app` in the destination. Deletes the temporary copy of `replace_app` and moves what was at `$1` back. When the copy has already taken `$1`, as when a signal arrives just after the last move, `mv` would put the earlier bundle inside the new one, so it stays aside and the script says where.
   rm -rf "$replace_copy"
   if [ -e "$replace_previous" ] || [ -L "$replace_previous" ]; then
-    mv "$replace_previous" "$1"
+    if [ -e "$1" ] || [ -L "$1" ]; then
+      echo "The new copy is at $1, and the earlier copy stays at $replace_previous; delete it by hand." >&2
+    else
+      mv "$replace_previous" "$1"
+    fi
   fi
 }
 
 replace_app() {
-  # Arguments: `$1` is the bundle to copy and `$2` the path of `Arch.app` in the destination, which `may_replace` allowed. Copies the bundle with `ditto` to a temporary name beside `$2`, moves a link or an earlier bundle at `$2` to a second temporary name, moves the copy into place, and only then deletes what was there. If a step fails, or the script is interrupted, it deletes the copy and moves what was there back.
+  # Arguments: `$1` is the bundle to copy and `$2` the path of `Arch.app` in the destination, which `may_replace` allowed. Copies the bundle with `ditto` to a temporary name beside `$2`, checks the copy with `codesign --verify --deep --strict`, moves a link or an earlier bundle at `$2` to a second temporary name, moves the copy into place, and only then deletes what was there. If a step fails, or the script is interrupted, it deletes the copy and moves what was there back.
   replace_destination="$2"
   replace_copy="$(dirname "$2")/.$(basename "$2").installing.$$"
   replace_previous="$(dirname "$2")/.$(basename "$2").previous.$$"
   trap 'undo_replace "$replace_destination"; exit 1' HUP INT TERM
   if replace_output="$(
     ditto "$1" "$replace_copy" 2>&1 &&
+      { codesign --verify --deep --strict "$replace_copy" 2>&1 || { echo "The signature of $1 does not verify, so $2 stays as it was. Run scripts/bundle_app.sh again, then run the script again."; false; }; } &&
       { if [ -e "$2" ] || [ -L "$2" ]; then mv "$2" "$replace_previous" 2>&1; fi; } &&
       mv "$replace_copy" "$2" 2>&1
   )"; then
@@ -90,5 +95,4 @@ if ps -axo comm= | grep -Fqx "$APP/Contents/MacOS/Arch"; then
 fi
 may_replace "$APP" || exit 1
 replace_app "$SOURCE" "$APP" || exit 1
-codesign --verify --deep --strict "$APP"
 echo "$APP"
