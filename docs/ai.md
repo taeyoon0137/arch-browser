@@ -51,9 +51,11 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
+    /// The one model that serves the request, with no fallback; nil uses the feature's route.
+    public var pinnedModel: AIModelRef?
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
-                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil)
+                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil)
 }
 
 public struct AIMessage: Sendable {
@@ -198,9 +200,11 @@ public struct AIToolCall: Sendable {
 
 public struct AIToolResult: Sendable {
     public var callID: String
-    /// Text, page, or selection parts. The service checks them like any other part.
+    /// Text, page, selection, and image parts. The service checks them like any other part.
     public var parts: [AIPart]
     public var isError: Bool
+    /// The line `run` sends in place of the result once it is more than eight rounds old; nil names the tool.
+    public var note: String?
 }
 
 public struct AIToolHandler: Sendable {
@@ -210,11 +214,15 @@ public struct AIToolHandler: Sendable {
 
 extension AIClient {
     /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run.
-    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8) -> AsyncThrowingStream<AIEvent, any Error>
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8,
+                    conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error>
 }
 ```
 
-- `run` performs calls one at a time in the model's order. A call to a tool not in the request returns an error result to the model without throwing. Passing `maxRounds` throws `toolRoundLimit`.
+- `run` performs calls one at a time in the model's order. A call to a tool not in the request returns an error result to the model without throwing. Passing `maxRounds` throws `toolRoundLimit`; the last round's calls do not run.
+- `pinnedModel` serves a request on that model alone, also one the route does not list, if it still exists and meets the feature's requirements. `run` pins every round after the first to the model that served the first, so a conversation never moves to another model mid-loop. A request with tools goes only to models with `tools`.
+- Before each round, `run` sends the results of rounds more than eight back as their notes, and an image in a result only in the round right after its call (`docs/agents.md`, API-key sessions). `conversationDidChange` gets the conversation after each round whose calls all ran and after the final reply or the round limit, with no tool call left without its result, so a caller can keep it across requests.
+- A tool result that the part checks refuse, for an excluded site or an undeclared kind, goes to the model as an error result that says why without naming the site, and the loop goes on; the check runs at every round, so a site excluded later is refused too. A model without `images` gets a note in place of each image in a result.
 - A model can ask for any offered tool, and a page can try to make it ask. A tool that changes state must therefore be safe for the model to call at any time. Hooks do not get tools that change state. They return actions that the host checks (see Hooks).
 
 ### Cancellation

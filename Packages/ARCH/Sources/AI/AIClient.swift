@@ -35,15 +35,18 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
+    /// The one model that serves the request, with no fallback, so that every round of a conversation stays on the model of its first; nil uses the feature's route. It must still exist and meet the feature's requirements.
+    public var pinnedModel: AIModelRef?
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
-                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil) {
+                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil) {
         self.feature = feature
         self.instructions = instructions
         self.messages = messages
         self.tools = tools
         self.output = output
         self.maxOutputTokens = maxOutputTokens
+        self.pinnedModel = pinnedModel
     }
 }
 
@@ -255,14 +258,17 @@ public struct AIToolCall: Sendable {
 
 public struct AIToolResult: Sendable {
     public var callID: String
-    /// Text, page, or selection parts. The service checks them like any other part.
+    /// Text, page, selection, and image parts. The service checks them like any other part; a result the checks refuse goes to the model as an error result that says why, and an image goes only to a model with `images`.
     public var parts: [AIPart]
     public var isError: Bool
+    /// One line that `run` sends in place of the result once it is more than `AIToolHistory.wholeRounds` rounds old, such as "Earlier read_text on t2: ok, 12,000 characters of page text." It must hold no page data. nil uses a line that names the tool.
+    public var note: String?
 
-    public init(callID: String, parts: [AIPart], isError: Bool = false) {
+    public init(callID: String, parts: [AIPart], isError: Bool = false, note: String? = nil) {
         self.callID = callID
         self.parts = parts
         self.isError = isError
+        self.note = note
     }
 }
 
@@ -279,11 +285,14 @@ public struct AIToolHandler: Sendable {
 
 extension AIClient {
     /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`.
-    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8) -> AsyncThrowingStream<AIEvent, any Error> {
+    ///
+    /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, so a long one stays within the model's input limit. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8,
+                    conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await runRounds(request, tools: tools, maxRounds: maxRounds, continuation: continuation)
+                    try await runRounds(request, tools: tools, maxRounds: maxRounds, conversationDidChange: conversationDidChange, continuation: continuation)
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: AIError.cancelled)
@@ -295,15 +304,21 @@ extension AIClient {
         }
     }
 
-    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
+    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
+                           continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         var request = request
         request.tools = tools.map(\.tool)
         for round in 1...max(maxRounds, 1) {
+            request.messages = AIToolHistory.prepared(request.messages)
             var text = ""
             var calls: [AIToolCall] = []
             var finishReason = AIFinishReason.completed
+            var servingModel: AIModelRef?
             for try await event in stream(request) {
                 switch event {
+                case .started(let model):
+                    servingModel = model
+                    continuation.yield(event)
                 case .text(let delta):
                     text += delta
                     continuation.yield(event)
@@ -317,19 +332,25 @@ extension AIClient {
                 }
             }
             try Task.checkCancellation()
-            guard !calls.isEmpty else {
+            // The last round's calls do not run once the limit is reached, so its text stays without them.
+            guard !calls.isEmpty, round < maxRounds else {
+                if !text.isEmpty { request.messages.append(AIMessage(role: .assistant, parts: [.text(text)])) }
+                await conversationDidChange?(request.messages)
+                guard calls.isEmpty else { break }
                 continuation.yield(.finished(finishReason))
                 return
             }
-            guard round < maxRounds else { break }
             var results: [AIPart] = []
             for call in calls {
                 try Task.checkCancellation()
                 results.append(.toolResult(await Self.perform(call, with: tools)))
             }
+            try Task.checkCancellation()
             let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.map { .toolCall($0) }
             request.messages.append(AIMessage(role: .assistant, parts: reply))
             request.messages.append(AIMessage(role: .user, parts: results))
+            request.pinnedModel = request.pinnedModel ?? servingModel
+            await conversationDidChange?(request.messages)
         }
         throw AIError.toolRoundLimit
     }
@@ -343,5 +364,43 @@ extension AIClient {
         } catch {
             return AIToolResult(callID: call.id, parts: [.text(error.localizedDescription)], isError: true)
         }
+    }
+}
+
+/// How `run` keeps a long tool conversation within a model's input limit (`docs/agents.md`, API-key sessions): results more than `wholeRounds` rounds old go as their one-line notes, and an image in a result goes only in the round right after its call.
+enum AIToolHistory {
+    /// The rounds of tool results, counted back from the newest, that go whole.
+    static let wholeRounds = 8
+    static let imageNote = "An image was here; it went to the model once, in the round after its call."
+
+    /// The conversation as the next round sends it. A user message with tool results counts as one round. Each result more than `wholeRounds` rounds back becomes its note, and each image in a result becomes `imageNote` unless the result is in the last message, which the next request is the first to carry. Applying it again changes nothing.
+    static func prepared(_ messages: [AIMessage]) -> [AIMessage] {
+        var toolNames: [String: String] = [:]
+        for message in messages {
+            for case .toolCall(let call) in message.parts { toolNames[call.id] = call.name }
+        }
+        var prepared = messages
+        var rounds = 0
+        for index in prepared.indices.reversed() {
+            guard prepared[index].parts.contains(where: { if case .toolResult = $0 { return true } else { return false } }) else { continue }
+            rounds += 1
+            let isOld = rounds > wholeRounds
+            let isLast = index == prepared.index(before: prepared.endIndex)
+            prepared[index].parts = prepared[index].parts.map { part in
+                guard case .toolResult(var result) = part else { return part }
+                if isOld {
+                    let note = result.note ?? "Earlier result of \(toolNames[result.callID] ?? "a tool"), left out to save space."
+                    return .toolResult(AIToolResult(callID: result.callID, parts: [.text(note)], isError: result.isError, note: note))
+                }
+                if !isLast {
+                    result.parts = result.parts.map { part in
+                        if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNote) }
+                        return part
+                    }
+                }
+                return .toolResult(result)
+            }
+        }
+        return prepared
     }
 }
