@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store….
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
 import AI
 import ARCHEngine
 import Browsing
@@ -229,7 +229,7 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, a newer version from the Web Store with Review Update…, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
+/// The plugin's switch with its summary, its grant, a newer version from the Web Store with Review Update…, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, for a web extension whose grant has `nativeMessaging`, its native app lines, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -324,6 +324,9 @@ private struct PluginSection: View {
                 }
                 if !isPair {
                     FailureNotes(plugin: plugin)
+                }
+                if NativeAppGuide.applies(to: versions), let outcomes = session.webExtensions(in: personaID)?.nativeAppOutcomes {
+                    NativeAppNotes(links: session.nativeMessagingHosts, outcomes: outcomes, versions: versions)
                 }
                 if let missingEngine {
                     Text(versionNote(for: plugin, engine: missingEngine))
@@ -447,6 +450,23 @@ private struct FailureNotes: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+}
+
+/// The native apps that accept the plugin's versions, what Arch does not meet of their conditions, the vendors' steps, and what the app last did on WebKit tabs, as `NativeAppGuide` words them. The first showing in a run has Arch look for native apps, for the plugin on or off.
+private struct NativeAppNotes: View {
+    @ObservedObject var links: NativeMessagingHostLinks
+    @ObservedObject var outcomes: NativeAppOutcomes
+    let versions: [InstalledPlugin]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(NativeAppGuide.lines(for: versions, links: links, installation: .current, outcomes: outcomes).enumerated()), id: \.offset) { line in
+                Text(line.element)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .task { await NativeAppGuide.look(for: versions, in: links) }
     }
 }
 

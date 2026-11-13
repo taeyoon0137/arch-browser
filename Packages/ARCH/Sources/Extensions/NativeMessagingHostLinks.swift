@@ -40,19 +40,26 @@ struct NativeMessagingCaller {
     let isProven: Bool
     /// Whether the version came from a `.crx` file before Arch checked signatures, which a reinstall proves (`InstalledPlugin.predatesProof`).
     let predatesProof: Bool
+    /// The version's plugin, under which `NativeMessaging` records what its calls met (`NativeAppOutcomes`); nil records nothing.
+    let plugin: PluginID?
+    /// The date of the version's install, which a recorded outcome keeps, so that an update starts without one.
+    let installedAt: Date?
 
-    init(extensionID: String, isProven: Bool, predatesProof: Bool = false) {
+    init(extensionID: String, isProven: Bool, predatesProof: Bool = false, plugin: PluginID? = nil, installedAt: Date? = nil) {
         self.extensionID = extensionID
         self.isProven = isProven
         self.predatesProof = predatesProof
+        self.plugin = plugin
+        self.installedAt = installedAt
     }
 
     init(_ installed: InstalledPlugin) {
-        self.init(extensionID: WebExtensionManifest.extensionID(of: installed.manifest.id), isProven: installed.proof != nil, predatesProof: installed.predatesProof)
+        self.init(extensionID: WebExtensionManifest.extensionID(of: installed.manifest.id), isProven: installed.proof != nil, predatesProof: installed.predatesProof,
+                  plugin: installed.id, installedAt: installed.installedAt)
     }
 }
 
-/// Arch's links to the host manifests that vendors install for other browsers, one for the app, which the session makes with Arch's folder and the folders the app shell lists (`BrowserSource.nativeMessagingHostFolders`). A pass reads the folders off the main thread. The runtimes ask for a pass before their first load of an extension whose grant has `nativeMessaging` in a run and after installing or updating one, and staging before reviewing a package that asks for it, so a Mac without such an extension never reads the folders.
+/// Arch's links to the host manifests that vendors install for other browsers, one for the app, which the session makes with Arch's folder and the folders the app shell lists (`BrowserSource.nativeMessagingHostFolders`). A pass reads the folders off the main thread. The runtimes ask for a pass before their first load of an extension whose grant has `nativeMessaging` in a run and after installing or updating one, staging before reviewing a package that asks for it, and Settings ▸ Plugins as it first shows such an extension's section in a run, on or off (`NativeAppGuide`), so a Mac without such an extension never reads the folders.
 @MainActor
 public final class NativeMessagingHostLinks: ObservableObject {
     /// The longest host manifest a pass reads.
@@ -64,17 +71,19 @@ public final class NativeMessagingHostLinks: ObservableObject {
     public let folders: [URL]
     /// The winners of the run's last pass by name, with whether each is held and why.
     @Published public private(set) var hosts: [String: NativeMessagingHost] = [:]
+    /// The user's valid manifests in Arch's folder by name, as the run's last pass read them: the files there that are not Arch's links, which both engines read under their names. None is held, and `folder` is Arch's folder.
+    @Published public private(set) var userHosts: [String: NativeMessagingHost] = [:]
     /// The listed folders that the run's last pass could not read for a permission error, in their order. A missing folder is not one of them.
     @Published public private(set) var unreadableFolders: [URL] = []
     /// Whether a pass has ended in this run.
     @Published public private(set) var hasLooked = false
+    /// Whether Arch's signature meets the parent launch constraints of each helper that a pass asked about in this run, by the helper's path as its manifest names it: nil for constraints that do not read, and no entry for a helper not asked about. Passes ask about the manifests of `HelperLaunchConstraints.constrainedHosts` among the winners, to hold them, and among the user's manifests in Arch's folder, for Settings, at most once per helper and run. Arch's team stays out of it.
+    @Published public private(set) var launchConstraintAnswers: [String: Bool?] = [:]
     /// Set by the session: called when the gate comes to refuse more callers, so that every Persona's runtime takes the versions it refuses out of Chromium. A pass calls it before it creates a link or changes a link's destination, once the gate counts the links the pass will make (`gatingHosts`), and changes the links only once it returns; and again after the change, when its reading of the manifests behind Arch's links refuses a caller that the gate did not count, as when a vendor adds an origin to a manifest behind a link that stays or a manifest no longer reads. Removing a link refuses no one more.
     public var gateWidens: (@MainActor () async -> Void)?
 
-    /// Whether Arch's signature meets the parent launch constraints of the helper at a path, or nil when they do not read. Called off the main thread.
+    /// Whether Arch's signature meets the parent launch constraints of the helper at a path, or nil when they do not read. Called off the main thread, at most once per helper and run (`launchConstraintAnswers`).
     private let launchConstraintCheck: @Sendable (URL) -> Bool?
-    /// The answers of `launchConstraintCheck` in this run, by the helper's path, nil among them, so that each helper is asked at most once per run.
-    private var launchConstraintAnswers: [String: Bool?] = [:]
     /// The run's last pass, which `update()` waits for instead of starting another.
     private var pass: Task<Void, Never>?
     /// The names under Arch's links with their manifests: as the last pass left them, or as read from Arch's folder before the run's first pass.
@@ -124,7 +133,7 @@ public final class NativeMessagingHostLinks: ObservableObject {
         await next.value
     }
 
-    /// Reads the listed folders, holds the hosts whose helpers macOS does not start for Arch, and brings Arch's links in line with the winners: it creates a link for each winner whose name has nothing in Arch's folder, replaces its own link when the winner moved, and removes its own links whose names have no winner or a held one. A link that would be created or change first waits for `gateWidens`, which the pass calls again once the gate reads the manifests behind the links, when they refuse a caller that it did not count.
+    /// Reads the listed folders, holds the hosts whose helpers macOS does not start for Arch, and brings Arch's links in line with the winners: it creates a link for each winner whose name has nothing in Arch's folder, replaces its own link when the winner moved, and removes its own links whose names have no winner or a held one. A link that would be created or change first waits for `gateWidens`, which the pass calls again once the gate reads the manifests behind the links, when they refuse a caller that it did not count. It also reads the user's manifests in Arch's folder, and asks about the launch constraints of a helper that one of them names, for Settings.
     private func runPass() async {
         let (directory, folders) = (self.directory, self.folders)
         let found = await Task.detached { Self.discover(in: folders) }.value
@@ -135,7 +144,16 @@ public final class NativeMessagingHostLinks: ObservableObject {
             hosts[name] = NativeMessagingHost(name: name, description: manifest.description, allowedOrigins: manifest.allowedOrigins, path: manifest.path,
                                               folder: manifest.folder, held: held)
         }
-        let current = await Task.detached { Self.readFolder(directory, folders: folders) }.value
+        let (current, userManifests) = await Task.detached {
+            let current = Self.readFolder(directory, folders: folders)
+            return (current, Self.validManifests(named: current.userNames, in: directory))
+        }.value
+        var userHosts: [String: NativeMessagingHost] = [:]
+        for (name, manifest) in userManifests {
+            if HelperLaunchConstraints.constrainedHosts.contains(name) { _ = await admitsArch(manifest.path) }
+            userHosts[name] = NativeMessagingHost(name: name, description: manifest.description, allowedOrigins: manifest.allowedOrigins, path: manifest.path,
+                                                  folder: directory, held: nil)
+        }
         var wanted: [String: String] = [:]
         for (name, host) in hosts where host.held == nil && !current.userNames.contains(name) {
             wanted[name] = host.folder.appendingPathComponent(name + ".json").standardizedFileURL.path
@@ -155,6 +173,7 @@ public final class NativeMessagingHostLinks: ObservableObject {
         self.linked = linked
         announced = [:]
         self.hosts = hosts
+        self.userHosts = userHosts
         unreadableFolders = found.unreadable
         hasLooked = true
         if Self.widens(linked, beyond: counted) { await gateWidens?() }
@@ -170,7 +189,7 @@ public final class NativeMessagingHostLinks: ObservableObject {
         }
     }
 
-    /// Whether Arch's signature meets the launch constraints of the helper at `path`, asked at most once per run.
+    /// Whether Arch's signature meets the launch constraints of the helper at `path`, asked at most once per run. Only passes ask, one after another.
     private func admitsArch(_ path: String) async -> Bool? {
         if let answer = launchConstraintAnswers[path] { return answer }
         let check = launchConstraintCheck
@@ -212,7 +231,7 @@ public final class NativeMessagingHostLinks: ObservableObject {
         let folder: URL
     }
 
-    /// The winners of the listed folders by name, and the folders that a permission error kept from being read. A folder's `*.json` files count when they are regular files of up to 64 KB, followed through links, whose `name` is the file's name without `.json` and follows the naming rule, whose `type` is `stdio`, whose `path` names an executable file by its absolute path, and whose `allowed_origins` read as a list of text.
+    /// The winners of the listed folders by name, and the folders that a permission error kept from being read. A folder's `*.json` files count when they are valid manifests for their names without `.json` (`validManifest(named:in:)`).
     private nonisolated static func discover(in folders: [URL]) -> (winners: [String: FoundManifest], unreadable: [URL]) {
         var winners: [String: FoundManifest] = [:]
         var unreadable: [URL] = []
@@ -226,12 +245,27 @@ public final class NativeMessagingHostLinks: ObservableObject {
             }
             for file in files.sorted() where file.hasSuffix(".json") {
                 let name = String(file.dropLast(".json".count))
-                guard winners[name] == nil, NativeMessaging.isValidName(name), let manifest = readManifest(folder.appendingPathComponent(file)),
-                      manifest.name == name, manifest.type == "stdio", manifest.path.hasPrefix("/"), isExecutableFile(manifest.path) else { continue }
-                winners[name] = FoundManifest(description: manifest.description ?? name, allowedOrigins: manifest.allowedOrigins, path: manifest.path, folder: folder)
+                guard winners[name] == nil, let manifest = validManifest(named: name, in: folder) else { continue }
+                winners[name] = manifest
             }
         }
         return (winners, unreadable)
+    }
+
+    /// The valid manifests `<name>.json` in `folder` for `names`, by name, by the rule of `discover(in:)`.
+    private nonisolated static func validManifests(named names: Set<String>, in folder: URL) -> [String: FoundManifest] {
+        var manifests: [String: FoundManifest] = [:]
+        for name in names {
+            manifests[name] = validManifest(named: name, in: folder)
+        }
+        return manifests
+    }
+
+    /// The manifest `<name>.json` in `folder` when it is valid: a regular file of up to 64 KB, followed through links, whose `name` is `name` and follows the naming rule, whose `type` is `stdio`, whose `path` names an executable file by its absolute path, and whose `allowed_origins` read as a list of text.
+    private nonisolated static func validManifest(named name: String, in folder: URL) -> FoundManifest? {
+        guard NativeMessaging.isValidName(name), let manifest = readManifest(folder.appendingPathComponent(name + ".json")),
+              manifest.name == name, manifest.type == "stdio", manifest.path.hasPrefix("/"), isExecutableFile(manifest.path) else { return nil }
+        return FoundManifest(description: manifest.description ?? name, allowedOrigins: manifest.allowedOrigins, path: manifest.path, folder: folder)
     }
 
     /// The manifest in the regular file at `url`, followed through links, when it has at most `manifestLimit` bytes and decodes.

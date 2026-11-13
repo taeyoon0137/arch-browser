@@ -7,7 +7,7 @@ import Testing
 
 /// A native app for the tests: a shell script that writes each message back, in a folder of the test's own.
 @discardableResult
-private func writeApp(in folder: TemporaryFolder) throws -> URL {
+func writeApp(in folder: TemporaryFolder) throws -> URL {
     let script = folder.url.appendingPathComponent("Apps/echo.sh")
     try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data("#!/bin/sh\nexec cat\n".utf8).write(to: script)
@@ -17,7 +17,7 @@ private func writeApp(in folder: TemporaryFolder) throws -> URL {
 
 /// Writes the host manifest `<name>.json` into `directory` for the app at `app`, accepting the extensions with `extensionIDs`; `fields` replace or add fields.
 @discardableResult
-private func writeHostManifest(_ name: String, into directory: URL, app: URL, description: String = "Example App", allowing extensionIDs: [String],
+func writeHostManifest(_ name: String, into directory: URL, app: URL, description: String = "Example App", allowing extensionIDs: [String],
                                fields: [String: Any] = [:]) throws -> URL {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let manifest: [String: Any] = ["name": name, "description": description, "path": app.path, "type": "stdio",
@@ -28,7 +28,7 @@ private func writeHostManifest(_ name: String, into directory: URL, app: URL, de
 }
 
 /// The gate's sentence for a version without proof that the app with `description` accepts.
-private func gateSentence(_ description: String = "Example App") -> String {
+func gateSentence(_ description: String = "Example App") -> String {
     "Arch cannot prove that this extension is the one that \(description) expects. Install it from the Web Store or from its signed .crx file."
 }
 
@@ -697,7 +697,9 @@ struct ProofGateTests {
         next.runtime.profileDidStart(with: kept, of: .chromium)
         #expect(kept.unloads.isEmpty)
         #expect(await eventually { next.manager.plugins.first?.engineFailures[.chromium] == gateSentence() })
-        #expect(linkExists && linkExistedAtUnload.first == false && kept.loaded.isEmpty)
+        // The failure comes as the runtimes take the version out, and the pass makes the link after that.
+        #expect(await eventually { linkExists })
+        #expect(linkExistedAtUnload.first == false && kept.loaded.isEmpty)
         #expect(await eventually { next.webKit.loaded[unproven.id] != nil })
         next.manager.close()
     }

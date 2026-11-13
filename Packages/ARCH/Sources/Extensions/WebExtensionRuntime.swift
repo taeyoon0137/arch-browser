@@ -379,6 +379,9 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         takeGatedVersionsOut(of: chromium)
     }
 
+    /// What the native messages and ports of the Persona's extensions last met on WebKit tabs in this run, by plugin, which Settings ▸ Plugins shows (`NativeAppGuide`).
+    public var nativeAppOutcomes: NativeAppOutcomes { nativeMessaging.outcomes }
+
     /// Whether the extension runs on the engine of `kind` by the rule Settings shows (`InstalledPlugin.engines`), with the engine's answer in this pass, `checks`, where it checked the package, and, while the engine has no answer, the answer `keepingUnanswered`.
     private static func runs(_ installed: InstalledPlugin, on kind: EngineKind, checks: [EngineKind: PluginEngineCheck] = [:], keepingUnanswered: Bool = false) -> Bool {
         var answered = installed

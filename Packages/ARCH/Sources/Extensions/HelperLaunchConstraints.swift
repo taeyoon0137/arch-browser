@@ -167,16 +167,22 @@ struct CodeSignature: Equatable {
 
     /// Arch's own signature, from `SecCodeCopySigningInformation`, or nil when it does not read. An ad hoc or missing signature has no team.
     static func own() -> CodeSignature? {
+        guard let information = ownSigningInformation() else { return nil }
+        let entitlements = information[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        return CodeSignature(identifier: information[kSecCodeInfoIdentifier as String] as? String, team: information[kSecCodeInfoTeamIdentifier as String] as? String,
+                             booleanEntitlements: entitlements.compactMapValues { $0 as? Bool })
+    }
+
+    /// What `SecCodeCopySigningInformation` gives for Arch's own code, with its signing and requirement information, or nil when it does not read. Its team is for the caller's question only, never to show or keep.
+    static func ownSigningInformation() -> [String: Any]? {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
         var information: CFDictionary?
         let flags = SecCSFlags(rawValue: UInt32(kSecCSSigningInformation | kSecCSRequirementInformation))
-        guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess, let information = information as? [String: Any] else { return nil }
-        let entitlements = information[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
-        return CodeSignature(identifier: information[kSecCodeInfoIdentifier as String] as? String, team: information[kSecCodeInfoTeamIdentifier as String] as? String,
-                             booleanEntitlements: entitlements.compactMapValues { $0 as? Bool })
+        guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess else { return nil }
+        return information as? [String: Any]
     }
 }
 

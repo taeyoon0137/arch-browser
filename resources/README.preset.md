@@ -95,7 +95,7 @@ git config core.hooksPath .githooks
 - [`docs/agents.md`](../docs/agents.md): the agents design (not built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](../docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 - [`docs/web-store.md`](../docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
-- [`docs/password-managers.md`](../docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps and the proof gate (built), and installing Arch in `/Applications`, the status in Settings, and the user's steps (not built).
+- [`docs/password-managers.md`](../docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
 
 <a id="scripts"></a>
 
@@ -111,6 +111,7 @@ git config core.hooksPath .githooks
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
+| `./scripts/install_app.sh` | Copies the signed `build/Arch.app` into `/Applications` as a real bundle for native apps, such as 1Password, that accept only browsers there. It refuses a bundle signed ad hoc or unsigned and replaces only an earlier Arch or a link. `ARCH_APP_SOURCE` and `ARCH_INSTALL_DIR` change the source and the destination folder. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
 | `./scripts/check_markdown.py` | Finds Markdown that GitHub renders differently from the text in `README.md`, `AGENTS.md`, the README preset, and `docs/`: angle-bracket placeholders outside code, pipes inside code spans in table cells, and paired tildes or dollar signs in prose. `--fix` escapes the placeholders. |
 
@@ -134,7 +135,7 @@ arch-browser
 │   └── ARCHKit/Tests/              # Tests: ARCHEngineChromiumTests, ARCHEngineTests, ARCHEngineWebKitTests, ARCHPrivateAPITests
 ├── docs/                           # Design documents
 ├── resources/                      # README source, hero images, and app icon
-├── scripts/                        # Build and README scripts (see Scripts)
+├── scripts/                        # Build, install, and README scripts (see Scripts)
 ├── .gitattributes                  # Line ending and attribute rules
 ├── .gitignore                      # Git exclusions
 ├── AGENTS.md                       # Agent working instructions (source of truth)

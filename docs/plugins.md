@@ -351,14 +351,14 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 
 ## Password manager plugins
 
-`docs/password-managers.md` describes their design (the host discovery and proof gate that IV.21 built, IV.22, and IV.13).
+`docs/password-managers.md` describes their design (the host discovery, proof gate, install script, and Settings status that are built, and the checks in IV.13).
 
 - The user installs the 1Password and iCloud Passwords extensions from the Web Store in each Persona that needs them, so Arch can prove their identifiers. Arch bundles no third-party code.
 - Both need `nativeMessaging` to reach their native apps, so installation asks for Touch ID. Arch finds the apps' host manifests in other browsers' host folders and links them into its own.
 - A vendor may ship a separate package for each engine. The user then installs each engine's package as that engine's version of one plugin (see Engine versions); each version reaches the native app under its own identifier.
 - 1Password accepts an unlisted browser only when it is signed and runs from `/Applications`, which `scripts/install_app.sh` provides, and the user allows it. The iCloud Passwords helper starts only for a browser with Apple's browser passkey entitlement (IV.14) or for one in the launch constraints that macOS signs into it from Apple's list, which requires a pull request and a macOS update (IV.24).
 - Universal Autofill (⌘\\) reads the page's accessibility tree and is not a plugin matter; it needs II.13 on Chromium.
-- Each plugin's Settings section lists the native apps that accept it, the conditions Arch does not meet, the user's required step for each of the two vendors, and on WebKit tabs whether the app answered.
+- Each plugin's Settings section lists the native apps that accept it, the conditions Arch does not meet, the user's required step for each of the two vendors, and on WebKit tabs whether the app answered (`NativeAppGuide`).
 
 ## AI hooks and plugins that AI writes
 
@@ -1180,7 +1180,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 2. Menus, shortcuts, sidebar items, panels for built-in plugins, and Settings ▸ Plugins in `Preferences`.
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
-5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate; the rest of the store installs (IV.27 and IV.17's page hosts) and the rest of the password managers (IV.22 and IV.13) follow.
+5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; the rest of the store installs (IV.27 and IV.17's page hosts) and the password managers' checks with the app (IV.13) follow.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
 
 ## Open decisions

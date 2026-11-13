@@ -1,6 +1,7 @@
-// Native messaging: what web extensions send to apps on the Mac. Arch finds an app through its host manifest in `NativeMessagingHosts/` in the app's Application Support folder, in the format Chromium reads, starts the executable that the manifest names for each message or connection with the calling extension's origin as its argument, and exchanges JSON with it over its standard input and output: each message is a 32-bit length in the Mac's byte order followed by that many bytes of UTF-8 JSON. Under one of Arch's links to another browser's host manifest, only a version whose identifier Arch can prove reaches the app (`NativeMessagingHostLinks`).
+// Native messaging: what web extensions send to apps on the Mac. Arch finds an app through its host manifest in `NativeMessagingHosts/` in the app's Application Support folder, in the format Chromium reads, starts the executable that the manifest names for each message or connection with the calling extension's origin as its argument, and exchanges JSON with it over its standard input and output: each message is a 32-bit length in the Mac's byte order followed by that many bytes of UTF-8 JSON. Under one of Arch's links to another browser's host manifest, only a version whose identifier Arch can prove reaches the app (`NativeMessagingHostLinks`). What each plugin's calls last met is kept for the run, which Settings ▸ Plugins shows (`NativeAppOutcomes`).
 import ARCHEngine
 import Foundation
+import Plugins
 
 /// The native apps that the extensions of one Persona reach on WebKit, which leaves native messaging to the app; Chromium reads the same folder itself.
 @MainActor
@@ -9,6 +10,8 @@ final class NativeMessaging {
     private let links: NativeMessagingHostLinks
     /// `NativeMessagingHosts/` in the app's Application Support folder.
     private var directory: URL { links.directory }
+    /// What each plugin's last message or port met in this run.
+    let outcomes = NativeAppOutcomes()
 
     init(links: NativeMessagingHostLinks) {
         self.links = links
@@ -22,32 +25,59 @@ final class NativeMessaging {
     /// Sends one message to the app that `application` names and answers with the app's first message, then ends the app.
     func send(_ message: Data, to application: String?, from caller: NativeMessagingCaller, reply: @escaping (Result<Data, any Error>) -> Void) {
         do {
-            let connection = try open(application, from: caller)
-            connection.onMessage = { [weak connection] message in
+            let (connection, app) = try open(application, from: caller)
+            connection.onMessage = { [weak connection, outcomes] message in
                 connection?.close()
+                outcomes.record(.answered(app), for: caller)
                 reply(.success(message))
             }
-            connection.onEnd = { reply(.failure($0 ?? NativeMessagingError.noReply)) }
+            connection.onEnd = { [outcomes] error in
+                outcomes.record(error.map { .failed($0.localizedDescription) } ?? .endedWithoutAnswer(app), for: caller)
+                reply(.failure(error ?? NativeMessagingError.noReply))
+            }
             connection.send(message)
         } catch {
+            outcomes.record(NativeAppOutcome(error), for: caller)
             reply(.failure(error))
         }
     }
 
-    /// Connects the extension's port to the app it names, until either side ends the connection. Throws when the app cannot be reached.
+    /// Connects the extension's port to the app it names, until either side ends the connection. Throws when the app cannot be reached. The app's first message counts as its answer; an end that the extension causes records nothing.
     func connect(_ port: any EngineNativeMessagingPort, from caller: NativeMessagingCaller) throws {
-        let connection = try open(port.application, from: caller)
-        connection.onMessage = { port.send($0) }
-        connection.onEnd = { port.disconnect($0) }
+        let connection: NativeMessagingConnection
+        let app: String
+        do {
+            (connection, app) = try open(port.application, from: caller)
+        } catch {
+            outcomes.record(NativeAppOutcome(error), for: caller)
+            throw error
+        }
+        var hasAnswered = false
+        connection.onMessage = { [outcomes] message in
+            if !hasAnswered {
+                hasAnswered = true
+                outcomes.record(.answered(app), for: caller)
+            }
+            port.send(message)
+        }
+        connection.onEnd = { [outcomes] error in
+            if let error {
+                outcomes.record(.failed(error.localizedDescription), for: caller)
+            } else if !hasAnswered {
+                outcomes.record(.endedWithoutAnswer(app), for: caller)
+            }
+            port.disconnect(error)
+        }
         port.onMessage = { [weak connection] in connection?.send($0) }
         port.onDisconnect = { [weak connection] in connection?.close() }
     }
 
-    /// Starts the app that `application` names for the extension.
-    private func open(_ application: String?, from caller: NativeMessagingCaller) throws -> NativeMessagingConnection {
-        let connection = NativeMessagingConnection(executable: try executable(of: application, for: caller), origin: Self.origin(of: caller.extensionID))
+    /// Starts the app that `application` names for the extension, and gives the connection with the app's `description`, or its name without one.
+    private func open(_ application: String?, from caller: NativeMessagingCaller) throws -> (NativeMessagingConnection, String) {
+        let manifest = try hostManifest(of: application, for: caller)
+        let connection = NativeMessagingConnection(executable: URL(fileURLWithPath: manifest.path), origin: Self.origin(of: caller.extensionID))
         try connection.start()
-        return connection
+        return (connection, manifest.description ?? manifest.name)
     }
 
     /// The origin that Chromium gives the extension and that host manifests list, which the app receives as its argument.
@@ -62,20 +92,81 @@ final class NativeMessaging {
         }
     }
 
-    /// The executable of the app that `application` names, whose host manifest lets the extension reach it. Under one of Arch's links, the caller needs proof of its identifier, which the gate asks of it by the manifest read here, so that a vendor's change to that manifest during the run counts at once (`NativeMessagingHostLinks`, the gate).
+    /// The executable of the app that `application` names, whose host manifest lets the extension reach it (`hostManifest(of:for:)`).
     func executable(of application: String?, for caller: NativeMessagingCaller) throws -> URL {
+        URL(fileURLWithPath: try hostManifest(of: application, for: caller).path)
+    }
+
+    /// The host manifest of the app that `application` names, which lets the extension reach it. Under one of Arch's links, the caller needs proof of its identifier, which the gate asks of it by the manifest read here, so that a vendor's change to that manifest during the run counts at once (`NativeMessagingHostLinks`, the gate). A held host, which has no manifest in Arch's folder, fails with why Arch does not start its app.
+    private func hostManifest(of application: String?, for caller: NativeMessagingCaller) throws -> NativeMessagingHostManifest {
         guard let application, Self.isValidName(application) else { throw NativeMessagingError.invalidName(application ?? "") }
         // Asked before the read, so that a link that a pass makes meanwhile counts.
         let isGated = !caller.isProven && links.coversLink(named: application)
         let file = directory.appendingPathComponent(application + ".json")
-        guard let data = try? Data(contentsOf: file) else { throw NativeMessagingError.notFound(application) }
+        guard let data = try? Data(contentsOf: file) else {
+            if let host = links.hosts[application], host.held != nil { throw NativeMessagingError.held(host.description) }
+            throw NativeMessagingError.notFound(application)
+        }
         guard let manifest = try? JSONDecoder().decode(NativeMessagingHostManifest.self, from: data), manifest.name == application, manifest.type == "stdio",
               manifest.path.hasPrefix("/") else { throw NativeMessagingError.invalidManifest(application) }
         guard manifest.allowedOrigins.contains(Self.origin(of: caller.extensionID)) else { throw NativeMessagingError.notAllowed(application) }
         if isGated {
             throw NativeMessagingError.unproven(NativeMessagingHostLinks.gateSentence(naming: manifest.description ?? application, predatesProof: caller.predatesProof))
         }
-        return URL(fileURLWithPath: manifest.path)
+        return manifest
+    }
+}
+
+/// What a plugin's last native message or port met on WebKit tabs, as Settings ▸ Plugins says it. Arch does not see Chromium's native messages.
+public enum NativeAppOutcome: Hashable, Sendable {
+    /// The native app with the description sent a message.
+    case answered(String)
+    /// The native app with the description ended without sending one, as a native app does when it does not accept the browser.
+    case endedWithoutAnswer(String)
+    /// Arch did not start the native app with the description, since macOS does not start it for Arch (`NativeMessagingHost.HeldReason`).
+    case held(String)
+    /// The call failed for another reason, with the failure's message.
+    case failed(String)
+
+    init(_ error: any Error) {
+        if case let .held(app)? = error as? NativeMessagingError {
+            self = .held(app)
+        } else {
+            self = .failed(error.localizedDescription)
+        }
+    }
+
+    /// "On WebKit tabs, 1Password BrowserSupport answered.", and the like.
+    public var sentence: String {
+        switch self {
+        case let .answered(app): return "On WebKit tabs, \(app) answered."
+        case let .endedWithoutAnswer(app): return "On WebKit tabs, \(app) ended without answering, as a native app does when it does not accept the browser."
+        case let .held(app): return "On WebKit tabs, Arch did not start \(app), which macOS does not start for Arch."
+        case let .failed(message): return message
+        }
+    }
+}
+
+/// What the native messages and ports of a Persona's plugins last met on WebKit tabs in this run, by plugin, each with the install it came from, so that an update or a reinstall, as one that brings a proof, starts without one.
+@MainActor
+public final class NativeAppOutcomes: ObservableObject {
+    private struct Entry: Equatable {
+        let installedAt: Date?
+        let outcome: NativeAppOutcome
+    }
+
+    @Published private var entries: [PluginID: Entry] = [:]
+
+    /// The plugin's last outcome in this run, while it has the install that met it.
+    public func outcome(of plugin: InstalledPlugin) -> NativeAppOutcome? {
+        guard let entry = entries[plugin.id], entry.installedAt == plugin.installedAt else { return nil }
+        return entry.outcome
+    }
+
+    /// Keeps the outcome for the caller's plugin, if it names one.
+    func record(_ outcome: NativeAppOutcome, for caller: NativeMessagingCaller) {
+        guard let plugin = caller.plugin else { return }
+        entries[plugin] = Entry(installedAt: caller.installedAt, outcome: outcome)
     }
 }
 
@@ -104,6 +195,8 @@ enum NativeMessagingError: LocalizedError, Equatable {
     case notAllowed(String)
     /// The gate's sentence for a version without proof under one of Arch's links.
     case unproven(String)
+    /// The description of a held host's native app, which Arch does not start.
+    case held(String)
     case messageTooLarge
     case noReply
 
@@ -114,6 +207,7 @@ enum NativeMessagingError: LocalizedError, Equatable {
         case let .invalidManifest(name): return "The host manifest of the native app \(name) does not read."
         case let .notAllowed(name): return "The native app \(name) does not accept this extension."
         case let .unproven(sentence): return sentence
+        case let .held(app): return "Arch did not start \(app), which macOS does not start for Arch."
         case .messageTooLarge: return "The native app sent a message larger than 1 MB."
         case .noReply: return "The native app ended without replying."
         }
