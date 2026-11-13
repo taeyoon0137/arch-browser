@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, and version 13 each pinned tab's saved page. Files without a version are version 1.
-    static let currentVersion = 13
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, version 13 each pinned tab's saved page, and version 14 each folder's parent folder. Files without a version are version 1.
+    static let currentVersion = 14
 
     struct TabRecord: Codable, Equatable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -86,7 +86,7 @@ struct SessionSnapshot: Codable {
     var currentSpaceID: UUID
     var favorites: [Favorite]
     var tabs: [TabRecord]
-    /// Every space's folders, in sidebar order within each space's pinned and open tabs. Optional so files before version 6 still decode.
+    /// Every space's folders, in sidebar order among the folders of each parent and list, each with its parent from version 14. Optional so files before version 6 still decode.
     var folders: [TabFolder]?
     /// The index in `tabs` of the front main window's selected tab, written for builds before version 11. `normalized()` reads it, when `selectedFavoriteID` names no favorite tab, to select the tab of the window it makes for a file without `windows`.
     var selectedTabIndex: Int?
@@ -121,6 +121,7 @@ struct SessionSnapshot: Codable {
         snapshot.closedTabs = snapshot.closedTabs.map { $0.suffix(Self.maximumClosedTabs).map(\.closed) }
         snapshot.tabs = snapshot.tabs.map { $0.repairingSavedPage() }
         snapshot.closedTabs = snapshot.closedTabs.map { $0.map { $0.repairingSavedPage() } }
+        snapshot.folders = folders.map(FolderTree.repairingParents)
         snapshot.assignPersonas()
         snapshot.repairWindows()
         // Only a Persona that is gone loses its stored data. The default Persona is always listed, so the engines' default storage is never removed.

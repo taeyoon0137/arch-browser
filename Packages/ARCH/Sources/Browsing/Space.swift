@@ -1,4 +1,4 @@
-// Spaces group sidebar tabs, and folders group tabs inside a space. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. Each space and favorite belongs to a Persona. `symbol` is an SF Symbol name.
+// Spaces group sidebar tabs, and folders, which nest up to four levels (`FolderTree`), group tabs inside a space. Favorites are site shortcuts shared by all spaces; once opened, each keeps a tab of its own. Each space and favorite belongs to a Persona. `symbol` is an SF Symbol name.
 import Foundation
 
 public struct Space: Identifiable, Codable, Hashable {
@@ -34,15 +34,17 @@ public enum SpaceTint: String, Codable, CaseIterable {
     case automatic
 }
 
-/// A named group of tabs among a space's pinned or open tabs. Its tabs refer to it by `id` and share its space and pinned state.
+/// A named group of tabs and folders among a space's pinned or open tabs. Its tabs refer to it by `id` and its folders by `parentID`, and all share its space and pinned state.
 public struct TabFolder: Identifiable, Codable, Hashable {
     public var id = UUID()
     public var spaceID: UUID
     public var name: String
     /// Whether the folder sits among the pinned tabs rather than the open ones.
     public var isPinned: Bool
-    /// A collapsed folder hides its tabs in the sidebar.
+    /// A collapsed folder hides its tabs and folders in the sidebar.
     public var isCollapsed = false
+    /// The folder that holds this one, in the same space and list, or `nil` at the top of the list and in files before version 14 (bookmark rule 6). `FolderTree` reads it, and `SessionSnapshot.normalized()` clears one that the file cannot keep.
+    public var parentID: UUID?
 }
 
 public struct Favorite: Identifiable, Codable, Hashable {

@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 struct TabRowView: View {
-    /// Observed, not only used by the actions: the split view fill, the shortcut number, and the folder menu come from the session's lists, which the window model does not republish.
+    /// Observed, not only used by the actions: the split view fill, the shortcut number, and the folder items come from the session's lists, which the window model does not republish.
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var tab: Tab
@@ -93,18 +93,7 @@ struct TabRowView: View {
             Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
             Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
             Divider()
-            Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
-            let otherFolders = tab.spaceID.map { session.folders(in: $0).filter { $0.id != tab.folderID } } ?? []
-            if !otherFolders.isEmpty {
-                Menu("Move to Folder") {
-                    ForEach(otherFolders) { folder in
-                        Button(folder.name) { withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folder.id) } }
-                    }
-                }
-            }
-            if tab.folderID != nil {
-                Button("Remove from Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.removeFromFolder(tab) } }
-            }
+            TabFolderItems(session: session, windowModel: windowModel, tab: tab)
             Divider()
             // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
             Button("Close Tab") { session.requestCloseTab(tab) }
@@ -117,6 +106,25 @@ struct TabRowView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { windowModel.selectTab(tab.id) }
+    }
+}
+
+/// A tab row's Add to New Folder, which makes the folder where the tab is, Move to Folder, listing the pinned list's folders before the open list's, and Move Out of Folder, which moves the tab up one level. The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
+private struct TabFolderItems: View {
+    @ObservedObject var session: BrowserSession
+    let windowModel: BrowserWindowModel
+    let tab: Tab
+
+    var body: some View {
+        let tree = session.folderTree
+        Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
+            .disabled(!tree.canAddFolder(inside: tab.folderID))
+        MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
+        }
+        if tab.folderID != nil {
+            Button("Move Out of Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.moveOutOfFolder(tab) } }
+        }
     }
 }
 

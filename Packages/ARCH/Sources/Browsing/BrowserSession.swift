@@ -462,9 +462,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Spaces
 
-    /// A space's pinned or open tabs in sidebar order: the tabs of each folder, folder by folder, then the tabs outside folders.
+    /// A space's pinned or open tabs in sidebar order: the tabs inside each folder, at every level, then the tabs outside folders (`FolderTree.tabs(in:pinned:)`).
     public func tabs(in spaceID: UUID, pinned: Bool) -> [Tab] {
-        folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
+        folderTree.tabs(in: spaceID, pinned: pinned)
     }
 
     /// Adds a space to the Persona and returns it, named `name` or else as `newSpaceName(among:)` names it, and with the next tint of the rotation.
@@ -510,7 +510,7 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }.map { spaces(in: $0.resolvedPersonaID).count > 1 } == true
     }
 
-    /// Removes a space, unless it is its Persona's last. Its tabs and folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
+    /// Removes a space, unless it is its Persona's last. Its tabs and nested folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
         guard canDeleteSpace(id), let space = spaces.first(where: { $0.id == id }) else { return }
         let group = spaces(in: space.resolvedPersonaID)
@@ -518,7 +518,7 @@ public final class BrowserSession: ObservableObject {
         let destination = group[index == 0 ? 1 : index - 1].id
         // The space's split view goes with it; its tabs join the destination as separate tabs.
         splitTabIDs[id] = nil
-        // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders.
+        // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders, and the folders their parents, so the tree moves whole.
         let moved = tabs.filter { $0.spaceID == id }
         let movedIDs = Set(moved.map(\.id))
         moved.forEach { $0.spaceID = destination }
@@ -1353,27 +1353,22 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Folders
 
-    /// Every space's folders. The sidebar shows a space's pinned and open folders in this order, each list starting with its folders.
+    /// Every space's folders. Among the folders of each parent, or at the top of each space's pinned or open list, the sidebar shows them in this order.
     @Published public private(set) var folders: [TabFolder] = []
 
-    /// A space's folders among its pinned or open tabs, in sidebar order.
+    /// The folders and tabs as the sidebar nests them (bookmark rule 6), which the rows, the folder menus, and the moves below ask.
+    var folderTree: FolderTree {
+        FolderTree(folders: folders, tabs: tabs)
+    }
+
+    /// A space's folders in its pinned or open list, at every level.
     public func folders(in spaceID: UUID, pinned: Bool) -> [TabFolder] {
         folders.filter { $0.spaceID == spaceID && $0.isPinned == pinned }
     }
 
-    /// A space's folders in sidebar order: those among its pinned tabs, then those among its open tabs.
+    /// A space's folders at every level: those among its pinned tabs, then those among its open tabs.
     public func folders(in spaceID: UUID) -> [TabFolder] {
         folders(in: spaceID, pinned: true) + folders(in: spaceID, pinned: false)
-    }
-
-    /// A folder's tabs in sidebar order.
-    public func tabs(in folder: TabFolder) -> [Tab] {
-        tabs.filter { $0.folderID == folder.id }
-    }
-
-    /// Whether `tab` sits in a collapsed folder, which shows it in the sidebar only while it is selected.
-    func isInCollapsedFolder(_ tab: Tab) -> Bool {
-        folders.contains { $0.id == tab.folderID && $0.isCollapsed }
     }
 
     /// A space's pinned or open tabs that are in no folder, in sidebar order. A small window's tab, which is in no folder, is left out until it moves to a main window.
@@ -1381,7 +1376,7 @@ public final class BrowserSession: ObservableObject {
         tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
-    /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list.
+    /// Moves a tab into a folder of its space, at any level, after the folder's own tabs. The tab joins the folder's pinned or open list.
     public func moveTab(_ id: UUID, toFolder folderID: UUID) {
         guard let folder = folders.first(where: { $0.id == folderID }), let index = tabs.firstIndex(where: { $0.id == id }),
               tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folderID else { return }
@@ -1393,40 +1388,53 @@ public final class BrowserSession: ObservableObject {
         tabs = reordered
     }
 
-    /// Takes a tab out of its folder.
-    public func removeFromFolder(_ tab: Tab) {
-        guard tab.folderID != nil else { return }
-        takeOutOfFolder([tab])
+    /// Move Out of Folder: moves a tab into its folder's parent, or out of folders, first among the tabs there.
+    public func moveOutOfFolder(_ tab: Tab) {
+        changeFolderTree { $0.moveTabOut(tab) }
+    }
+
+    /// Move to Folder for a folder: moves it with everything it holds into another folder of its list, last among that folder's folders, as `FolderTree.canMoveFolder(_:into:)` allows.
+    public func moveFolder(_ id: UUID, into parentID: UUID) {
+        changeFolderTree { $0.moveFolder(id, into: parentID) }
+    }
+
+    /// Move Out of Folder for a folder: moves it with everything it holds up one level, right after the folder it leaves.
+    public func moveFolderOut(_ id: UUID) {
+        changeFolderTree { $0.moveFolderOut(id) }
     }
 
     public func toggleCollapsed(ofFolder id: UUID) {
         updateFolder(id) { $0.isCollapsed.toggle() }
     }
 
-    /// Removes a folder and keeps its tabs.
+    /// Expands every collapsed folder that holds the folder `id`, so that the folder's row shows.
+    func expandFolders(holding id: UUID) {
+        for ancestor in folderTree.ancestors(of: id) where ancestor.isCollapsed {
+            updateFolder(ancestor.id) { $0.isCollapsed = false }
+        }
+    }
+
+    /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place in its parent, or at the top of its list, and its tabs go first among the tabs there.
     public func deleteFolder(_ id: UUID) {
-        guard let folder = folders.first(where: { $0.id == id }) else { return }
-        takeOutOfFolder(tabs(in: folder))
-        folders.removeAll { $0.id == id }
+        guard folders.contains(where: { $0.id == id }) else { return }
+        changeFolderTree { $0.deleteFolder(id) }
         windows.forEach { $0.endRenamingFolder(id) }
     }
 
-    /// Appends a folder to a space's pinned or open folders.
-    func makeFolder(in spaceID: UUID, pinned: Bool) -> TabFolder {
-        let folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+    /// Appends a folder to a space's pinned or open list: at the top of the list, or last among the folders of `parentID`, a folder of that list in which `FolderTree.canAddFolder(inside:)` allows one.
+    func makeFolder(in spaceID: UUID, pinned: Bool, inside parentID: UUID? = nil) -> TabFolder {
+        var folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+        folder.parentID = parentID
         folders.append(folder)
         return folder
     }
 
-    /// Takes tabs of one folder out of it and puts them, in order, first among their list's tabs outside folders, just below the folders.
-    private func takeOutOfFolder(_ moved: [Tab]) {
-        guard let first = moved.first else { return }
-        let movedIDs = Set(moved.map(\.id))
-        var reordered = tabs.filter { !movedIDs.contains($0.id) }
-        moved.forEach { $0.folderID = nil }
-        let destination = reordered.firstIndex { $0.spaceID == first.spaceID && $0.isPinned == first.isPinned && $0.folderID == nil } ?? reordered.endIndex
-        reordered.insert(contentsOf: moved, at: destination)
-        tabs = reordered
+    /// Applies a change of the folder tree to the session's folders and tabs. Both are set, so that the session publishes a change even when only a tab's folder changed.
+    private func changeFolderTree(_ change: (inout FolderTree) -> Void) {
+        var tree = folderTree
+        change(&tree)
+        folders = tree.folders
+        tabs = tree.tabs
     }
 
     func updateFolder(_ id: UUID, _ change: (inout TabFolder) -> Void) {

@@ -201,8 +201,9 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// The first tab row of the space that the sidebar shows and no other window shows, open tabs before pinned ones (window rule 3). Only a space whose free tabs all sit in collapsed folders gives a hidden tab.
     func firstFreeTab(inSpace id: UUID) -> Tab? {
-        let spaceTabs = (session.tabs(in: id, pinned: false) + session.tabs(in: id, pinned: true)).filter { !isShownInAnotherWindow($0) }
-        return spaceTabs.first { !session.isInCollapsedFolder($0) } ?? spaceTabs.first
+        let tree = session.folderTree
+        let spaceTabs = (tree.tabs(in: id, pinned: false) + tree.tabs(in: id, pinned: true)).filter { !isShownInAnotherWindow($0) }
+        return spaceTabs.first { !tree.isInCollapsedFolder($0) } ?? spaceTabs.first
     }
 
     public func switchToAdjacentSpace(forward: Bool) {
@@ -530,9 +531,10 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// The current space's tab rows in sidebar order: pinned first, then open. A collapsed folder shows only the selected tab.
+    /// The current space's tab rows in sidebar order: pinned first, then open. A collapsed folder, at any level, shows only the selected tab.
     private var orderedTabs: [Tab] {
-        (session.tabs(in: currentSpaceID, pinned: true) + session.tabs(in: currentSpaceID, pinned: false)).filter { $0.id == selectedTabID || !session.isInCollapsedFolder($0) }
+        let tree = session.folderTree
+        return (tree.tabs(in: currentSpaceID, pinned: true) + tree.tabs(in: currentSpaceID, pinned: false)).filter { $0.id == selectedTabID || !tree.isInCollapsedFolder($0) }
     }
 
     public func selectTab(at index: Int) {
@@ -1124,11 +1126,20 @@ public final class BrowserWindowModel: ObservableObject {
         renamingFolderID = session.makeFolder(in: spaceID, pinned: true).id
     }
 
-    /// Puts a tab in a new folder among its space's pinned or open tabs and starts renaming the folder. A favorite's tab belongs to no space and stays out of folders.
+    /// New Folder Inside: adds an empty folder last among a folder's folders, below the fourth level only, expands the folders that hold it, and starts renaming it.
+    public func addFolder(inside parentID: UUID) {
+        guard session.folderTree.canAddFolder(inside: parentID), let parent = session.folders.first(where: { $0.id == parentID }) else { return }
+        let folder = session.makeFolder(in: parent.spaceID, pinned: parent.isPinned, inside: parentID)
+        session.expandFolders(holding: folder.id)
+        renamingFolderID = folder.id
+    }
+
+    /// Add to New Folder: puts a tab in a new folder where the tab is, inside its folder or at the top of its space's pinned or open list, expands the folders that hold the new one, and starts renaming it. A tab in a folder at the fourth level has no room for one. A favorite's tab belongs to no space and stays out of folders.
     public func addToNewFolder(_ tab: Tab) {
-        guard let spaceID = tab.spaceID else { return }
-        let folder = session.makeFolder(in: spaceID, pinned: tab.isPinned)
+        guard let spaceID = tab.spaceID, session.folderTree.canAddFolder(inside: tab.folderID) else { return }
+        let folder = session.makeFolder(in: spaceID, pinned: tab.isPinned, inside: tab.folderID)
         session.moveTab(tab.id, toFolder: folder.id)
+        session.expandFolders(holding: folder.id)
         renamingFolderID = folder.id
     }
 

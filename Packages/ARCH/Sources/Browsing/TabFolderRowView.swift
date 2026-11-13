@@ -1,7 +1,7 @@
-// A folder's row in a space's tab list, above the folder's indented tabs. `SpaceTabsView` places the row and reports its frame, so a dragged tab can find it.
+// A folder's row in a space's tab list, above the folder's indented folders and tabs, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row and reports its frame, so a dragged tab can find it.
 import SwiftUI
 
-/// Clicking the row collapses or expands the folder, and Rename Folder in its context menu edits the name in place. The row lights up while a dragged tab is over it, as a space's symbol does.
+/// Clicking the row collapses or expands the folder, Rename Folder in its context menu edits the name in place, and the menu's folder items nest it (bookmark rule 6). The row lights up while a dragged tab is over it, as a space's symbol does.
 struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -52,6 +52,8 @@ struct TabFolderRowView: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
+            FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
+            Divider()
             Button("Delete Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
         }
         .accessibilityElement(children: .combine)
@@ -65,5 +67,64 @@ struct TabFolderRowView: View {
     private func toggleCollapsed() {
         guard !isRenaming else { return }
         withAnimation(.easeInOut(duration: 0.2)) { session.toggleCollapsed(ofFolder: folder.id) }
+    }
+}
+
+/// A folder's New Folder Inside, Move to Folder, and Move Out of Folder. The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
+private struct FolderNestingItems: View {
+    @ObservedObject var session: BrowserSession
+    let windowModel: BrowserWindowModel
+    let folder: TabFolder
+
+    var body: some View {
+        let tree = session.folderTree
+        Button("New Folder Inside") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(inside: folder.id) } }
+            .disabled(!tree.canAddFolder(inside: folder.id))
+        MoveToFolderMenu(lists: [tree.moveTargets(forFolder: folder.id)]) { target in
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveFolder(folder.id, into: target) }
+        }
+        if folder.parentID != nil {
+            Button("Move Out of Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.moveFolderOut(folder.id) } }
+        }
+    }
+}
+
+/// Move to Folder for a tab or a folder: a submenu that mirrors the folder tree, one list after another with a divider between them, and lists only the moves `FolderTree` allows. A folder that holds listed folders is a submenu whose first item moves into the folder itself. Without a move to offer, the item is left out.
+struct MoveToFolderMenu: View {
+    let lists: [[FolderTree.MoveTarget]]
+    let move: (UUID) -> Void
+
+    var body: some View {
+        let lists = lists.filter { !$0.isEmpty }
+        if !lists.isEmpty {
+            Menu("Move to Folder") {
+                ForEach(lists.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    MoveTargetItems(targets: lists[index], move: move)
+                }
+            }
+        }
+    }
+}
+
+/// One level of Move to Folder's targets.
+private struct MoveTargetItems: View {
+    let targets: [FolderTree.MoveTarget]
+    let move: (UUID) -> Void
+
+    var body: some View {
+        ForEach(targets) { target in
+            if target.inside.isEmpty {
+                Button(target.folder.name) { move(target.folder.id) }
+            } else {
+                Menu(target.folder.name) {
+                    if target.takesItem {
+                        Button(target.folder.name) { move(target.folder.id) }
+                        Divider()
+                    }
+                    MoveTargetItems(targets: target.inside, move: move)
+                }
+            }
+        }
     }
 }

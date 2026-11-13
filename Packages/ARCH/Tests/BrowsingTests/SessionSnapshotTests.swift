@@ -242,6 +242,26 @@ import Testing
         #expect(reloaded.closedTabs?.map(\.savedPage) == loaded.closedTabs?.map(\.savedPage))
     }
 
+    @Test func version13FoldersLoadAtTheTopLevel() throws {
+        let folder = try SessionFolder()
+        try folder.write(version13FileWithFolders)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.map(\.id) == [workFolder, docsFolder])
+        #expect(loaded.folders?.map(\.parentID) == [nil, nil])
+        #expect(loaded.tabs.map(\.folderID) == [docsFolder, nil, nil])
+    }
+
+    @Test func folderParentsLoadAndSaveAndThoseTheFileCannotKeepAreCleared() throws {
+        let folder = try SessionFolder()
+        try folder.write(version14File)
+        let loaded = try #require(folder.store.load())
+        // Docs stays in Work; Loose names a folder that is not in the file, and Mixed one of the open list.
+        #expect(loaded.folders?.map(\.id) == [workFolder, docsFolder, looseFolder, mixedFolder])
+        #expect(loaded.folders?.map(\.parentID) == [nil, workFolder, nil, nil])
+        folder.store.saveNow(loaded)
+        #expect(try #require(folder.store.load()).folders?.map(\.parentID) == loaded.folders?.map(\.parentID))
+    }
+
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
         let folder = try SessionFolder()
         let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": [1, 2],"#)
@@ -379,6 +399,10 @@ private let window3 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F43")!
 private let window4 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F44")!
 private let window5 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F45")!
 private let frontFrame = CGRect(x: 100, y: 200, width: 1000, height: 700)
+private let workFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F51")!
+private let docsFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F52")!
+private let looseFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F53")!
+private let mixedFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F54")!
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]
@@ -533,3 +557,23 @@ private let version13File = version8File
     .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" },"#)
     .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "isPinned": false, "savedPage": { "url": "https://example.org/stray", "title": "Stray" },"#)
     .replacingOccurrences(of: #""closedTabs": [ { "#, with: #""closedTabs": [ { "id": "\#(UUID())", "spaceID": "\#(spaceA)", "url": "https://example.org/gone", "title": "Gone", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" } }, { "savedPage": { "url": "https://example.org/stray", "title": "Stray" }, "#)
+
+/// A version 13 file whose pinned tab sits in Docs, the second of two pinned folders, which have no parents before version 14.
+private let version13FileWithFolders = version13File
+    .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "isPinned": true, "folderID": "\#(docsFolder)","#)
+    .replacingOccurrences(of: #""selectedTabIndex": 2,"#, with: """
+"folders": [
+    { "id": "\(workFolder)", "spaceID": "\(spaceA)", "name": "Work", "isPinned": true, "isCollapsed": false },
+    { "id": "\(docsFolder)", "spaceID": "\(spaceA)", "name": "Docs", "isPinned": true, "isCollapsed": true }
+  ],
+  "selectedTabIndex": 2,
+""")
+
+/// A version 14 file whose Docs folder sits in Work, beside a folder whose parent is not in the file and an open folder whose parent is a pinned one.
+private let version14File = version13FileWithFolders
+    .replacingOccurrences(of: #""version": 13,"#, with: #""version": 14,"#)
+    .replacingOccurrences(of: #""name": "Docs", "isPinned": true, "isCollapsed": true }"#, with: """
+"name": "Docs", "isPinned": true, "isCollapsed": true, "parentID": "\(workFolder)" },
+    { "id": "\(looseFolder)", "spaceID": "\(spaceA)", "name": "Loose", "isPinned": true, "isCollapsed": false, "parentID": "\(UUID())" },
+    { "id": "\(mixedFolder)", "spaceID": "\(spaceA)", "name": "Mixed", "isPinned": false, "isCollapsed": false, "parentID": "\(workFolder)" }
+""")
