@@ -1,4 +1,4 @@
-// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery, Proof gate, and Tests): the links a pass makes, keeps, replaces, and removes in Arch's folder from manifests in temporary folders that stand for other browsers' host folders, the manifests it skips, the folders it cannot read, the user's files it leaves, one pass per run unless forced, held hosts, the launch constraints in `codesign` output written for the tests, and the gate on WebKit, on Chromium, at a Chromium profile's start, in the review, for pairs, and in the order of a pass that links a native app while another Persona runs an unproven version. Shell scripts stand for native apps, recording engines for the engines' runtimes, and no test reads a real browser's folder or runs `codesign`.
+// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery, Proof gate, and Tests): the links a pass makes, keeps, replaces, and removes in Arch's folder from manifests in temporary folders that stand for other browsers' host folders, the manifests it skips, the folders it cannot read, the user's files it leaves, one pass per run unless forced, held hosts, the launch constraints in `codesign` output written for the tests, and the gate on WebKit, on Chromium, at a Chromium profile's start, in the review, for pairs, in the order of a pass that links a native app while another Persona runs an unproven version, after a vendor changes a manifest behind a link, and under a link whose manifest does not read. Shell scripts stand for native apps, recording engines for the engines' runtimes, and no test reads a real browser's folder or runs `codesign`.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -214,7 +214,7 @@ private final class LaunchConstraintAnswers: @unchecked Sendable {
         let manifest = try writeHostManifest("org.example.app", into: vendor(1), app: app, allowing: [extensionID])
         let links = links([vendor(1)])
         let asked = Recorded<Bool>()
-        links.willChangeLinks = { [arch] in
+        links.gateWidens = { [arch] in
             asked.values.append((try? FileManager.default.destinationOfSymbolicLink(atPath: arch.appendingPathComponent("org.example.app.json").path)) != nil)
         }
         await links.update()
@@ -233,12 +233,44 @@ private final class LaunchConstraintAnswers: @unchecked Sendable {
         let links = links([vendor(1)])
         let caller = NativeMessagingCaller(extensionID: extensionID, isProven: false)
         let refusals = Recorded<String?>()
-        links.willChangeLinks = { [weak links] in refusals.values.append(links?.refusal(of: caller)) }
+        links.gateWidens = { [weak links] in refusals.values.append(links?.refusal(of: caller)) }
         #expect(links.refusal(of: caller) == nil)
         await links.update()
         #expect(refusals.values == [gateSentence()] && links.refusal(of: caller) == gateSentence())
         #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: true)) == nil)
         #expect(links.refusal(of: NativeMessagingCaller(extensionID: String(repeating: "b", count: 32), isProven: false)) == nil)
+    }
+
+    @Test func asksTheRuntimesAgainOnceAManifestBehindAKeptLinkAllowsMore() async throws {
+        let app = try writeApp(in: folder)
+        let other = String(repeating: "b", count: 32)
+        try writeHostManifest("org.example.app", into: vendor(1), app: app, allowing: [other])
+        let links = links([vendor(1)])
+        let caller = NativeMessagingCaller(extensionID: extensionID, isProven: false)
+        let refusals = Recorded<String?>()
+        links.gateWidens = { [weak links] in refusals.values.append(links?.refusal(of: caller)) }
+        await links.update()
+        #expect(refusals.values == [nil] && destination(of: "org.example.app") != nil)
+        // The vendor adds the caller to the manifest behind the link, whose destination stays.
+        try writeHostManifest("org.example.app", into: vendor(1), app: app, allowing: [other, extensionID])
+        await links.update(force: true)
+        #expect(refusals.values == [nil, gateSentence()])
+        await links.update(force: true)
+        try writeHostManifest("org.example.app", into: vendor(1), app: app, allowing: [extensionID])
+        await links.update(force: true)
+        #expect(refusals.values == [nil, gateSentence()])
+    }
+
+    @Test func gatesEveryCallerWithoutProofUnderALinkWhoseManifestDoesNotRead() throws {
+        try FileManager.default.createDirectory(at: vendor(1), withIntermediateDirectories: true)
+        let manifest = vendor(1).appendingPathComponent("org.example.app.json")
+        try Data("{".utf8).write(to: manifest)
+        try FileManager.default.createDirectory(at: arch, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: arch.appendingPathComponent("org.example.app.json").path, withDestinationPath: manifest.path)
+        let links = links([vendor(1)])
+        #expect(links.linkedHosts == ["org.example.app": NativeMessagingLinkedHost(description: "org.example.app", allowedOrigins: nil)])
+        #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: false)) == gateSentence("org.example.app"))
+        #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: true)) == nil)
     }
 }
 
@@ -409,7 +441,7 @@ struct ProofGateTests {
     /// Has the run's passes ask every launch's runtime to take what the new links gate out of Chromium, as the session does.
     private func follow(_ launches: [Launch], in links: NativeMessagingHostLinks) {
         let runtimes = launches.map(\.runtime)
-        links.willChangeLinks = {
+        links.gateWidens = {
             for runtime in runtimes { await runtime.takeGatedVersionsOutOfChromium() }
         }
     }
@@ -472,6 +504,21 @@ struct ProofGateTests {
         #expect(String(decoding: try await reply(from: unproven.id, to: "org.example.mine", in: launch).get(), as: UTF8.self) == "1")
         // The version keeps running on WebKit tabs.
         #expect(launch.manager.plugins.allSatisfy { $0.isEnabled && $0.engineFailures.isEmpty })
+        launch.manager.close()
+    }
+
+    @Test func refusesAnUnprovenVersionOnWebKitAsSoonAsAVendorAddsItBehindALink() async throws {
+        let links = run()
+        let launch = launch([.webKit], links: links)
+        let unproven = try messenger()
+        let app = try writeApp(in: folder)
+        let other = String(repeating: "b", count: 32)
+        try writeHostManifest("org.example.app", into: vendor, app: app, allowing: [other])
+        try await launch.manager.installEverything(from: unproven.package)
+        #expect(await eventually { launch.webKit.loaded[unproven.id] != nil && linkExists })
+        // The vendor rewrites the manifest during the run, and no pass follows.
+        try writeHostManifest("org.example.app", into: vendor, app: app, allowing: [other, unproven.id])
+        await #expect(throws: NativeMessagingError.unproven(gateSentence())) { try await reply(from: unproven.id, to: "org.example.app", in: launch).get() }
         launch.manager.close()
     }
 
@@ -611,6 +658,24 @@ struct ProofGateTests {
         #expect(other.chromium.loaded[unproven.id] == nil && other.webKit.loaded[unproven.id] != nil)
         installer.manager.close()
         other.manager.close()
+    }
+
+    @Test func takesAnUnprovenVersionOutOfChromiumOnceAPassReadsItBehindALinkThatStays() async throws {
+        let links = run()
+        let launch = launch([.webKit, .chromium], links: links)
+        follow([launch], in: links)
+        let unproven = try messenger()
+        let app = try writeApp(in: folder)
+        let other = String(repeating: "b", count: 32)
+        try writeHostManifest("org.example.app", into: vendor, app: app, allowing: [other])
+        try await launch.manager.installEverything(from: unproven.package)
+        #expect(await eventually { launch.chromium.loaded[unproven.id] != nil && launch.webKit.loaded[unproven.id] != nil && linkExists })
+        // The vendor adds the version's identifier to the manifest behind the link, whose destination stays.
+        try writeHostManifest("org.example.app", into: vendor, app: app, allowing: [other, unproven.id])
+        await links.update(force: true)
+        #expect(await eventually { launch.manager.plugins.first?.engineFailures[.chromium] == gateSentence() })
+        #expect(launch.chromium.loaded[unproven.id] == nil && launch.webKit.loaded[unproven.id] != nil)
+        launch.manager.close()
     }
 
     @Test func takesAKeptCopyOutOfChromiumBeforeTheRunsFirstPassLinksIt() async throws {

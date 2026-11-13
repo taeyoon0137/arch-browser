@@ -147,7 +147,7 @@ public final class BrowserSession: ObservableObject {
         sheets.windows = { [weak self] in self?.windows ?? [] }
         start(primary)
         MainActor.assumeIsolated {
-            nativeMessagingHosts.willChangeLinks = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
+            nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
         }
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
@@ -1121,7 +1121,7 @@ public final class BrowserSession: ObservableObject {
         return plugins
     }
 
-    /// Has every Persona's web extension runtime take out of Chromium the versions that the proof gate refuses under the links a pass is about to make (`NativeMessagingHostLinks.willChangeLinks`). A Persona whose runtime the session has not made yet does so when it makes it, as its profiles' starts reach the runtime.
+    /// Has every Persona's web extension runtime take out of Chromium the versions that the proof gate comes to refuse, as under the links a pass is about to make (`NativeMessagingHostLinks.gateWidens`). A Persona whose runtime the session has not made yet does so when it makes it, as its profiles' starts reach the runtime.
     @MainActor private func takeGatedVersionsOutOfChromium() async {
         for runtime in personaEngines.values.compactMap(\.webExtensions) {
             await runtime.takeGatedVersionsOutOfChromium()

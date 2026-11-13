@@ -62,15 +62,19 @@ final class NativeMessaging {
         }
     }
 
-    /// The executable of the app that `application` names, whose host manifest lets the extension reach it. Under one of Arch's links, the caller needs proof of its identifier (`NativeMessagingHostLinks`, the gate).
+    /// The executable of the app that `application` names, whose host manifest lets the extension reach it. Under one of Arch's links, the caller needs proof of its identifier, which the gate asks of it by the manifest read here, so that a vendor's change to that manifest during the run counts at once (`NativeMessagingHostLinks`, the gate).
     func executable(of application: String?, for caller: NativeMessagingCaller) throws -> URL {
         guard let application, Self.isValidName(application) else { throw NativeMessagingError.invalidName(application ?? "") }
-        if let refusal = links.refusal(of: caller, underHostNamed: application) { throw NativeMessagingError.unproven(refusal) }
+        // Asked before the read, so that a link that a pass makes meanwhile counts.
+        let isGated = !caller.isProven && links.coversLink(named: application)
         let file = directory.appendingPathComponent(application + ".json")
         guard let data = try? Data(contentsOf: file) else { throw NativeMessagingError.notFound(application) }
         guard let manifest = try? JSONDecoder().decode(NativeMessagingHostManifest.self, from: data), manifest.name == application, manifest.type == "stdio",
               manifest.path.hasPrefix("/") else { throw NativeMessagingError.invalidManifest(application) }
         guard manifest.allowedOrigins.contains(Self.origin(of: caller.extensionID)) else { throw NativeMessagingError.notAllowed(application) }
+        if isGated {
+            throw NativeMessagingError.unproven(NativeMessagingHostLinks.gateSentence(naming: manifest.description ?? application, predatesProof: caller.predatesProof))
+        }
         return URL(fileURLWithPath: manifest.path)
     }
 }

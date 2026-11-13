@@ -350,7 +350,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// The gate's sentence for the version on Chromium, which reads Arch's links itself: for a version whose grant has `nativeMessaging`, whose identifier Arch cannot prove, and which a manifest behind one of Arch's links, or one that a pass is about to make, allows. Nil lets it run there.
+    /// The gate's sentence for the version on Chromium, which reads Arch's links itself: for a version whose grant has `nativeMessaging`, whose identifier Arch cannot prove, and which a manifest behind one of Arch's links, or one that a pass is about to make, allows, as a manifest behind a link that does not read counts. Nil lets it run there.
     private func gateRefusal(of installed: InstalledPlugin) -> String? {
         guard installed.grant.permissions.contains(.nativeMessaging) else { return nil }
         return hostLinks.refusal(of: NativeMessagingCaller(installed))
@@ -370,7 +370,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// The step before a pass of `NativeMessagingHostLinks` creates or changes a link (`willChangeLinks`), which the session asks of every Persona's runtime: takes out of Chromium the versions that the links the pass will make gate, then waits for a load in Chromium under way and takes it out too if they gate it, so that no such version runs there once the link exists. It does not wait for the runtime's changes to the engines, since its own pass of loads may be the one that asked for the links.
+    /// The step when the gate of `NativeMessagingHostLinks` comes to refuse more callers (`gateWidens`), before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes out of Chromium the versions that the gate refuses, the links the pass will make included, then waits for a load in Chromium under way and takes it out too if the gate refuses it, so that no such version runs there once the link exists. It does not wait for the runtime's changes to the engines, since its own pass of loads may be the one that asked for the links.
     public func takeGatedVersionsOutOfChromium() async {
         guard let chromium = attached?[.chromium] ?? startedProfiles[.chromium] else { return }
         takeGatedVersionsOut(of: chromium)
