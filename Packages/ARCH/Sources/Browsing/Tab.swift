@@ -58,8 +58,6 @@ public final class Tab: ObservableObject, Identifiable {
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to show a sheet for the page, which waits until a window shows the page. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
-    var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
@@ -74,7 +72,7 @@ public final class Tab: ObservableObject, Identifiable {
     var previewLink: ((URL) -> Void)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
     var didChangeFullscreen: ((Bool) -> Void)?
-    /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
+    /// Set while a card asks to open a link in another app, so that a page cannot queue more of them.
     private var isOfferingExternalApp = false
     /// The site whose own request to open another app the user declined: its host, or its scheme for a page without one, such as a file. The page asks no more until the tab moves to another site, so changing its own address or reloading does not bring the question back. A link the user clicks or an address the user types still asks.
     private var declinedExternalAppSite: String?
@@ -357,61 +355,37 @@ extension Tab: EngineWebContentsUIDelegate {
         return url.host ?? "\(url.scheme ?? ""):"
     }
 
-    /// Asks before a page hands a link to another app, then opens the link there. Nothing happens without an app for the link. One question shows at a time, and a site the user said no to asks no more.
+    /// Asks before a page hands a link to another app, with the app's name and icon, then opens the link there. Nothing happens without an app for the link. One question shows at a time, and a site the user said no to asks no more.
     private func offerExternalApp(for url: URL) {
         guard !isOfferingExternalApp, declinedExternalAppSite == nil || declinedExternalAppSite != Self.site(of: self.url),
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
         isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
-        let alert = NSAlert()
-        alert.messageText = "Open \u{201C}\(appName)\u{201D}?"
-        alert.informativeText = "\(self.url?.host.map { "\u{201C}\($0)\u{201D}" } ?? "This page") wants to open a \(url.scheme ?? "") link in \(appName)."
-        alert.icon = NSWorkspace.shared.icon(forFile: appURL.path)
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
+        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path), scheme: url.scheme ?? "",
+                                                 hasHost: self.url?.host?.isEmpty == false, identity: pageIdentity)
         let pageSite = Self.site(of: self.url)
-        showAlert(alert) { [weak self] response in
+        showPrompt(content) { [weak self] response in
             self?.isOfferingExternalApp = false
-            if response == .alertFirstButtonReturn {
+            switch TabPromptContent.openInAppResult(response) {
+            case .open:
                 NSWorkspace.shared.open(url)
-            } else if response == .alertSecondButtonReturn, let self, Self.site(of: self.url) == pageSite {
-                // Only the Cancel button counts as an answer; a sheet the app ended, as for an engine switch, does not.
-                self.declinedExternalAppSite = pageSite
+            case .decline:
+                // Only Cancel, clicked or through Escape, counts as an answer; a card that ended without the user, as for an engine switch, does not.
+                if let self, Self.site(of: self.url) == pageSite { self.declinedExternalAppSite = pageSite }
+            case .none:
+                break
             }
         }
     }
 
     // MARK: HTTP authentication
 
-    /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved.
+    /// Asks for a user name and password for a site or proxy, in a card whose password field is secure. The credential lasts for this session only and is never saved.
     public func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) {
         let space = challenge.protectionSpace
-        let alert = NSAlert()
-        alert.messageText = space.isProxy() ? "Log In to the Proxy \u{201C}\(space.host)\u{201D}" : "Log In to \u{201C}\(space.host)\u{201D}"
-        var details: [String] = []
-        if challenge.previousFailureCount > 0 { details.append("The user name or password was incorrect.") }
-        if let realm = space.realm, !realm.isEmpty { details.append("The site says: \u{201C}\(realm)\u{201D}") }
-        if !space.receivesCredentialSecurely { details.append("Your login information will be sent without encryption.") }
-        alert.informativeText = details.joined(separator: "\n")
-        alert.addButton(withTitle: "Log In")
-        alert.addButton(withTitle: "Cancel")
-        let userField = NSTextField(string: challenge.proposedCredential?.user ?? "")
-        userField.placeholderString = "User Name"
-        let passwordField = NSSecureTextField(string: "")
-        passwordField.placeholderString = "Password"
-        let fields = NSStackView(views: [userField, passwordField])
-        fields.orientation = .vertical
-        fields.spacing = 8
-        fields.frame = NSRect(x: 0, y: 0, width: 280, height: 56)
-        userField.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        passwordField.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        alert.accessoryView = fields
-        alert.window.initialFirstResponder = userField
-        userField.nextKeyView = passwordField
-        showAlert(alert) { response in
-            guard response == .alertFirstButtonReturn else { return completion(nil) }
-            completion(URLCredential(user: userField.stringValue, password: passwordField.stringValue, persistence: .forSession))
-        }
+        let identity = PromptSiteIdentity.signIn(space, tabURL: url, favicon: favicon)
+        let content = TabPromptContent.signIn(space, proposedUser: challenge.proposedCredential?.user, failed: challenge.previousFailureCount > 0, identity: identity)
+        showPrompt(content) { completion(TabPromptContent.signInCredential($0)) }
     }
 
     /// The tab's page as the asker of its own prompts.
@@ -424,10 +398,6 @@ extension Tab: EngineWebContentsUIDelegate {
         presentPrompt(content, completion)
     }
 
-    private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        guard let presentAlert else { return completion(.cancel) }
-        presentAlert(alert, isPageDialog, completion)
-    }
 }
 
 // MARK: Page scripts

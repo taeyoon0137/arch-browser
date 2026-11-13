@@ -1,4 +1,4 @@
-// A tab asks its prompts through the session's card callback: a page's own dialogs under the page's site with the answer the card gives, and the safe answer when no card can show. The tab's page is a stand-in, so no engine starts.
+// A tab asks its prompts through the session's card callback: a page's own dialogs under the page's site with the answer the card gives, a login under its server with a credential for the session, a link for another app whose Cancel the site keeps and whose dismissal it does not, and the safe answer when no card can show. The tab's page is a stand-in, so no engine starts, and no test answers Open, so no app opens.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -72,5 +72,63 @@ import Testing
         tab.webContents(tab.webContents, runJavaScriptPrompt: "Name?", defaultText: nil) { log.append("prompt \($0 ?? "nil")") }
         tab.webContents(tab.webContents, runBeforeUnloadPanel: "") { log.append("leave \($0)") }
         #expect(log == ["confirm false", "prompt nil", "leave true"])
+    }
+
+    /// A challenge's sender, which the tab never calls: it answers through its completion.
+    private final class ChallengeSender: NSObject, URLAuthenticationChallengeSender {
+        func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+        func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+        func cancel(_ challenge: URLAuthenticationChallenge) {}
+    }
+
+    @Test func aLoginAsksUnderItsServerAndGivesACredentialForTheSession() throws {
+        let tab = Self.tab()
+        let prompts = PromptRecorder()
+        prompts.attach(to: tab)
+        let space = URLProtectionSpace(host: "example.com", port: 443, protocol: "https", realm: "Staff", authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+        let challenge = URLAuthenticationChallenge(protectionSpace: space, proposedCredential: URLCredential(user: "ada", password: "", persistence: .none),
+                                                   previousFailureCount: 1, failureResponse: nil, error: nil, sender: ChallengeSender())
+        var credentials: [URLCredential?] = []
+        tab.webContents(tab.webContents, didReceiveAuthenticationChallenge: challenge) { credentials.append($0) }
+        tab.webContents(tab.webContents, didReceiveAuthenticationChallenge: challenge) { credentials.append($0) }
+
+        let content = try #require(prompts.contents.first)
+        #expect(content.kind == .signIn && content.identity.name == "example.com" && content.identity.isSecure)
+        #expect(content.fields.map(\.initialValue) == ["ada", ""] && content.focusedFieldID == "password")
+        #expect(content.notes.map(\.id) == ["failed"] && content.shakesOnArrival)
+        prompts.respond(.answered(PromptAnswer(buttonID: "logIn", fieldValues: ["user": "ada", "password": "pw"])))
+        prompts.respond(.dismissed)
+        #expect(credentials.count == 2)
+        #expect(credentials.first??.password == "pw" && credentials.first??.persistence == .forSession)
+        #expect(credentials.last! == nil)
+    }
+
+    @Test func aLinkForAnotherAppAsksOnceAndOnlyCancelSilencesTheSite() throws {
+        let link = URL(string: "mailto:someone@example.com")!
+        // A Mac without an app for mail links asks nothing.
+        guard NSWorkspace.shared.urlForApplication(toOpen: link) != nil else { return }
+        let tab = Self.tab()
+        let prompts = PromptRecorder()
+        prompts.attach(to: tab)
+
+        tab.webContents(tab.webContents, openExternally: link, isUserInitiated: false)
+        tab.webContents(tab.webContents, openExternally: link, isUserInitiated: false)
+        let content = try #require(prompts.contents.first)
+        #expect(prompts.contents.count == 1)
+        #expect(content.kind == .openInApp && content.message?.hasPrefix("This website wants to open a mailto link in ") == true)
+        #expect(content.buttons.first { $0.id == "open" }?.needsArming == true)
+
+        // A card that ended without the user leaves the site free to ask again.
+        prompts.respond(.dismissed)
+        tab.webContents(tab.webContents, openExternally: link, isUserInitiated: false)
+        #expect(prompts.contents.count == 2)
+
+        // Cancel silences the site's own requests, but not a link the user clicks.
+        prompts.respond(.answered(PromptAnswer(buttonID: "cancel")))
+        tab.webContents(tab.webContents, openExternally: link, isUserInitiated: false)
+        #expect(prompts.contents.count == 2)
+        tab.webContents(tab.webContents, openExternally: link, isUserInitiated: true)
+        #expect(prompts.contents.count == 3)
+        prompts.respond(.dismissed)
     }
 }

@@ -846,10 +846,6 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.window(showing: tab)?.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
         }
-        tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
-            guard let self, let tab else { return completion(.cancel) }
-            self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
-        }
         tab.presentPrompt = { [weak self, weak tab] content, completion in
             guard let self, let tab else { return completion(.dismissed) }
             self.enqueuePrompt(content, for: tab, completion: completion)
