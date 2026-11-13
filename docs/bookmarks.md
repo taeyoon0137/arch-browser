@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-- This note designs rows 64 (bookmarks) and 65 (live folders) of `docs/features.md` and queue tasks III.16 to III.25 in `docs/plan.md`. Every label it adds follows Persona rule 7 of `docs/windows-personas.md`: a Persona named with one of its spaces shows as "Persona / Space", and III.15 applies that rule to the surfaces built before it.
+- This note designs rows 64 (bookmarks) and 65 (live folders) of `docs/features.md` and queue tasks III.16 to III.25 in `docs/plan.md`. Every label it adds follows Persona rule 7 of `docs/windows-personas.md`: a Persona named with one of its spaces shows as "Persona / Space", as the space header, the window title, and the bottom bar's tooltips already show it.
 - Bookmarks: pinned tabs, favorites, and the folders that hold pinned tabs become Arch's bookmarks. Each keeps a saved page to return to and can unload and reload its page. Folders nest, and a Bookmarks menu lists them.
 - Live folders: pinned folders filled and kept up to date by a source: RSS and Atom feeds fetched directly, and GitHub pull requests, review requests, and issues through the user's `gh` command-line tool signed in through the built-in terminal. Each item is a tab with read and unread state.
 - Excluded: a bookmarks bar, because nothing sits above the page (Approach in `docs/plan.md`); a bookmark manager window, because the sidebar, the Bookmarks menu, and the palette, which already lists pinned tabs, cover it; live sources that need a service's own sign-in and API, such as calendars, documents, and chats (open decision 1); custom icons for folders and tabs; and muting, which Arch's tabs do not have.
@@ -211,7 +211,7 @@ query($q: String!, $n: Int!) {
 
 ## Persona / Space labels
 
-- `BrowserSession.label(ofSpace:)` gives a space's label under Persona rule 7: its name alone with one Persona, "Persona / Space" with two or more. `displayedName(ofPersona:)` gives a Persona-wide label, as today. III.15 adds `label(ofSpace:)` and moves the space header, the window title, and the bottom bar symbols' tooltips and accessibility labels to it: the bottom bar lists every Persona's spaces, and two Personas can each have a space named Personal. Every label in this note uses them: the live folder sheet's title, the Bookmarks menu's submenus and their favorites heading.
+- `BrowserSession.label(ofSpace:)` gives a space's label under Persona rule 7: its name alone with one Persona, "Persona / Space" with two or more. `displayedName(ofPersona:)` gives a Persona-wide label. Both are built, with static forms that take the Personas (`among:`), which tests and code without a session can call. The space header, the window title, and the bottom bar symbols' tooltips and accessibility labels use `label(ofSpace:)`: the bottom bar lists every Persona's spaces, and two Personas can each have a space named Personal. Every label in this note uses them: the live folder sheet's title, the Bookmarks menu's submenus and their favorites heading.
 
 ## Interactions with other features
 
@@ -256,7 +256,7 @@ query($q: String!, $n: Int!) {
   - Bookmarks menu: one Persona (space names alone, spaces without pinned tabs left out, nested folders in order, live folders with their counts, No Bookmarks) and two (submenus titled "Work / Research", the favorites headed "Work", Personas in order).
   - Live folders in the session: the snapshot round trip and its repairs; a private feed's address absent from the encoded snapshot and present in an in-memory Keychain store, which loses it with its folder; a plan applied to `PageStub` and stand-in tabs; an item's stand-in requesting no site icon at a plan and at a relaunch; dismissing an item tab with Close and through an extension's `tabs.remove`; a download-only item tab unloading and staying in its folder; moving one out within the pinned tabs keeping its saved page and through Unpin Tab clearing it, after which the next plan adds a tab for the item; a window showing an item tab, and then showing another, setting `viewedAt` both times; `dropTarget` and Move to Folder refusing a live folder; Convert to Folder; Delete Folder and Delete Persona leaving no closed records for item tabs; an imported folder named like a live folder made beside it (`SidebarImportTests`).
   - The sheet's model: addresses accepted and refused (not HTTP or HTTPS, a user name or password), an address with a query marked for the Keychain, default names, the discovery outcomes (a feed, one link, several, none), the `gh` states from a stubbed `GitHubCLI`, Add disabled at 20 live folders, an edit of the source starting over, and the title with one and two Personas.
-  - Labels: `label(ofSpace:)` with one Persona and with two, two Personas' spaces both named Personal told apart, and a Persona-wide label.
+  - Labels (built, `PersonaTests`): `label(ofSpace:)` with one Persona and with two, two Personas' spaces both named Personal told apart, a Persona-wide label, and the window title with one Persona and with two.
 - `LiveFoldersTests`:
   - Parsing: synthetic RSS 2.0, RSS 1.0, and Atom files with IDs, links, relative links with `xml:base`, titles with markup and character references, RFC 822 and ISO 8601 dates, items without links or with other schemes skipped, titles cut at 300 characters, `ttl` and the syndication interval, newest first when every item has a date, and a file that is not a feed.
   - Discovery: alternate links of both types, relative addresses, other link types ignored, and at most ten.
@@ -271,7 +271,7 @@ query($q: String!, $n: Int!) {
 
 Each step builds, keeps the app working, passes `swift test`, and forms one commit with the subject `Task(<ID>): …`. Each finishes by removing its row, updating Current State and the rows in `docs/features.md`, and adding its checks below to the regression checklist as the next free numbers.
 
-1. III.15: Persona / Space labels on the existing surfaces.
+1. III.15 (built): Persona / Space labels on the existing surfaces.
 2. III.16: Saved pages.
 3. III.17: Unloading.
 4. III.18: Nested folders: model, rows, and menus.

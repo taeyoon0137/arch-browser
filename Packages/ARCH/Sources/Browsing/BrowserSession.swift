@@ -546,9 +546,25 @@ public final class BrowserSession: ObservableObject {
         personas.first { $0.id == id }
     }
 
-    /// The Persona's name where the interface shows it, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one.
+    /// The Persona's name where the interface names a whole Persona, as its favorites, site data, plugins, and sheets do, or nil while the default Persona is the only one, so that nothing names Personas until the user adds one (Persona rule 7).
     func displayedName(ofPersona id: Persona.ID) -> String? {
-        personas.count > 1 ? persona(withID: id)?.name : nil
+        Self.displayedName(ofPersona: id, among: personas)
+    }
+
+    /// The space's label where the interface names one space: "Work / Research" with two or more Personas, else the space's name alone (Persona rule 7). Two Personas can each have a space named Personal, so a surface that lists every Persona's spaces needs it.
+    func label(ofSpace space: Space) -> String {
+        Self.label(ofSpace: space, among: personas)
+    }
+
+    /// What stands between the Persona's name and the space's in a space's label.
+    static let labelSeparator = " / "
+
+    static func displayedName(ofPersona id: Persona.ID, among personas: [Persona]) -> String? {
+        personas.count > 1 ? personas.first { $0.id == id }?.name : nil
+    }
+
+    static func label(ofSpace space: Space, among personas: [Persona]) -> String {
+        displayedName(ofPersona: space.resolvedPersonaID, among: personas).map { $0 + labelSeparator + space.name } ?? space.name
     }
 
     /// The space a tab of the Persona joins when no space of the Persona is given: the last main window's current space while it belongs to the Persona, else the Persona's first space. Every listed Persona has a space; for one that is gone, the first space.

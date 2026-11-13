@@ -39,6 +39,8 @@ struct SidebarBottomBar: View {
                 }
                 let isCurrent = space.id == windowModel.currentSpaceID
                 let isTabTarget = sidebarDrag.targetSpaceID == space.id
+                // The bar lists every Persona's spaces, so with several Personas the label names the space's Persona.
+                let label = session.label(ofSpace: space)
                 // The release that ends a drag of the symbol does not also switch spaces.
                 Button(action: { if sidebarDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
                     Image(systemName: space.symbol)
@@ -52,8 +54,8 @@ struct SidebarBottomBar: View {
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
                 .modifier(SidebarItemDrag(item: .space(space.id), cornerRadius: 6) { reorder(space, at: $0) })
                 .contextMenu { SpaceMenuItems(session: session, space: space) }
-                .help(space.name)
-                .accessibilityLabel(space.name)
+                .help(label)
+                .accessibilityLabel(label)
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }

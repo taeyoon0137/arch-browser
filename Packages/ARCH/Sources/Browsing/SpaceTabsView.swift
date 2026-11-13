@@ -226,7 +226,7 @@ private struct TabRowFramesKey: PreferenceKey {
     }
 }
 
-/// The space's symbol and name above its tabs, with a button for the space menu, and with several Personas the space's Persona above them. Double-clicking the name renames the space in place.
+/// The space's symbol and label above its tabs, with a button for the space menu. With several Personas, the label is "Work / Research" (Persona rule 7), the Persona's name and the slash at regular weight before the space's name. Double-clicking the space's name renames the space in place.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -236,50 +236,13 @@ struct SpaceHeaderView: View {
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
-                Text(personaName)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            nameRow
-        }
-        // Another space's page takes over the keyboard, so the name in this one is kept.
-        .onChange(of: windowModel.currentSpaceID) { _, id in
-            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-        }
-    }
-
-    private var nameRow: some View {
         HStack(spacing: 6) {
             Image(systemName: space.symbol)
                 .font(.system(size: 10))
                 .foregroundStyle(theme.symbolColor(for: space.tint))
-            if windowModel.renamingSpaceID == space.id {
-                TextField("Space Name", text: $draftName)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold))
-                    .focused($isNameFocused)
-                    .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
-                    .onExitCommand { windowModel.renamingSpaceID = nil }
-                    .onChange(of: isNameFocused) { _, focused in
-                        if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                    }
-                    .onAppear {
-                        draftName = space.name
-                        DispatchQueue.main.async { isNameFocused = true }
-                    }
-                    // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
-                    .onDisappear {
-                        if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                    }
-            } else {
-                Text(space.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .onTapGesture(count: 2) { windowModel.renamingSpaceID = space.id }
+            HStack(spacing: 0) {
+                personaPart
+                spaceName
             }
             Spacer(minLength: 0)
             Menu {
@@ -299,6 +262,57 @@ struct SpaceHeaderView: View {
             .accessibilityLabel("Space Options")
         }
         .frame(height: 22)
+        // Another space's page takes over the keyboard, so the name in this one is kept.
+        .onChange(of: windowModel.currentSpaceID) { _, id in
+            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+        }
+    }
+
+    /// The Persona's name and the slash before the space's name, which only a label with several Personas has. They stay while the space's name is being edited.
+    @ViewBuilder private var personaPart: some View {
+        if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
+            Text(personaName)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            // A text can leave its trailing space out of its width, so the separator's spaces show as no-break spaces.
+            Text(BrowserSession.labelSeparator.replacingOccurrences(of: " ", with: "\u{00A0}"))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// The space's name, or its field while the space is being renamed.
+    @ViewBuilder private var spaceName: some View {
+        if windowModel.renamingSpaceID == space.id {
+            TextField("Space Name", text: $draftName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .focused($isNameFocused)
+                .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
+                .onExitCommand { windowModel.renamingSpaceID = nil }
+                .onChange(of: isNameFocused) { _, focused in
+                    if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                }
+                .onAppear {
+                    draftName = space.name
+                    DispatchQueue.main.async { isNameFocused = true }
+                }
+                // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
+                .onDisappear {
+                    if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                }
+        } else {
+            Text(space.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                // The Persona's name gives way first when the label does not fit.
+                .layoutPriority(1)
+                .onTapGesture(count: 2) { windowModel.renamingSpaceID = space.id }
+        }
     }
 }
 
