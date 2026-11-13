@@ -287,23 +287,31 @@ struct SpaceHeaderView: View {
     /// The space's name, or its field while the space is being renamed.
     @ViewBuilder private var spaceName: some View {
         if windowModel.renamingSpaceID == space.id {
-            TextField("Space Name", text: $draftName)
-                .textFieldStyle(.plain)
+            // A hidden copy of the name sizes the field, which would otherwise take a share of the row from the Persona's name. So the label keeps its layout when renaming starts, and the Persona's name still gives way first.
+            Text(draftName.isEmpty ? "Space Name" : draftName)
                 .font(.system(size: 13, weight: .semibold))
-                .focused($isNameFocused)
-                .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
-                .onExitCommand { windowModel.renamingSpaceID = nil }
-                .onChange(of: isNameFocused) { _, focused in
-                    if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                .lineLimit(1)
+                .hidden()
+                .overlay(alignment: .leading) {
+                    TextField("Space Name", text: $draftName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .semibold))
+                        .focused($isNameFocused)
+                        .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
+                        .onExitCommand { windowModel.renamingSpaceID = nil }
+                        .onChange(of: isNameFocused) { _, focused in
+                            if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                        }
+                        .onAppear {
+                            draftName = space.name
+                            DispatchQueue.main.async { isNameFocused = true }
+                        }
+                        // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
+                        .onDisappear {
+                            if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                        }
                 }
-                .onAppear {
-                    draftName = space.name
-                    DispatchQueue.main.async { isNameFocused = true }
-                }
-                // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
-                .onDisappear {
-                    if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                }
+                .layoutPriority(1)
         } else {
             Text(space.name)
                 .font(.system(size: 13, weight: .semibold))
