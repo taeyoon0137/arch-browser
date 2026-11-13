@@ -362,7 +362,7 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 
 ## AI hooks and plugins that AI writes
 
-- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will register with the same center under its own feature.
+- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will get those events from the browser event bus and run its listeners as steps of the shared hook scheduler that the center owns, at order 200 under its own feature (`docs/hooks.md`, Plugins); it will not register with the center.
 - The plugin API has no other AI-specific part except `agent`, below. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
 - Hooks (`docs/hooks.md`) reuse the script runtime. A JavaScript hook script runs as a `ScriptPlugin` with a package the hook registry creates in memory and a `PluginContext` of its own, outside the plugin manager. Its `arch.agent.run` calls the agent run API through `runAgent(_:)` under the `agent` permission. Plugin events come from the same browser event bus.
 - The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites or page scripts and with its background script as its only file, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
@@ -937,12 +937,14 @@ public protocol PluginRuntime: AnyObject, Sendable {
 /// Not built yet: what `Browsing` will provide so that plugins can act on tabs without `Plugins` depending on `Browsing`.
 @MainActor
 public protocol PluginBrowserHost: AnyObject {
+    /// Never agent tabs, which belong to agent sessions.
     func tabs(in persona: PersonaID) -> [PluginTab]
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID) -> UUID
     func closeTab(_ id: UUID)
     func selectTab(_ id: UUID)
-    func renameTab(_ id: UUID, to name: String?)
+    /// Applies only while the tab shows `document`, ignoring the fragment, and reports whether it did (`docs/hooks.md`, hook decision 13). Plugins pass the tab's address when the call arrives; hook scripts pass the run's document.
+    func renameTab(_ id: UUID, to name: String?, showing document: URL?) -> Bool
     func renameDownload(_ id: String, to filename: String) throws
     func present(_ panel: NSViewController, for item: Attributed<PluginSidebarItem>)
 }
@@ -1163,7 +1165,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.13 follows both.
-6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
+6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) follow.
 
 ## Open decisions
 

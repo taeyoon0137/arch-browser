@@ -602,7 +602,7 @@ public protocol AIPageSource: Sendable {
 
 Hooks let features act on browser events (row 54). The hook center lives in `AI`; `Browsing` posts the events and applies the actions.
 
-`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center).
+`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). VII.23 moves its scheduling into `AIHookScheduler` beside it, which the center owns and shares with plugin hooks and the hook registry, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
 
 ### Events
 
@@ -721,7 +721,7 @@ public enum AIHookError: Error, Sendable {
 
 ### Ordering
 
-- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once.
+- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once. Once built, plugin hooks join the same chain at 200 and the hook registry's hooks at 1,000 and above, in the registry's order.
 - Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only actions the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
 - The center skips hooks without sending a request when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. After each hook's delay, it repeats these checks and checks the event's site.
@@ -732,6 +732,7 @@ The center cancels a running hook and its request when:
 
 - a newer event of the same kind and subject arrives (the new event's chain starts after the old one stops);
 - the subject goes away (`cancel(subject:)`);
+- once VII.23 builds the shared scheduler, the event's tab commits another document, ignoring the fragment, which would make its actions stale;
 - the user switches the feature off or changes its route;
 - the subscription is canceled;
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
@@ -786,7 +787,7 @@ The review uses the install sheet in `docs/plugins.md` (Lifecycle), with additio
 ### Lifetime
 
 - `plugins.json` records a plugin that AI wrote with `generated`, the requests and the model's name, in place of `source` (`docs/plugins.md`, Storage). Its section in Settings ▸ Plugins says that AI wrote it, with which model, when, and from which requests. It switches off and is removed like any installed plugin.
-- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would register with the hook center at priority 200 and make that feature automatic; reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
+- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would run a plugin's event listeners as steps of the shared hook scheduler at order 200 under that feature, making it automatic, rather than register with the center (`docs/hooks.md`, Plugins); reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
 
 ## Errors
 
