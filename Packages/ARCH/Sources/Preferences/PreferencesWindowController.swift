@@ -1,4 +1,5 @@
 // Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+import Agent
 import AI
 import AppKit
 import ARCHEngine
@@ -44,9 +45,11 @@ public final class PreferencesWindowController: NSWindowController {
     public static var openTerminal: (() -> Void)?
     /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
     public static var session: BrowserSession?
+    /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
+    public static var agents: AgentService?
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
-    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())
+    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents))
     /// Settings ▸ Plugins, while the app shell has set `session`.
     private var pluginsSection: NSTabViewItem?
 

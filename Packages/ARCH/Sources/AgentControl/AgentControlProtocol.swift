@@ -9,6 +9,31 @@ public enum AgentControlProtocol {
     public static let helloMethod = "hello"
 }
 
+/// The methods a client calls after `hello`, and the notifications Arch sends (docs/agents.md, Local control channel ▸ Framing and methods). The methods of later tasks join as they are built; Arch answers any other method with JSON-RPC error -32601.
+public enum AgentControlMethod {
+    /// The tools the connection's grant allows, as MCP's `tools/list` result.
+    public static let toolsList = "tools/list"
+    /// One tool call, params `AgentToolCall`, answered with an `AgentToolResult`. The request's ID is the call's ID.
+    public static let toolsCall = "tools/call"
+    /// The connection's status, as in the answer to `hello`.
+    public static let grantShow = "grant/show"
+    /// Gives up the client's own grant, answered with `{"released": true}` or false when it had none.
+    public static let grantRelease = "grant/release"
+
+    /// A call still waits, as for the grant sheet: params `{"call": <request ID>, "message": "…"}`.
+    public static let progressNotification = "progress"
+    /// The grant ended: params `{"message": "…"}`. Arch closes the connection after it.
+    public static let revokedNotification = "revoked"
+}
+
+/// The control protocol's own JSON-RPC error codes, in the range JSON-RPC leaves to servers.
+public enum AgentControlErrorCode {
+    /// The client has no grant: the user did not allow it, or asked a moment ago, and `arch-cli` exits 6.
+    public static let noGrant = -32001
+    /// More calls than `AgentLimits.callsPerConnection` run on the connection.
+    public static let busy = -32002
+}
+
 /// The program that connects: `arch-cli`, or the same binary run as `arch-mcp`.
 public enum AgentClientKind: String, Codable, Sendable {
     case cli = "arch-cli"
@@ -143,6 +168,8 @@ public struct AgentRefusal: Codable, Equatable, Sendable {
         public static let outsideAccessOff = Reason(rawValue: "outsideAccessOff")
         /// The ticket matches no session, or the peer is not in its session's process tree.
         public static let ticket = Reason(rawValue: "ticket")
+        /// Arch could not tell which program the client is, as when a process on its parent chain ended while Arch read it.
+        public static let unidentified = Reason(rawValue: "unidentified")
     }
 }
 

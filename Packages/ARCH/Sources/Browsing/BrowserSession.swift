@@ -433,7 +433,7 @@ public final class BrowserSession: ObservableObject {
         if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions) } }
         context.downloads.delegate = self
         followDownloadSettings(of: context)
-        permissionAnswers.follow(context)
+        permissionAnswers.follow(context, of: persona.id)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
         browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
         // An engine that starts after another in the Persona takes what the running engine changed since the two stores last agreed. This first copy of a launch reads the Persona's record of that agreement, so it also carries what one engine changed while the other was not running (`CookieSync`).
@@ -457,7 +457,13 @@ public final class BrowserSession: ObservableObject {
 
     /// A space's pinned or open tabs in sidebar order: the tabs of each folder, folder by folder, then the tabs outside folders.
     public func tabs(in spaceID: UUID, pinned: Bool) -> [Tab] {
-        folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
+        Self.tabs(in: spaceID, pinned: pinned, among: tabs, folders: folders)
+    }
+
+    /// The rule of `tabs(in:pinned:)` over given lists. A small window's tab, which is in no folder, is left out until it moves to a main window.
+    static func tabs(in spaceID: UUID, pinned: Bool, among tabs: [Tab], folders: [TabFolder]) -> [Tab] {
+        let inFolders = folders.filter { $0.spaceID == spaceID && $0.isPinned == pinned }.flatMap { folder in tabs.filter { $0.folderID == folder.id } }
+        return inFolders + tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
     /// Adds a space to the Persona and returns it, named `name` or else as `newSpaceName(among:)` names it, and with the next tint of the rotation.
@@ -705,6 +711,18 @@ public final class BrowserSession: ObservableObject {
     /// Every open tab: the spaces' tabs, then the favorites' tabs.
     public var allTabs: [Tab] { tabs + openFavoriteTabs }
 
+    /// Every open tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs, then the small windows' tabs. AppleScript's `tabs` and the agents' `list_tabs` read this one order.
+    public var tabsInSidebarOrder: [Tab] {
+        Self.sidebarOrder(favoriteTabs: openFavoriteTabs, spaces: spaces, folders: folders, tabs: tabs)
+    }
+
+    static func sidebarOrder(favoriteTabs: [Tab], spaces: [Space], folders: [TabFolder], tabs: [Tab]) -> [Tab] {
+        let spaceTabs = spaces.flatMap { space in
+            Self.tabs(in: space.id, pinned: true, among: tabs, folders: folders) + Self.tabs(in: space.id, pinned: false, among: tabs, folders: folders)
+        }
+        return favoriteTabs + spaceTabs + tabs.filter(\.isInSmallWindow)
+    }
+
     /// Opens a tab in `engine`, or in the default engine when no engine is given, in the space `spaceID` or the sidebar target's current space. `select` selects it in the sidebar target. Views and menus that act on a window open tabs through `BrowserWindowModel` instead.
     @discardableResult
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
@@ -807,7 +825,7 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, ask: { alert, response in
                 self.enqueueSheet(alert, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1139,6 +1157,12 @@ public final class BrowserSession: ObservableObject {
 
     /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
     let permissionAnswers: SitePermissionAnswers
+
+    /// The Agents Persona, which the agents' service names through `BrowserAgentHost` before any of its profiles starts: its profiles get no remembered answers, and its requests are denied without a sheet (agent decision 9). Never the default Persona, whose profile follows the answers from launch.
+    var agentOnlyPersonaID: Persona.ID? {
+        get { permissionAnswers.agentOnlyPersonaID }
+        set { permissionAnswers.agentOnlyPersonaID = newValue == Persona.defaultID ? nil : newValue }
+    }
 
     // MARK: Sheets
 

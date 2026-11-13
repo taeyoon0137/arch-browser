@@ -18,8 +18,8 @@ import Testing
         let sheets = SheetRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), forTab: UUID(), personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation]), forTab: UUID(), personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
         #expect(granted == [true, false])
         #expect(sheets.alerts.isEmpty)
     }
@@ -33,8 +33,8 @@ import Testing
         let request = EnginePermissionRequest(origin: Self.site, types: [.camera])
 
         var granted: [Bool] = []
-        answers.answer(request, forTab: tabID, in: nil, ask: sheets.ask) { granted.append($0) }
-        answers.answer(request, forTab: tabID, in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(request, forTab: tabID, personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(request, forTab: tabID, personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
         #expect(sheets.alerts.count == 1)
         #expect(sheets.alerts.first?.informativeText.isEmpty == false)
 
@@ -51,9 +51,9 @@ import Testing
         let sheets = SheetRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
         sheets.respond(.cancel)
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.screenCapture]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.screenCapture]), forTab: UUID(), personaID: Persona.defaultID, in: nil, ask: sheets.ask) { granted.append($0) }
         #expect(sheets.alerts.last?.informativeText.isEmpty == true)
         sheets.respond(.alertFirstButtonReturn)
 
@@ -68,7 +68,7 @@ import Testing
         let answers = SitePermissionAnswers(store: store)
         let context = RecordingContext()
 
-        answers.follow(context)
+        answers.follow(context, of: Persona.defaultID)
         #expect(context.kept["camera \(Self.origin)"] == .some(true))
         store.set(.deny, for: [.microphone], origin: Self.origin)
         #expect(context.kept["microphone \(Self.origin)"] == .some(false))
@@ -94,7 +94,7 @@ import Testing
         #expect(relaunched.removed == [Self.origin: [.geolocation]])
         let answers = SitePermissionAnswers(store: relaunched)
         let context = RecordingContext()
-        answers.follow(context)
+        answers.follow(context, of: Persona.defaultID)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(nil))
         #expect(context.kept["camera \(Self.origin)"] == .some(false))
 

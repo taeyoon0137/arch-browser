@@ -18,14 +18,20 @@ public enum AgentClientError: Error, Equatable {
     case timedOut
     case malformedAnswer(String)
     case system(String)
+    /// The user did not allow this client, or Arch asked a moment ago; Arch's sentence.
+    case noGrant(String)
+    /// The grant ended while the call ran; Arch's sentence.
+    case revoked(String)
+    /// Arch answered a method with a JSON-RPC error.
+    case failed(AgentRPCError)
 
     public var exitCode: AgentExitCode {
         switch self {
-        case .noSocketLocation, .timedOut, .malformedAnswer, .system: return .internalError
+        case .noSocketLocation, .timedOut, .malformedAnswer, .system, .failed: return .internalError
         case .notRunning, .closed: return .unavailable
         case .notArch: return .notArch
         case .protocolMismatch: return .protocolMismatch
-        case .closedBeforeAnswer: return .noGrant
+        case .closedBeforeAnswer, .noGrant, .revoked: return .noGrant
         case .refused(let refusal):
             switch refusal.reason {
             case .protocolMismatch: return .protocolMismatch
@@ -48,6 +54,8 @@ public enum AgentClientError: Error, Equatable {
         case .timedOut: return "Arch did not answer."
         case .malformedAnswer(let detail): return "Arch's answer could not be read: \(detail)"
         case .system(let detail): return detail
+        case .noGrant(let message), .revoked(let message): return message
+        case .failed(let error): return "Arch could not answer: \(error.message)"
         }
     }
 }
@@ -134,6 +142,38 @@ public final class AgentControlConnection {
         guard answer.protocol == AgentControlProtocol.version else { throw AgentClientError.protocolMismatch(arch: answer.protocol) }
         if case .refused(let refusal) = answer.status { throw AgentClientError.refused(refusal) }
         return answer
+    }
+
+    /// Calls a method after `hello` and returns its result. Waits as long as Arch takes, which for a first `tools/call` includes the user's answer to the grant sheet, or at most `timeout` seconds for each message when one is given; each `progress` notification for the call goes to `progress`. Throws `noGrant` and `revoked` for Arch's answers that end the client's access.
+    public func call(_ method: String, params: AgentJSON? = nil, timeout: TimeInterval? = nil, progress: (String) -> Void = { _ in }) throws -> AgentJSON {
+        let id = AgentRPCID.number(nextRequestID)
+        nextRequestID += 1
+        try send(.request(id: id, method: method, params: params))
+        while true {
+            switch try receive(timeout: timeout) {
+            case .result(id, let result):
+                return result
+            case .error(id, let error):
+                if error.code == AgentControlErrorCode.noGrant { throw AgentClientError.noGrant(error.message) }
+                throw AgentClientError.failed(error)
+            case .notification(AgentControlMethod.revokedNotification, let params):
+                throw AgentClientError.revoked(params?["message"]?.stringValue ?? "Your access to Arch ended.")
+            case .notification(AgentControlMethod.progressNotification, let params):
+                if let message = params?["message"]?.stringValue { progress(message) }
+            default:
+                continue
+            }
+        }
+    }
+
+    /// Calls one tool and returns its result.
+    public func callTool(_ call: AgentToolCall, timeout: TimeInterval? = nil, progress: (String) -> Void = { _ in }) throws -> AgentToolResult {
+        let result = try self.call(AgentControlMethod.toolsCall, params: AgentJSON(encoding: call), timeout: timeout, progress: progress)
+        do {
+            return try result.decode(as: AgentToolResult.self)
+        } catch {
+            throw AgentClientError.malformedAnswer("its tool result is not one this program knows.")
+        }
     }
 
     /// Sends one message as one frame.

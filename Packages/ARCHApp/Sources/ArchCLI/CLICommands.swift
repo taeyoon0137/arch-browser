@@ -1,4 +1,4 @@
-// The commands `arch-cli` answers: `status`, `guide`, `tools`, and `--help` (docs/agents.md, arch-cli). Text goes to standard output, and an error to standard error as one sentence, with the exit code from `AgentExitCode`.
+// The commands `arch-cli` answers: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, and `--help` (docs/agents.md, arch-cli). Text goes to standard output, and an error to standard error as one sentence, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
 import AgentControl
 import Foundation
 
@@ -25,6 +25,12 @@ enum CLICommands {
             return .done
         case .status:
             return status(json: request.json)
+        case .spaces:
+            return runTool(AgentToolCall(name: "list_spaces"), json: request.json)
+        case .tabs(let shared):
+            return runTool(AgentToolCall(name: "list_tabs", arguments: shared ? ["scope": "shared"] : [:]), json: request.json)
+        case .release:
+            return release(json: request.json)
         }
     }
 
@@ -42,24 +48,63 @@ enum CLICommands {
         }
     }
 
-    // MARK: - status
+    // MARK: - Connecting
 
-    /// Connects, checks that the socket is Arch's, and reports Arch's answer to `hello`.
-    private static func status(json: Bool) -> AgentExitCode {
-        let clientVersion = AgentBundleLayout.currentExecutable().flatMap(AgentBundleLayout.containing(helper:))?.version ?? "unknown"
+    private static var clientVersion: String {
+        AgentBundleLayout.currentExecutable().flatMap(AgentBundleLayout.containing(helper:))?.version ?? "unknown"
+    }
+
+    /// Connects, checks that the socket is Arch's, says `hello`, and runs `body` on the connection with Arch's answer. Client errors print their sentence and exit with their code.
+    private static func withConnection(_ body: (AgentControlConnection, AgentHelloAnswer) throws -> AgentExitCode) -> AgentExitCode {
         do {
             guard let location = AgentSocketLocation.current() else { throw AgentClientError.noSocketLocation }
             let connection = try AgentControlConnection(location: location, check: AgentControlConnection.archCheck())
             let answer = try connection.hello(AgentHello(client: .cli, version: clientVersion))
-            if json { return printJSON(try AgentJSON(encoding: answer)) }
-            print(statusText(answer, clientVersion: clientVersion))
-            return .done
+            return try body(connection, answer)
         } catch let error as AgentClientError {
             printError(error.message)
             return error.exitCode
         } catch {
             printError("\(error)")
             return .internalError
+        }
+    }
+
+    // MARK: - status
+
+    /// Connects, checks that the socket is Arch's, and reports Arch's answer to `hello`.
+    private static func status(json: Bool) -> AgentExitCode {
+        withConnection { _, answer in
+            if json { return printJSON(try AgentJSON(encoding: answer)) }
+            print(statusText(answer, clientVersion: clientVersion))
+            return .done
+        }
+    }
+
+    // MARK: - Tools
+
+    /// Calls one tool. The first call of a client without a grant waits while Arch asks the user, and says so on standard error.
+    private static func runTool(_ call: AgentToolCall, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let result = try connection.callTool(call) { printError($0) }
+            if json {
+                if printJSON(result.structured ?? .null) != .done { return .internalError }
+            } else if result.status == .ok {
+                print(result.text)
+            } else {
+                printError(result.text)
+            }
+            return AgentExitCode(status: result.status)
+        }
+    }
+
+    /// Gives up this client's grant.
+    private static func release(json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let released = try connection.call(AgentControlMethod.grantRelease)["released"] == .bool(true)
+            if json { return printJSON(["released": .bool(released)]) }
+            print(released ? "This client no longer has access to Arch. Its next command asks again." : "This client had no access to give up.")
+            return .done
         }
     }
 

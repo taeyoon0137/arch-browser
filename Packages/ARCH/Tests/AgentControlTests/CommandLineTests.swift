@@ -26,6 +26,10 @@ import Testing
         #expect(try AgentCommandLine.parse(["--help"]).command == .help)
         #expect(try AgentCommandLine.parse(["help"]).command == .help)
         #expect(try AgentCommandLine.parse(["status", "-h"]).command == .help)
+        #expect(try AgentCommandLine.parse(["spaces"]) == AgentCLIRequest(command: .spaces, json: false))
+        #expect(try AgentCommandLine.parse(["tabs"]) == AgentCLIRequest(command: .tabs(shared: false), json: false))
+        #expect(try AgentCommandLine.parse(["tabs", "--shared", "--json"]) == AgentCLIRequest(command: .tabs(shared: true), json: true))
+        #expect(try AgentCommandLine.parse(["release"]) == AgentCLIRequest(command: .release, json: false))
     }
 
     @Test(arguments: [
@@ -36,6 +40,9 @@ import Testing
         (["guide", "cli", "browsing"], "guide takes at most one topic."),
         (["guide", "secrets"], "There is no guide topic named secrets. Topics: cli."),
         (["--verbose", "status"], "Unknown option --verbose."),
+        (["spaces", "--shared"], "Only tabs takes --shared."),
+        (["tabs", "t1"], "tabs takes no arguments."),
+        (["release", "now"], "release takes no arguments."),
     ])
     func usageErrors(arguments: [String], message: String) {
         #expect(throws: AgentUsageError(message: message)) { try AgentCommandLine.parse(arguments) }
@@ -73,6 +80,9 @@ import Testing
         #expect(AgentClientError.closed.exitCode == .unavailable)
         #expect(AgentClientError.timedOut.exitCode == .internalError)
         #expect(AgentClientError.noSocketLocation.exitCode == .internalError)
+        #expect(AgentClientError.noGrant("You did not allow it.").exitCode == .noGrant)
+        #expect(AgentClientError.revoked("Revoked.").exitCode == .noGrant)
+        #expect(AgentClientError.failed(.methodNotFound("task/start")).exitCode == .internalError)
         #expect(AgentClientError.protocolMismatch(arch: 2).message.contains("version 2") && AgentClientError.protocolMismatch(arch: 2).message.contains("version 1"))
     }
 

@@ -1,4 +1,5 @@
-// Settings ▸ AI: the providers the user connects, the models for each registered feature, the sites where AI is off, usage, and recent requests. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
+// Settings ▸ AI: the providers the user connects, the models for each registered feature, the sites where AI is off, usage, recent requests, and agents' outside access, grants, and activity. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
+import Agent
 import AI
 import SwiftUI
 
@@ -17,8 +18,11 @@ struct AISettingsView: View {
         case sites = "Sites"
         case usage = "Usage"
         case activity = "Activity"
+        case agents = "Agents"
     }
 
+    /// The agents' service, whose page shows only when the app shell set one.
+    let agents: AgentService?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
     @State private var page = Page.providers
@@ -28,7 +32,7 @@ struct AISettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Page", selection: $page) {
-                ForEach(Page.allCases, id: \.self) { Text($0.rawValue) }
+                ForEach(Page.allCases.filter { $0 != .agents || agents != nil }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -47,6 +51,8 @@ struct AISettingsView: View {
                 case .sites: AISitesPage(settings: settings)
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
+                case .agents:
+                    if let agents { AgentSettingsPage(service: agents, activity: agents.activity) }
                 }
             }
             .formStyle(.grouped)

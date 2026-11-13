@@ -1,4 +1,5 @@
-// Registers the engines, creates the browser session, which opens the browser windows, and connects the menu bar to it.
+// Registers the engines, creates the browser session, which opens the browser windows, and the agents' service, and connects the menu bar to them.
+import Agent
 import AppKit
 import ARCHEngine
 import ARCHEngineChromium
@@ -13,6 +14,8 @@ import Terminal
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     /// Scripting reads it through the application.
     private(set) var session: BrowserSession!
+    /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
+    private var agents: AgentService?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
@@ -53,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.session = session
+        // Before the windows open, so that the Agents Persona that `agent.json` names is agent-only before any of its profiles starts. It listens only once Allow Outside Clients is on.
+        let agents = AgentService(directory: supportDirectory, host: BrowserAgentHost(session: session),
+                                  version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
+        self.agents = agents
+        PreferencesWindowController.agents = agents
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }
@@ -136,12 +144,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
+        // AppKit calls the quit on the main thread, where the agents' grant sheets show.
+        if quitting { MainActor.assumeIsolated { agents?.cancelQuestions() } }
     }
 
-    /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits.
+    /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits. The agents' socket goes with the app.
     func applicationWillTerminate(_ notification: Notification) {
         session?.saveAtQuit()
         session?.history.finishWrites()
+        agents?.stop()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.

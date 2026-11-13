@@ -1,4 +1,4 @@
-// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a sheet on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones.
+// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a sheet on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones. The Persona that only agents use is the exception (agent decision 9; Persona rule 6): its profiles get no remembered answers, and its requests are denied without a sheet and not remembered.
 import AppKit
 import ARCHEngine
 import Combine
@@ -10,14 +10,34 @@ final class SitePermissionAnswers {
     /// The answers waiting for each permission sheet, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same sheet's answer.
     private var waiters: [String: [(Bool) -> Void]] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    /// The agent-only Persona's profiles, which follow the remembered answers only once their Persona becomes ordinary again.
+    private var unfollowed: [(personaID: UUID, context: any EngineBrowserContext)] = []
+
+    /// The Agents Persona while `agent.json` names it, which the agents' service sets before any of its profiles starts. A Persona that stops being agent-only, as after `agent.json` lost its seal, has its running profiles follow the remembered answers from then on; a profile that followed them before its Persona became agent-only keeps them until quit.
+    var agentOnlyPersonaID: UUID? {
+        didSet {
+            guard agentOnlyPersonaID != oldValue else { return }
+            let released = unfollowed.filter { $0.personaID != agentOnlyPersonaID }
+            unfollowed.removeAll { $0.personaID != agentOnlyPersonaID }
+            for profile in released { follow(profile.context, of: profile.personaID) }
+        }
+    }
 
     init(store: SitePermissionStore) {
         self.store = store
     }
 
-    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?,
+    /// Answers a request of the tab `tabID` in the Persona `personaID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. A request in the agent-only Persona is denied at once. `context` is the profile of the tab's page.
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?,
                 ask: (NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
+        if personaID == agentOnlyPersonaID {
+            completion(false)
+            // Chromium keeps every answer it receives, so its profile forgets the denial again: this Persona remembers nothing.
+            if let context {
+                DispatchQueue.main.async { request.types.forEach { context.setRememberedPermission(nil, for: $0, origin: request.origin) } }
+            }
+            return
+        }
         let store = store
         // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
         let answer = { [weak self] (granted: Bool) in
@@ -58,8 +78,12 @@ final class SitePermissionAnswers {
         }
     }
 
-    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings. Now also takes away the answers removed while the profile was not running.
-    func follow(_ context: any EngineBrowserContext) {
+    /// Copies the remembered answers into the kept answers of a profile of the Persona `personaID`, now and after every change, such as one made in Settings. Now also takes away the answers removed while the profile was not running. A profile of the agent-only Persona takes none.
+    func follow(_ context: any EngineBrowserContext, of personaID: UUID) {
+        guard personaID != agentOnlyPersonaID else {
+            unfollowed.append((personaID, context))
+            return
+        }
         let store = store
         let apply = { (origin: String, types: [EnginePermissionType]) in
             guard let url = URL(string: origin) else { return }

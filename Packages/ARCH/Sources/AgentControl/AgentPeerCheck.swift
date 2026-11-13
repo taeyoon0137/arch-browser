@@ -98,10 +98,16 @@ public struct AgentPeerCheck: Sendable {
     /// Throws `AgentPeerCheckFailure` unless the peer runs as this process's user with valid code whose hash is the expected one, and returns the peer it checked.
     @discardableResult
     public func verify(socket: Int32) throws -> AgentPeer {
-        guard let expectedHash else { throw AgentPeerCheckFailure.noExpectedCode }
+        guard expectedHash != nil else { throw AgentPeerCheckFailure.noExpectedCode }
         let peer = try AgentPeer.read(socket: socket)
-        guard peer.userID == geteuid() else { throw AgentPeerCheckFailure.otherUser(peer.userID) }
-        guard try AgentCodeIdentity.uniqueHash(ofProcessWith: peer.auditToken) == expectedHash else { throw AgentPeerCheckFailure.otherCode }
+        try verify(peer)
         return peer
+    }
+
+    /// The same check of a peer already read, with the running code's hash from `runningCodeHash`, so that a test can give the peer another user.
+    public func verify(_ peer: AgentPeer, runningCodeHash: (audit_token_t) throws -> Data = AgentCodeIdentity.uniqueHash(ofProcessWith:)) throws {
+        guard let expectedHash else { throw AgentPeerCheckFailure.noExpectedCode }
+        guard peer.userID == geteuid() else { throw AgentPeerCheckFailure.otherUser(peer.userID) }
+        guard try runningCodeHash(peer.auditToken) == expectedHash else { throw AgentPeerCheckFailure.otherCode }
     }
 }

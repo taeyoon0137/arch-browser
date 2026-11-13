@@ -6,7 +6,7 @@ public enum AgentRPCID: Hashable, Sendable {
     case number(Int)
     case string(String)
 
-    var json: AgentJSON {
+    public var json: AgentJSON {
         switch self {
         case .number(let number): return .number(Double(number))
         case .string(let string): return .string(string)

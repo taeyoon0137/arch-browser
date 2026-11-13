@@ -115,7 +115,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 3. A tab's Persona is fixed when the tab is created, because its web contents belong to that Persona's context. Every change of a tab's space goes through one guard that refuses a space of another Persona. A space's Persona is fixed.
 4. Cookies copy between the engines only within a Persona: each Persona has its own `CookieSync`.
 5. A Persona's stored data is removed only through an explicit list in the snapshot, at the next launch, before any engine starts. Removal is never inferred from a missing Persona.
-6. History, remembered permissions, zoom, site search, the search engine, the download settings, and `ai.json` stay app-wide (open decisions 2 and 3).
+6. History, remembered permissions, zoom, site search, the search engine, the download settings, and `ai.json` stay app-wide (open decisions 2 and 3). The Agents Persona, which Arch creates for outside agent clients and `agent.json` records, is the exception for permissions (`docs/agents.md`, agent decision 9): its profiles take none of the remembered answers, and its permission requests are denied without a sheet and remembered nowhere.
 
 ## Risks and mitigations
 
