@@ -1,4 +1,4 @@
-// The rules both adapters apply to a page's file chooser: the accepted types they keep, the file types an open panel offers for them, and what the page receives of the user's choice.
+// The rules both adapters apply to a page's file chooser: the accepted types they keep, the file types an open panel offers for them, the origins that name who asks, and what the page receives of the user's choice.
 import ARCHEngine
 import Foundation
 import Testing
@@ -48,6 +48,15 @@ import UniformTypeIdentifiers
         #expect(EngineFileChooserRequest(mode: .openFiles).allowsMultipleSelection)
         for mode in [EngineFileChooserRequest.Mode.openFile, .openFolder, .save] {
             #expect(!EngineFileChooserRequest(mode: mode).allowsMultipleSelection)
+        }
+    }
+
+    @Test func eachAddressKeepsOnlyItsOriginAndOneWithoutAHostNone() {
+        let request = EngineFileChooserRequest(mode: .openFile, origin: URL(string: "https://user:secret@widget.example:8443/frame?q=1#x"), pageOrigin: URL(string: "https://news.example/story"))
+        #expect(request.origin == URL(string: "https://widget.example:8443/"))
+        #expect(request.pageOrigin == URL(string: "https://news.example/"))
+        for address in ["about:blank", "data:text/html,a", "blob:https://news.example/1", "file:///tmp/a.html"] {
+            #expect(EngineFileChooserRequest(mode: .openFile, origin: URL(string: address), pageOrigin: URL(string: address)) == EngineFileChooserRequest(mode: .openFile))
         }
     }
 }

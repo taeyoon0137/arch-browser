@@ -1,4 +1,4 @@
-// A page's request for files, a folder, or a place to save one, which both adapters report to the UI delegate (`webContents(_:runFileChooser:completion:)`), and the rules both apply to the answer.
+// A page's request for files, a folder, or a place to save one, with who asks, which both adapters report to the UI delegate (`webContents(_:runFileChooser:completion:)`), and the rules both apply to the answer.
 import Foundation
 import UniformTypeIdentifiers
 
@@ -20,9 +20,13 @@ public struct EngineFileChooserRequest: Equatable, Sendable {
     public var acceptedTypes: [String]
     /// The file name the page suggests for `save`, without a folder; nil for the other modes.
     public var suggestedName: String?
+    /// The origin of the frame that asks, which receives the files, as an address with an empty path. Nil when the engine cannot tell, as Chromium cannot, whose chooser names no frame, and for an origin without a host, such as a sandboxed or `data:` frame's.
+    public var origin: URL?
+    /// The origin of the page the tab shows, from the address its main frame committed, never from one it is still loading, which the page can start; nil when unknown or without a host. A panel names who asks from `origin` and this, not from the tab's address.
+    public var pageOrigin: URL?
 
-    /// Keeps of `acceptedTypes` only MIME types and extensions, trimmed and in lowercase.
-    public init(mode: Mode, acceptedTypes: [String] = [], suggestedName: String? = nil) {
+    /// Keeps of `acceptedTypes` only MIME types and extensions, trimmed and in lowercase, and of each address only its origin.
+    public init(mode: Mode, acceptedTypes: [String] = [], suggestedName: String? = nil, origin: URL? = nil, pageOrigin: URL? = nil) {
         self.mode = mode
         self.acceptedTypes = acceptedTypes.compactMap { type in
             let type = type.trimmingCharacters(in: .whitespaces).lowercased()
@@ -32,6 +36,20 @@ public struct EngineFileChooserRequest: Equatable, Sendable {
             return isExtension || isMIMEType ? type : nil
         }
         self.suggestedName = suggestedName.flatMap { $0.isEmpty ? nil : $0 }
+        self.origin = origin.flatMap(Self.origin(of:))
+        self.pageOrigin = pageOrigin.flatMap(Self.origin(of:))
+    }
+
+    /// An address's scheme, host, and port with an empty path, or nil for an address without a host, as `about:`, `data:`, `blob:`, and `file:` addresses are.
+    private static func origin(of url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: true), components.scheme != nil,
+              let host = components.host, !host.isEmpty else { return nil }
+        components.user = nil
+        components.password = nil
+        components.path = "/"
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 
     /// Whether the user may choose more than one item.

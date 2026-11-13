@@ -853,10 +853,10 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return completion(.cancel) }
             self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
         }
-        // A page's file chooser opens Arch's panel on both engines, in the tab's sheet queue; Cancel, a closed tab, or quitting gives the page no file.
+        // A page's file chooser opens Arch's panel on both engines, in the tab's sheet queue, naming who asks from the engine's report rather than from the tab's address; Cancel, a closed tab, or quitting gives the page no file.
         tab.chooseFiles = { [weak self, weak tab] request, completion in
             guard let self, let tab, !self.isQuitting else { return completion(nil) }
-            let panel = FileChooserPanel.make(for: request, site: tab.url?.host)
+            let panel = FileChooserPanel.make(for: request)
             self.sheets.enqueue(panel, for: tab) { completion($0 == .OK ? FileChooserPanel.chosenURLs(of: panel) : nil) }
         }
         // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.

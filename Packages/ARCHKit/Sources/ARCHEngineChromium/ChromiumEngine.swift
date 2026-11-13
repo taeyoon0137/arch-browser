@@ -632,13 +632,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate?.webContentsDidCancelDialogs(self)
     }
     /// The UI delegate shows the app's panel; without one the page gets no file. The page receives only what the request's rules keep (`answer(from:)`).
-    public func cefBrowserRunFileChooser(_ mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], completion: @escaping ([String]?) -> Void) {
+    public func cefBrowserRunFileChooser(_ mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], pageURL: String, completion: @escaping ([String]?) -> Void) {
         guard let uiDelegate else { return completion(nil) }
-        let request = Self.fileChooserRequest(mode: mode, defaultPath: defaultPath, acceptedTypes: acceptedTypes)
+        let request = Self.fileChooserRequest(mode: mode, defaultPath: defaultPath, acceptedTypes: acceptedTypes, pageURL: pageURL)
         uiDelegate.webContents(self, runFileChooser: request) { completion(request.answer(from: $0)?.map(\.path)) }
     }
-    /// The request for a chooser the bridge reports. A save chooser suggests only the file name of CEF's default path, which can name a folder on the Mac.
-    static func fileChooserRequest(mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String]) -> EngineFileChooserRequest {
+    /// The request for a chooser the bridge reports. A save chooser suggests only the file name of CEF's default path, which can name a folder on the Mac. CEF names no frame, so the request names only the page, from the main frame's committed address.
+    static func fileChooserRequest(mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], pageURL: String) -> EngineFileChooserRequest {
         let chooserMode: EngineFileChooserRequest.Mode = switch mode {
         case .openMultiple: .openFiles
         case .openFolder: .openFolder
@@ -646,7 +646,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         default: .openFile
         }
         let name = chooserMode == .save ? (defaultPath as NSString).lastPathComponent : nil
-        return EngineFileChooserRequest(mode: chooserMode, acceptedTypes: acceptedTypes, suggestedName: name)
+        return EngineFileChooserRequest(mode: chooserMode, acceptedTypes: acceptedTypes, suggestedName: name, pageOrigin: URL(engineString: pageURL))
     }
     public func cefBrowserShouldDownloadURL(_ url: String, hasDocument: Bool) -> Bool {
         guard let uiDelegate, let url = URL(string: url) else { return true }

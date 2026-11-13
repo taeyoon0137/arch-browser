@@ -503,7 +503,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webView.isInspectable = true
     }
 
-    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate.
+    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate. The lookup runs in a world of the app's own: `evaluateJavaScript` runs with a user gesture, which in the page's world would reach a DOM method the page replaced, and with it a file chooser or a popup after every load.
     func refreshFavicon() {
         guard let pageURL = webView.url else { return }
         if favicon != nil {
@@ -511,9 +511,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             uiDelegate?.webContentsDidChangeFavicon(self)
         }
         let script = "(function(){var l=document.querySelector('link[rel~=\"icon\"],link[rel=\"shortcut icon\"],link[rel=\"apple-touch-icon\"]');return l?l.href:null;})()"
-        webView.evaluateJavaScript(script) { [weak self] value, _ in
+        webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { [weak self] result in
             guard let self else { return }
-            let declared = (value as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
+            let declared = (try? result.get() as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
             guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
             FaviconLoader.load(iconURL) { [weak self] image in
                 // Ignore icons received after the tab navigates to another page.

@@ -22,10 +22,10 @@ enum WebKitFileChooserAPI {
     /// Whether the feature may run now. WebKit asks on the main thread, where the flags live.
     static var isAllowed: Bool { MainActor.assumeIsolated { PrivateAPIFlags.shared.allows(featureID) } }
 
-    /// The request for an open panel: a folder for an input with `webkitdirectory`, several files for one with `multiple`, otherwise one file, with the page's accepted types while the flags allow reading them. WebKit gives the types in lowercase, MIME types first.
-    static func request(for parameters: WKOpenPanelParameters) -> EngineFileChooserRequest {
+    /// The request for an open panel: a folder for an input with `webkitdirectory`, several files for one with `multiple`, otherwise one file, with the page's accepted types while the flags allow reading them, and who asks. WebKit gives the types in lowercase, MIME types first.
+    static func request(for parameters: WKOpenPanelParameters, origin: URL?, pageOrigin: URL?) -> EngineFileChooserRequest {
         let mode: EngineFileChooserRequest.Mode = parameters.allowsDirectories ? .openFolder : parameters.allowsMultipleSelection ? .openFiles : .openFile
-        return EngineFileChooserRequest(mode: mode, acceptedTypes: isAllowed ? acceptedTypes(of: parameters) : [])
+        return EngineFileChooserRequest(mode: mode, acceptedTypes: isAllowed ? acceptedTypes(of: parameters) : [], origin: origin, pageOrigin: pageOrigin)
     }
 
     /// Key-value coding reads the getters the availability check looked for.

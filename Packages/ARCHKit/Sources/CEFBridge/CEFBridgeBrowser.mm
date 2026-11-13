@@ -283,6 +283,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
               defaultPath:(NSString *)defaultPath
             acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                  pageURL:(NSString *)pageURL
                completion:(void (^)(NSArray<NSString *> *_Nullable))completion;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
@@ -510,7 +511,7 @@ public:
         return true;
     }
 
-    // Every file chooser that Chromium opens comes here: a page's file input, and any other, such as a download's Save As. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused.
+    // CEF's file dialog factory takes every chooser and asks the dialog handler of the browser it finds for the chooser's web contents, then for its window, then the focused one, and cancels when it finds none (`file_dialog_runner.cc`). So this browser's file inputs and other choosers, such as a download's Save As, come here, and so can those of views without a browser of their own, such as an extension's popup or docked DevTools. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused. CEF names no frame, so the app gets the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not the address a navigation the page started is loading.
     bool OnFileDialog(CefRefPtr<CefBrowser> browser, FileDialogMode mode, const CefString &title, const CefString &default_file_path,
                       const std::vector<CefString> &accept_filters, const std::vector<CefString> &accept_extensions,
                       const std::vector<CefString> &accept_descriptions, CefRefPtr<CefFileDialogCallback> callback) override {
@@ -526,8 +527,10 @@ public:
         for (const CefString &filter : accept_filters) {
             [types addObject:ToNSString(filter)];
         }
+        CefRefPtr<CefFrame> mainFrame = browser->GetMainFrame();
+        NSString *pageURL = mainFrame ? ToNSString(mainFrame->GetURL()) : @"";
         CefRefPtr<CefFileDialogCallback> continuation = callback;
-        [owner_ handleFileChooser:chooserMode defaultPath:ToNSString(default_file_path) acceptedTypes:types completion:^(NSArray<NSString *> *paths) {
+        [owner_ handleFileChooser:chooserMode defaultPath:ToNSString(default_file_path) acceptedTypes:types pageURL:pageURL completion:^(NSArray<NSString *> *paths) {
             std::vector<CefString> files;
             for (NSString *path in paths) {
                 files.push_back(CefString(path.UTF8String));
@@ -1252,6 +1255,7 @@ private:
 - (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
               defaultPath:(NSString *)defaultPath
             acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                  pageURL:(NSString *)pageURL
                completion:(void (^)(NSArray<NSString *> *_Nullable))completion {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
     if (!delegate) {
@@ -1259,7 +1263,7 @@ private:
         return;
     }
     // CEF ignores a second answer, so a delegate that answers twice changes nothing.
-    [delegate cefBrowserRunFileChooser:mode defaultPath:defaultPath acceptedTypes:acceptedTypes completion:completion];
+    [delegate cefBrowserRunFileChooser:mode defaultPath:defaultPath acceptedTypes:acceptedTypes pageURL:pageURL completion:completion];
 }
 
 - (void)handleBeforeClose {

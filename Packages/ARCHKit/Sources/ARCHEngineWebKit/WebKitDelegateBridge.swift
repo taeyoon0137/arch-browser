@@ -87,7 +87,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// The origin of the frame that started a navigation, as an address with an empty path, or nil when the origin is opaque or unknown, which leaves its protocol empty.
     private static func sourceOrigin(of navigationAction: WKNavigationAction) -> URL? {
-        let origin = navigationAction.sourceFrame.securityOrigin
+        address(of: navigationAction.sourceFrame.securityOrigin)
+    }
+
+    /// A security origin as an address with an empty path, or nil when the origin is opaque or unknown, which leaves its protocol empty.
+    private static func address(of origin: WKSecurityOrigin) -> URL? {
         guard !origin.protocol.isEmpty else { return nil }
         let port = origin.port == 0 ? "" : ":\(origin.port)"
         return URL(string: "\(origin.protocol)://\(origin.host)\(port)/")
@@ -183,10 +187,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
     }
 
-    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`).
+    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`). The request names the frame that asks and the page: the web view's address can be one the page is still loading, so the page's origin is the main frame's own, or for a frame inside the page that of the current back-forward item, which changes only when a navigation commits.
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         guard let delegate = owner.uiDelegate else { return completionHandler(nil) }
-        let request = WebKitFileChooserAPI.request(for: parameters)
+        let origin = Self.address(of: frame.securityOrigin)
+        let request = WebKitFileChooserAPI.request(for: parameters, origin: origin, pageOrigin: frame.isMainFrame ? origin : webView.backForwardList.currentItem?.url)
         let answer = WebKitFileChooserAnswer(completionHandler)
         delegate.webContents(owner, runFileChooser: request) { answer.send(request.answer(from: $0)) }
     }
