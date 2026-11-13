@@ -32,6 +32,8 @@ struct PluginsSection: View {
     /// The session's Personas. The section follows only them, not every change of the session.
     @State private var personas: [Persona] = []
     @State private var personaID = Persona.defaultID
+    /// Whether the shown list is busy (`PluginList.isBusy`), which a request for another Persona waits for.
+    @State private var listIsBusy = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -44,17 +46,22 @@ struct PluginsSection: View {
                     }
                 }
                 // Each Persona's list is a view of its own, so that a review sheet open while the user deletes its Persona closes instead of installing into the Persona shown next.
-                PluginList(session: session, plugins: session.plugins(in: shownPersonaID), personaID: shownPersonaID, proxy: proxy)
+                PluginList(session: session, plugins: session.plugins(in: shownPersonaID), personaID: shownPersonaID, proxy: proxy, listIsBusy: $listIsBusy)
                     .id(shownPersonaID)
             }
             .formStyle(.grouped)
         }
         .frame(width: sectionWidth, height: 440)
         .onReceive(session.$personas) { personas = $0 }
-        // A request for another Persona shows that Persona, whose list then answers it.
-        .onReceive(PluginsRequests.shared.$pending) { request in
-            if let request, request.persona != personaID, session.personas.contains(where: { $0.id == request.persona }) { personaID = request.persona }
-        }
+        // The publisher sends a request before `pending` holds it.
+        .onReceive(PluginsRequests.shared.$pending) { showPersona(of: $0) }
+        .onChange(of: listIsBusy) { showPersona(of: PluginsRequests.shared.pending) }
+    }
+
+    /// Shows the Persona of a request for another one, whose list then answers it, once the shown list is not busy, so that switching lists closes none of its sheets.
+    private func showPersona(of request: PluginsRequest?) {
+        guard let request, request.persona != personaID, !listIsBusy, session.personas.contains(where: { $0.id == request.persona }) else { return }
+        personaID = request.persona
     }
 
     /// The chosen Persona while it exists, else the default one.
@@ -69,14 +76,21 @@ private struct PluginList: View {
     @ObservedObject var plugins: PluginManager
     let personaID: Persona.ID
     let proxy: ScrollViewProxy
+    /// The section's copy of `isBusy`.
+    @Binding var listIsBusy: Bool
     /// The providers and routes, which decide whether AI can write plugins.
     @ObservedObject private var aiSettings = AIService.shared.settings
     /// The install sheet: a staged package's review, or the store sheet.
     @State private var sheet: InstallSheet?
     /// Whether the sheet of New Feature with AI shows.
     @State private var isComposing = false
+    /// Whether an open panel shows or the package it chose is staging, whose review would replace a sheet shown meanwhile.
+    @State private var isChoosing = false
     /// Why the last chosen folder or archive could not be staged.
     @State private var failure: String?
+
+    /// Whether a sheet of the list shows, or an open panel or its staging is under way, which a request waits for.
+    private var isBusy: Bool { sheet != nil || isComposing || isChoosing }
 
     /// How the install sheet starts, with the sentence of its review that names the Persona.
     private struct InstallSheet: Identifiable {
@@ -97,7 +111,9 @@ private struct PluginList: View {
                 LabeledContent("Describe a feature, and AI writes a plugin for it") {
                     Button("New Feature with AI\u{2026}") { isComposing = true }
                 }
-                .sheet(isPresented: $isComposing) { PluginComposerSheet(plugins: plugins) }
+                .sheet(isPresented: $isComposing) {
+                    PluginComposerSheet(plugins: plugins, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: nil, among: session.personas))
+                }
             }
         } footer: {
             if failure != nil || plugins.listWriteFailure != nil {
@@ -119,21 +135,22 @@ private struct PluginList: View {
         .sheet(item: $sheet) { sheet in
             PluginInstallSheet(plugins: plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
         }
-        // A request waits while a sheet of the list shows.
-        .onReceive(PluginsRequests.shared.$pending) { _ in answerPendingRequest() }
-        .onChange(of: sheet == nil && !isComposing) { answerPendingRequest() }
+        // A request waits while the list is busy. The publisher sends a request before `pending` holds it.
+        .onReceive(PluginsRequests.shared.$pending) { answer($0) }
+        .onChange(of: isBusy, initial: true) { listIsBusy = $1 }
+        .onChange(of: isBusy) { answer(PluginsRequests.shared.pending) }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
             PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin) { installVersion(of: $0, for: $1, from: $2, space: nil) }
                 .id(plugin.id)
         }
     }
 
-    /// Answers the pending request for this Persona once no sheet of the list shows: the version's open panel at its plugin, or the store sheet started for its extension.
-    private func answerPendingRequest() {
-        guard let request = PluginsRequests.shared.pending, request.persona == personaID, sheet == nil, !isComposing else { return }
+    /// Answers a pending request for this Persona once the list is not busy: the version's open panel at its plugin, or the store sheet started for its extension.
+    private func answer(_ request: PluginsRequest?) {
+        guard let request, request.persona == personaID, !isBusy else { return }
         // After the window shows the section, and outside the request's own publishing.
         DispatchQueue.main.async {
-            guard PluginsRequests.shared.pending == request else { return }
+            guard PluginsRequests.shared.pending == request, !isBusy else { return }
             PluginsRequests.shared.pending = nil
             switch request.action {
             case let .installVersion(id, engine):
@@ -156,13 +173,17 @@ private struct PluginList: View {
     /// Install <Engine> Version…: asks for the package with an open panel on the Settings window, or in the store sheet, then reviews it as the plugin's version for the engine.
     private func installVersion(of plugin: InstalledPlugin, for engine: EngineKind, from source: PackageSource, space: Space.ID?) {
         guard source == .file else { return showSheet(.webStore(WebStoreStart(versionOf: plugin.id, engine: engine)), space: space) }
+        isChoosing = true
         chooseVersionPackage(of: plugin, for: engine, in: plugins, over: PreferencesWindowController.shared.window) { result in
             switch result {
-            case let .success(package):
+            case let .success(package)?:
                 showSheet(.review(PluginReview(package: package, versionOf: plugin.id, engine: engine)), space: space)
-            case let .failure(error):
+            case let .failure(error)?:
                 failure = error.localizedDescription
+            case nil:
+                break
             }
+            isChoosing = false
         }
     }
 
@@ -173,14 +194,19 @@ private struct PluginList: View {
         panel.canChooseDirectories = true
         panel.allowedContentTypes = [.folder, .zip, PluginPackage.crxType]
         panel.prompt = "Review"
+        isChoosing = true
         let finish = { (response: NSApplication.ModalResponse) in
-            guard response == .OK, let url = panel.url else { return }
+            guard response == .OK, let url = panel.url else {
+                isChoosing = false
+                return
+            }
             Task {
                 do {
                     showSheet(.review(PluginReview(package: try await plugins.stage(url))), space: nil)
                 } catch {
                     failure = error.localizedDescription
                 }
+                isChoosing = false
             }
         }
         if let window = PreferencesWindowController.shared.window {

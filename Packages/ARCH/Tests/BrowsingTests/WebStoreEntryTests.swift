@@ -1,4 +1,4 @@
-// The Web Store's entry points in tabs and the palette (`docs/web-store.md`, Entry points): the palette's rows for a store address, a bare identifier, and other text, with and without a store page in the selected tab, and the site settings popover's row for a store page with the extension installed or not. Store pages are built from hosts that stand in for the store's, so this file names no store host.
+// The Web Store's entry points in tabs and the palette (`docs/web-store.md`, Entry points): the palette's rows for a store address, a bare identifier, and other text, with and without a store page in the selected tab, and the site settings popover's row for a store page with the extension installed or not, with the section's note for the row alone. Store pages are built from hosts that stand in for the store's, so this file names no store host.
 @testable import Browsing
 @testable import Extensions
 import Foundation
@@ -46,6 +46,9 @@ import Testing
         #expect(row == .installed("1Password") && row?.title == "\u{201C}1Password\u{201D} is installed.")
         let install = WebStorePageRow(pageURL: page(otherID), installedName: installed, reader: reader)
         #expect(install == .install(otherID) && install?.title == "Install This Extension\u{2026}")
+        // The section's note for the row alone says what the row does, and for an installed extension where to manage it.
+        #expect(install?.note == "Opens the extension\u{2019}s review in Settings before it installs.")
+        #expect(row?.note == "Manage it for this Persona in Settings \u{25B8} Plugins.")
         // Pages that are not a store page's get no row.
         for url in [URL(string: "https://example.org/detail/sample-name/\(id)"), URL(string: "https://store.example/category/extensions"), nil] {
             #expect(WebStorePageRow(pageURL: url, installedName: installed, reader: reader) == nil, "\(String(describing: url))")

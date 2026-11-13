@@ -19,7 +19,7 @@ struct WebExtensionActionsSection: View {
         if !items.isEmpty || storeRow != nil {
             let engines = Set(webExtensions.engines.keys)
             SiteSettingsSection(title: "Extensions", note: items.isEmpty
-                ? "Opens the extension\u{2019}s review in Settings before it installs."
+                ? storeRow?.note ?? ""
                 : engines.contains(tab.engineKind)
                 ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
                 : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {
@@ -156,6 +156,14 @@ enum WebStorePageRow: Equatable {
         switch self {
         case .install: return "Install This Extension\u{2026}"
         case let .installed(name): return "\u{201C}\(name)\u{201D} is installed."
+        }
+    }
+
+    /// The section's note while the row is its only one.
+    var note: String {
+        switch self {
+        case .install: return "Opens the extension\u{2019}s review in Settings before it installs."
+        case .installed: return "Manage it for this Persona in Settings \u{25B8} Plugins."
         }
     }
 }

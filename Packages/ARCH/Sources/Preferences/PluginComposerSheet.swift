@@ -6,6 +6,8 @@ import SwiftUI
 /// The request field, or the review of the version AI wrote last. Each change replaces the version under review once AI has written it.
 struct PluginComposerSheet: View {
     @ObservedObject var plugins: PluginManager
+    /// The review's sentence that names the Persona the plugin installs in, with two or more Personas.
+    private let personaSentence: String?
     @Environment(\.dismiss) private var dismiss
     @State private var composer: PluginComposer
     /// The version under review, staged until the user installs or discards it.
@@ -18,15 +20,16 @@ struct PluginComposerSheet: View {
     /// Why the last request failed.
     @State private var failure: Error?
 
-    init(plugins: PluginManager) {
+    init(plugins: PluginManager, personaSentence: String?) {
         self.plugins = plugins
+        self.personaSentence = personaSentence
         _composer = State(initialValue: PluginComposer(plugins: plugins, service: .shared))
     }
 
     var body: some View {
         Group {
             if isReviewing, let draft {
-                PluginInstallSheet(plugins: plugins, review: PluginReview(package: draft)) { isReviewing = false }
+                PluginInstallSheet(plugins: plugins, start: .review(PluginReview(package: draft)), personaSentence: personaSentence) { isReviewing = false }
                     .id(draft.id)
             } else {
                 requestForm

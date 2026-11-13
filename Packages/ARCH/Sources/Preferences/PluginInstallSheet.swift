@@ -52,10 +52,6 @@ struct PluginInstallSheet: View {
         }
     }
 
-    init(plugins: PluginManager, review: PluginReview, askForChanges: (() -> Void)? = nil) {
-        self.init(plugins: plugins, start: .review(review), askForChanges: askForChanges)
-    }
-
     /// How the review names the Persona from where the install started (Persona rule 7): "Installs in the Persona of “Work / Research” for all its spaces." from a tab or a window, with its space, "Installs in “Work” for all its spaces." from Settings ▸ Plugins, without one, and nil while the default Persona is the only one.
     static func personaSentence(persona: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: persona, space: space, among: personas) else { return nil }
@@ -457,8 +453,9 @@ private struct VersionLastStep: View {
                     guard source == .file else { return storeSheet(WebStoreStart(versionOf: plugin, engine: engine)) }
                     chooseVersionPackage(of: installed, for: engine, in: plugins, over: NSApp.keyWindow) { result in
                         switch result {
-                        case let .success(package): review(PluginReview(package: package, versionOf: plugin, engine: engine))
-                        case let .failure(error): failure = error.localizedDescription
+                        case let .success(package)?: review(PluginReview(package: package, versionOf: plugin, engine: engine))
+                        case let .failure(error)?: failure = error.localizedDescription
+                        case nil: break
                         }
                     }
                 }
@@ -502,10 +499,10 @@ struct InstallVersionMenu: View {
     }
 }
 
-/// Asks with an open panel over `window` for the package of the plugin's version for the engine, of the engine's package types, and stages it.
+/// Asks with an open panel over `window` for the package of the plugin's version for the engine, of the engine's package types, and stages it. `staged` gets nil when the user cancels the panel.
 @MainActor
 func chooseVersionPackage(of plugin: InstalledPlugin, for engine: EngineKind, in plugins: PluginManager, over window: NSWindow?,
-                          staged: @escaping (Result<PluginPackage, any Error>) -> Void) {
+                          staged: @escaping (Result<PluginPackage, any Error>?) -> Void) {
     let panel = NSOpenPanel()
     panel.canChooseFiles = true
     panel.canChooseDirectories = true
@@ -513,7 +510,7 @@ func chooseVersionPackage(of plugin: InstalledPlugin, for engine: EngineKind, in
     panel.message = "Choose the \(engine.displayName) version of \u{201C}\(plugins.leadVersion(of: plugin.id)?.manifest.name ?? plugin.manifest.name)\u{201D}."
     panel.prompt = "Review"
     let finish = { (response: NSApplication.ModalResponse) in
-        guard response == .OK, let url = panel.url else { return }
+        guard response == .OK, let url = panel.url else { return staged(nil) }
         Task {
             do {
                 staged(.success(try await plugins.stage(url)))
