@@ -633,17 +633,63 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Agent panel
 
-    /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
-    @MainActor public func showAgentComposer(text: String = "") {
+    /// Whether a Claude Code or Codex model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
+    @MainActor var canStartAgentTask: Bool {
+        !(session.agents?.agentModels().isEmpty ?? true)
+    }
+
+    /// Where a session started in this window goes and what it starts with: the window's current space, which for a small window is the space Move to Main Window would use, its Persona, and the selected tab unless an internal page or the preview covers it.
+    @MainActor func agentComposerContext(text: String = "") -> AgentComposerContext {
         let space = currentSpace
         let persona = session.personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
         let tab = isSelectedPageCovered ? nil : selectedTab.map(BrowserAgentHost.info(of:))
-        showAgentPanel(.composer(AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: tab, text: text)))
+        return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: tab, text: text)
+    }
+
+    /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
+    @MainActor public func showAgentComposer(text: String = "") {
+        showAgentPanel(.composer(agentComposerContext(text: text)))
+    }
+
+    /// The palette's Ask Agent row: starts a session with the palette's text at once, in Settings' mode for new sessions, and shows it. A start the service refuses shows the composer with the task and the refusal's sentence instead.
+    @MainActor func askAgent(_ offer: AskAgentOffer) {
+        guard let agents = session.agents else { return }
+        var context = agentComposerContext(text: offer.task)
+        do {
+            let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.settings.newSessionMode, allowsAI: AIService.shared.settings.allowsAI(on:)))
+            showAgentSession(started.id)
+        } catch {
+            context.problem = error.localizedDescription
+            showAgentPanel(.composer(context))
+        }
+    }
+
+    /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
+    @MainActor func continueAsAgentTask(_ question: String) {
+        closePageQuestion()
+        showAgentComposer(text: question)
     }
 
     /// Shows a session in the panel, as a row or the indicator's menu does.
     @MainActor public func showAgentSession(_ id: UUID) {
         showAgentPanel(.session(id))
+    }
+
+    /// A step's tab button: selects the tab here, or, since a small window shows only its own tab, in the main window, which comes forward.
+    @MainActor func showAgentTab(_ id: UUID) {
+        guard kind == .small else { return selectTab(id) }
+        guard id != selectedTabID else { return }
+        let target = session.sidebarTarget()
+        target.selectTab(id)
+        target.nsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// A link in the agent panel opens as a page the window opened: a selected tab of the window's current space, or beside a small window a small window of its own.
+    @MainActor func openAgentPanelLink(_ url: URL) {
+        switch kind {
+        case .main: openTab(url: url)
+        case .small: showOpenedPage(session.makeWebContents(url: url, engine: nil, state: nil, in: personaID), personaID: personaID)
+        }
     }
 
     /// View ▸ Show Agent Panel: hides the panel, or shows the latest session of the window's current space, or the composer when it has none.

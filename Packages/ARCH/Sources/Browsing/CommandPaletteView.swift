@@ -1,4 +1,5 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching plugin commands, Ask About This Page when the words begin its name, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Ask Agent for text of two or more words and agent sessions to show, matching plugin commands, Ask About This Page when the words begin its name, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+import Agent
 import History
 import Plugins
 import SwiftUI
@@ -63,6 +64,17 @@ struct CommandPaletteView: View {
         return !words.isEmpty && "ask about this page".hasPrefix(words) && windowModel.canAskAboutPage
     }
 
+    private var askAgentOffer: AskAgentOffer? {
+        AskAgentOffer(text: text, canRunSession: windowModel.canStartAgentTask)
+    }
+
+    /// The live agent sessions whose titles contain the text, ignoring case, to show in the panel.
+    private var matchingAgentSessions: [AgentSession] {
+        let query = text.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty, let agents = session.agents else { return [] }
+        return Array(agents.sessions.filter { !$0.hasEnded && $0.title.lowercased().contains(query) }.prefix(5))
+    }
+
     /// The palette's distance from the window's top.
     static let top: CGFloat = 120
     /// The height of the search field.
@@ -96,6 +108,20 @@ struct CommandPaletteView: View {
                 VStack(spacing: 2) {
                     PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
                         .paletteAction { windowModel.submitCommandPalette(text) }
+                    if let offer = askAgentOffer {
+                        PaletteRow(symbol: "sparkles", title: offer.title)
+                            .paletteAction {
+                                windowModel.dismissCommandPalette()
+                                windowModel.askAgent(offer)
+                            }
+                    }
+                    ForEach(matchingAgentSessions) { agentSession in
+                        PaletteRow(symbol: "text.bubble", title: agentSession.title, detail: session.agents?.place(of: agentSession))
+                            .paletteAction {
+                                windowModel.dismissCommandPalette()
+                                windowModel.showAgentSession(agentSession.id)
+                            }
+                    }
                     ForEach(pluginCommands, id: \.ref) { command in
                         PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
                             .paletteAction {
@@ -147,6 +173,20 @@ struct CommandPaletteView: View {
         }
         .task(id: text) { await loadHistorySuggestions() }
     }
+}
+
+/// The palette's Ask Agent row (docs/agents.md, In the browser ▸ Starting a session): offered once the text has two or more words while a Claude Code or Codex model can run a session, and starting one with the text as its task.
+struct AskAgentOffer: Equatable {
+    /// The palette's text without the white space around it.
+    let task: String
+
+    init?(text: String, canRunSession: Bool) {
+        let task = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canRunSession, task.split(whereSeparator: \.isWhitespace).count >= 2 else { return nil }
+        self.task = task
+    }
+
+    var title: String { "Ask Agent: \u{201C}\(task)\u{201D}" }
 }
 
 /// The command palette over a window of either kind, with the dimming behind it that a click dismisses. Each opening gets a fresh palette, which arrives with its origin's motion; closing fades out the palette and the dimming, then removes both.

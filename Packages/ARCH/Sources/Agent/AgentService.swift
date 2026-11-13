@@ -83,7 +83,7 @@ import Foundation
     /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
     var sessionReadyWait = AgentSession.readyWait
     var sessionTakeOverWait = AgentSession.takeOverWait
-    /// Republish each session's turn starting and ending, which the bottom bar's indicator reads.
+    /// Republish each session's turn starting and ending, which the bottom bar's indicator reads, and its waiting for the user starting and ending, which the bar's space symbols read.
     private var sessionObservers: [UUID: AnyCancellable] = [:]
 
     /// Set while an in-app session on a CLI lives, which then keeps the channel listening with outside access off.
@@ -599,7 +599,10 @@ import Foundation
             self.toolsDidChange(forSession: session.id)
         }
         session.describe = { [weak self] error in self?.describe(error) ?? (error.localizedDescription, .retry) }
-        sessionObservers[session.id] = session.$isTurnRunning.removeDuplicates().dropFirst().sink { [weak self] _ in self?.objectWillChange.send() }
+        sessionObservers[session.id] = session.$isTurnRunning.combineLatest(session.$state.map { $0 == .waitingForUser })
+            .removeDuplicates(by: ==)
+            .dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     /// One sentence and one action for an error in a session (docs/agents.md, Errors).
@@ -648,6 +651,11 @@ import Foundation
     /// Whether any agent acts now: a session's turn runs or an outside client is connected, for the bottom bar's indicator.
     public var isAnyAgentActing: Bool {
         sessions.contains { $0.isTurnRunning } || !connectedGrantIDs.isEmpty
+    }
+
+    /// The spaces with a session that waits for the user, whose symbols in the bottom bar show a dot.
+    public var spacesWaitingForUser: Set<UUID> {
+        Set(sessions.filter { !$0.hasEnded && $0.state == .waitingForUser }.map(\.spaceID))
     }
 
     /// At quit, before the endpoint stops: every session ends, with its folder and Codex's thread, within `limit`; whatever is left ends its processes at `stop()`.

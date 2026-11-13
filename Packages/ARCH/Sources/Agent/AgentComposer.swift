@@ -34,13 +34,28 @@ public struct AgentComposerContext: Equatable, Identifiable {
     /// The selected tab, which the composer attaches unless its site is excluded from AI.
     public var tab: AgentTabInfo?
     public var text: String
+    /// The sentence of a start that was refused before the composer showed, as for the palette's Ask Agent; the task stays in the field with it.
+    public var problem: String?
 
-    public init(personaID: UUID, spaceID: UUID, place: String, tab: AgentTabInfo?, text: String = "") {
+    public init(personaID: UUID, spaceID: UUID, place: String, tab: AgentTabInfo?, text: String = "", problem: String? = nil) {
         self.personaID = personaID
         self.spaceID = spaceID
         self.place = place
         self.tab = tab
         self.text = text
+        self.problem = problem
+    }
+
+    /// The tab a session started here attaches: the selected tab while it shows a web page on a site not excluded from AI.
+    public func attachableTab(allowsAI: (URL) -> Bool) -> AgentTabInfo? {
+        guard let tab, let url = tab.url, AgentSite.of(url) != nil, allowsAI(url) else { return nil }
+        return tab
+    }
+
+    /// A session that starts here at once with `task`, without the composer's choices, as the palette's Ask Agent starts one: the attachable tab, `mode`, and the `agent` route's model.
+    public func sessionStart(task: String, mode: AgentAccessLevel, allowsAI: (URL) -> Bool) -> AgentService.SessionStart {
+        AgentService.SessionStart(task: task, personaID: personaID, spaceID: spaceID, attachedTabIDs: attachableTab(allowsAI: allowsAI).map { [$0.id] } ?? [],
+                                  mode: mode, model: nil, effort: nil)
     }
 }
 
@@ -65,13 +80,13 @@ public struct AgentComposer: View {
         self.actions = actions
         self.didStart = didStart
         _text = State(initialValue: context.text)
+        _problem = State(initialValue: context.problem)
     }
 
     private var models: [AIModelRef] { service.agentModels() }
 
     private var attachableTab: AgentTabInfo? {
-        guard let tab = context.tab, let url = tab.url, AgentSite.of(url) != nil, settings.allowsAI(on: url) else { return nil }
-        return tab
+        context.attachableTab(allowsAI: settings.allowsAI(on:))
     }
 
     public var body: some View {

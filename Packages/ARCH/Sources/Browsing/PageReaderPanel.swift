@@ -1,4 +1,4 @@
-// The page reader: a panel beside the page that summarizes the selected tab's page and answers follow-up questions about it. Each tab keeps its own conversation, also while the panel is closed or another tab is selected.
+// The page reader: a panel beside the page that summarizes the selected tab's page and answers follow-up questions about it, with Continue as Agent Task beside its Ask. Each tab keeps its own conversation, also while the panel is closed or another tab is selected.
 import AI
 import SwiftUI
 
@@ -110,6 +110,7 @@ private struct PageReaderTabView: View {
                 .lineLimit(1...5)
                 .onSubmit(send)
                 .padding(.vertical, 6)
+            ContinueAsAgentTaskButton { ContinueAsAgentTaskButton.task(draft: draft, exchanges: conversation.exchanges) }
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {
@@ -141,5 +142,24 @@ private struct PageReaderPlaceholder: View {
             .multilineTextAlignment(.center)
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Continue as Agent Task beside Ask in the page reader and the question popover (docs/agents.md, In the browser ▸ Starting a session), while a Claude Code or Codex model can run a session: the composer with the question and the selected tab, whose page the question is about.
+struct ContinueAsAgentTaskButton: View {
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    let task: () -> String
+
+    var body: some View {
+        if windowModel.canStartAgentTask {
+            SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") { windowModel.continueAsAgentTask(task()) }
+        }
+    }
+
+    /// The question typed in the field, or else the last question the user asked. A summary, which Arch asks for, shows a title of its own and gives no question, and neither the selected text nor a reply joins the task, which carries only the user's words.
+    static func task(draft: String, exchanges: [PageConversation.Exchange]) -> String {
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard typed.isEmpty else { return typed }
+        return exchanges.last { $0.title == $0.prompt }?.prompt ?? ""
     }
 }

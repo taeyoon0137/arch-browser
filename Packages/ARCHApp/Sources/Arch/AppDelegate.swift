@@ -393,9 +393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
-    /// The agent panel shows in main windows.
-    @MainActor @objc private func newAgentTask() { frontSidebarTarget().showAgentComposer() }
-    @MainActor @objc private func toggleAgentPanel() { frontSidebarTarget().toggleAgentPanel() }
+    /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
+    @MainActor @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
+    @MainActor @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
     @MainActor @objc private func stopAllAgents() { agents?.stopAllAgents() }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
@@ -564,7 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(newAgentTask) || item.action == #selector(toggleAgentPanel) {
             item.isHidden = MainActor.assumeIsolated { agents?.agentModels().isEmpty ?? true }
             if item.action == #selector(toggleAgentPanel) {
-                item.title = session?.lastMainWindow?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
+                item.title = (activeWindow ?? session?.lastMainWindow)?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
             }
             return !item.isHidden
         }

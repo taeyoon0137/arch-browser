@@ -1,4 +1,4 @@
-// Where the agent panel shows (docs/agents.md, In the browser ▸ The agent panel; Sidebar and attention): in a main window's trailing column in place of the page reader and at its width, with the composer for a new task or one session's conversation, and the bottom bar's agents indicator, whose menu lists the acting sessions and outside clients and Stop All Agents. The panel's views are the `Agent` module's; this file gives them the page reader's way of rendering replies and the window's ways of opening links and tabs.
+// Where the agent panel shows (docs/agents.md, In the browser ▸ The agent panel; Sidebar and attention): in a main or small window's trailing column in place of the page reader and at its width, with the composer for a new task or one session's conversation; the bottom bar's agents indicator, whose menu lists the acting sessions and outside clients and Stop All Agents; and the dot on the symbol of a space whose session waits for the user. The panel's views are the `Agent` module's; this file gives them the page reader's way of rendering replies and the window's ways of opening links and tabs.
 import Agent
 import AI
 import SwiftUI
@@ -27,9 +27,9 @@ struct AgentPanelColumn: View {
         AgentPanelActions(formatReply: PageReply.text,
                           openLink: { [windowModel] url in
                               guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
-                              windowModel.openTab(url: url)
+                              windowModel.openAgentPanelLink(url)
                           },
-                          showTab: { [windowModel] id in windowModel.selectTab(id) },
+                          showTab: { [windowModel] id in windowModel.showAgentTab(id) },
                           openAISettings: { [session] in session.pageAssistant.showAISettings?() },
                           signIn: { [session] provider in session.signInToAgentTool?(provider) })
     }
@@ -114,6 +114,45 @@ private struct AgentsIndicatorMenu: View {
             .fixedSize()
             .help("Agents are working")
             .accessibilityLabel("Agents")
+        }
+    }
+}
+
+/// A dot on the bottom bar's symbol of a space other than the window's own while a session of that space waits for the user. It follows the symbol's scale.
+struct AgentWaitingDot: ViewModifier {
+    let agents: AgentService?
+    let spaceID: UUID
+    let isCurrent: Bool
+    let scale: CGFloat
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let agents, !isCurrent {
+            content.modifier(Mark(agents: agents, spaceID: spaceID, scale: scale))
+        } else {
+            content
+        }
+    }
+
+    private struct Mark: ViewModifier {
+        @ObservedObject var agents: AgentService
+        let spaceID: UUID
+        let scale: CGFloat
+
+        func body(content: Content) -> some View {
+            let isWaiting = agents.spacesWaitingForUser.contains(spaceID)
+            content
+                .overlay {
+                    if isWaiting {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 5, height: 5)
+                            // Beside the symbol's top trailing corner; scaling after the offset shrinks the distance with the symbol.
+                            .offset(x: 6, y: -6)
+                            .scaleEffect(scale)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .accessibilityValue(isWaiting ? "An agent is waiting" : "")
         }
     }
 }
