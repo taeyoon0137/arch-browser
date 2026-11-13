@@ -181,6 +181,21 @@ private let notRunning = AgentClientError.notRunning.message
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":99,"result":{"status":"ok","content":[]}}"#) == [])
     }
 
+    @Test func theGuideToolGoesToArchAndBackAsText() throws {
+        var transcript = Transcript()
+        transcript.initialize("2025-06-18")
+        #expect(transcript.client(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"guide","arguments":{"topic":"forms"}}}"#) == [outsideHello])
+        #expect(transcript.connected() == [#"arch <- {"id":1,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"topic":"forms"},"name":"guide"}}"#])
+        // The tool host answers with the harness's result, which reaches the client as the topic's text.
+        let result = AgentHarness.guideResult(arguments: ["topic": "forms"])
+        let answer = try reply(try #require(transcript.arch(String(decoding: try AgentRPCMessage.result(id: .number(1), result: AgentJSON(encoding: result)).encoded(), as: UTF8.self)).first))
+        #expect(answer["id"] == 5)
+        #expect(answer["result"]?["content"] == [["type": "text", "text": .string(AgentHarness.text(for: .forms))]])
+        #expect(answer["result"]?["isError"] == false)
+        #expect(answer["result"]?["structuredContent"]?["topic"] == "forms")
+        #expect(answer["result"]?["structuredContent"]?["status"] == "ok")
+    }
+
     @Test func approvalPendingAtTheCapAndApprovalWait() throws {
         var transcript = Transcript()
         transcript.initialize()

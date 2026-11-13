@@ -1,4 +1,4 @@
-// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. These copies run outside an app bundle, so `ARCH_AGENT_TEST_SOCKET` moves their socket to a path in the temporary folder where nothing listens, and a running Arch never sees them: the lists come from the catalog and tool calls end in the not-running error result. `swift build` writes the executable beside this test bundle and must run before `swift test`.
+// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. These copies run outside an app bundle, so `ARCH_AGENT_TEST_SOCKET` moves their socket to a path in the temporary folder where nothing listens, and a running Arch never sees them: the lists come from the catalog and tool calls end in the not-running error result. The `skills` commands run from a copy in a scratch app bundle, with `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `--path` in the temporary folder, so they never write the user's own skill folders; they connect to no socket. `swift build` writes the executable beside this test bundle and must run before `swift test`.
 import AgentControl
 import Foundation
 import Testing
@@ -22,8 +22,8 @@ private struct Run {
 /// A socket path in the temporary folder where nothing listens.
 private let absentSocket = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("act-none-\(UUID().uuidString.prefix(8)).sock").path
 
-/// Runs the executable with the lines on standard input, closes it, and reads both outputs. The socket is `absentSocket`, so no Arch is reached.
-private func run(_ executable: URL, _ arguments: [String] = [], environment: [String: String] = [:], input: [String]) throws -> Run {
+/// Runs the executable with the lines on standard input, closes it, and reads both outputs, decoding each line of standard output as JSON unless `json` is false. The socket is `absentSocket`, so no Arch is reached.
+private func run(_ executable: URL, _ arguments: [String] = [], environment: [String: String] = [:], input: [String], json: Bool = true) throws -> Run {
     let process = Process()
     process.executableURL = executable
     process.arguments = arguments
@@ -46,7 +46,7 @@ private func run(_ executable: URL, _ arguments: [String] = [], environment: [St
     let output = String(decoding: standardOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     process.waitUntilExit()
     errorsRead.wait()
-    let lines = try output.split(separator: "\n").map { try AgentJSON.decode(Data($0.utf8)) }
+    let lines = json ? try output.split(separator: "\n").map { try AgentJSON.decode(Data($0.utf8)) } : []
     return Run(status: process.terminationStatus, lines: lines, output: output, errors: String(decoding: errorData.value, as: UTF8.self))
 }
 
@@ -136,11 +136,61 @@ private let codexStart = [
 
     @Test func setupCommandsOutsideABundleExit77() throws {
         let executable = try builtExecutable()
-        for arguments in [["mcp-config"], ["setup", "claude"], ["links", "install"]] {
+        for arguments in [["mcp-config"], ["setup", "claude"], ["links", "install"], ["skills", "list"], ["skills", "install", "--path", NSTemporaryDirectory()]] {
             let result = try run(executable, arguments, input: [])
             #expect(result.status == AgentExitCode.notArch.rawValue, "\(arguments)")
             #expect(result.errors.contains("does not run from inside an Arch bundle"), "\(arguments)")
         }
         #expect(try run(executable, ["setup", "cursor"], input: []).status == AgentExitCode.usage.rawValue)
+    }
+
+    @Test func skillsFromABundleWriteListAndRemoveTheEntrySkill() throws {
+        // A scratch bundle with a copy of the built executable as its Contents/Helpers/arch-cli, and the skill folders beside it.
+        // The temporary folder's real path, which the copy finds itself at (`realpath`), so that the skill's text names the same path.
+        let temporary = try #require(realpath(NSTemporaryDirectory(), nil))
+        defer { free(temporary) }
+        let root = URL(fileURLWithPath: String(cString: temporary)).appendingPathComponent("act-skillcli-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = AgentBundleLayout(bundleURL: root.appendingPathComponent("Arch.app"))
+        try FileManager.default.createDirectory(at: layout.helpersURL, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: try builtExecutable(), to: layout.cliExecutableURL)
+        let folder = root.appendingPathComponent("skills", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let environment = ["CLAUDE_CONFIG_DIR": root.appendingPathComponent("claude").path, "CODEX_HOME": root.appendingPathComponent("codex").path]
+        let places = ["--target", "claude", "--target", "codex-home", "--path", folder.path]
+        let files = ["claude/skills", "codex/skills", "skills"].map { root.appendingPathComponent($0).appendingPathComponent("arch-browser/SKILL.md") }
+        let skill = AgentHarness.entrySkill(cliPath: layout.cliExecutableURL.path)
+
+        let install = try run(layout.cliExecutableURL, ["skills", "install"] + places, environment: environment, input: [], json: false)
+        #expect(install.status == 0, "\(install.errors)")
+        // The exact paths come before the write, and each copy names this bundle's arch-cli.
+        for file in files {
+            #expect(install.output.contains("  \(file.path)\n"), "\(file.path)")
+            #expect((try? String(contentsOf: file, encoding: .utf8)) == skill.markdown, "\(file.path)")
+        }
+        let list = try run(layout.cliExecutableURL, ["skills", "list"] + places, environment: environment, input: [], json: false)
+        #expect(list.status == 0)
+        #expect(list.output.components(separatedBy: "Installed, with this Arch's text.").count == 4, "\(list.output)")
+
+        // A foreign folder stops install before anything is written and stays at remove, which exits 4 after removing the others.
+        try FileManager.default.removeItem(at: files[2])
+        try Data("my notes".utf8).write(to: files[2].deletingLastPathComponent().appendingPathComponent("notes.md"))
+        try Data("old".utf8).write(to: files[0])
+        let refused = try run(layout.cliExecutableURL, ["skills", "install"] + places, environment: environment, input: [], json: false)
+        #expect(refused.status == AgentExitCode.refused.rawValue)
+        #expect(refused.errors.contains("Arch did not write"))
+        #expect((try? String(contentsOf: files[0], encoding: .utf8)) == "old")
+        // An Arch copy of other text is listed as outdated.
+        try Data(AgentHarness.entrySkill(cliPath: "/Other/Arch.app/Contents/Helpers/arch-cli").markdown.utf8).write(to: files[0])
+        let outdated = try run(layout.cliExecutableURL, ["skills", "list", "--target", "claude"], environment: environment, input: [], json: false)
+        #expect(outdated.output.contains("older than this Arch"))
+        let remove = try run(layout.cliExecutableURL, ["skills", "remove"] + places, environment: environment, input: [], json: false)
+        #expect(remove.status == AgentExitCode.refused.rawValue)
+        #expect(!FileManager.default.fileExists(atPath: files[0].deletingLastPathComponent().path))
+        #expect(!FileManager.default.fileExists(atPath: files[1].deletingLastPathComponent().path))
+        #expect(FileManager.default.fileExists(atPath: files[2].deletingLastPathComponent().appendingPathComponent("notes.md").path))
+        let again = try run(layout.cliExecutableURL, ["skills", "remove", "--target", "claude"], environment: environment, input: [], json: false)
+        #expect(again.status == 0)
+        #expect(again.output.contains("No skill of Arch's is at"))
     }
 }

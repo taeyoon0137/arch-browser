@@ -26,6 +26,8 @@ public enum AgentCLICommand: Equatable, Sendable {
     case setup(AgentMCPSetupClient)
     /// PATH links, in the folder `--dir` names or else one PATH chooses.
     case links(AgentLinksAction, folder: String?)
+    /// The entry skill at the places named by `--target` and `--path`, in order; `list` without either lists every target.
+    case skills(AgentSkillsAction, places: [AgentSkillInstaller.Place])
 }
 
 public enum AgentLinksAction: String, CaseIterable, Sendable {
@@ -33,9 +35,15 @@ public enum AgentLinksAction: String, CaseIterable, Sendable {
     case remove
 }
 
+public enum AgentSkillsAction: String, CaseIterable, Sendable {
+    case list
+    case install
+    case remove
+}
+
 public struct AgentCLIRequest: Equatable, Sendable {
     public var command: AgentCLICommand
-    /// `--json`: print the result's structured value instead of text. `guide`, `--help`, and the setup commands print text either way.
+    /// `--json`: print the result's structured value instead of text. `guide`, `--help`, the setup commands, and `skills` always print text.
     public var json: Bool
 
     public init(command: AgentCLICommand, json: Bool) {
@@ -74,6 +82,7 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "mcp-config", arguments: "[claude|codex|json]", summary: "Prints the configuration that adds arch-mcp, by its absolute path, to Claude Code, Codex, or another MCP client.", needsArch: false),
         AgentCLICommandSpec(name: "setup", arguments: "claude|codex", summary: "Shows the command that adds arch-mcp to Claude Code or Codex for your user, asks, and runs it.", needsArch: false),
         AgentCLICommandSpec(name: "links", arguments: "install|remove [--dir folder]", summary: "Links arch-cli and arch-mcp into a writable folder on your PATH inside your home folder, ~/.local/bin first, or removes those links.", needsArch: false),
+        AgentCLICommandSpec(name: "skills", arguments: "list|install|remove [--target t] [--path folder]", summary: "Lists, installs, or removes the \(AgentHarness.entrySkillName) skill, which tells an agent how to use Arch, in Claude Code's skill folder (--target claude), Codex's (--target codex or codex-home), or a folder of skill folders (--path). Install and remove change only the places named.", needsArch: false),
     ]
 
     /// Tells `arch-mcp` from `arch-cli` by the name the process was started under, which for the link in `Contents/Helpers` or on PATH is `arch-mcp`, and by an `mcp` first argument.
@@ -85,12 +94,13 @@ public enum AgentCommandLine {
         return .cli(rest)
     }
 
-    /// Parses `arch-cli`'s arguments, without the program name. `--json`, `--help`, and `-h` may come anywhere; `help` is `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`.
+    /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. `--shared` belongs to `tabs`; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
         var json = false
         var help = false
         var shared = false
         var folder: String?
+        var places: [AgentSkillInstaller.Place] = []
         var words: [String] = []
         var remaining = arguments[...]
         while let argument = remaining.popFirst() {
@@ -101,6 +111,13 @@ public enum AgentCommandLine {
             case "--dir":
                 guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--dir needs a folder.") }
                 folder = value
+            case "--target":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--target needs claude, codex, or codex-home.") }
+                guard let target = AgentSkillInstaller.Target(rawValue: value) else { throw AgentUsageError(message: "--target takes claude, codex, or codex-home.") }
+                if !places.contains(.target(target)) { places.append(.target(target)) }
+            case "--path":
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "--path needs a folder.") }
+                if !places.contains(.path(value)) { places.append(.path(value)) }
             case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "Unknown option \(argument).")
             default: words.append(argument)
             }
@@ -155,13 +172,17 @@ public enum AgentCommandLine {
         case "links":
             guard operands.count == 1, let action = AgentLinksAction(rawValue: operands[0]) else { throw AgentUsageError(message: "links takes install or remove.") }
             command = .links(action, folder: folder)
+        case "skills":
+            guard operands.count == 1, let action = AgentSkillsAction(rawValue: operands[0]) else { throw AgentUsageError(message: "skills takes list, install, or remove.") }
+            if action != .list, places.isEmpty {
+                throw AgentUsageError(message: "skills \(action.rawValue) needs --target claude, codex, or codex-home, or --path with a folder.")
+            }
+            command = .skills(action, places: places)
         default:
             throw AgentUsageError(message: "Unknown command \(name).")
         }
-        switch command {
-        case .links: break
-        default: if folder != nil { throw AgentUsageError(message: "--dir belongs to links.") }
-        }
+        if case .links = command {} else if folder != nil { throw AgentUsageError(message: "--dir belongs to links.") }
+        if case .skills = command {} else if !places.isEmpty { throw AgentUsageError(message: "--target and --path belong to skills.") }
         return AgentCLIRequest(command: command, json: json)
     }
 

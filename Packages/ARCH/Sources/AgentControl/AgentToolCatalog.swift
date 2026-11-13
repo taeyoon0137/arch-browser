@@ -152,8 +152,8 @@ public enum AgentToolCatalog {
         AgentToolParameter("tab", .string, required: required, description, pattern: tabPattern)
     }
 
-    /// A number as the descriptions write it, such as 16,000, whatever the Mac's region.
-    private static func number(_ value: Int) -> String {
+    /// A number formatted for descriptions and the harness, such as 16,000, regardless of the Mac's region.
+    static func number(_ value: Int) -> String {
         value.formatted(.number.locale(Locale(identifier: "en_US")))
     }
 

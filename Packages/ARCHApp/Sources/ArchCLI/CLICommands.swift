@@ -1,4 +1,4 @@
-// The commands `arch-cli` answers: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `--help`, and the setup commands `mcp-config`, `setup`, and `links` (docs/agents.md, arch-cli). Text goes to standard output, and an error to standard error as one sentence, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code.
 import AgentControl
 import Foundation
 
@@ -37,6 +37,8 @@ enum CLICommands {
             return setup(client)
         case .links(let action, let folder):
             return links(action, folder: folder)
+        case .skills(let action, let places):
+            return skills(action, places: places)
         }
     }
 
@@ -240,6 +242,74 @@ enum CLICommands {
         } catch {
             printError("\(error)")
             return .internalError
+        }
+    }
+
+    // MARK: - skills
+
+    /// Lists, writes, or removes the entry skill. `list` and `install` need the bundle because the skill names its `arch-cli` by absolute path; `remove` works anywhere.
+    private static func skills(_ action: AgentSkillsAction, places: [AgentSkillInstaller.Place]) -> AgentExitCode {
+        guard let home = AgentLinkInstaller.userHomeFolder else {
+            printError("The home folder could not be read.")
+            return .internalError
+        }
+        let installer = AgentSkillInstaller(homeFolder: home, environment: ProcessInfo.processInfo.environment)
+        do {
+            switch action {
+            case .list:
+                guard let layout = requireBundle() else { return .notArch }
+                let skill = AgentHarness.entrySkill(cliPath: layout.cliExecutableURL.path)
+                for place in places.isEmpty ? AgentSkillInstaller.Target.allCases.map(AgentSkillInstaller.Place.target) : places {
+                    let destination = try installer.destination(for: place, skillName: skill.name)
+                    print("\(place.title): \(destination.folder.path)\n  \(stateText(installer.state(of: destination, skill: skill), place: place))")
+                }
+                return .done
+            case .install:
+                guard let layout = requireBundle() else { return .notArch }
+                let skill = AgentHarness.entrySkill(cliPath: layout.cliExecutableURL.path)
+                let destinations = try places.map { try installer.destination(for: $0, skillName: skill.name) }
+                // Refuses before listing paths to write, since nothing will be written.
+                if let foreign = destinations.first(where: { installer.state(of: $0, skill: skill) == .foreign }) {
+                    throw AgentSkillInstaller.Failure.foreignFolder(foreign.folder.path)
+                }
+                print("Writing the \(skill.name) skill, a copy that names \(layout.cliExecutableURL.path):")
+                for destination in destinations { print("  \(destination.file.path)") }
+                try installer.install(skill, at: destinations)
+                print("Done. New sessions of the tool read it.")
+                return .done
+            case .remove:
+                var code = AgentExitCode.done
+                for place in places {
+                    let destination = try installer.destination(for: place, skillName: AgentHarness.entrySkillName)
+                    do {
+                        print(try installer.remove(at: destination) ? "Removed \(destination.folder.path)." : "No skill of Arch's is at \(destination.folder.path).")
+                    } catch let failure as AgentSkillInstaller.Failure {
+                        printError(failure.message)
+                        code = failure.exitCode
+                    }
+                }
+                return code
+            }
+        } catch let failure as AgentSkillInstaller.Failure {
+            printError(failure.message)
+            return failure.exitCode
+        } catch {
+            printError("\(error)")
+            return .internalError
+        }
+    }
+
+    private static func stateText(_ state: AgentSkillInstaller.State, place: AgentSkillInstaller.Place) -> String {
+        let option: String
+        switch place {
+        case .target(let target): option = "--target \(target.rawValue)"
+        case .path(let path): option = "--path \(AgentMCPConfiguration.shellCommand([path]))"
+        }
+        switch state {
+        case .absent: return "Not installed. arch-cli skills install \(option) writes it."
+        case .current: return "Installed, with this Arch's text."
+        case .outdated: return "Installed, but older than this Arch or written by a copy of Arch elsewhere. arch-cli skills install \(option) updates it."
+        case .foreign: return "A folder that Arch did not write, which arch-cli leaves alone."
         }
     }
 

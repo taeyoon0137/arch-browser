@@ -36,6 +36,11 @@ import Testing
         #expect(try AgentCommandLine.parse(["links", "install"]).command == .links(.install, folder: nil))
         #expect(try AgentCommandLine.parse(["links", "install", "--dir", "/Users/someone/bin"]).command == .links(.install, folder: "/Users/someone/bin"))
         #expect(try AgentCommandLine.parse(["--dir", "bin", "links", "remove"]).command == .links(.remove, folder: "bin"))
+        #expect(try AgentCommandLine.parse(["guide", "purchases-and-messages"]).command == .guide(.purchasesAndMessages))
+        #expect(try AgentCommandLine.parse(["skills", "list"]).command == .skills(.list, places: []))
+        #expect(try AgentCommandLine.parse(["skills", "install", "--target", "claude", "--target", "codex", "--target", "claude"]).command == .skills(.install, places: [.target(.claude), .target(.codex)]))
+        #expect(try AgentCommandLine.parse(["--path", "/Users/someone/skills", "skills", "remove", "--target", "codex-home"]).command == .skills(.remove, places: [.path("/Users/someone/skills"), .target(.codexHome)]))
+        #expect(try AgentCommandLine.parse(["skills", "list", "--target", "codex"]).command == .skills(.list, places: [.target(.codex)]))
     }
 
     @Test(arguments: [
@@ -44,7 +49,7 @@ import Testing
         (["status", "now"], "status takes no arguments."),
         (["tools", "all"], "tools takes no arguments."),
         (["guide", "cli", "browsing"], "guide takes at most one topic."),
-        (["guide", "secrets"], "There is no guide topic named secrets. Topics: cli."),
+        (["guide", "secrets"], "There is no guide topic named secrets. Topics: browsing, forms, research, downloads, purchases-and-messages, troubleshooting, cli."),
         (["--verbose", "status"], "Unknown option --verbose."),
         (["spaces", "--shared"], "Only tabs takes --shared."),
         (["tabs", "t1"], "tabs takes no arguments."),
@@ -57,6 +62,16 @@ import Testing
         (["links"], "links takes install or remove."),
         (["links", "install", "--dir"], "--dir needs a folder."),
         (["status", "--dir", "bin"], "--dir belongs to links."),
+        (["skills"], "skills takes list, install, or remove."),
+        (["skills", "update"], "skills takes list, install, or remove."),
+        (["skills", "install"], "skills install needs --target claude, codex, or codex-home, or --path with a folder."),
+        (["skills", "remove"], "skills remove needs --target claude, codex, or codex-home, or --path with a folder."),
+        (["skills", "install", "--target", "cursor"], "--target takes claude, codex, or codex-home."),
+        (["skills", "install", "--target"], "--target needs claude, codex, or codex-home."),
+        (["skills", "install", "--path"], "--path needs a folder."),
+        (["skills", "list", "--dir", "bin"], "--dir belongs to links."),
+        (["links", "install", "--target", "claude"], "--target and --path belong to skills."),
+        (["guide", "--path", "/tmp"], "--target and --path belong to skills."),
     ])
     func usageErrors(arguments: [String], message: String) {
         #expect(throws: AgentUsageError(message: message)) { try AgentCommandLine.parse(arguments) }
@@ -117,7 +132,7 @@ import Testing
             #expect(cli.contains("  \(code.rawValue)"), "\(code.rawValue)")
             #expect(cli.contains(code.meaning), "\(code.rawValue)")
         }
-        #expect(cli.contains("guide, tools, mcp-config, setup, and links work without Arch running."))
+        #expect(cli.contains("guide, tools, mcp-config, setup, links, and skills work without Arch running."))
         #expect(!cli.contains("\n\n\n"))
     }
 }
