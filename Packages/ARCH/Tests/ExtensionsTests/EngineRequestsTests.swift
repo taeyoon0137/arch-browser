@@ -192,7 +192,7 @@ struct EngineRequestsTests {
         runtime.storePageReader = { WebStore.extensionID(in: $0, pageHosts: ["store.example"]) }
         let id = WebExtensionManifest.extensionID(ofBytes: Data("store extension".utf8))
         // Before the Persona has any extension, a profile's start makes the runtime the engine's delegate, which the store's button asks.
-        runtime.profileDidStart(with: chromium)
+        runtime.profileDidStart(with: chromium, of: .chromium)
         let delegate = try #require(chromium.delegate)
         #expect(delegate === runtime)
         let storeTab = PageStub(url: URL(string: "https://store.example/detail/sample-name/\(id)"))
