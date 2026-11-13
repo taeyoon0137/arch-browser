@@ -269,6 +269,19 @@ import Foundation
         } else if isNeeded, !acceptsOutsideClients {
             // Outside access went off while a session keeps the channel: only the sessions' own connections stay.
             for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
+            // A session an outside client started stops with its access.
+            endClientSessions(of: nil, because: "Outside access was turned off in Arch.")
+        }
+    }
+
+    /// Ends the sessions an outside client started, those of one grant or all of them, with their connections: a session never outlives the access that started it.
+    private func endClientSessions(of grantID: UUID?, because reason: String) {
+        for session in sessions where session.isFromOutsideClient && !session.hasEnded && (grantID == nil || session.grantID == grantID) {
+            for connection in connections.values where connection.sessionID == session.id { endpoint?.close(connection.id) }
+            Task {
+                await session.end(keepingThread: settings.keepsCodexCopy, because: reason)
+                updateSessionsChannel()
+            }
         }
     }
 
@@ -282,7 +295,7 @@ import Foundation
     public func stop() {
         expiryTimer?.invalidate()
         dependencies.prompt.cancelAll()
-        for session in sessions where !session.hasEnded { session.endProcessesAtQuit() }
+        for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
         if canChangeSettings, file.hasKey, !settings.grants.isEmpty { write() }
         activity.saveNow()
         endpoint?.stop()
@@ -323,6 +336,7 @@ import Foundation
         handles[grant.id] = nil
         if wasKept { save() }
         record(event, grant: grant)
+        endClientSessions(of: grant.id, because: message)
         for connection in connections.values where connection.identity?.key == grant.client.key && connection.id != connectionID {
             endpoint?.send(.notification(method: AgentControlMethod.revokedNotification, params: ["message": .string(message)]), to: connection.id)
             endpoint?.close(connection.id)
@@ -602,9 +616,9 @@ import Foundation
         }
     }
 
-    /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again.
+    /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again. A conversation a model held has no Retry, since a new runner would not carry it.
     public func retry(_ session: AgentSession) async {
-        guard case .failed = session.state, !session.hasEnded, let old = session.runner else { return session.retryLastMessage() }
+        guard case .failed = session.state, !session.hasEnded, session.model == nil, let old = session.runner else { return session.retryLastMessage() }
         await old.end(keepingThread: false)
         guard !session.hasEnded else { return }
         do {
@@ -641,16 +655,20 @@ import Foundation
         let live = sessions.filter { !$0.hasEnded }
         guard !live.isEmpty else { return }
         let keepsCopy = settings.keepsCodexCopy
-        let ending = Task { @MainActor in
-            await withTaskGroup(of: Void.self) { group in
-                for session in live { group.addTask { await session.end(keepingThread: keepsCopy) } }
+        // The first of the endings and the time limit returns; an ending that has not finished by then ends its processes at `stop()`.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = Once(continuation)
+            let ending = Task { @MainActor in
+                await withTaskGroup(of: Void.self) { group in
+                    for session in live { group.addTask { await session.end(keepingThread: keepsCopy) } }
+                }
+                once.resume()
             }
-        }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await ending.value }
-            group.addTask { try? await Task.sleep(for: limit) }
-            _ = await group.next()
-            group.cancelAll()
+            Task {
+                try? await Task.sleep(for: limit)
+                once.resume()
+                ending.cancel()
+            }
         }
     }
 
@@ -716,7 +734,7 @@ import Foundation
         // Only `arch-mcp --session` presents a ticket.
         guard hello.client == .mcp, let session = matched, !session.hasEnded, let process = session.liveProcess,
               AgentProcessAncestry.isProcess(connection.peer.processID, descendedFrom: process, records: dependencies.processRecord) else {
-            if let session = matched, !session.hasEnded, session.liveProcess != nil, hello.client == .mcp { session.noteForeignTicketUse() }
+            if let session = matched, !session.hasEnded, hello.client == .mcp { session.noteForeignTicketUse() }
             activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: matched?.id, clientName: hello.client.rawValue,
                                                outcome: matched == nil ? "the ticket names no session" : "the ticket's program is not the session's"))
             return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))
@@ -727,12 +745,15 @@ import Foundation
         reply(connection, requestID, Self.json(AgentHelloAnswer(version: version, status: .bound)))
     }
 
-    private var sessionScopes: AgentGrantScopes {
-        AgentGrantScopes(searchHistory: settings.inAppAgentsSearchHistory, startTasks: false)
+    /// Whether a session may search history: Let In-App Agents Search History, and for a session an outside client started also its grant's Search History scope, which a revoked grant no longer has.
+    private func searchesHistory(_ session: AgentSession) -> Bool {
+        guard settings.inAppAgentsSearchHistory else { return false }
+        guard let grantID = session.grantID else { return true }
+        return grants.first { $0.id == grantID }?.scopes.searchHistory ?? false
     }
 
     private func listedTools(for session: AgentSession) -> [String] {
-        AgentToolHost.tools(for: session.mode, scopes: sessionScopes).map(\.name)
+        AgentToolHost.tools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false)).map(\.name)
     }
 
     /// `tools/list` on a session's connection: the tools its mode allows. A list that differs from the last one reported, as after a mode change, reaches the runner, whose start check accepts it in a later `init`.
@@ -762,13 +783,14 @@ import Foundation
         }
         connection.runningCalls += 1
         let runner = session.runner
+        let epoch = session.callEpoch
         runner?.toolCallDidStart()
         Task {
             defer {
                 connection.runningCalls -= 1
                 runner?.toolCallDidEnd()
             }
-            let result = await sessionResult(of: call, in: session)
+            let result = await sessionResult(of: call, in: session, arrivedAt: epoch, on: connection)
             guard connections[connection.id] != nil else { return }
             let tool = AgentToolCatalog.tool(named: call.name)
             let tabHandle = call.arguments["tab"]?.stringValue
@@ -780,16 +802,22 @@ import Foundation
         }
     }
 
-    private func sessionResult(of call: AgentToolCall, in session: AgentSession) async -> AgentToolResult {
+    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, on connection: ClientConnection) async -> AgentToolResult {
         guard await session.ready.wait(timeout: sessionReadyWait) else {
+            if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
             return AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls.")
         }
+        // A call the turn's end or Stop cut off, or whose connection closed while it waited, runs nothing.
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         guard await session.handedBack.wait(timeout: sessionTakeOverWait) else {
+            if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
             return AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message.")
         }
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
+        guard connections[connection.id] != nil else { return AgentToolResult(status: .refused, code: "stopped", text: "The connection closed, so Arch did not run this call.") }
         if let refusal = session.countCall() { return refusal }
         var handles = session.handles
-        let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: AgentToolClient(session: session, searchesHistory: settings.inAppAgentsSearchHistory), handles: &handles)
+        let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: AgentToolClient(session: session, searchesHistory: searchesHistory(session)), handles: &handles)
         session.handles = handles
         return result
     }
@@ -828,8 +856,11 @@ import Foundation
         session.origin = .outsideClient(grantID: grant.id, clientName: identity.displayName, deniesApprovals: start.deniesApprovals)
         do {
             let started = try startSession(session)
+            // Only the IDs, so that the closure does not keep the session and its transcript alive.
+            let sessionID = started.id
+            let connectionID = connection.id
             started.taskEvent = { [weak self] kind, text in
-                self?.endpoint?.send(.notification(method: AgentControlMethod.taskEventNotification, params: Self.json(AgentTaskEvent(session: started.id, kind: kind, text: text))), to: connection.id)
+                self?.endpoint?.send(.notification(method: AgentControlMethod.taskEventNotification, params: Self.json(AgentTaskEvent(session: sessionID, kind: kind, text: text))), to: connectionID)
             }
             reply(connection, requestID, Self.json(summary(of: started)))
         } catch {
@@ -992,6 +1023,20 @@ import Foundation
 
     static func json<Value: Encodable>(_ value: Value) -> AgentJSON {
         (try? AgentJSON(encoding: value)) ?? .null
+    }
+}
+
+/// Resumes a continuation once, whichever of two tasks comes first.
+@MainActor private final class Once {
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(_ continuation: CheckedContinuation<Void, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

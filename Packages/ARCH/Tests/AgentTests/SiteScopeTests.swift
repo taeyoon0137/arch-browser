@@ -75,6 +75,22 @@ import Testing
         #expect(AgentAddressQuestion(url: url("https://other.example/"), unseenParts: [], isOutsideScope: true).sentence == "The agent wants to open https://other.example/ \u{2014} a site you did not name.")
     }
 
+    @Test func aHostLabelOfASiteInScopeCannotCarryDataOut() {
+        var scope = AgentSiteScope(searchResults: search)
+        scope.add(url("https://corp.example/inbox"))
+        scope.see(url("https://news.corp.example/today"))
+        // The registrable domain, `www.` before it, and a host the session saw open as bare origins.
+        #expect(scope.written(url("https://corp.example")) == .opens)
+        #expect(scope.written(url("https://www.corp.example")) == .opens)
+        #expect(scope.written(url("https://news.corp.example")) == .opens)
+        // Any other host asks, naming the host as the part no page showed.
+        let label = url("https://nbswy3dpeb3w64tmmq.corp.example/")
+        #expect(scope.written(label) == .asks(AgentAddressQuestion(url: label, unseenParts: [.host], isOutsideScope: false)))
+        // A hosting platform's customers are other sites, so another customer's subdomain stays outside the scope.
+        scope.add(url("https://mine.github.io/"))
+        #expect(scope.written(url("https://theirs.github.io/")) != .opens)
+    }
+
     @Test func theSearchEnginesResultsAddressOpensAndItsOtherAddressesAsk() {
         let scope = AgentSiteScope(searchResults: search)
         #expect(scope.written(url("https://www.google.com/search?q=arch+agents")) == .opens)

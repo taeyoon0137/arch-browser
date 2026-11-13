@@ -77,6 +77,8 @@ public enum AIAgentTurnEnd: Sendable, Equatable {
 public enum AIAgentEvent: Sendable {
     /// The model's first output in the session (Claude Code's first `message_start` after an `init` that passed the start check, or Codex's first item other than an error), with the model that now holds the conversation. A model that fails before it gives way to the route's next.
     case ready(AIModelRef)
+    /// The first output of a later CLI process, after its own start check passed, as `ready` is the first process's: a new Claude Code process after one that stopped, or each Codex turn after the first. The `Agent` module holds a session's calls again from each process start until it.
+    case processReady
     case text(String)
     case thinking(String)
     /// A turn's tokens, also recorded under the session's feature and model. For Codex, what the turn added to the thread's running total.
@@ -143,6 +145,10 @@ public final class AIAgentSession {
 
     private var process: CommandLineProcess?
     private var processKind: AIAgentKind?
+    /// Whether the running process has produced output, which `ready` or `processReady` reports once per process.
+    private var processHasOutput = false
+    /// Held while the session lives, so that another Arch's sweep of leftover folders leaves its folder alone.
+    private var folderLock: AIAgentFolderLock?
     /// Counts process starts and ends, so the end of a process Arch already let go reports nothing.
     private var processRun = 0
     private var lines = AIAgentLineBuffer()
@@ -169,6 +175,12 @@ public final class AIAgentSession {
         folder = request.folder
         currentTools = request.toolServer.tools
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        do {
+            folderLock = try AIAgentFolderLock(folder: folder)
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
     }
 
     /// `$TMPDIR/Arch-Agent-<session UUID>/`.
@@ -178,11 +190,13 @@ public final class AIAgentSession {
 
     nonisolated static let folderPrefix = "Arch-Agent-"
 
-    /// Removes the session folders an earlier run left, as after a crash. The app calls it at launch, before any session starts.
-    public nonisolated static func removeLeftoverFolders(in directory: URL = FileManager.default.temporaryDirectory) {
+    /// Removes the session folders an earlier run left, as after a crash. The app calls it at launch, before any session starts. A folder whose lock a live session holds, as another Arch's, stays, and so does a folder without a lock made in the last minute, which a session may be starting in.
+    public nonisolated static func removeLeftoverFolders(in directory: URL = FileManager.default.temporaryDirectory, now: Date = Date()) {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         for name in names where name.hasPrefix(folderPrefix) {
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name, isDirectory: true))
+            let folder = directory.appendingPathComponent(name, isDirectory: true)
+            guard AIAgentFolderLock.isLeftover(folder, now: now) else { continue }
+            try? FileManager.default.removeItem(at: folder)
         }
     }
 
@@ -246,6 +260,7 @@ public final class AIAgentSession {
         isClosed = true
         if !keepingThread, let holder = candidates.first { await deleteThread(of: holder) }
         try? FileManager.default.removeItem(at: folder)
+        folderLock = nil
     }
 
     /// Ends the running process group at once, as at quit, without the work of `end(keepingThread:)`, which still removes the folder and Codex's thread.
@@ -511,6 +526,7 @@ public final class AIAgentSession {
         self.process = process
         processKind = kind
         processID = process.id
+        processHasOutput = false
         processDidStart?(process.id)
         lines = AIAgentLineBuffer()
         Task { [weak self] in
@@ -576,8 +592,13 @@ public final class AIAgentSession {
             if thread != threadID { threadUsage = nil }
             threadID = thread
         case .output:
+            guard !processHasOutput else { return }
+            processHasOutput = true
+            guard model == nil else {
+                continuation.yield(.processReady)
+                return
+            }
             // The model replied, so the conversation stays on it from here on.
-            guard model == nil else { return }
             model = turn.candidate.ref
             candidates = [turn.candidate]
             continuation.yield(.ready(turn.candidate.ref))
@@ -660,6 +681,8 @@ extension AIService {
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
         var candidates: [AIRouteModel]
+        // A model the caller names does not bypass the feature's switch in Settings ▸ AI ▸ Features.
+        guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
         if let ref = request.model {
             guard let provider = settings.providers.first(where: { $0.id == ref.provider }),
                   let model = provider.models.first(where: { $0.name == ref.model }) else { throw AIError.notConfigured(.noUsableModel) }
@@ -679,8 +702,10 @@ extension AIService {
         }
     }
 
-    /// The models that can run an agent session on the user's CLI, for the composer's menu: the `agent` route's usable models first, then every other model of a Claude Code or Codex preset.
+    /// The models that can run an agent session on the user's CLI, for the composer's menu: the `agent` route's usable models first, then every other model of a Claude Code or Codex preset; none while Agent Tasks is off.
     public func agentSessionModels() -> [AIModelRef] {
+        // With Agent Tasks off, no model can run a session.
+        guard settings.route(for: .agent).isEnabled else { return [] }
         let all = settings.providers.flatMap { provider -> [AIModelRef] in
             guard case .commandLine(let tool) = provider.kind, tool.agent != nil else { return [] }
             return provider.models.map { AIModelRef(provider: provider.id, model: $0.name) }
@@ -713,5 +738,41 @@ extension AIService {
         case false?: throw AIAgentToolError(detail: "\(name) is not signed in. Sign in to it in the terminal.")
         case nil: throw AIAgentToolError(detail: "\(name) did not say whether it is signed in.")
         }
+    }
+}
+
+/// A lock a live session holds on its folder (`flock` on `.arch-lock` in it), so that the sweep of leftover folders at another Arch's launch leaves it alone. The lock goes with the process, so a crashed Arch's folder is leftover again.
+final class AIAgentFolderLock {
+    static let fileName = ".arch-lock"
+    /// How long a folder without a lock file may be young, since a session makes the folder before it takes the lock.
+    static let graceInterval: TimeInterval = 60
+
+    private var descriptor: Int32
+
+    init(folder: URL) throws {
+        let descriptor = open(folder.appendingPathComponent(Self.fileName).path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EWOULDBLOCK)
+        }
+        self.descriptor = descriptor
+    }
+
+    deinit {
+        close(descriptor)
+    }
+
+    /// Whether the sweep may remove `folder`: no live session holds its lock, and a folder without a lock file is older than the grace interval.
+    static func isLeftover(_ folder: URL, now: Date) -> Bool {
+        let descriptor = open(folder.appendingPathComponent(fileName).path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            let modified = (try? FileManager.default.attributesOfItem(atPath: folder.path))?[.modificationDate] as? Date
+            return modified.map { now.timeIntervalSince($0) > graceInterval } ?? true
+        }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_SH | LOCK_NB) == 0 else { return false }
+        flock(descriptor, LOCK_UN)
+        return true
     }
 }

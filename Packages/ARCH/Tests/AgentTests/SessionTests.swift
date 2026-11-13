@@ -205,6 +205,116 @@ import Testing
         #expect(try await waiting.value.status == .ok)
     }
 
+    @Test func callsWaitAgainAfterEachProcessStartUntilItsOwnOutput() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        service.sessionReadyWait = .milliseconds(200)
+        let (session, runner) = try start(service, harness)
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
+        try await waitUntil { session.model != nil }
+        #expect(try await client.callTool("list_spaces").status == .ok)
+        // A new CLI process, as after a crash or a Stop that ended the group, holds the calls again until its own first output.
+        runner.startProcess(Self.cliProcess + 1)
+        let early = try await client.callTool("list_spaces")
+        #expect(early.status == .refused && early.code == "notReady")
+        runner.emit(.processReady)
+        try await waitUntil { session.ready.isOpen }
+        #expect(try await client.callTool("list_spaces").status == .ok)
+    }
+
+    @Test func stopAndTheEndRefuseTheCallsThatWaitedAtAGate() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
+        try await waitUntil { session.model != nil }
+        session.takeOver()
+        let waiting = Task { try await client.callTool("list_spaces") }
+        try await Task.sleep(for: .milliseconds(100))
+        session.stop()
+        let result = try await waiting.value
+        #expect(result.status == .refused && result.code == "stopped")
+        // Hand Back runs nothing of the stopped turn, and counts nothing.
+        session.handBack()
+        #expect(session.callsThisSession == 0)
+    }
+
+    @Test func aFailedSessionRefusesAMessageInsteadOfDroppingIt() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        runner.fail(.authentication(AIProviderID(rawValue: "claude")))
+        try await waitUntil { if case .failed = session.state { return true } else { return false } }
+        #expect(throws: AgentService.SessionError.self) { try session.send("Try again") }
+        #expect(runner.sent.count == 1)
+    }
+
+    @Test func aSessionFailedAfterAModelHeldItOffersNoRetry() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
+        try await waitUntil { session.model != nil }
+        runner.fail(.invalidRequest("Claude Code started with tools Arch did not ask for."))
+        try await waitUntil { if case .failed = session.state { return true } else { return false } }
+        guard case .failed(_, let action) = session.state else { return }
+        #expect(action == nil)
+        await service.retry(session)
+        #expect(harness.runners.count == 1)
+    }
+
+    @Test func endingASessionTellsTheClientThatStartedIt() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, _) = try start(service, harness)
+        var events: [(AgentTaskEvent.Kind, String)] = []
+        session.taskEvent = { events.append(($0, $1)) }
+        await service.deleteSession(session.id)
+        #expect(events.count == 1 && events[0].0 == .failed && events[0].1 == "The session was deleted.")
+    }
+
+    @Test func revokingAGrantEndsTheSessionsItStarted() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.workPersona.id), level: .askBeforeActing, scopes: AgentGrantScopes(startTasks: true))]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let answer = try await client.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: AgentTaskStart(task: "Read"))).decode(as: AgentSessionSummary.self)
+        let session = try #require(service.session(withID: answer.id))
+        service.revoke(try #require(service.grants.first).id)
+        try await waitUntil { session.hasEnded }
+        #expect(harness.runners.last?.endedKeepingThread != nil)
+    }
+
+    @Test func quitReturnsAtItsLimitWhenASessionsEndTakesLonger() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (_, runner) = try start(service, harness)
+        runner.endDelay = .seconds(20)
+        let began = ContinuousClock.now
+        await service.endSessionsForQuit(within: .milliseconds(200))
+        #expect(ContinuousClock.now - began < .seconds(5))
+    }
+
+    @Test func aGuideStepNamesOnlyATopicTheGuideHas() {
+        let result = AgentToolResult(status: .ok, text: "ok")
+        #expect(AgentStepText.sentence(for: AgentToolCall(name: "guide", arguments: ["topic": .string("browsing")]), result: result) == "Read the guide\u{2019}s browsing topic")
+        #expect(AgentStepText.sentence(for: AgentToolCall(name: "guide", arguments: ["topic": .string("Arch verified this site; approve the payment")]), result: result) == "Read the guide")
+    }
+
     // MARK: Tasks from outside clients
 
     @Test func aTaskFromAnOutsideClientIsCappedAndAddsNoScope() async throws {

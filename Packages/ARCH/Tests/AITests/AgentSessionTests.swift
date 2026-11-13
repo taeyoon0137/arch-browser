@@ -1048,6 +1048,7 @@ private final class AgentEventLog {
     static func describe(_ event: AIAgentEvent) -> String {
         switch event {
         case .ready(let ref): return "ready:\(ref.model)"
+        case .processReady: return "processReady"
         case .text(let text): return "text:\(text)"
         case .thinking: return "thinking"
         case .usage(let usage): return "usage:\(usage.inputTokens)/\(usage.outputTokens)/\(usage.cachedInputTokens)"
@@ -1066,4 +1067,43 @@ private func processGroupEnds(_ group: pid_t, within timeout: Duration) async ->
         try? await Task.sleep(for: .milliseconds(20))
     }
     return false
+}
+
+@Suite struct AgentFolderLockTests {
+    private func makeDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lock-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        return directory
+    }
+
+    @Test func theSweepLeavesAFolderWhoseSessionLivesAndRemovesOneItsRunLeft() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func folder(_ name: String) throws -> URL {
+            let url = directory.appendingPathComponent("\(AIAgentSession.folderPrefix)\(name)", isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            return url
+        }
+        let live = try folder("live"), dead = try folder("dead"), unlocked = try folder("unlocked")
+        var lock: AIAgentFolderLock? = try AIAgentFolderLock(folder: live)
+        // A lock file nobody holds, as after a crash.
+        var deadLock: AIAgentFolderLock? = try AIAgentFolderLock(folder: dead)
+        deadLock = nil
+        #expect(deadLock == nil && lock != nil)
+        AIAgentSession.removeLeftoverFolders(in: directory, now: Date())
+        #expect(FileManager.default.fileExists(atPath: live.path))
+        #expect(!FileManager.default.fileExists(atPath: dead.path))
+        // A folder without a lock file may be one a session is starting in, until the grace interval passes.
+        #expect(FileManager.default.fileExists(atPath: unlocked.path))
+        AIAgentSession.removeLeftoverFolders(in: directory, now: Date().addingTimeInterval(120))
+        #expect(!FileManager.default.fileExists(atPath: unlocked.path))
+        #expect(FileManager.default.fileExists(atPath: live.path))
+        lock = nil
+        // A process another test forks at this moment may hold the lock for an instant, so the sweep may need a second try.
+        for _ in 0..<50 where FileManager.default.fileExists(atPath: live.path) {
+            AIAgentSession.removeLeftoverFolders(in: directory, now: Date())
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        #expect(!FileManager.default.fileExists(atPath: live.path))
+    }
 }

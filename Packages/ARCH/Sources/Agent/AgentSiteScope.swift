@@ -1,4 +1,4 @@
-// An in-app session's site scope and the addresses it has seen (docs/agents.md, Permissions, approvals, and injection defenses ▸ Site scope and navigation; rule P13). The scope holds registrable domains: the sites of tabs attached at the start or shared later, of addresses the user wrote in the task or a later message, and of addresses the user allowed. The search engine joins only through its results address. A link the agent follows opens without asking, since the page wrote its address. An address the agent writes opens without asking only when the session has seen it verbatim, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other written address asks in every mode, because its path, query, or fragment can carry what the agent read elsewhere. A redirect hop of a written address's navigation to a site outside the scope asks with the hop's full address. Site exclusions (rule P16) are the policy's and apply before the scope.
+// An in-app session's site scope and the addresses it has seen (docs/agents.md, Permissions, approvals, and injection defenses ▸ Site scope and navigation; rule P13). The scope holds registrable domains: the sites of tabs attached at the start or shared later, of addresses the user wrote in the task or a later message, and of addresses the user allowed. The search engine joins only through its results address. A link the agent follows opens without asking, since the page wrote its address. An address the agent writes opens without asking only when the session has seen it verbatim, when it is the search engine's results address, or when it is the bare origin of a host the session has seen or of a site in scope's own name (the registrable domain or `www.` before it), since a host's label can carry data as a query can; any other written address asks in every mode, because its path, query, or fragment can carry what the agent read elsewhere. A redirect hop of a written address's navigation to a site outside the scope asks with the hop's full address. Site exclusions (rule P16) are the policy's and apply before the scope.
 import Foundation
 
 /// Sites as the scope counts them: a host's registrable domain, the part a registrant controls, such as `example.co.uk` for `shop.example.co.uk`.
@@ -72,6 +72,7 @@ public struct AgentSearchResultsAddress: Equatable, Sendable {
 /// An address as the scope compares it: the scheme and host in lower case, without a default port, and with `/` for an empty path. The path, query, and fragment stay as written.
 struct AgentSeenAddress: Hashable {
     var origin: String
+    var host: String
     var path: String
     var query: String?
     var fragment: String?
@@ -83,6 +84,7 @@ struct AgentSeenAddress: Hashable {
               scheme == "http" || scheme == "https", let host = components.host?.lowercased(), !host.isEmpty else { return nil }
         let isDefaultPort = components.port == nil || (scheme == "http" && components.port == 80) || (scheme == "https" && components.port == 443)
         hasDefaultPort = isDefaultPort
+        self.host = host
         let credentials = components.percentEncodedUser.map { user in user + (components.percentEncodedPassword.map { ":\($0)" } ?? "") + "@" } ?? ""
         origin = "\(scheme)://\(credentials)\(host)\(isDefaultPort ? "" : ":\(components.port!)")"
         path = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
@@ -107,7 +109,8 @@ enum AgentScopeDecision: Equatable {
 /// A P13 question: the full address, the parts of it the session has not seen, and whether its site is outside the scope.
 struct AgentAddressQuestion: Equatable {
     enum Part: String, Equatable {
-        case path, query, fragment
+        /// A host of a site in scope that the session never saw, which the address's name alone could carry data to.
+        case host, path, query, fragment
     }
 
     var url: URL
@@ -164,8 +167,12 @@ struct AgentSiteScope: Equatable {
         guard let address = AgentSeenAddress(url) else { return .asks(AgentAddressQuestion(url: url, unseenParts: [.path], isOutsideScope: true)) }
         if seen.contains(address) || searchResults?.matches(url) == true { return .opens }
         let isInScope = contains(url)
-        if address.isBareOrigin, isInScope { return .opens }
-        return .asks(AgentAddressQuestion(url: url, unseenParts: unseenParts(of: address), isOutsideScope: !isInScope))
+        let isHostKnown = knows(host: address.host)
+        if address.isBareOrigin, isInScope, isHostKnown { return .opens }
+        var parts = unseenParts(of: address)
+        // A host label can carry data as a query can, so a host the session never saw asks even without a path.
+        if isInScope, !isHostKnown, parts.isEmpty { parts = [.host] }
+        return .asks(AgentAddressQuestion(url: url, unseenParts: parts, isOutsideScope: !isInScope))
     }
 
     /// A redirect hop of a navigation the agent started. A hop of a written address's navigation that leads off the scope asks with the hop's full address; hops of followed links, and hops within the scope, go on.
@@ -173,6 +180,12 @@ struct AgentSiteScope: Equatable {
         guard ofWrittenAddress, !contains(url), searchResults?.matches(url) != true else { return .opens }
         let address = AgentSeenAddress(url)
         return .asks(AgentAddressQuestion(url: url, unseenParts: address.map(unseenParts(of:)) ?? [.path], isOutsideScope: true))
+    }
+
+    /// Whether a host of a site in scope may open as a bare origin: the registrable domain itself, `www.` before it, or a host the session has seen.
+    private func knows(host: String) -> Bool {
+        let site = AgentSite.registrableDomain(of: host)
+        return host == site || host == "www." + site || seen.contains { $0.host == host }
     }
 
     /// The parts of an address that no seen address on its origin shares: its path, then its query on that path, then its fragment on that path and query.

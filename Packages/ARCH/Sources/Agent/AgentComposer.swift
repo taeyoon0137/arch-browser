@@ -134,8 +134,9 @@ public struct AgentComposer: View {
             }
             GridRow {
                 label("Mode")
-                Picker("Mode", selection: Binding(get: { mode ?? service.settings.newSessionMode }, set: { mode = $0 })) {
-                    ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+                // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
+                Picker("Mode", selection: Binding(get: { chosenMode }, set: { mode = $0 })) {
+                    ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.settings.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
                 .controlSize(.small)
@@ -176,6 +177,13 @@ public struct AgentComposer: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The mode the user picked, at most Settings' mode.
+    private var chosenMode: AgentAccessLevel {
+        let limit = service.settings.newSessionMode
+        guard let mode, mode.rank <= limit.rank else { return limit }
+        return mode
+    }
+
     /// The route's first model until the user picks another.
     private var selectedModel: AIModelRef? {
         model ?? models.first
@@ -207,7 +215,7 @@ public struct AgentComposer: View {
         guard !task.isEmpty else { return }
         let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
         let start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
-                                              mode: mode ?? service.settings.newSessionMode, model: selectedModel, effort: effort, usesAgentsPersona: usesAgentsPersona)
+                                              mode: chosenMode, model: model, effort: effort, usesAgentsPersona: usesAgentsPersona)
         do {
             let session = try service.startSession(start)
             problem = nil

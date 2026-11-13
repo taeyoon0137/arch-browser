@@ -81,6 +81,8 @@ extension AIAgentSession: AgentSessionRunning {}
     /// Take Over: the session's calls wait until Hand Back.
     @Published public private(set) var isTakenOver = false
     @Published public private(set) var hasEnded = false
+    /// Set once the runner's end finished, with its processes, folder, and Codex's thread; a quit that ran out of time ends the processes of a session without it.
+    private(set) var isCleanedUp = false
     /// The scope's sites, for the panel's header and `session_info`.
     @Published public private(set) var siteScope: [String] = []
 
@@ -94,6 +96,8 @@ extension AIAgentSession: AgentSessionRunning {}
     private(set) var runner: (any AgentSessionRunning)?
     /// The CLI process Arch started last, as it was right after it started.
     private(set) var spawnedProcess: AgentProcessRecord?
+    /// Counts what ends the calls of the turn before: a new turn, Stop, a new runner, and the end. A call that waited at a gate runs only when the count is still the one it arrived with.
+    private(set) var callEpoch = 0
     private(set) var callsThisTurn = 0
     private(set) var callsThisSession = 0
     /// The last tool list reported to the runner, so that a later `tools/list` answer that differs reaches it once.
@@ -161,7 +165,11 @@ extension AIAgentSession: AgentSessionRunning {}
     /// Starts driving `runner`, whose events the session reads until it ends. `processRecord` reads each CLI process's start time right after it starts.
     func attach(_ runner: any AgentSessionRunning, processRecord: @escaping (pid_t) -> AgentProcessRecord?) {
         self.runner = runner
-        runner.processDidStart = { [weak self] processID in self?.spawnedProcess = processRecord(processID) }
+        // Calls wait again from each CLI process's start until its start check passed and it gave its first output (`ready` or `processReady`), as after a Retry or a Stop's new process.
+        runner.processDidStart = { [weak self] processID in
+            self?.spawnedProcess = processRecord(processID)
+            self?.ready.close()
+        }
         let events = runner.events
         Task { [weak self] in
             do {
@@ -189,6 +197,8 @@ extension AIAgentSession: AgentSessionRunning {}
             model = ref
             ready.open()
             if state == .starting { state = .running }
+        case .processReady:
+            ready.open()
         case .text(let text):
             transcript.replyText(text)
             taskEvent?(.text, text)
@@ -223,7 +233,9 @@ extension AIAgentSession: AgentSessionRunning {}
         isTurnRunning = false
         queuedMessages = []
         guard let error, !hasEnded else { return }
-        let (sentence, action) = describe(error)
+        var (sentence, action) = describe(error)
+        // A conversation never moves to another model, and a new runner would not carry it, so Retry stays for a session no model held.
+        if model != nil, action == .retry { action = nil }
         transcript.append(.error(sentence, action))
         state = .failed(sentence, action)
         taskEvent?(.failed, sentence)
@@ -235,7 +247,7 @@ extension AIAgentSession: AgentSessionRunning {}
     public func send(_ text: String) throws {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !hasEnded, let runner else { return }
-        if case .failed = state { return }
+        if case .failed(let sentence, _) = state { throw AgentService.SessionError(message: sentence) }
         try runner.checkMessage(text)
         if isTurnRunning {
             queuedMessages.append(text)
@@ -256,6 +268,7 @@ extension AIAgentSession: AgentSessionRunning {}
         // The user's own addresses join the scope; an outside client's never do.
         if !isFromOutsideClient { scope.addAddresses(inUserText: text) }
         callsThisTurn = 0
+        callEpoch += 1
         let message = hasSentFirstMessage ? text : AgentSessionPreamble.firstMessage(text, attachedTabHandles: attachedTabHandles)
         do {
             try runner.send(message)
@@ -278,7 +291,21 @@ extension AIAgentSession: AgentSessionRunning {}
     /// Stop: the running turn ends and the queued messages go; the next message continues the session.
     public func stop() {
         queuedMessages = []
+        endCallsOfTheTurn()
         runner?.stop()
+    }
+
+    /// The calls waiting at a gate from the turn that ended go on with a refusal, and none of them runs later, as at a Hand Back after Stop.
+    private func endCallsOfTheTurn() {
+        callEpoch += 1
+        ready.release()
+        handedBack.release()
+    }
+
+    /// The refusal of a call that arrived at `epoch` after its turn ended or its session was stopped.
+    func staleCallResult(arrivedAt epoch: Int) -> AgentToolResult? {
+        guard epoch != callEpoch || hasEnded else { return nil }
+        return AgentToolResult(status: .refused, code: "stopped", text: "The turn this call belonged to ended, so Arch did not run it.")
     }
 
     /// Retry after a failed turn: the last message again.
@@ -356,15 +383,18 @@ extension AIAgentSession: AgentSessionRunning {}
     // MARK: Ending
 
     /// Ends the session: its calls stop waiting, and its CLI processes and folder go, with Codex's copy of the thread unless `keepingThread`.
-    func end(keepingThread: Bool) async {
+    func end(keepingThread: Bool, because reason: String = "The session was deleted.") async {
         guard !hasEnded else { return }
         hasEnded = true
         queuedMessages = []
+        callEpoch += 1
+        taskEvent?(.failed, reason)
         ready.shut()
         handedBack.shut()
         if isTurnRunning || state == .starting || state == .running { state = .stopped }
         isTurnRunning = false
         await runner?.end(keepingThread: keepingThread)
+        isCleanedUp = true
     }
 
     /// At quit, after the time to end the session ran out: the CLI's process group ends at once.
@@ -376,6 +406,8 @@ extension AIAgentSession: AgentSessionRunning {}
     func replaceRunner(_ newRunner: any AgentSessionRunning, processRecord: @escaping (pid_t) -> AgentProcessRecord?) {
         hasSentFirstMessage = false
         spawnedProcess = nil
+        callEpoch += 1
+        ready.close()
         state = .starting
         attach(newRunner, processRecord: processRecord)
     }

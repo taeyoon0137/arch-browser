@@ -22,6 +22,11 @@ import Foundation
         isOpen = false
     }
 
+    /// Every waiting call goes on with no; the gate keeps its state.
+    func release() {
+        resumeAll(false)
+    }
+
     /// Closes the gate for good; every waiting call goes on with no.
     func shut() {
         isShut = true

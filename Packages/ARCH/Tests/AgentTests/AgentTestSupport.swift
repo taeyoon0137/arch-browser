@@ -97,8 +97,12 @@ import Testing
 
     func stop() { stops += 1 }
 
+    /// How long `end` takes, as Codex's thread deletion can.
+    var endDelay: Duration?
+
     func end(keepingThread: Bool) async {
         endedKeepingThread = keepingThread
+        if let endDelay { try? await Task.sleep(for: endDelay) }
         processID = nil
         continuation.finish()
     }
