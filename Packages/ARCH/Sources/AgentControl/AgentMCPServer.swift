@@ -206,7 +206,7 @@ public struct AgentMCPServer {
 
     private mutating func notification(method: String, params: AgentJSON?) -> [Effect] {
         guard method == "notifications/cancelled", let id = params?["requestId"].flatMap(AgentRPCID.init) else { return [] }
-        // A request still waiting for the connection never reaches Arch.
+        // A request still waiting for the connection never reaches Arch. `MCPServerLoop` connects before it reads the next line, so there the request has always been sent.
         if let index = waiting.firstIndex(where: { $0.id == id }) {
             waiting.remove(at: index)
             return []

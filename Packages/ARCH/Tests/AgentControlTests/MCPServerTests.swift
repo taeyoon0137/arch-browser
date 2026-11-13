@@ -226,7 +226,7 @@ private let notRunning = AgentClientError.notRunning.message
     @Test func cancellationStopsTheCallInArch() {
         var transcript = Transcript()
         transcript.initialize()
-        // A call cancelled while arch-mcp connects never reaches Arch.
+        // The core drops a call cancelled before the connection's outcome. `MCPServerLoop` connects before it reads the next line, so there the cancellation follows the call to Arch, as below.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"wait_for","arguments":{"tab":"t1","load":true}}}"#)
         #expect(transcript.client(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":41,"reason":"The user stopped it."}}"#) == [])
         _ = transcript.client(#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"ask_user","arguments":{"question":"Go on?"}}}"#)

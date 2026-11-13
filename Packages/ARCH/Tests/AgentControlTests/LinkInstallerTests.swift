@@ -1,4 +1,4 @@
-// The setup commands without the user's own folders: the MCP configuration texts and `setup`'s commands for a bundle path, and the PATH link installer in a temporary home folder with folders on and off PATH, inside and outside that home, links into Arch bundles, and files that are not Arch's.
+// The setup commands without the user's own folders: the MCP configuration texts and `setup`'s commands for a bundle path, and the PATH link installer in a temporary home folder with folders on and off PATH, inside and outside that home, an Arch bundle's own `Contents/Helpers` among them, links into Arch bundles, and files that are not Arch's.
 import AgentControl
 import Darwin
 import Foundation
@@ -154,6 +154,29 @@ private final class TemporaryHome {
         #expect(home.destination("arch-cli", in: home.outside) == home.bundle.cliExecutableURL.path)
         #expect(try installer.remove(from: folders) == [])
         #expect(throws: AgentLinkInstaller.Failure.outsideHome(home.outside.path)) { try installer.removalFolders(named: home.outside.path) }
+    }
+
+    @Test func aFolderInsideAnAppBundleIsNeverUsed() throws {
+        let home = try TemporaryHome()
+        // Arch's own Contents/Helpers on PATH, with the bundle's arch-cli and its relative arch-mcp link.
+        let helpers = home.bundle.helpersURL
+        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: home.bundle.cliExecutableURL)
+        try FileManager.default.createSymbolicLink(atPath: home.bundle.mcpExecutableURL.path, withDestinationPath: AgentBundleLayout.cliName)
+        let installer = home.installer([helpers, home.local])
+        #expect(try installer.removalFolders(named: nil).map(\.path) == [home.local.path])
+        #expect(try installer.remove(from: installer.removalFolders(named: nil)) == [])
+        #expect(throws: AgentLinkInstaller.Failure.noFolder) { try home.installer([helpers]).installFolder(named: nil) }
+        // Named, directly or through a link to it, a folder in a bundle is a usage error.
+        let shortcut = home.home.appendingPathComponent("helpers")
+        try FileManager.default.createSymbolicLink(at: shortcut, withDestinationURL: helpers)
+        for folder in [helpers, shortcut, home.bundle.bundleURL.appendingPathComponent("Contents")] {
+            #expect(throws: AgentLinkInstaller.Failure.insideAppBundle(folder.path)) { try installer.installFolder(named: folder.path) }
+            #expect(throws: AgentLinkInstaller.Failure.insideAppBundle(folder.path)) { try installer.removalFolders(named: folder.path) }
+        }
+        #expect(AgentLinkInstaller.Failure.insideAppBundle("x").exitCode == .usage)
+        #expect(home.destination(AgentBundleLayout.mcpName, in: helpers) == AgentBundleLayout.cliName)
+        #expect(FileManager.default.fileExists(atPath: home.bundle.cliExecutableURL.path))
     }
 
     @Test func archLinksPointIntoAnAppBundlesHelpers() {

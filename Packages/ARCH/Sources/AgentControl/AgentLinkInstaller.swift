@@ -1,4 +1,4 @@
-// `arch-cli links install` and `links remove`, and Install Command-Line Tools… in Settings ▸ AI ▸ Agents (docs/agents.md, arch-cli): symbolic links to the bundle's `arch-cli` and `arch-mcp` in a writable folder on PATH, `~/.local/bin` first when PATH has it. A link follows the bundle, so a rebuilt app brings its own tools. The installer writes only inside the user's home folder, replaces only links into an Arch bundle, and removes only those.
+// `arch-cli links install` and `links remove`, and Install Command-Line Tools… in Settings ▸ AI ▸ Agents (docs/agents.md, arch-cli): symbolic links to the bundle's `arch-cli` and `arch-mcp` in a writable folder on PATH, `~/.local/bin` first when PATH has it. A link follows the bundle, so a rebuilt app brings its own tools. The installer writes only inside the user's home folder and never inside an app bundle, whose signature seals its files, replaces only links into an Arch bundle, and removes only those.
 import Darwin
 import Foundation
 
@@ -17,6 +17,8 @@ public struct AgentLinkInstaller {
     public enum Failure: Error, Equatable {
         /// A folder the caller named lies outside the home folder.
         case outsideHome(String)
+        /// A folder the caller named lies inside an app bundle, such as Arch's own `Contents/Helpers`.
+        case insideAppBundle(String)
         case notAFolder(String)
         case notWritable(String)
         /// No folder of PATH inside the home folder exists and is writable.
@@ -29,6 +31,7 @@ public struct AgentLinkInstaller {
         public var message: String {
             switch self {
             case .outsideHome(let path): return "\(path) is outside your home folder, and arch-cli writes links only inside it."
+            case .insideAppBundle(let path): return "\(path) is inside an app bundle, whose signature covers its files, so arch-cli leaves it alone."
             case .notAFolder(let path): return "\(path) is not a folder."
             case .notWritable(let path): return "\(path) is not writable."
             case .noFolder: return "No folder on your PATH inside your home folder is writable. Make one and add it to PATH, for example with mkdir -p ~/.local/bin and the line export PATH=\"$HOME/.local/bin:$PATH\" in ~/.zprofile, or name a folder with --dir."
@@ -39,7 +42,7 @@ public struct AgentLinkInstaller {
 
         public var exitCode: AgentExitCode {
             switch self {
-            case .outsideHome, .notAFolder: return .usage
+            case .outsideHome, .insideAppBundle, .notAFolder: return .usage
             case .notWritable, .noFolder, .system: return .toolError
             case .foreignFile: return .refused
             }
@@ -69,11 +72,11 @@ public struct AgentLinkInstaller {
 
     // MARK: - Folders
 
-    /// The folder `install` links into: the one named, which must be a writable folder inside the home folder, or else the first such folder of PATH, with `~/.local/bin` before the others.
+    /// The folder `install` links into: the one named, which must be a writable folder inside the home folder and outside any app bundle, or else the first such folder of PATH, with `~/.local/bin` before the others.
     public func installFolder(named name: String?) throws -> URL {
         if let name {
             let folder = URL(fileURLWithPath: name, isDirectory: true).standardizedFileURL
-            try checkInHome(folder)
+            try check(folder)
             guard FileManager.default.isWritableFile(atPath: folder.path) else { throw Failure.notWritable(folder.path) }
             return folder
         }
@@ -85,11 +88,11 @@ public struct AgentLinkInstaller {
         return folder
     }
 
-    /// The folders `remove` looks in: the one named, or every folder of PATH inside the home folder.
+    /// The folders `remove` looks in: the one named, or every folder of PATH inside the home folder and outside any app bundle, so that a bundle's own `arch-mcp` link stays.
     public func removalFolders(named name: String?) throws -> [URL] {
         if let name {
             let folder = URL(fileURLWithPath: name, isDirectory: true).standardizedFileURL
-            try checkInHome(folder)
+            try check(folder)
             return [folder]
         }
         return homeSearchFolders
@@ -101,17 +104,19 @@ public struct AgentLinkInstaller {
         return searchFolders.contains { resolved($0) == target }
     }
 
-    /// PATH's existing folders inside the home folder.
+    /// PATH's existing folders inside the home folder and outside any app bundle.
     private var homeSearchFolders: [URL] {
-        searchFolders.filter { (try? checkInHome($0)) != nil }
+        searchFolders.filter { (try? check($0)) != nil }
     }
 
-    private func checkInHome(_ folder: URL) throws {
+    /// Throws unless the folder, with its links resolved, is a folder inside the home folder and outside any app bundle, so that a bundle on PATH, or Arch's own `Contents/Helpers`, keeps its sealed files.
+    private func check(_ folder: URL) throws {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue, let path = resolved(folder) else {
             throw Failure.notAFolder(folder.path)
         }
         guard let home = resolved(homeFolder), path == home || path.hasPrefix(home + "/") else { throw Failure.outsideHome(folder.path) }
+        guard !path.dropFirst(home.count).split(separator: "/").contains(where: { (String($0) as NSString).pathExtension == "app" }) else { throw Failure.insideAppBundle(folder.path) }
     }
 
     /// The path with every symbolic link resolved (`realpath`), or nil when nothing is there.

@@ -1,4 +1,4 @@
-// The socket location rule: the home folder's `Library/Application Support/Arch/Agent/control.sock` while it fits `sun_path` with its terminating NUL, the per-user temporary folder's `xyz.taeyoon.arch/control.sock` for a longer home, and no location when neither fits; and the bundle layout both ends read their expected code from.
+// The socket location rule: the home folder's `Library/Application Support/Arch/Agent/control.sock` while it fits `sun_path` with its terminating NUL, the per-user temporary folder's `xyz.taeyoon.arch/control.sock` for a longer home, and no location when neither fits; the test variable that only a client outside an app bundle follows; and the bundle layout both ends read their expected code from.
 import AgentControl
 import Darwin
 import Foundation
@@ -38,6 +38,19 @@ import Testing
         let home = String(cString: getpwuid(getuid())!.pointee.pw_dir!)
         #expect(location.path.hasPrefix(home) || location.isInTemporaryFolder)
         #expect(location.path.hasSuffix("/control.sock"))
+    }
+
+    @Test func onlyAClientOutsideABundleFollowsTheTestVariable() throws {
+        let variable = AgentSocketLocation.unbundledClientVariable
+        let named = [variable: "/tmp/act/control.sock"]
+        let bundled = URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-cli")
+        let unbundled = URL(fileURLWithPath: "/Users/someone/arch/.build/debug/arch-cli")
+        #expect(AgentSocketLocation.forClient(at: bundled, environment: named) == AgentSocketLocation.current())
+        #expect(AgentSocketLocation.forClient(at: unbundled, environment: named) == AgentSocketLocation(path: "/tmp/act/control.sock", isInTemporaryFolder: false))
+        #expect(AgentSocketLocation.forClient(at: nil, environment: named)?.path == "/tmp/act/control.sock")
+        #expect(AgentSocketLocation.forClient(at: unbundled, environment: [:]) == AgentSocketLocation.current())
+        #expect(AgentSocketLocation.forClient(at: unbundled, environment: [variable: ""]) == AgentSocketLocation.current())
+        #expect(AgentSocketLocation.forClient(at: unbundled, environment: [variable: "/" + String(repeating: "x", count: 120)]) == nil)
     }
 
     @Test func theAddressCarriesThePathAndItsNUL() {

@@ -71,7 +71,7 @@ enum CLICommands {
     /// Connects, checks that the socket is Arch's, says `hello`, and runs `body` on the connection with Arch's answer. Client errors print their sentence and exit with their code.
     private static func withConnection(_ body: (AgentControlConnection, AgentHelloAnswer) throws -> AgentExitCode) -> AgentExitCode {
         do {
-            guard let location = AgentSocketLocation.current() else { throw AgentClientError.noSocketLocation }
+            guard let location = AgentSocketLocation.forClient() else { throw AgentClientError.noSocketLocation }
             let connection = try AgentControlConnection(location: location, check: AgentControlConnection.archCheck())
             let answer = try connection.hello(AgentHello(client: .cli, version: clientVersion))
             return try body(connection, answer)

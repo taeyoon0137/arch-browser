@@ -1,4 +1,4 @@
-// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. Nothing listens for these copies, which run outside an app bundle; were an Arch listening, the client check would refuse it, so the lists come from the catalog and tool calls end in an error result either way. `swift build` writes the executable beside this test bundle and must run before `swift test`.
+// The built `arch-cli` as arch-mcp through pipes, as Claude Code and Codex start it: under the name `arch-mcp` through a link and as `arch-cli mcp`, with the recorded client lines of MCPServerTests on standard input. These copies run outside an app bundle, so `ARCH_AGENT_TEST_SOCKET` moves their socket to a path in the temporary folder where nothing listens, and a running Arch never sees them: the lists come from the catalog and tool calls end in the not-running error result. `swift build` writes the executable beside this test bundle and must run before `swift test`.
 import AgentControl
 import Foundation
 import Testing
@@ -19,12 +19,17 @@ private struct Run {
     var errors: String
 }
 
-/// Runs the executable with the lines on standard input, closes it, and reads both outputs.
+/// A socket path in the temporary folder where nothing listens.
+private let absentSocket = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("act-none-\(UUID().uuidString.prefix(8)).sock").path
+
+/// Runs the executable with the lines on standard input, closes it, and reads both outputs. The socket is `absentSocket`, so no Arch is reached.
 private func run(_ executable: URL, _ arguments: [String] = [], environment: [String: String] = [:], input: [String]) throws -> Run {
     let process = Process()
     process.executableURL = executable
     process.arguments = arguments
-    process.environment = ProcessInfo.processInfo.environment.filter { $0.key != AgentMCPServer.ticketVariable }.merging(environment) { $1 }
+    process.environment = ProcessInfo.processInfo.environment.filter { $0.key != AgentMCPServer.ticketVariable }
+        .merging([AgentSocketLocation.unbundledClientVariable: absentSocket]) { $1 }
+        .merging(environment) { $1 }
     let standardInput = Pipe(), standardOutput = Pipe(), standardError = Pipe()
     process.standardInput = standardInput
     process.standardOutput = standardOutput
@@ -93,6 +98,7 @@ private let codexStart = [
         #expect(result.lines[3] == ["jsonrpc": "2.0", "id": 2, "result": [:]])
         #expect(result.lines[4]["id"] == 3)
         #expect(result.lines[4]["result"]?["isError"] == true)
+        #expect(result.lines[4]["result"]?["content"] == [["type": "text", "text": .string(AgentClientError.notRunning.message)]])
         // Standard output holds only MCP messages; the reason goes to standard error.
         #expect(result.errors.hasPrefix("arch-mcp: "))
     }
@@ -119,10 +125,11 @@ private let codexStart = [
         #expect(missing.status == AgentExitCode.usage.rawValue)
         #expect(missing.output.isEmpty)
         #expect(missing.errors.contains(AgentMCPServer.ticketVariable))
-        // With a ticket but no Arch to bind it, it ends before answering anything: 69 while nothing listens, 77 for a listener this unbundled copy cannot check.
+        // With a ticket but no Arch to bind it, it ends with 69 before answering anything.
         let unbound = try run(executable, ["mcp", "--session"], environment: [AgentMCPServer.ticketVariable: "dGlja2V0"], input: codexStart)
-        #expect([AgentExitCode.unavailable.rawValue, AgentExitCode.notArch.rawValue].contains(unbound.status))
+        #expect(unbound.status == AgentExitCode.unavailable.rawValue)
         #expect(unbound.output.isEmpty)
+        #expect(unbound.errors.contains(AgentClientError.notRunning.message))
         let extra = try run(executable, ["mcp", "--stdio"], input: [])
         #expect(extra.status == AgentExitCode.usage.rawValue)
     }

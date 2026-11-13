@@ -1,4 +1,4 @@
-// Where the control socket lives, by the rule both ends follow (docs/agents.md, Local control channel ▸ Transport): `~/Library/Application Support/Arch/Agent/control.sock`, with the home folder from the account database, never `$HOME`, so that an environment cannot move it. A path too long for `sun_path` moves to the per-user temporary folder.
+// Where the control socket lives, by the rule both ends follow (docs/agents.md, Local control channel ▸ Transport): `~/Library/Application Support/Arch/Agent/control.sock`, with the home folder from the account database, never `$HOME`, so that an environment cannot move it. A path too long for `sun_path` moves to the per-user temporary folder. A client outside an app bundle, whose check of any listener fails, follows `ARCH_AGENT_TEST_SOCKET` when it is set, so that tests of the built `arch-cli` reach no running Arch.
 import Darwin
 import Foundation
 
@@ -37,6 +37,15 @@ public struct AgentSocketLocation: Equatable, Sendable {
         var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
         guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0 else { return nil }
         return resolve(homeFolder: String(cString: home), temporaryFolder: String(cString: buffer))
+    }
+
+    /// The variable that names the socket for a client outside an app bundle, such as `.build/debug/arch-cli` in the tests. A bundled client ignores it.
+    public static let unbundledClientVariable = "ARCH_AGENT_TEST_SOCKET"
+
+    /// The location a client connects to: `current()`, or for a client outside an app bundle the path `unbundledClientVariable` names, when set. Such a client fails its check of any listener and sends nothing (docs/agents.md, Client checks of Arch), so the variable changes only which socket it reaches, never what reaches Arch. Nil when the named path does not fit `sun_path`.
+    public static func forClient(at executable: URL? = AgentBundleLayout.currentExecutable(), environment: [String: String] = ProcessInfo.processInfo.environment) -> AgentSocketLocation? {
+        guard executable.flatMap(AgentBundleLayout.containing(helper:)) == nil, let path = environment[unbundledClientVariable], !path.isEmpty else { return current() }
+        return fits(path) ? AgentSocketLocation(path: path, isInTemporaryFolder: false) : nil
     }
 
     /// Whether the path and its terminating NUL fit `sun_path`.

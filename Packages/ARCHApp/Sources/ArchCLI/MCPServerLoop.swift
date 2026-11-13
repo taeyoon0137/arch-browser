@@ -106,7 +106,7 @@ final class MCPServerLoop: @unchecked Sendable {
         let answer: AgentHelloAnswer
         let connection: AgentControlConnection
         do {
-            guard let location = AgentSocketLocation.current() else { throw AgentClientError.noSocketLocation }
+            guard let location = AgentSocketLocation.forClient() else { throw AgentClientError.noSocketLocation }
             connection = try AgentControlConnection(location: location, check: AgentControlConnection.archCheck())
             answer = try connection.hello(hello)
         } catch {
