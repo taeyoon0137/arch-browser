@@ -36,6 +36,8 @@ public enum AIPolicyReason: Sendable {
     case agentUsedOwnTools(String)
     /// A message that starts with `/` in a session where Claude Code loads Arch's skills, which Claude Code would run as one of its own commands.
     case agentMessageIsCommand
+    /// A request or session named a route or a model for a stored automatic feature, which keeps the models the user chose for it.
+    case routeNotAllowed
 }
 
 public enum AIBudget: Sendable {
@@ -93,6 +95,8 @@ extension AIError: LocalizedError {
             return detail
         case .blockedByPolicy(.agentMessageIsCommand):
             return "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it."
+        case .blockedByPolicy(.routeNotAllowed):
+            return "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own."
         case .budgetReached(.automaticRequestsPerDay):
             return "This feature reached its daily limit of automatic requests."
         case .budgetReached(.monthlySpending):

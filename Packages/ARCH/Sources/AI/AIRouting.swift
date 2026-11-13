@@ -72,7 +72,7 @@ extension AIFeatureID {
     }
 }
 
-/// The route a request names for itself: a tier, or a model and up to two fallbacks. It encodes as `{"tier": "fast"}` or `{"models": [{"provider": …, "model": …}]}`, the form agent run options take in JavaScript and on the wire.
+/// The route a request names for itself: a tier, or a model and up to two fallbacks. It encodes as `{"tier": "fast"}` or `{"models": [{"provider": …, "model": …}]}`, the form agent run options take in JavaScript and on the wire; a value with both keys does not decode, so neither choice is dropped unseen.
 public enum AIRouteChoice: Codable, Hashable, Sendable {
     case tier(AIModelTier)
     /// A model and up to two fallbacks; later models are left out.
@@ -85,6 +85,9 @@ public enum AIRouteChoice: Codable, Hashable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard !(container.contains(.tier) && container.contains(.models)) else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "A route names a tier or models, not both."))
+        }
         if let tier = try container.decodeIfPresent(AIModelTier.self, forKey: .tier) {
             self = .tier(tier)
         } else if let models = try container.decodeIfPresent([AIModelRef].self, forKey: .models) {
@@ -111,7 +114,7 @@ struct AIRouteModel: Sendable {
 }
 
 extension AISettingsStore {
-    /// The models that serve `feature` for a request that names `choice` or none, in order. Throws `notConfigured` when the feature is off or has no usable model, and `invalidRequest` when a stored automatic feature is given a route. An automatic feature never uses the default route, so nothing runs on its own until the user assigns it a model. A request that carries page data skips command-line tools that may run their own tools, and throws `blockedByPolicy` when only that rule left no model.
+    /// The models that serve `feature` for a request that names `choice` or none, in order. Throws `notConfigured` when the feature is off or has no usable model, and `blockedByPolicy(.routeNotAllowed)` when a stored automatic feature is given a route. An automatic feature never uses the default route, so nothing runs on its own until the user assigns it a model. A request that carries page data skips command-line tools that may run their own tools, and throws `blockedByPolicy` when only that rule left no model.
     func routeModels(for feature: AIFeature, route choice: AIRouteChoice? = nil, carryingPageData: Bool = false) throws -> [AIRouteModel] {
         let refs = try routeRefs(for: feature, choice: choice)
         let usable = refs.prefix(AIRoute.maximumModels).compactMap { ref -> AIRouteModel? in
@@ -135,7 +138,7 @@ extension AISettingsStore {
             return try refs(of: choice)
         case .stored:
             if choice != nil, feature.trigger == .automatic {
-                throw AIError.invalidRequest("\(feature.name) uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own.")
+                throw AIError.blockedByPolicy(.routeNotAllowed)
             }
             let route = route(for: feature.id)
             guard route.isEnabled else { throw AIError.notConfigured(.switchedOff) }

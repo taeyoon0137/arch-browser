@@ -338,8 +338,10 @@ public struct AIAgentSkills: Sendable { public var folder: URL; public var plugi
 
 public struct AIAgentSessionRequest: Sendable {
     public var feature: AIFeatureID         // .agent
-    /// The session's model; nil uses the route.
+    /// The session's model; nil uses `route`, or the feature's route without one.
     public var model: AIModelRef?
+    /// Used when `model` is nil: a tier or the request's own models (`docs/ai.md`, Routing).
+    public var route: AIRouteChoice?
     public var instructions: String         // the static harness
     public var toolServer: AIAgentToolServer
     public var id: UUID

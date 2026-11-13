@@ -143,10 +143,13 @@ private func answering(_ text: String) -> [Step] {
         for isEnabled in [true, false] {
             service.settings.setRoute(AIRoute(isEnabled: isEnabled, models: [ref]), for: automaticFeature.id)
             for route in [AIRouteChoice.tier(.fast), .models([ref])] {
-                guard case .invalidRequest = await collect(service.stream(request(automaticFeature, route: route))).error else {
-                    Issue.record("Expected invalidRequest for \(route)")
+                let error = await collect(service.stream(request(automaticFeature, route: route))).error
+                guard case .blockedByPolicy(.routeNotAllowed) = error else {
+                    Issue.record("Expected routeNotAllowed for \(route), got \(String(describing: error))")
                     continue
                 }
+                // Nothing reached a provider, so the sentence blames none.
+                #expect(error?.localizedDescription == "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own.")
             }
         }
         #expect(log.requests.isEmpty)
@@ -190,6 +193,29 @@ private func answering(_ text: String) -> [Step] {
         #expect(FileManager.default.fileExists(atPath: session.folder.path))
         await session.end(keepingThread: true)
         #expect(!FileManager.default.fileExists(atPath: session.folder.path))
+    }
+
+    /// A session's model is a route of that one model: a stored automatic feature refuses it as it refuses a route, and a stored feature's switch applies to it.
+    @Test func anAgentSessionsModelFollowsTheRouteRules() throws {
+        let feature = AIFeature(id: .agent, name: "Agent", summary: "", trigger: .user, data: AIDataScope(kinds: [.page]), requirements: [.agent])
+        let automatic = AIFeature(id: AIFeatureID(rawValue: "hook.agentTest"), name: "Automatic Agent", summary: "", trigger: .automatic, data: .textOnly, requirements: [.agent])
+        let preset = AIAgentKind.claudeCode.preset(executable: URL(fileURLWithPath: "/usr/bin/false"))
+        let service = scriptedService(providers: [preset], script: [:])
+        service.register(feature)
+        service.register(automatic)
+        let ref = AIModelRef(provider: preset.id, model: "")
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [ref]), for: automatic.id)
+        let server = AIAgentToolServer(executable: URL(fileURLWithPath: "/usr/bin/false"), arguments: [], environment: [:], tools: [])
+        // Both refusals come before the session's folder is made, so none is given.
+        do {
+            _ = try service.startAgentSession(AIAgentSessionRequest(feature: automatic.id, model: ref, instructions: "Harness", toolServer: server))
+            Issue.record("Expected routeNotAllowed for a stored automatic feature")
+        } catch AIError.blockedByPolicy(.routeNotAllowed) {}
+        service.settings.setRoute(AIRoute(isEnabled: false), for: .agent)
+        do {
+            _ = try service.startAgentSession(AIAgentSessionRequest(model: ref, instructions: "Harness", toolServer: server))
+            Issue.record("Expected switchedOff for a feature that is off")
+        } catch AIError.notConfigured(.switchedOff) {}
     }
 }
 
@@ -293,6 +319,30 @@ private func answering(_ text: String) -> [Step] {
         #expect(store.route(for: .tier(.fast)).models.isEmpty)
     }
 
+    /// A tier's switch is not read, so a hand-written tier may leave it out; any route without one takes its feature's standard switch rather than making the file unreadable.
+    @Test func readsAHandWrittenRouteWithoutItsSwitch() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai.json")
+        try Data("""
+        {
+          "providers": [ { "id": "6F1C", "name": "Work API", "kind": { "http": { "format": "chatCompletions", "baseURL": "https://api.example.com/v1" } },
+                           "models": [ { "name": "model-a" } ] } ],
+          "routes": {
+            "tier.fast": { "models": [ { "provider": "6F1C", "model": "model-a" } ] },
+            "hook.tabName": { "models": [ { "provider": "6F1C", "model": "model-a" } ] },
+            "pageReader": { "models": [] }
+          }
+        }
+        """.utf8).write(to: file)
+        let store = AISettingsStore(fileURL: file, keys: InMemoryKeys())
+        let ref = AIModelRef(provider: AIProviderID(rawValue: "6F1C"), model: "model-a")
+        #expect(!store.replacedUnreadableFile)
+        #expect(store.route(for: .tier(.fast)) == AIRoute(isEnabled: true, models: [ref]))
+        #expect(store.route(for: .tabNameHook) == AIRoute(isEnabled: false, models: [ref]))
+        #expect(store.route(for: .pageReader) == AIRoute(isEnabled: true))
+    }
+
     @Test func routeChoicesEncodeAsOneKey() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -304,6 +354,10 @@ private func answering(_ text: String) -> [Step] {
         #expect(try decoder.decode(AIRouteChoice.self, from: Data(#"{"models": [{"provider": "6F1C", "model": "model-a"}]}"#.utf8)) == .models([ref]))
         #expect(throws: DecodingError.self) { try decoder.decode(AIRouteChoice.self, from: Data(#"{"tier": "huge"}"#.utf8)) }
         #expect(throws: DecodingError.self) { try decoder.decode(AIRouteChoice.self, from: Data(#"{"model": "model-a"}"#.utf8)) }
+        // A value with both keys names two routes, so neither wins unseen.
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(AIRouteChoice.self, from: Data(#"{"tier": "deep", "models": [{"provider": "6F1C", "model": "model-a"}]}"#.utf8))
+        }
         #expect(AIModelTier.allCases.map { AIFeatureID.tier($0).rawValue } == ["tier.fast", "tier.standard", "tier.deep"])
     }
 }

@@ -24,12 +24,22 @@ public final class AISettingsStore: ObservableObject {
 
         init() {}
 
+        /// A route as a hand-written file may hold it. Without `isEnabled` it takes its feature's standard switch, so a hook stays off and a tier, whose switch is not read, needs none.
+        private struct WrittenRoute: Decodable {
+            var isEnabled: Bool?
+            var models: [AIModelRef]?
+        }
+
         /// A file missing a field takes that field's default, as do the providers, routes, and limits in it for their fields that have one.
         init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
             providers = try container.decodeIfPresent([AIProviderConfiguration].self, forKey: .providers) ?? []
-            routes = try container.decodeIfPresent([String: AIRoute].self, forKey: .routes) ?? [:]
+            let written = try container.decodeIfPresent([String: WrittenRoute].self, forKey: .routes) ?? [:]
+            routes = written.reduce(into: [:]) { routes, entry in
+                let isEnabled = entry.value.isEnabled ?? AIRoute.standard(for: AIFeatureID(rawValue: entry.key)).isEnabled
+                routes[entry.key] = AIRoute(isEnabled: isEnabled, models: entry.value.models ?? [])
+            }
             excludedSites = try container.decodeIfPresent([AISitePattern].self, forKey: .excludedSites) ?? AISitePattern.defaultExclusions
             limits = try container.decodeIfPresent(AILimits.self, forKey: .limits) ?? AILimits()
         }

@@ -263,13 +263,13 @@ private struct AITestPromptRows: View {
 
 // MARK: - Model tiers
 
-/// One section per tier with the Features rows' model menus and a sentence on what the tier is for. A tier starts empty and lists every connected model; a request that names the tier drops the models that cannot serve it.
+/// One section per tier with the Features rows' model menus and a sentence on what the tier is for. The sentences name no feature: a feature under Features uses the models chosen there, and only a request that names a tier uses one. A tier starts empty and lists every connected model; a request that names the tier drops the models that cannot serve it.
 private struct AIModelTiersPage: View {
     @ObservedObject var settings: AISettingsStore
 
     var body: some View {
         Section {
-            Text("A request that names a tier, such as an agent hook's, uses the tier's first model and its fallbacks. A tier without a model fails; it never uses another tier or the default model.")
+            Text("A request that names a tier, such as an agent hook's, uses the tier's first model and its fallbacks; the features under Features use the models chosen there. A tier without a model fails; it never uses another tier or the default model.")
                 .foregroundStyle(.secondary)
         }
         ForEach(AIModelTier.allCases, id: \.self) { tier in
@@ -285,8 +285,8 @@ private struct AIModelTiersPage: View {
 
     private static func purpose(of tier: AIModelTier) -> String {
         switch tier {
-        case .fast: return "For small, frequent tasks such as naming a tab, where a quick, inexpensive model serves best."
-        case .standard: return "For everyday tasks that need more care, such as answering a question about a page."
+        case .fast: return "For small, frequent tasks, where a quick, inexpensive model serves best."
+        case .standard: return "For everyday tasks that need more care than a quick, inexpensive model gives."
         case .deep: return "For hard tasks that need the most capable model, at a higher cost and with slower replies."
         }
     }

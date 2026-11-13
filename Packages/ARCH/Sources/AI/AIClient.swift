@@ -35,7 +35,7 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
-    /// The route the request names for itself, which a `perRequest` feature needs and a feature the user starts may use instead of its own; nil uses the feature's route. A stored automatic feature refuses one with `invalidRequest`.
+    /// The route the request names for itself, which a `perRequest` feature needs and a feature the user starts may use instead of its own; nil uses the feature's route. A stored automatic feature refuses one with `blockedByPolicy(.routeNotAllowed)`.
     public var route: AIRouteChoice?
     /// false leaves the request's Activity entry without content, so Show Content has nothing to show; its part kinds and sizes, model, result, and usage stay.
     public var recordsContent: Bool
