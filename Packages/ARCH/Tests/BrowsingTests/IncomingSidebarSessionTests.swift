@@ -83,6 +83,41 @@ import Testing
         }
     }
 
+    @Test func firstSyncMovesLocalChildrenAndSelectionToTheMatchedIDsOnlyOnce() async throws {
+        try await temporarySession { session, directory in
+            let original = session.sidebarSyncState
+            let oldSpace = try #require(original.spaces.first)
+            let oldFolder = session.makeFolder(in: oldSpace.id, pinned: true)
+            let pin = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#pin")),
+                                    spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID, pinned: true, select: false, folderID: oldFolder.id)
+            let open = session.adopt(PageStub(engine: .webKit, url: nil), spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID,
+                                     pinned: false, select: false, folderID: oldFolder.id)
+            let newSpace = Space(name: oldSpace.name, personaID: oldSpace.resolvedPersonaID)
+            let newFolder = SidebarSyncState.Folder(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
+                                                     parentID: nil, name: oldFolder.name, live: nil)
+            let newPin = SidebarSyncState.PinnedTab(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
+                                                     folderID: newFolder.id, savedPage: pin.savedPage, customTitle: nil, engine: .webKit)
+            let state = SidebarSyncState(personas: original.personas, spaces: [newSpace], folders: [newFolder], favorites: [], pinnedTabs: [newPin])
+            let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: oldSpace.id, selectedTabID: nil, isSidebarVisible: true)
+            let window = session.makeWindow(from: record, kind: .main)
+            defer { session.windowWillClose(window) }
+            window.selectTab(pin.id)
+            var replacements = SidebarSyncReplacements()
+            replacements.spaces[oldSpace.id] = newSpace.id
+            replacements.folders[oldFolder.id] = newFolder.id
+            replacements.tabs[pin.id] = newPin.id
+            for _ in 0..<2 { session.applyFirstSidebarSync(state, replacements: replacements) }
+            #expect(session.sidebarSyncState == state)
+            #expect(window.currentSpaceID == newSpace.id && window.selectedTabID == newPin.id)
+            #expect(open.spaceID == newSpace.id && open.folderID == newFolder.id)
+            #expect(!session.hasClosedTabs && session.undoableCloseCount == 0)
+            try session.saveNow().get()
+            let stored = try #require(SessionStore(directory: directory, seal: SessionStateSeal { nil }).load())
+            #expect(stored.windows?.first?.selectedTabID == newPin.id)
+            #expect(stored.spaces.map(\.id) == [newSpace.id])
+        }
+    }
+
     @Test func aSpaceTombstoneKeepsLocalOpenTabsAndAPersonaTombstoneRetainsItsClosedTabs() async throws {
         try await temporarySession { session, directory in
             let personal = try #require(session.spaces.first)

@@ -1927,6 +1927,61 @@ public final class BrowserSession: ObservableObject {
 // MARK: Incoming sidebar sync
 
 extension BrowserSession {
+    /// Applies both sides of the first-sync plan before saving. Only IDs captured as syncable
+    /// can be replaced; an open tab or a private/agent folder cannot be claimed by a remote match.
+    @MainActor public func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements) {
+        let before = sidebarSyncState
+        let selections = windows.compactMap { window in window.selectedTabID.flatMap { replacements.tabs[$0] }.map { (window, $0) } }
+        applySidebarSync(state, deletions: SidebarSyncDeletions())
+        let oldSpaceOwners = Dictionary(uniqueKeysWithValues: before.spaces.map { ($0.id, $0.resolvedPersonaID) })
+        let newSpaceOwners = Dictionary(uniqueKeysWithValues: state.spaces.map { ($0.id, $0.resolvedPersonaID) })
+        var changedSpaces: [UUID: UUID] = [:]
+        for (old, new) in replacements.spaces {
+            guard old != new, let owner = oldSpaceOwners[old], newSpaceOwners[new] == owner,
+                  spaces.contains(where: { $0.id == new && $0.resolvedPersonaID == owner }) else { continue }
+            for tab in tabs where tab.spaceID == old { tab.spaceID = new }
+            for index in folders.indices where folders[index].spaceID == old { folders[index].spaceID = new }
+            if let panes = splitTabIDs.removeValue(forKey: old), splitTabIDs[new] == nil { splitTabIDs[new] = panes }
+            for window in windows where window.currentSpaceID == old { window.currentSpaceID = new }
+            for index in windowsToReopen.indices where windowsToReopen[index].currentSpaceID == old { windowsToReopen[index].currentSpaceID = new }
+            changedSpaces[old] = new
+        }
+        let oldFolders = Dictionary(uniqueKeysWithValues: before.folders.map { ($0.id, $0) })
+        for (old, new) in replacements.folders {
+            guard old != new, let source = oldFolders[old], let target = state.folders.first(where: { $0.id == new }),
+                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder && SidebarSyncState.canShare($0.live) }) else { continue }
+            for index in folders.indices where folders[index].parentID == old { folders[index].parentID = new }
+            for tab in tabs where tab.folderID == old { tab.folderID = new }
+            folders.removeAll { $0.id == old }
+        }
+        for (old, new) in replacements.favorites {
+            guard old != new, let source = before.favorites.first(where: { $0.id == old }),
+                  favorites.contains(where: { $0.id == new && $0.resolvedPersonaID == source.resolvedPersonaID }) else { continue }
+            if let tab = favoriteTabs.removeValue(forKey: old) { favoriteTabs[new] = tab }
+            if var saved = savedFavoriteTabs.removeValue(forKey: old) { saved.favoriteID = new; savedFavoriteTabs[new] = saved }
+            favorites.removeAll { $0.id == old }
+        }
+        let oldPins = Set(before.pinnedTabs.map(\.id))
+        var replacedTabs: [UUID: UUID] = [:]
+        for (old, new) in replacements.tabs {
+            guard old != new, oldPins.contains(old), let local = tabs.first(where: { $0.id == old }),
+                  let remote = tabs.first(where: { $0.id == new && $0.isPinned && $0.agentOwnerID == nil && $0.liveItemID == nil }),
+                  remote.personaID == local.personaID else { continue }
+            replacedTabs[old] = new
+        }
+        for (space, panes) in splitTabIDs {
+            var seen = Set<UUID>()
+            let ids = panes.map { replacedTabs[$0] ?? $0 }.filter { seen.insert($0).inserted }
+            if ids != panes { splitTabIDs[space] = ids.count > 1 ? ids : nil }
+        }
+        for index in windowsToReopen.indices {
+            if let id = windowsToReopen[index].selectedTabID, let target = replacedTabs[id] { windowsToReopen[index].selectedTabID = target }
+        }
+        for (window, target) in selections where window.selectedTabID.flatMap({ replacedTabs[$0] }) == target { window.selectTab(target) }
+        for tab in tabs where replacedTabs[tab.id] != nil { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
+        spaces.removeAll { changedSpaces[$0.id] != nil }
+    }
+
     /// Applies a complete, repaired sidebar and its explicit tombstones. Items kept on this Mac
     /// retain their slots among the synced rows. A replay makes no additional closed records.
     @MainActor public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
