@@ -58,6 +58,8 @@ public struct AIAgentSessionRequest: Sendable {
     public var maxTurns: Int?
     /// A single message with no persistent CLI thread. The session closes after the turn.
     public var ephemeral: Bool
+    /// The hook's approved executable paths and invocation digests.
+    public var knownProviders: [AIProviderID: String]? = nil
 
     public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, route: AIRouteChoice? = nil, instructions: String, toolServer: AIAgentToolServer,
                 id: UUID = UUID(), folder: URL? = nil, effort: String? = nil, skills: AIAgentSkills? = nil, maxTurns: Int? = nil, ephemeral: Bool = false) {
@@ -370,6 +372,7 @@ public final class AIAgentSession {
             (outcome, reply) = await attempt(message, on: candidate)
             guard model == nil, !hasEnded, candidates.count > 1 else { break }
             if case .finished = outcome { break }
+            if case .refused(.blockedByPolicy(.unknownProvider)) = outcome { break }
             endProcess()
             await deleteThread(of: candidate)
             candidates.removeFirst()
@@ -438,6 +441,7 @@ public final class AIAgentSession {
         let environment = await tool.runEnvironment()
         let probe: AIAgentProbeResult
         do {
+            try service.checkDestination(of: candidate.provider, known: request.knownProviders)
             if !signedInChecked.contains(candidate.ref) {
                 let status = try await AIAgentToolStatus.read(kind: kind, executable: tool.executable, environment: tool.environment)
                 if status.isSignedIn == false { return .failed(.authentication(provider)) }
@@ -445,6 +449,8 @@ public final class AIAgentSession {
             }
             // The probe store compares the executable's resolved path, size, and modification time before every process start.
             probe = try await AIAgentProbeStore.shared.result(kind: kind, executable: tool.executable, environment: environment)
+        } catch AIError.blockedByPolicy(.unknownProvider) {
+            return .refused(.blockedByPolicy(.unknownProvider))
         } catch let error as AIAgentToolError {
             return .failed(error.aiError(provider: provider))
         } catch {
@@ -453,6 +459,7 @@ public final class AIAgentSession {
         if turn.isStopping { return .finished(.stopped) }
         if hasEnded { return .finished(.stopped) }
         do {
+            try service.checkDestination(of: candidate.provider, known: request.knownProviders)
             switch kind {
             case .claudeCode:
                 if request.maxTurns != nil && !probe.supportsRunOption {
@@ -466,6 +473,8 @@ public final class AIAgentSession {
                 }
                 try startCodexTurn(message, on: candidate, tool: tool, environment: environment, probe: probe)
             }
+        } catch AIError.blockedByPolicy(.unknownProvider) {
+            return .refused(.blockedByPolicy(.unknownProvider))
         } catch let error as AIError {
             return .failed(error)
         } catch {

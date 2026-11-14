@@ -1,6 +1,5 @@
 // The agent run's plain values (`docs/hooks.md`, Agent run API): what a caller asks of one agent run, what its grant allows, and what the run returns. Hooks keep the options and grants in `hooks.json`, and scripts and outside programs send the options as JSON. `AgentRunner` (VII.27) runs them; nothing here runs an agent.
 import AI
-import CryptoKit
 import Foundation
 
 /// What a run may see of its tabs. Ordered from less to more.
@@ -251,20 +250,7 @@ public struct AgentRunRequest: Sendable {
 
     /// Where the provider's requests go, as `knownProviders` records it: an HTTP provider's base address, whose headers and format cannot send them to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, any of which can, such as through a variable that names another server.
     public static func destination(of provider: AIProviderConfiguration) -> String {
-        switch provider.kind {
-        case .http(let http):
-            return http.baseURL.absoluteString
-        case .commandLine(let tool):
-            struct Invocation: Encodable {
-                var agent: AIAgentKind?
-                var arguments: [String]
-                var environment: [String: String]
-            }
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let data = (try? encoder.encode(Invocation(agent: tool.agent, arguments: tool.arguments, environment: tool.environment))) ?? Data()
-            return tool.executable.path + " sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        }
+        provider.hookDestination
     }
 }
 

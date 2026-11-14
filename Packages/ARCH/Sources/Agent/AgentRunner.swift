@@ -169,8 +169,9 @@ public final class AgentRunner: ObservableObject {
     private func perform(_ run: Execution, models: [AIModelRef], cli: Bool) async -> AgentRunResult {
         let request = run.request
         let keepsSession = request.options.record == .session
-        let modelRequest = AIRequest(feature: request.feature, instructions: Self.instructions,
+        var modelRequest = AIRequest(feature: request.feature, instructions: Self.instructions,
                                      messages: [run.message], route: .models(models), recordsContent: keepsSession)
+        modelRequest.knownProviders = request.knownProviders
         var result = AgentRunResult(status: .completed)
         var reply = ""
         let grantedTools = Self.supportedTools.filter { request.options.tools.contains($0.name) }
@@ -192,6 +193,8 @@ public final class AgentRunner: ObservableObject {
                     default: break
                     }
                 }
+            } catch AIError.blockedByPolicy(.unknownProvider) {
+                result = Self.refused("unknownProvider", AIError.blockedByPolicy(.unknownProvider).localizedDescription)
             } catch AIError.toolCallLimit {
                 result.code = "toolCallLimit"
             } catch AIError.toolRoundLimit {
@@ -220,7 +223,7 @@ public final class AgentRunner: ObservableObject {
 
     private func performCLI(_ run: Execution, tools: [AgentTool], models: [AIModelRef]) async -> AgentRunResult {
         guard let startCLI, !Task.isCancelled else { return AgentRunResult(status: .cancelled) }
-        let binding = AgentHookCLIRun(tools: tools, limit: run.request.options.limits.toolCalls) { call in
+        let binding = AgentHookCLIRun(tools: tools, limit: run.request.options.limits.toolCalls, knownProviders: run.request.knownProviders ?? [:]) { call in
             guard let tool = tools.first(where: { $0.name == call.name }) else {
                 return AgentToolResult(status: .refused, code: "notGranted", text: "This tool is outside the hook's grant.")
             }
@@ -264,6 +267,8 @@ public final class AgentRunner: ObservableObject {
                 case .thinking, .notice: break
                 }
             }
+        } catch AIError.blockedByPolicy(.unknownProvider) {
+            result = Self.refused("unknownProvider", AIError.blockedByPolicy(.unknownProvider).localizedDescription)
         } catch {
             result.status = .failed
             result.code = "modelError"

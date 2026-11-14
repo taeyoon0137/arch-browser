@@ -970,6 +970,8 @@ public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool
 
 ### Known providers
 
+The API interface checks each hook's approved provider destination again after waiting for a slot. For HTTP it checks after the Keychain read and before dispatch. For a CLI it checks before sign-in checks and again before handing the tool a message. A changed destination refuses the run before sending page data.
+
 `ai.json` is not sealed, so a program could add a provider with its own address, or change an existing provider's address, and point a tier at it; every hook on that tier would then send its titles and page text there. Hooks therefore use only providers Arch saw the user set up.
 
 - `hooks.json` keeps `knownProviders`: each provider's identifier and destination (`AgentRunRequest.destination(of:)`): an HTTP provider's base address, since its headers and format cannot send requests to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, since a variable such as one that names another server or a proxy, or another argument, can send the tool's requests elsewhere. The registry follows `AISettingsStore.providers` while Arch runs and records each provider the user adds or changes in Settings ▸ AI ▸ Providers. When Arch first writes `hooks.json`, it records the providers `ai.json` holds then.

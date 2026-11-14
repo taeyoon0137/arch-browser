@@ -10,6 +10,7 @@ final class AgentHookCLIRun {
     let ready = AgentGate(isOpen: false)
     let tools: [AgentTool]
     let limit: Int
+    let knownProviders: [AIProviderID: String]
     let dispatch: @MainActor (AgentToolCall) async -> AgentToolResult
     var runner: (any AgentCommandLineRunning)?
     var spawnedProcess: AgentProcessRecord?
@@ -17,9 +18,10 @@ final class AgentHookCLIRun {
     private var calls = 0
     private var executing = false
 
-    init(tools: [AgentTool], limit: Int, dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
+    init(tools: [AgentTool], limit: Int, knownProviders: [AIProviderID: String], dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
         self.tools = tools
         self.limit = limit
+        self.knownProviders = knownProviders
         self.dispatch = dispatch
     }
 

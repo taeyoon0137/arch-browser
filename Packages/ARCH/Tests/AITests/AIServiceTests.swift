@@ -363,6 +363,27 @@ import Testing
         #expect(service.usage.totals(monthsAgo: 0).first?.costs["USD"] == 3)
     }
 
+    @Test func anApprovedDestinationThatChangesWhileQueuedIsRefusedWithoutAKey() async throws {
+        let log = ProviderLog()
+        let service = service(log: log)
+        var provider = try #require(service.settings.providers.first)
+        let running = Task { await collect(service.stream(textRequest(userFeature))) }
+        try #require(await eventually { log.requests.count == 1 })
+        var request = textRequest(userFeature)
+        request.knownProviders = [provider.id: provider.hookDestination]
+        let waiting = try await waitingRequest(request, on: service)
+        if case .http(var http) = provider.kind {
+            http.baseURL = URL(string: "https://changed.example/v1")!
+            provider.kind = .http(http)
+        }
+        service.settings.save(provider)
+        guard case .blockedByPolicy(.unknownProvider) = await waiting.value else {
+            Issue.record("Expected a refusal for the changed destination")
+            return
+        }
+        #expect(await running.value.error == nil && log.requests.count == 1)
+    }
+
     /// A provider that the user moves to another base URL while a request waits has the new server's key under its ID by then. That key never goes to the old address: the waiting request ends without reaching a provider.
     @Test func aProviderMovedToAnotherBaseURLDuringTheWaitSendsNoKeyToTheOldOne() async throws {
         let log = ProviderLog()

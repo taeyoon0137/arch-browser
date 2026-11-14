@@ -784,6 +784,29 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         await later.end()
     }
 
+    @Test func changingTheExecutableWhileAHookWaitsRunsNeitherCLI() async throws {
+        let first = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let replacement = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: first, feature: automaticAgentFeature)
+        var provider = fixture.provider
+        let limiter = fixture.service.limiter(for: provider.id)
+        await limiter.update(provider.limits)
+        for _ in 0..<2 { try await limiter.acquire(isUser: true) { _ in } }
+        let session = try fixture.start(route: fixture.firstModelRoute, ephemeral: true, known: [provider.id: provider.hookDestination])
+        let log = AgentEventLog(session)
+        try session.send("One hook turn")
+        try #require(await eventually { fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1 })
+        if case .commandLine(var tool) = provider.kind {
+            tool.executable = replacement.executable
+            provider.kind = .commandLine(tool)
+        }
+        fixture.service.settings.save(provider)
+        for _ in 0..<2 { await limiter.release() }
+        try await log.waitForEnd()
+        guard case .blockedByPolicy(.unknownProvider)? = log.error else { Issue.record("Expected unknownProvider"); return }
+        #expect(first.calls().isEmpty && replacement.calls().isEmpty)
+    }
+
     /// An automatic feature's turn takes a provider slot only after the user's requests that wait for one, though it asked first.
     @Test func anAutomaticFeaturesTurnWaitsBehindTheUsersRequests() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
@@ -1166,10 +1189,12 @@ private struct AgentFixture {
     /// The first provider's model as a route, which a `perRequest` feature's session needs.
     var firstModelRoute: AIRouteChoice { .models([AIModelRef(provider: provider.id, model: provider.models[0].name)]) }
 
-    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil, maxTurns: Int? = nil, ephemeral: Bool = false) throws -> AIAgentSession {
+    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil, maxTurns: Int? = nil, ephemeral: Bool = false, known: [AIProviderID: String]? = nil) throws -> AIAgentSession {
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return try service.startAgentSession(AIAgentSessionRequest(feature: feature.id, route: route, instructions: harness, toolServer: ticketServer, folder: folder,
-                                                                   effort: effort, skills: skills, maxTurns: maxTurns, ephemeral: ephemeral))
+        var request = AIAgentSessionRequest(feature: feature.id, route: route, instructions: harness, toolServer: ticketServer, folder: folder,
+                                            effort: effort, skills: skills, maxTurns: maxTurns, ephemeral: ephemeral)
+        request.knownProviders = known
+        return try service.startAgentSession(request)
     }
 }
 
