@@ -24,7 +24,7 @@ public final class AgentRunner: ObservableObject {
     var startCLI: ((AgentHookCLIRun, AIFeatureID, [AIModelRef], Int, String) throws -> any AgentSessionRunning)?
     var finishCLI: ((AgentHookCLIRun) -> Void)?
     @Published public private(set) var isRunning = false
-    private var running: [UUID: Task<AgentRunResult, Never>] = [:]
+    private var running: [UUID: (execution: Execution, task: Task<AgentRunResult, Never>)] = [:]
 
     init(host: any AgentBrowserHost, client: any AIClient, activity: AgentActivityLog? = nil,
          resolve: @escaping (AIFeatureID, AIRouteChoice) throws -> [AIModelRef],
@@ -48,7 +48,10 @@ public final class AgentRunner: ObservableObject {
     public func deleteKeptRun(_ id: UUID) { keptRuns.removeAll { $0.id == id } }
 
     public func cancelAll() {
-        for task in running.values { task.cancel() }
+        for run in running.values {
+            run.execution.active = false
+            run.task.cancel()
+        }
     }
 
     public func run(_ request: AgentRunRequest, personaID: UUID, rename: @escaping Rename) async -> AgentRunResult {
@@ -106,11 +109,12 @@ public final class AgentRunner: ObservableObject {
         let execution = Execution(request: request, personaID: personaID, tabs: selected, closed: closed, rename: rename)
         let cli = usesCLI == true
         let task = Task { await self.perform(execution, models: models, cli: cli) }
-        running[id] = task
+        running[id] = (execution, task)
         isRunning = true
         let timeout = Task {
             try await Task.sleep(for: options.limits.timeout)
             execution.timedOut = true
+            execution.active = false
             task.cancel()
         }
         defer {
