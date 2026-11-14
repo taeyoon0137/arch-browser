@@ -3,15 +3,14 @@ import AgentControl
 import AI
 import ARCHEngine
 import Foundation
+import SwiftUI
 import Testing
 @testable import Agent
 @testable import Browsing
 
 @MainActor @Suite struct SessionFolderControlsTests {
-    @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchFolderTests-\(UUID())")
+    private func fixture(in directory: URL, client: any AIClient) throws -> (BrowserSession, BrowserAgentHost, AgentService) {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
         try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
@@ -21,9 +20,16 @@ import Testing
             location: nil, keys: UnusedFolderKeys(), peerChecks: .init(read: { _ in throw CancellationError() }, verify: { _ in throw CancellationError() }),
             identify: { _ in throw CancellationError() }, processStart: { _ in nil }, prompt: AgentGrantSheetPresenter(host: host),
             authenticator: AgentDeviceOwnerAuthentication(), allowsAI: { _ in true }, now: Date.init, processRecord: { _ in nil },
-            startRunner: { _ in throw CancellationError() }, sessionRoute: { .http(pinnedModel: $0) }, apiClient: WaitingFolderClient(),
-            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: { [] }, subscriptionToolName: { _ in nil }))
+            startRunner: { _ in throw CancellationError() }, sessionRoute: { .http(pinnedModel: $0) }, apiClient: client,
+            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: { [] }, subscriptionToolName: { _ in nil }, attention: {}))
         browser.agents = service
+        return (browser, host, service)
+    }
+
+    @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchFolderTests-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, host, service) = try fixture(in: directory, client: WaitingFolderClient())
         defer { service.stop() }
         let home = try #require(browser.spaces.first)
         let other = browser.addPersona(named: "Elsewhere")
@@ -75,6 +81,62 @@ import Testing
         #expect(!browser.tabs.contains { $0.id == unrelated.id })
         #expect(browser.tabs.contains { $0.id == kept.id })
     }
+
+    @Test func spaceDotsTrackUnansweredCardsAcrossWindowsAndPersonas() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchSpaceDots-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: QuestionClient())
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let work = browser.addPersona(named: "Work")
+        let office = try #require(browser.spaces(in: work.id).first)
+        func start(in space: Space) throws -> AgentSession {
+            try service.startSession(.init(task: "Review this", personaID: space.resolvedPersonaID, spaceID: space.id,
+                                           attachedTabIDs: [], mode: .readOnly, model: QuestionClient.model, effort: nil))
+        }
+        let first = try start(in: home), second = try start(in: home), third = try start(in: office)
+        // Each row renders one window's two space symbols. Keep the same view tree as sessions change.
+        func marker(_ space: Space, current: Space) -> some View {
+            Color.white.frame(width: 24, height: 24)
+                .modifier(AgentWaitingDot(agents: service, spaceID: space.id, isCurrent: space.id == current.id, scale: 1))
+        }
+        let renderer = ImageRenderer(content: VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                marker(home, current: home)
+                marker(office, current: home)
+            }
+            HStack(spacing: 0) {
+                marker(home, current: office)
+                marker(office, current: office)
+            }
+        }.accentColor(.red))
+        func dots() -> [Bool] {
+            guard let image = renderer.cgImage, image.width == 48, image.height == 48 else { return [] }
+            let pixels = NSBitmapImageRep(cgImage: image)
+            // Sample the center of each dot, red on the symbol's white background.
+            return [(18, 6), (42, 6), (18, 30), (42, 30)].map { x, y in
+                let color = pixels.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
+                return (color?.greenComponent ?? 1) < 0.8
+            }
+        }
+        #expect(dots() == [false, false, false, false])
+        try #require(await eventually { service.approvals.pending.count == 3 })
+        #expect(await eventually { dots() == [false, true, true, false] })
+        func answer(_ session: AgentSession) async throws {
+            let card = try #require(service.approvals.pending.first { $0.ownerID == session.id })
+            try #require(await service.approvals.answer(card.id, with: .answer("Continue")))
+            try #require(await eventually { session.state == .running })
+        }
+        try await answer(third)
+        #expect(await eventually { dots() == [false, false, true, false] })
+        try await answer(first)
+        #expect(dots() == [false, false, true, false])
+        second.stop()
+        #expect(await eventually { dots() == [false, false, false, false] })
+        #expect(service.approvals.pending.isEmpty && first.isTurnRunning && third.isTurnRunning)
+        #expect(service.sessions.map(\.id) == [first.id, second.id, third.id])
+        await service.endSessionsForQuit()
+    }
 }
 
 private actor UnusedFolderKeys: AgentSealKeyStore {
@@ -86,5 +148,24 @@ private actor UnusedFolderKeys: AgentSealKeyStore {
 private struct WaitingFolderClient: AIClient {
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { _ in }
+    }
+}
+
+/// Each session's first round asks once. Its reply stays open after the answer so the dot must clear within the same turn.
+private struct QuestionClient: AIClient {
+    static let model = AIModelRef(provider: .init(rawValue: "local-fixture"), model: "question")
+
+    func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.started(Self.model))
+            if request.messages.count == 1 {
+                let call = AIToolCall(id: "ask", name: "ask_user", arguments: Data(#"{"question":"Continue?"}"#.utf8))
+                continuation.yield(.toolCall(call))
+                continuation.yield(.finished(.toolUse))
+                continuation.finish()
+            } else {
+                continuation.yield(.text("Continuing"))
+            }
+        }
     }
 }
