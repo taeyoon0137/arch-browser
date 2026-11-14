@@ -124,7 +124,7 @@ print(best[1] if best else "")
 IDENTITY="${ARCH_SIGN_IDENTITY:-$(individual_identity)}"
 IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
 
-# iCloud (CloudKit) and push need entitlements that only a provisioning profile grants (`docs/sync.md`, Requirements); `scripts/provision_app.sh` gets the profiles. A profile suits the signing identity when it is for `xyz.taeyoon.arch` on macOS, has not expired, lists the identity's certificate, and matches its kind: a Developer ID profile for a Developer ID Application identity, and a development profile that lists this Mac for an Apple Development identity. The newest suitable profile in Xcode's profile folder is used, or the one at `ARCH_PROVISIONING_PROFILE`, which must suit. The script embeds it as `Contents/embedded.provisionprofile` and signs the app with entitlements written to `build/Arch.entitlements` from the ones the profile grants: the application and team identifiers, the iCloud containers with CloudKit and their environment (Production for Developer ID, as Xcode's export chooses, and Development otherwise), and the push environment. The bundle has no other entitlements. Without a suitable profile, the app is signed as before, with none.
+# iCloud (CloudKit) and push need entitlements that only a provisioning profile grants (`docs/sync.md`, Requirements); `scripts/provision_app.sh` gets the profiles. A profile suits the signing identity when it is for `xyz.taeyoon.arch` on macOS, has not expired, lists the identity's certificate, and matches its kind: a Developer ID profile for a Developer ID Application identity, and a development profile that lists this Mac for an Apple Development identity. The newest suitable profile in Xcode's profile folder is used, or the one at `ARCH_PROVISIONING_PROFILE`, which must suit. The script embeds it as `Contents/embedded.provisionprofile` and signs the app with entitlements written to `build/Arch.entitlements` from the ones the profile grants: the application and team identifiers, the iCloud containers with CloudKit and their environment (Production for Developer ID, as Xcode's export chooses, and Development otherwise) when the profile grants a container and CloudKit, and the push environment when it grants push. The script says which of these the app got and warns when the profile grants no iCloud container. The bundle has no other entitlements. Without a suitable profile, the app is signed as before, with none.
 PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 ENTITLEMENTS="$ROOT/build/Arch.entitlements"
 
@@ -168,11 +168,11 @@ print(best[1] if best else "")
 ' "$@"
 }
 
-# Prints the app's entitlements, as a property list, from the ones the profile at `$1` grants, for an identity of kind `$2`. A profile grants patterns, such as `*` for every iCloud service; the app names the values it uses.
+# Writes the app's entitlements, as a property list at `$3`, from the ones the profile at `$1` grants, for an identity of kind `$2`, and prints which iCloud and push entitlements they hold. A profile grants patterns, such as `*` for every iCloud service; the app names the values it uses.
 profile_entitlements() {
   security cms -D -i "$1" 2>/dev/null | python3 -I -c '
 import plistlib, sys
-kind = sys.argv[1]
+kind, path = sys.argv[1:3]
 granted = plistlib.loads(sys.stdin.buffer.read())["Entitlements"]
 entitlements = {key: granted[key] for key in ("com.apple.application-identifier", "com.apple.developer.team-identifier")}
 services = granted.get("com.apple.developer.icloud-services", [])
@@ -187,8 +187,11 @@ if containers and (services == "*" or "CloudKit" in services):
         entitlements["com.apple.developer.icloud-container-environment"] = wanted if wanted in environments else environments[0]
 if "com.apple.developer.aps-environment" in granted:
     entitlements["com.apple.developer.aps-environment"] = granted["com.apple.developer.aps-environment"]
-sys.stdout.buffer.write(plistlib.dumps(entitlements))
-' "$2"
+with open(path, "wb") as file:
+    plistlib.dump(entitlements, file)
+container = "iCloud.xyz.taeyoon.arch" in entitlements.get("com.apple.developer.icloud-container-identifiers", [])
+print("iCloud container: " + ("yes" if container else "no") + ", CloudKit environment: " + entitlements.get("com.apple.developer.icloud-container-environment", "not set") + ", push: " + entitlements.get("com.apple.developer.aps-environment", "no"))
+' "$2" "$3"
 }
 
 PROFILE=""
@@ -217,8 +220,11 @@ if [ -n "${ARCH_PROVISIONING_PROFILE:-}" ] && [ -z "$PROFILE" ]; then
 fi
 if [ -n "$PROFILE" ]; then
   cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
-  profile_entitlements "$PROFILE" "$CERT_KIND" > "$ENTITLEMENTS"
-  echo "embedding the provisioning profile for the $CERT_KIND identity, with the iCloud and push entitlements it grants" >&2
+  GRANTED="$(profile_entitlements "$PROFILE" "$CERT_KIND" "$ENTITLEMENTS")"
+  echo "embedding the provisioning profile for the $CERT_KIND identity; entitlements: $GRANTED" >&2
+  case "$GRANTED" in
+    "iCloud container: no"*) echo "the profile grants no iCloud container with CloudKit, so the app has no iCloud entitlements; scripts/provision_app.sh says how to assign the container to the App ID" >&2 ;;
+  esac
 elif [ -n "$CERT_KIND" ]; then
   echo "no provisioning profile suits the $CERT_KIND identity, so the app has no iCloud or push entitlements; scripts/provision_app.sh gets one" >&2
 fi

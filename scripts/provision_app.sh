@@ -2,9 +2,13 @@
 # Get the provisioning profiles that let `scripts/bundle_app.sh` give Arch the iCloud (CloudKit) and push entitlements:
 # a Mac development profile through a build, and a Developer ID profile through an archive and its export. Xcode makes
 # and downloads profiles only for a project, so the script writes a stand-in project with Arch's bundle identifier and
-# entitlements into a temporary folder, builds it with automatic signing, and deletes the folder; the repository holds
-# no project files. `--dry-run` writes and checks the project, prints the commands, and reports the installed profiles
-# without running them.
+# entitlements into a temporary folder, builds it with automatic signing, and deletes the folder, along with the
+# distribution logs that the export leaves in the user's temporary folder, which name the team and the certificate's
+# holder; the repository holds no project files. `--dry-run` writes and checks the project, prints the commands, and
+# reports the installed profiles without running them.
+# Automatic signing from the command line turns on iCloud and push for the App ID but does not assign the iCloud
+# container to it. Until the container is assigned once in Certificates, Identifiers & Profiles, Xcode's profiles list
+# no container and the builds fail; the script then says how to assign it.
 # Usage: scripts/provision_app.sh [--dry-run]
 # Xcode signs in with the Apple Account in Xcode ▸ Settings ▸ Accounts, or with an App Store Connect API key when
 # `ARCH_ASC_KEY_ID` and `ARCH_ASC_ISSUER_ID` are set. `ARCH_ASC_KEY_PATH` is the key's path and defaults to
@@ -68,6 +72,24 @@ Xcode could not sign in to your Apple Developer account. Give it access in one o
 TEXT
 }
 
+explain_container() {
+  cat >&2 <<'TEXT'
+
+The provisioning profile has no iCloud container. The App ID xyz.taeyoon.arch has iCloud turned on, but the
+container iCloud.xyz.taeyoon.arch is not assigned to it, and Xcode does not assign one when it signs from the
+command line. Do this once in a web browser, then run ./scripts/provision_app.sh again:
+
+1. Open https://developer.apple.com/account, sign in, and choose Certificates, Identifiers & Profiles >
+   Identifiers.
+2. Choose iCloud Containers in the menu at the top right of the list. If iCloud.xyz.taeyoon.arch is not listed,
+   add it with the plus button: any description, and the identifier iCloud.xyz.taeyoon.arch.
+3. Choose App IDs in that menu and open xyz.taeyoon.arch. In the iCloud row, click Edit or Configure, select
+   iCloud.xyz.taeyoon.arch, click Continue, and then click Save.
+
+If the container is already assigned, run the script again: Xcode then makes a new profile that lists it.
+TEXT
+}
+
 CHOICE="$(individual_team)"
 if [ -z "$CHOICE" ]; then
   cat >&2 <<'TEXT'
@@ -92,8 +114,22 @@ if [ -n "$KEY_ID" ] || [ -n "$ISSUER_ID" ]; then
 fi
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+trap 'remove_distribution_logs || true; rm -rf "$WORK"' EXIT
 WORK="$(cd "$WORK" && pwd -P)"
+
+# `xcodebuild -exportArchive` writes `Arch_<date>.xcdistributionlogs` into the Darwin user temporary folder, whatever
+# `TMPDIR` says, and its logs name the team and the certificate's holder. The script lists the folders there before the
+# export and removes the ones that appear after it.
+LOGS_DIR="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+LOGS_BEFORE="$WORK/distribution-logs"
+distribution_logs() {
+  [ -n "$LOGS_DIR" ] || return 0
+  find "$LOGS_DIR" -maxdepth 1 -name 'Arch_*.xcdistributionlogs' -print 2>/dev/null | sort
+}
+remove_distribution_logs() {
+  [ -f "$LOGS_BEFORE" ] || return 0
+  distribution_logs | comm -13 "$LOGS_BEFORE" - | while IFS= read -r folder; do rm -rf "$folder"; done
+}
 
 # Replaces the team, the holder, the key and issuer identifiers, email addresses, certificate names, and anything that
 # looks like a team identifier, and shortens the temporary folder.
@@ -177,8 +213,9 @@ xcodebuild_with_credentials() {
 }
 
 # Runs one xcodebuild step named `$1` and keeps its output in memory. A failed step shows its errors without the
-# team, names, or identifiers, and notes whether signing in failed.
+# team, names, or identifiers, and notes whether signing in failed or the profile lacks the iCloud container.
 SIGN_IN_FAILED=0
+CONTAINER_MISSING=0
 run_step() {
   name="$1"
   shift
@@ -196,6 +233,10 @@ run_step() {
   if printf '%s\n' "$output" | grep -q -i -E 'No Accounts|Xcode-Token|Xcode-Username|credentials|not signed in|sign in|log in|authenticat|session has expired|No account for team'; then
     SIGN_IN_FAILED=1
   fi
+  # Xcode reports that the profile "doesn't match the entitlements file's value" for the container entitlement.
+  if printf '%s\n' "$output" | grep -q -F 'com.apple.developer.icloud-container-identifiers'; then
+    CONTAINER_MISSING=1
+  fi
   return 1
 }
 
@@ -211,7 +252,7 @@ install_profile() {
 }
 
 # Reports the newest current profile of each kind for the bundle identifier and the team, with yes or no for what it
-# allows, and its expiry date.
+# allows, and its expiry date. Exits with 3 when a reported profile lists no iCloud container.
 report() {
   REPORT_TEAM="$TEAM" python3 -I -c '
 import datetime, hashlib, os, plistlib, re, subprocess, sys
@@ -238,6 +279,7 @@ for name in names:
         continue
     found["Developer ID" if profile.get("ProvisionsAllDevices") else "Development"].append(profile)
 print("Provisioning profiles for " + bundle + " on this Mac: " + str(sum(len(p) for p in found.values())))
+missing = False
 for kind, profiles in found.items():
     current = [p for p in profiles if p.get("ExpirationDate", now) > now]
     if not current:
@@ -246,17 +288,20 @@ for kind, profiles in found.items():
     profile = max(current, key=lambda p: p.get("CreationDate", now))
     granted = profile["Entitlements"]
     services = granted.get("com.apple.developer.icloud-services", [])
+    container_granted = container in granted.get("com.apple.developer.icloud-container-identifiers", [])
+    missing = missing or not container_granted
     certificates = {hashlib.sha1(c).hexdigest().upper() for c in profile.get("DeveloperCertificates", [])}
     parts = [kind + " profile: found", "certificate on this Mac: " + yes(certificates & local)]
     if kind == "Development":
         parts.append("this Mac registered: " + yes(udid and udid in profile.get("ProvisionedDevices", [])))
     parts += [
-        "iCloud container: " + yes(container in granted.get("com.apple.developer.icloud-container-identifiers", [])),
+        "iCloud container: " + yes(container_granted),
         "CloudKit: " + yes(services == "*" or "CloudKit" in services),
         "push: " + granted.get("com.apple.developer.aps-environment", "no"),
         "expires " + profile["ExpirationDate"].strftime("%Y-%m-%d"),
     ]
     print(", ".join(parts))
+sys.exit(3 if missing else 0)
 ' "$PROFILES" "$BUNDLE_ID" "$CONTAINER"
 }
 
@@ -289,7 +334,10 @@ if run_step "Development profile (build)" -project "$PROJECT" -scheme Arch -conf
 else
   STATUS=1
 fi
-if [ "$SIGN_IN_FAILED" = 0 ]; then
+if [ "$CONTAINER_MISSING" = 1 ]; then
+  echo "Archive and Developer ID profile (export): skipped, because the archive needs the iCloud container in the profile, as the build does"
+elif [ "$SIGN_IN_FAILED" = 0 ]; then
+  [ "$DRY_RUN" = 1 ] || distribution_logs > "$LOGS_BEFORE"
   if run_step "Archive" -project "$PROJECT" -scheme Arch -configuration Release \
     -destination "generic/platform=macOS" -derivedDataPath "$DERIVED" -archivePath "$ARCHIVE" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$TEAM" archive &&
@@ -299,8 +347,13 @@ if [ "$SIGN_IN_FAILED" = 0 ]; then
   else
     STATUS=1
   fi
+  remove_distribution_logs
 fi
 
-report
+REPORT_STATUS=0
+report || REPORT_STATUS=$?
+[ "$REPORT_STATUS" != 3 ] || CONTAINER_MISSING=1
+[ "$REPORT_STATUS" = 0 ] || [ "$REPORT_STATUS" = 3 ] || STATUS=1
 [ "$SIGN_IN_FAILED" = 0 ] || explain_credentials
+[ "$CONTAINER_MISSING" = 0 ] || explain_container
 exit "$STATUS"
