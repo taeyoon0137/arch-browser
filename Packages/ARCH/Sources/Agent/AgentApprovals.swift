@@ -183,7 +183,8 @@ public struct AgentApproval: Identifiable {
     /// Touch ID or the login password, for the sensitive cards of outside clients.
     var authenticator: any AgentAuthenticating = AgentDeviceOwnerAuthentication()
 
-    private var waiters: [UUID: CheckedContinuation<AgentApprovalAnswer, Never>] = [:]
+    @Published private var questionDrafts: [UUID: String] = [:]
+    private var completions: [UUID: (AgentApprovalAnswer) -> Void] = [:]
     /// The waiting cards by ID; a card leaves once it ends, with its capture.
     private var cards: [UUID: AgentApproval] = [:]
     private var waiting: Set<UUID> = []
@@ -195,36 +196,35 @@ public struct AgentApproval: Identifiable {
     /// Shows a card and waits until it ends. A call whose task was cancelled, as when its client's work ended while it prepared the card, opens none.
     func request(_ approval: AgentApproval) async -> AgentApprovalAnswer {
         if Task.isCancelled { return .ended("The client's work in Arch ended.") }
-        show(approval)
         let id = approval.id
         return await withTaskCancellationHandler {
-            await answer(of: id)
+            await withCheckedContinuation { continuation in
+                open(approval) { continuation.resume(returning: $0) }
+            }
         } onCancel: {
             Task { @MainActor [weak self] in self?.finish(id, .ended("The call was cancelled.")) }
         }
     }
 
-    /// Shows a card now and returns the task that waits until it ends, for cards that a page's report opens while the engine waits for its answer.
-    func open(_ approval: AgentApproval) -> Task<AgentApprovalAnswer, Never> {
-        show(approval)
-        return Task { await answer(of: approval.id) }
-    }
-
-    private func show(_ approval: AgentApproval) {
-        cards[approval.id] = approval
-        waiting.insert(approval.id)
+    /// Registers the answer before publishing the card, including when a page opens one synchronously.
+    func open(_ approval: AgentApproval, onAnswer: @escaping (AgentApprovalAnswer) -> Void) {
+        let id = approval.id
+        completions[id] = onAnswer
+        cards[id] = approval
+        waiting.insert(id)
         pending.append(approval)
         let delay = max(0, approval.deadline.timeIntervalSinceNow)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            MainActor.assumeIsolated { self?.finish(approval.id, .timedOut) }
+            MainActor.assumeIsolated { self?.finish(id, .timedOut) }
         }
         didAdd?(approval)
     }
 
-    /// How a card ended, once it has.
-    private func answer(of id: UUID) async -> AgentApprovalAnswer {
-        if let outcome = outcomes[id] { return outcome }
-        return await withCheckedContinuation { waiters[id] = $0 }
+    func draftAnswer(to id: UUID) -> String { questionDrafts[id] ?? "" }
+
+    func setDraftAnswer(_ text: String, to id: UUID) {
+        guard case .question? = cards[id]?.kind, isPending(id) else { return }
+        questionDrafts[id] = text.isEmpty ? nil : text
     }
 
     public func isPending(_ id: UUID) -> Bool {
@@ -302,9 +302,10 @@ public struct AgentApproval: Identifiable {
         guard waiting.remove(id) != nil else { return }
         pending.removeAll { $0.id == id }
         cards[id] = nil
+        if questionDrafts[id] != nil { questionDrafts[id] = nil }
         outcomes[id] = answer
         endedOrder.append(id)
         if endedOrder.count > Self.keptOutcomes { outcomes[endedOrder.removeFirst()] = nil }
-        waiters.removeValue(forKey: id)?.resume(returning: answer)
+        completions.removeValue(forKey: id)?(answer)
     }
 }

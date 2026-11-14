@@ -7,7 +7,7 @@ import SwiftUI
 
 struct AgentApprovalCard: View {
     let approval: AgentApproval
-    let approvals: AgentApprovals
+    @ObservedObject var approvals: AgentApprovals
     let showTab: () -> Void
     @State private var reply = ""
     @State private var isReplying = false
@@ -70,13 +70,17 @@ struct AgentApprovalCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
     }
 
+    private var questionAnswer: Binding<String> {
+        Binding(get: { approvals.draftAnswer(to: approval.id) }, set: { approvals.setDraftAnswer($0, to: approval.id) })
+    }
+
     @ViewBuilder private var inputs: some View {
         switch approval.kind {
         case .question(let choices):
             if !choices.isEmpty {
                 FlowButtons(titles: choices) { answer(.answer($0)) }
             }
-            TextField("Your answer", text: $written, axis: .vertical)
+            TextField("Your answer", text: questionAnswer, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .handToUser:
             Text("Do the step in the tab, then choose Done.")
@@ -128,8 +132,8 @@ struct AgentApprovalCard: View {
             switch approval.kind {
             case .question:
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel("")) }
-                AgentPointerButton(title: "Answer", requiresPointer: false) { answer(.answer(written)) }
-                    .disabled(written.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                AgentPointerButton(title: "Answer", requiresPointer: false) { answer(.answer(questionAnswer.wrappedValue)) }
+                    .disabled(questionAnswer.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             case .handToUser:
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
                 AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
