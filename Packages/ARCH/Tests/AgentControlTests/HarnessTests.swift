@@ -150,6 +150,25 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(odd.markdown != skill.markdown)
     }
 
+    @Test func inAppGuidanceOnlyNamesOfferedToolsAndKeepsTheOutsideGuide() {
+        let guide = AgentHarness.guideResult(arguments: [:], inSession: true)
+        #expect(guide.text == AgentHarness.sessionInstructions)
+        for name in ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"] {
+            #expect(guide.text.contains(name))
+        }
+        for topic in AgentGuideTopic.allCases {
+            let text = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true).text
+            for unavailable in ["open_tab", "navigate(", "request_tab", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
+                #expect(!text.contains(unavailable), "\(topic) describes \(unavailable)")
+            }
+        }
+        let outside = AgentMCPServer(mode: .outside, version: "test")
+        let bound = AgentMCPServer(mode: .session(ticket: "fixture"), version: "test")
+        #expect(outside.instructions == AgentHarness.mcpInstructions && outside.instructions.contains("request_approval"))
+        #expect(bound.instructions == AgentHarness.boundMCPInstructions && !bound.instructions.contains("request_approval"))
+        #expect(AgentHarness.guideResult(arguments: ["topic": "browsing"]).text.contains("open_tab"))
+    }
+
     @Test func sessionSkillsAreTheTopicsButCLI() throws {
         let skills = AgentHarness.sessionSkills
         let topics = AgentGuideTopic.allCases.filter { $0 != .cli }
@@ -157,10 +176,11 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(Set(skills.map(\.name)).count == skills.count)
         for (skill, topic) in zip(skills, topics) {
             let description = try checkSkill(skill)
-            #expect(description.hasPrefix(topic.summary))
-            // The same text as the guide topic.
-            #expect(skill.body == topic.text)
-            #expect(skill.markdown.contains(topic.text))
+            #expect(!description.isEmpty)
+            let delivered = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true)
+            #expect(skill.body == delivered.text)
+            #expect(skill.markdown.contains(delivered.text))
+            #expect(skill.body != topic.text)
         }
         #expect(!skills.map(\.name).contains(AgentHarness.entrySkillName))
     }

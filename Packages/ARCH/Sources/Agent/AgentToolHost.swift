@@ -1020,7 +1020,7 @@ extension AgentToolHost {
             return AgentToolResult(status: .error, code: "unknownTool", text: "Arch has no tool named \(call.name).")
         }
         // The harness checks guide's arguments itself, so an unknown topic is answered with the topic names, as arch-cli guide answers it, and a null topic gives the guide.
-        if tool.name == "guide" { return AgentHarness.guideResult(arguments: call.arguments) }
+        if tool.name == "guide" { return AgentHarness.guideResult(arguments: call.arguments, inSession: true) }
         if let problem = Self.problem(with: call.arguments, for: tool) {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
@@ -1071,10 +1071,10 @@ extension AgentToolHost {
         let place = space.map { "\(persona) / \($0.name) (\(spaceHandle ?? ""))" } ?? "the \(persona) Persona"
         let openTabs = host.agentTabs(of: client.id).count
         let shared = handles.sharedTabIDs.map { handles.tabs.handle(for: $0) }
-        let asks = Self.whatAsksInSession(client.level)
+        let asks = ["Reading an available tab runs without asking. Opening, navigating and interacting with pages require the user."]
         let sites = session.siteScope.isEmpty ? "no sites yet" : session.siteScope.joined(separator: ", ")
         var lines = ["This session works in \(place), in \(client.level.title)."]
-        lines.append("Site scope: \(sites)\(session.hasSearchResults ? ", and the search engine's results address" : ""). \(Self.scopeRule)")
+        lines.append("Site scope: \(sites)\(session.hasSearchResults ? ", and the search engine's results address" : "").")
         lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once. Tabs the user shared: \(shared.isEmpty ? "none" : shared.joined(separator: ", ")).")
         lines.append("Limits: \(session.callsLeftThisTurn) of \(AgentLimits.toolCallsPerTurn) tool calls left for this message and \(session.callsLeftThisSession) of \(AgentLimits.toolCallsPerSession) for the session, \(AgentLimits.actionsPerSecond) actions a second.")
         lines.append(contentsOf: asks)
@@ -1096,23 +1096,6 @@ extension AgentToolHost {
             "scopes": ["searchHistory": .bool(client.scopes.searchHistory)],
         ]
         return AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: structured)
-    }
-
-    /// How the site scope gates the addresses an in-app session's agent writes (rule P13).
-    static let scopeRule = "Links you follow by ref open without asking. An address you write opens without asking only when a page or the user showed it, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other address asks the user first, in every mode, and so does a redirect of it to a site outside the scope."
-
-    /// What asks the user or is refused in each mode of an in-app session (docs/agents.md, Modes).
-    static func whatAsksInSession(_ mode: AgentAccessLevel) -> [String] {
-        let interactions: String
-        switch mode {
-        case .readOnly: interactions = "Interactions other than scroll and hover are refused, and so are sensitive steps such as request_approval."
-        case .askBeforeActing: interactions = "Each interaction asks the user first, and sensitive steps such as request_approval always ask."
-        case .actInAgentTabs: interactions = "Interactions in your agent tabs on sites in scope run without asking; elsewhere they ask once per site, and sensitive steps such as request_approval always ask."
-        }
-        return [
-            "Reading runs without asking. \(interactions) Any interaction in a tab the user shared asks every time.",
-            "Arch refuses typing passwords, codes, or card details, sites excluded from AI, and tabs you were not given. Hand such steps to the user with hand_to_user.",
-        ]
     }
 
     private func listSpaces(ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
