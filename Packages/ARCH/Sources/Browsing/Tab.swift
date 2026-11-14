@@ -79,6 +79,8 @@ import LiveFolders
     weak var opener: (any EngineWebContents)?
     /// Closes the tab, as `TabCloseAction` decides, when its page closes itself with `window.close()` or the engine closes its crashed page. Set by the session.
     var didClose: (() -> Void)?
+    /// Ends outstanding requests that belonged to the previous main document.
+    var didCommitDocument: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.
     var didFinishLoad: (() -> Void)?
     /// Sends each time the main frame finishes loading a document, for the AI interface's hooks. Loads of frames inside the page and navigations within the document send nothing.
@@ -340,9 +342,11 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         }
     }
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        guard webContents === self.webContents else { return }
         documentID = UUID()
         engineCommittedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
+        didCommitDocument?()
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
         commitURL()

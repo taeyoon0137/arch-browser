@@ -39,6 +39,51 @@ import Testing
         #expect(BrowserAgentHost.info(of: tab).documentID != first.documentID)
     }
 
+    @Test func outstandingSitePermissionEndsWithTheDocumentAndAnOldCardCannotRememberAnAnswer() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let site = try #require(URL(string: "https://example.org/page"))
+        let origin = try #require(SitePermissionStore.origin(of: site))
+        let tab = session.openTab(url: site, in: session.spaces[0].id, select: false)
+        let page = tab.webContents
+        tab.webContents(page, didCommitDocumentAt: site)
+        let request = EnginePermissionRequest(origin: site, types: [.clipboard])
+        var answers: [Bool] = []
+        func requestClipboard() {
+            tab.webContents(page, requestPermission: request) { answers.append($0) }
+        }
+        requestClipboard()
+        requestClipboard()
+        let old = try #require(session.prompts.current(for: tab.id))
+        #expect(session.prompts.waiting[tab.id]?.count == 1)
+
+        // A move within the Persona keeps the same page. Reloading the same address ends it.
+        let destination = session.makeSpace(in: tab.personaID, named: "Later")
+        session.moveTab(tab.id, toSpace: destination.id)
+        #expect(session.prompts.current(for: tab.id)?.id == old.id)
+        let notice = TabPromptContent.notice(title: "Download finished", detail: nil, identity: old.content.identity)
+        session.enqueuePrompt(notice, for: tab) { _ in }
+        tab.webContents(page, didCommitDocumentAt: site)
+        #expect(answers == [false, false])
+        #expect(!session.prompts.contains(old.id))
+        let kept = try #require(session.prompts.current(for: tab.id))
+        #expect(kept.content.kind == .notice)
+        session.prompts.answer(kept.id, with: PromptAnswer(buttonID: "ok"))
+        session.prompts.answer(old.id, with: PromptAnswer(buttonID: "allow"))
+        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == nil)
+
+        requestClipboard()
+        let fresh = try #require(session.prompts.current(for: tab.id))
+        #expect(fresh.id != old.id)
+        session.prompts.answer(fresh.id, with: PromptAnswer(buttonID: "deny"))
+        #expect(answers == [false, false, false])
+        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == .deny)
+    }
+
     @Test func aPagesDialogsAskUnderThePagesSiteAndTakeTheCardsAnswer() {
         let tab = Self.tab()
         let prompts = PromptRecorder()

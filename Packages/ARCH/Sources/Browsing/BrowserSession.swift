@@ -926,10 +926,14 @@ final class EngineRuntime {
             self.closeTab(tab, reason: tab.hasCrashed ? .crash : .page)
             self.undoableCloseCount = 0
         }
+        tab.didCommitDocument = { [weak self, weak tab] in
+            guard let self, let tab, self.prompts.hasPrompt(for: tab.id), self.allTabs.contains(where: { $0 === tab }) else { return }
+            self.prompts.dismiss(tabID: tab.id, matching: \.endsWithDocument)
+        }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
             guard let self, let tab else { return }
-            self.prompts.dismiss(tabID: tab.id, pageDialogsOnly: true)
+            self.prompts.dismiss(tabID: tab.id, matching: \.isPageDialog)
         }
         // A leave-page card shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in

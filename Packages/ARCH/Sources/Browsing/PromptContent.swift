@@ -15,6 +15,9 @@ enum PromptKind: Equatable {
         }
     }
 
+    /// A permission or file request belongs to the document that asked, including when its address reloads.
+    var endsWithDocument: Bool { self == .sitePermission || self == .fileChooser }
+
     /// The first words VoiceOver reads for the card.
     var accessibilityName: String {
         switch self {

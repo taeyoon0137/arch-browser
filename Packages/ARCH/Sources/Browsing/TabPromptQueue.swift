@@ -41,12 +41,12 @@ import SwiftUI
         completion?(.answered(answer))
     }
 
-    /// Ends the tab's prompts without the user, oldest first: all of them when the tab closes or switches engines, or only the page's own dialogs when the engine cancels those. The queue changes before any completion runs.
-    func dismiss(tabID: UUID, pageDialogsOnly: Bool = false) {
+    /// Ends matching prompts without a user answer, oldest first. Remove them before calling any completion, which may enqueue another prompt.
+    func dismiss(tabID: UUID, matching shouldDismiss: (PromptKind) -> Bool = { _ in true }) {
         guard let queue = waiting[tabID] else { return }
-        let ending = pageDialogsOnly ? queue.filter(\.content.kind.isPageDialog) : queue
+        let ending = queue.filter { shouldDismiss($0.content.kind) }
         guard !ending.isEmpty else { return }
-        let kept = pageDialogsOnly ? queue.filter { !$0.content.kind.isPageDialog } : []
+        let kept = queue.filter { !shouldDismiss($0.content.kind) }
         waiting[tabID] = kept.isEmpty ? nil : kept
         finish(ending)
     }

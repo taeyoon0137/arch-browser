@@ -124,12 +124,12 @@ import Testing
         for kind in [PromptKind.sitePermission, .pageAlert, .leavePage, .pageTextInput] {
             queue.enqueue(Self.content(kind), for: tab) { _ in ended.append(kind) }
         }
-        queue.dismiss(tabID: tab, pageDialogsOnly: true)
+        queue.dismiss(tabID: tab, matching: \.isPageDialog)
         #expect(ended == [.pageAlert, .pageTextInput])
         #expect(queue.waiting[tab]?.map(\.content.kind) == [.sitePermission, .leavePage])
 
         // Nothing to cancel changes nothing.
-        queue.dismiss(tabID: tab, pageDialogsOnly: true)
+        queue.dismiss(tabID: tab, matching: \.isPageDialog)
         #expect(queue.waiting[tab]?.count == 2)
     }
 
@@ -143,7 +143,7 @@ import Testing
             chosen.append(TabPromptContent.fileChooserResult($0))
         }
         #expect(queue.current(for: tab)?.panel == nil)
-        queue.dismiss(tabID: tab, pageDialogsOnly: true)
+        queue.dismiss(tabID: tab, matching: \.isPageDialog)
         let chooser = try #require(queue.current(for: tab))
         #expect(chooser.content.kind == .fileChooser && chooser.panel === panel)
         queue.answer(chooser.id, with: PromptAnswer(buttonID: "choose"))
