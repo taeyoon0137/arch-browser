@@ -206,7 +206,7 @@ public struct AgentSessionPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(session.items) { item in
-                        AgentTranscriptRow(item: item, actions: actions, settings: settings,
+                        AgentTranscriptRow(item: item, actions: actions, settings: settings, readTab: { service.currentReadPage($0, in: session) },
                                            retry: item.id == session.transcript.retryableErrorID && !session.hasEnded ? { retry(item.id) } : nil)
                             .id(item.id)
                     }
@@ -409,6 +409,7 @@ private struct AgentTranscriptRow: View {
     let item: AgentTranscriptItem
     let actions: AgentPanelActions
     let settings: AISettingsStore
+    let readTab: (AgentReadPage) -> AgentTabInfo?
     let retry: (() -> Void)?
 
     var body: some View {
@@ -465,9 +466,28 @@ private struct AgentTranscriptRow: View {
                 }
             }
         case .turnFooter(let model, let usage):
-            Text(footer(model: model, usage: usage))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(footer(model: model, usage: usage))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                let available = item.pagesRead.compactMap { page -> (page: AgentReadPage, label: String)? in
+                    guard let tab = readTab(page) else { return nil }
+                    let title = tab.title.isEmpty ? (page.url.host ?? "") : tab.title
+                    return (page, page.handle + " · " + title)
+                }
+                if !available.isEmpty {
+                    DisclosureGroup("Pages read this turn") {
+                        ForEach(available, id: \.page) { row in
+                            Button(row.label) {
+                                if let current = readTab(row.page) { actions.showReadTab(current.id) }
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
         }
     }
 

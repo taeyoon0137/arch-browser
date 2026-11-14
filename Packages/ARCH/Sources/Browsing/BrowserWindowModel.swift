@@ -906,6 +906,17 @@ public enum BrowserWindowKind {
         target.nsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    /// A page read this turn can already be on screen in another window, including a split pane.
+    func showReadTab(_ id: UUID) {
+        guard let tab = session.allTabs.first(where: { $0.id == id }), tab.isLoaded else { return }
+        if let owner = session.window(showing: tab) {
+            if owner.selectedTabID != id || owner.internalPage != nil { owner.selectTab(id) }
+            if owner !== self { owner.nsWindow?.makeKeyAndOrderFront(nil) }
+        } else {
+            showAgentTab(id)
+        }
+    }
+
     /// A reply link opens in the invoking Persona, in the current space or a small window of its own.
     func openReplyLink(_ url: URL, in personaID: Persona.ID) {
         switch kind {

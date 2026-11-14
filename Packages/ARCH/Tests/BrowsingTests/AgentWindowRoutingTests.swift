@@ -65,6 +65,28 @@ import Testing
         }
     }
 
+    @Test func showingAPageReadInAnotherWindowKeepsBothConversationsAndTheOriginalTab() throws {
+        try withWindows { session, main, _, home, research in
+            let other = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: research.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            let otherWindow = WindowSpy()
+            otherWindow.isReleasedWhenClosed = false
+            other.nsWindow = otherWindow
+            defer { session.windowWillClose(other) }
+            let source = session.openTab(url: URL(string: "about:blank#source"), in: research.id, select: false, engine: .webKit)
+            other.selectTab(source.id)
+            let sourceConversation = UUID(), invokingConversation = UUID()
+            other.showAgentSession(sourceConversation)
+            main.showAgentSession(invokingConversation)
+            let original = main.selectedTabID, document = source.documentID, count = session.allTabs.count
+            main.showReadTab(source.id)
+            #expect(otherWindow.raises == 1 && other.selectedTabID == source.id && source.documentID == document)
+            #expect(main.currentSpaceID == home.id && main.selectedTabID == original && session.allTabs.count == count)
+            #expect(main.agentPanel == .session(invokingConversation) && other.agentPanel == .session(sourceConversation))
+            main.showReadTab(UUID())
+            #expect(otherWindow.raises == 1 && session.allTabs.count == count)
+        }
+    }
+
     @Test func tabsCreatedDuringAPersonaEngineOutageRecoverTheirRequestedEngine() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

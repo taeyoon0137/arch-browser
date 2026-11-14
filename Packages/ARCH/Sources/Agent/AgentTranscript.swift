@@ -13,6 +13,16 @@ public struct AgentStep: Equatable, Sendable {
     public var status: AgentResultStatus
 }
 
+/// A successful read's local document identity. These values never enter a model message.
+struct AgentReadPage: Hashable {
+    let tabID: UUID
+    let handle: String
+    let documentID: UUID
+    let url: URL
+    let ownerID: UUID?
+    let takeoverGeneration: Int
+}
+
 /// What the panel offers beside an error, one action each (`docs/ai.md`, Errors).
 public enum AgentErrorAction: Equatable, Sendable {
     /// Sends the last message again.
@@ -37,6 +47,8 @@ public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
 
     public let id: UUID
     public var kind: Kind
+    /// Populated only on a turn footer, from successful host calls in that turn.
+    var pagesRead: [AgentReadPage] = []
 
     init(_ kind: Kind) {
         id = UUID()
@@ -49,6 +61,7 @@ struct AgentTranscript: Equatable {
     private(set) var retryableErrorID: UUID?
     /// The current turn's usage and whether its reply or thinking is still growing.
     private var turnUsage: AIUsage?
+    private var turnPages: [AgentReadPage] = []
     private var growing: Growing?
 
     private enum Growing: Equatable {
@@ -67,6 +80,7 @@ struct AgentTranscript: Equatable {
     mutating func beginTurn(_ text: String, isRetry: Bool) {
         retryableErrorID = nil
         turnUsage = nil
+        turnPages = []
         if !isRetry { append(.user(text)) }
     }
 
@@ -94,9 +108,19 @@ struct AgentTranscript: Equatable {
         turnUsage = usage
     }
 
+    func containsRead(of tabID: UUID) -> Bool {
+        items.contains { $0.pagesRead.contains { $0.tabID == tabID } }
+    }
+
+    mutating func read(_ page: AgentReadPage) {
+        if !turnPages.contains(page) { turnPages.append(page) }
+    }
+
     /// The footer under a turn that ended, with the model that held it.
     mutating func endTurn(model: AIModelRef?) {
         append(.turnFooter(model: model, usage: turnUsage))
+        items[items.count - 1].pagesRead = turnPages
+        turnPages = []
         turnUsage = nil
     }
 

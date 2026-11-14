@@ -556,6 +556,57 @@ import UserNotifications
         return client
     }
 
+    @Test func completedTurnListsOnlyItsSuccessfulLivePageReads() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService(), host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        func tab(_ path: String) -> AgentTabInfo {
+            AgentTabInfo(id: UUID(), spaceID: space.id, title: "Same title", url: URL(string: "https://fixture.example/" + path),
+                         isLoading: false, engine: .webKit)
+        }
+        let one = tab("first"), two = tab("second"), unrelated = tab("third")
+        host.tabs = [one, two, unrelated]
+        host.userTabIDs = Set(host.tabs.map(\.id))
+        let (session, runner) = try start(service, harness, attaching: [one.id, two.id])
+        let client = try await connectQuestionClient(session, runner, harness)
+        func read(_ handle: String) async throws -> AgentToolResult {
+            try await client.callTool("read_text", ["tab": .string(handle)])
+        }
+        for handle in ["t1", "t1", "t2"] { try #require(try await read(handle).status == .ok) }
+        #expect(try await read("t3").status != .ok)
+        runner.emit(.text("Another page I mention: t8 https://model.example/invented."))
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { session.state == .done }
+        let list = try #require(session.items.last).pagesRead
+        try #require(list.map(\.handle) == ["t1", "t2"])
+        #expect(list.compactMap { service.currentReadPage($0, in: session)?.id } == [one.id, two.id])
+        try session.send("Continue without reading.")
+        runner.emit(.text("t1 and t2"))
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { session.state == .done }
+        #expect(session.items.last?.pagesRead == [])
+        try session.send("Try again.")
+        _ = try await read("t1")
+        runner.emit(.turnFailed(.cancelled))
+        try await waitUntil { !session.isTurnRunning }
+        session.retryLastMessage()
+        try #require(try await read("t2").status == .ok)
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { session.state == .done }
+        #expect(session.items.last?.pagesRead.map(\.handle) == ["t2"])
+
+        host.tabs[0].documentID = UUID()
+        #expect(service.currentReadPage(list[0], in: session) == nil)
+        harness.excludedHosts.value.insert("fixture.example")
+        #expect(service.currentReadPage(list[1], in: session) == nil)
+        harness.excludedHosts.value.remove("fixture.example")
+        service.stopSharing(two.id, with: session)
+        try #require(service.share(two, with: session))
+        #expect(service.currentReadPage(list[1], in: session) == nil)
+        #expect(host.openedOwners.isEmpty && host.shownTabIDs.isEmpty)
+    }
+
     @Test func anAttentionNotificationCarriesOnlyItsOwnerAndGenericTitle() throws {
         let owner = UUID()
         let request = AgentAttention.request(for: owner)

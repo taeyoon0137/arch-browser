@@ -126,6 +126,10 @@ extension AgentAPISession: AgentSessionRunning {
         return call
     }
 
+    func recordRead(_ page: AgentReadPage) {
+        transcript.read(page)
+    }
+
     func finishedReading(_ call: UUID) { readingTabs.removeAll { $0.call == call } }
 
     private(set) var callsThisTurn = 0

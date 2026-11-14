@@ -453,6 +453,9 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(text == "Opened background research tab " + handle + ".")
         #expect(host.openedOwners.map(\.id) == [session.id] && host.shownTabIDs.isEmpty && host.shownPanels.isEmpty)
         #expect(host.researchLoads[copy.id]?(address) == false)
+        let sourceRead = try #require(session.items.last?.pagesRead.first)
+        #expect(sourceRead.handle == "t1" && service.currentReadPage(sourceRead, in: session)?.id == source.id)
+        #expect(session.items.last?.pagesRead.count == 1)
         let lastStep = session.items.compactMap { if case .step(let step) = $0.kind { return step }; return nil }.last
         #expect(lastStep?.tabID == copy.id && lastStep?.tabHandle == handle)
         let entries = service.activity.entries.filter { $0.tool == "open_tab" }
@@ -693,10 +696,13 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         try session.send("Read the research tab.")
         try await waitUntil { client.requests.count == 3 && session.state == .done }
         #expect(client.requests[2].messages.description.contains("Private research body"))
+        let read = try #require(session.items.last?.pagesRead.first)
+        #expect(service.currentReadPage(read, in: session)?.id == copy.id)
         // Keep in Sidebar clears the owner. The document remains open in the user's Persona.
         let index = try #require(harness.host.tabs.firstIndex { $0.id == copy.id })
         harness.host.tabs[index].agentOwnerID = nil
         harness.host.userTabIDs.insert(copy.id)
+        #expect(service.currentReadPage(read, in: session) == nil)
         try session.send("Continue.")
         try await waitUntil { client.requests.count == 4 && session.state == .done }
         let history = client.requests[3].messages.flatMap { toolResults(in: $0) }

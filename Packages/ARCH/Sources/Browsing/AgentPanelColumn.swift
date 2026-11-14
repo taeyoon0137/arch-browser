@@ -41,7 +41,8 @@ struct AgentPanelColumn: View {
                           showTab: { [windowModel] id in windowModel.showAgentTab(id) },
                           openAISettings: { [session] in session.pageAssistant.showAISettings?() },
                           signIn: { [session] provider in session.signInToAgentTool?(provider) },
-                          openModelSettings: session.showAgentModelSettings)
+                          openModelSettings: session.showAgentModelSettings,
+                          showReadTab: { [windowModel] id in windowModel.showReadTab(id) })
     }
 }
 

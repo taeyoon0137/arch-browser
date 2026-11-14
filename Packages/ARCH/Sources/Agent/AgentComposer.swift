@@ -13,6 +13,7 @@ public struct AgentPanelActions {
     public var openLink: (URL) -> Void
     /// Selects a tab of the session's, as a step's button does.
     public var showTab: (UUID) -> Void
+    public var showReadTab: (UUID) -> Void
     public var openAISettings: () -> Void
     public var openModelSettings: (AgentModelSettingsPage) -> Void
     /// Opens the built-in terminal with the tool's sign-in typed but not run.
@@ -20,10 +21,11 @@ public struct AgentPanelActions {
 
     public init(formatReply: @escaping (String) -> AttributedString, openLink: @escaping (URL) -> Void, showTab: @escaping (UUID) -> Void,
                 openAISettings: @escaping () -> Void, signIn: @escaping (AIProviderID) -> Void,
-                openModelSettings: ((AgentModelSettingsPage) -> Void)? = nil) {
+                openModelSettings: ((AgentModelSettingsPage) -> Void)? = nil, showReadTab: ((UUID) -> Void)? = nil) {
         self.formatReply = formatReply
         self.openLink = openLink
         self.showTab = showTab
+        self.showReadTab = showReadTab ?? showTab
         self.openAISettings = openAISettings
         self.openModelSettings = openModelSettings ?? { _ in openAISettings() }
         self.signIn = signIn

@@ -164,10 +164,13 @@ import Foundation
         state = FileManager.default.fileExists(atPath: file.fileURL.path) ? .reading : .ready
         applyAgentOnlyPersona()
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
-        host.userDocumentDidEnd = { [weak approvals] tabID, documentID in
-            guard let approvals else { return }
-            for card in approvals.pending where card.tabID == tabID && card.researchDocumentID == documentID {
-                approvals.withdrawResearch(card.id)
+        host.userDocumentDidEnd = { [weak self] tabID, documentID in
+            guard let self else { return }
+            for card in self.approvals.pending where card.tabID == tabID && card.researchDocumentID == documentID {
+                self.approvals.withdrawResearch(card.id)
+            }
+            for session in self.sessions where session.handles.sharedTabIDs.contains(tabID) {
+                session.objectWillChange.send()
             }
         }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
@@ -694,6 +697,23 @@ import Foundation
         }
     }
 
+    /// A read source remains local to its session. Choosing it can only select the same live document.
+    func currentReadPage(_ page: AgentReadPage, in session: AgentSession) -> AgentTabInfo? {
+        guard canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == page.takeoverGeneration,
+              session.handles.tabs.id(for: page.handle) == page.tabID,
+              let tab = host.tabs(withIDs: [page.tabID]).first, tab.documentID == page.documentID,
+              tab.url == page.url, tab.isLoaded, tab.agentOwnerID == page.ownerID,
+              AgentPolicy.mayRead(tab.url, allowsAI: dependencies.allowsAI) == .allowed else { return nil }
+        if page.ownerID == session.id {
+            guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }),
+                  session.permitsResearchTab(tab, host: host, allowsAI: dependencies.allowsAI) else { return nil }
+        } else {
+            guard page.ownerID == nil, !tab.isLiveFolderItem, session.handles.sharedTabIDs.contains(tab.id),
+                  host.userTabs(in: session.personaID).contains(where: { $0.id == tab.id }) else { return nil }
+        }
+        return tab
+    }
+
     func researchChoices(for session: AgentSession) -> [AgentResearchPage] {
         guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
         return session.researchChoices(host: host, allowsAI: dependencies.allowsAI)
@@ -1206,20 +1226,16 @@ import Foundation
             default: return nil
             }
             // Handles are never reused, including when the user shares the same tab again.
-            let sources = Dictionary(uniqueKeysWithValues: tabs.map { (session.handles.tabs.handle(for: $0.id), $0) })
+            let pages = tabs.compactMap { tab -> AgentReadPage? in
+                guard let url = tab.url else { return nil }
+                return AgentReadPage(tabID: tab.id, handle: session.handles.tabs.handle(for: tab.id), documentID: tab.documentID,
+                                     url: url, ownerID: tab.agentOwnerID, takeoverGeneration: generation)
+            }
+            let sources = Dictionary(uniqueKeysWithValues: pages.map { ($0.handle, $0) })
             return { [weak service, weak session] result in
                 @MainActor func permits(_ handle: String) -> Bool {
-                    guard let service, let session, !session.hasEnded, !session.isTakenOver, session.takeoverGeneration == generation,
-                          let source = sources[handle], session.handles.tabs.id(for: handle) == source.id,
-                          let current = service.host.tabs(withIDs: [source.id]).first, current.documentID == source.documentID,
-                          current.url == source.url, current.agentOwnerID == source.agentOwnerID,
-                          AgentPolicy.showsTitle(of: current.url, allowsAI: service.dependencies.allowsAI) else { return false }
-                    if current.agentOwnerID == session.id {
-                        return service.host.agentTabs(of: session.id).contains { $0.id == current.id }
-                            && session.permitsResearchTab(current, host: service.host, allowsAI: service.dependencies.allowsAI)
-                    }
-                    return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(current.id)
-                        && service.host.userTabs(in: session.personaID).contains { $0.id == current.id }
+                    guard let service, let session, let source = sources[handle] else { return false }
+                    return service.currentReadPage(source, in: session) != nil
                 }
                 if call.name == "list_tabs" {
                     return Self.checkedList(result, permits: permits)
@@ -1283,6 +1299,14 @@ import Foundation
         toolHost.clientKind = session.isFromOutsideClient ? .outside : .inApp
         toolHost.approvalWindow = sessionQuestionWindow
         let generation = session.takeoverGeneration
+        let read: AgentReadPage?
+        if session.origin == .app, call.name == "snapshot" || call.name == "read_text",
+           let handle = call.arguments["tab"]?.stringValue, let id = session.handles.tabs.id(for: handle),
+           let tab = host.tabs(withIDs: [id]).first, let url = tab.url {
+            read = AgentReadPage(tabID: id, handle: handle, documentID: tab.documentID, url: url, ownerID: tab.agentOwnerID, takeoverGeneration: generation)
+        } else {
+            read = nil
+        }
         let result: AgentToolResult
         if call.name == "request_tab" || call.name == "open_tab" {
             result = await requestSessionTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
@@ -1296,6 +1320,9 @@ import Foundation
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         if session.isTakenOver || generation != session.takeoverGeneration {
             return AgentToolResult(status: .refused, code: "stopped", text: "The user took over while this call was running. Request the step again when the user hands the session back.")
+        }
+        if result.status == .ok, let read, currentReadPage(read, in: session) != nil {
+            session.recordRead(read)
         }
         return result
     }
@@ -1632,6 +1659,11 @@ import Foundation
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
         if report == .closed || report == .takenOver { session(withID: ownerID)?.forgetResearchTab(tabID) }
+        switch report {
+        case .takenOver, .closed, .loaded, .addressChanged:
+            if let session = session(withID: ownerID), session.transcript.containsRead(of: tabID) { session.objectWillChange.send() }
+        default: break
+        }
         let client = grants.first { $0.id == ownerID }?.client.displayName ?? ""
         toolHost().tab(tabID, of: ownerID, didReport: report, state: states[ownerID], client: client)
     }
