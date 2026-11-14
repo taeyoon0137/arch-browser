@@ -204,6 +204,7 @@ import Testing
 
         let held = settings.comparison(mirror: mirror, pending: [])
         #expect(held.records.map(\.recordName) == [appearance, archiveAfterHours])
+        #expect(held.heldOut == [tintStrength, searchEngine])
         #expect(held.contains(mirror[0]))
         #expect(!held.contains(mirror[1]))
         #expect(!held.contains(mirror[2]))
@@ -220,6 +221,7 @@ import Testing
         #expect(settings.changedKeys() == [searchEngine])
         let changed = settings.comparison(mirror: mirror, pending: [])
         #expect(changed.contains(mirror[2]))
+        #expect(changed.heldOut == [tintStrength])
         let changes = SyncDiff.changes(local: changed.records, scope: changed.contains, mirror: mirror, pending: [], foundAt: date(200))
         let searchSave = changes.saves.first { $0.recordName == searchEngine }
         #expect(searchSave?[.value] == .text("google"))
@@ -231,10 +233,25 @@ import Testing
         #expect(relaunched.comparison(mirror: mirror, pending: changes.saves).records.map(\.recordName) == [appearance, searchEngine, archiveAfterHours])
         #expect(relaunched.comparison(mirror: mirror, pending: []).records.map(\.recordName) == [appearance, archiveAfterHours])
 
-        // Another refused value holds it out again.
+        // Another refused value, which the merge chose over the unsent google as the later edit, holds it out again, also after a relaunch, so the earlier pending save is dropped rather than sent over that value.
         let newer = record(searchEngine, "another-engine", at: 300)
         #expect(!settings.apply(newer))
-        #expect(settings.comparison(mirror: [mirror[0], mirror[1], newer, mirror[3]], pending: []).records.map(\.recordName) == [appearance, archiveAfterHours])
+        let newerMirror = [mirror[0], mirror[1], newer, mirror[3]]
+        for heldAgain in [settings.comparison(mirror: newerMirror, pending: changes.saves), SyncedSettings(defaults: store).comparison(mirror: newerMirror, pending: changes.saves)] {
+            #expect(heldAgain.records.map(\.recordName) == [appearance, archiveAfterHours])
+            #expect(heldAgain.heldOut == [tintStrength, searchEngine])
+            let againChanges = SyncDiff.changes(local: heldAgain.records, scope: heldAgain.contains, mirror: newerMirror, pending: changes.saves, foundAt: date(400))
+            #expect(!againChanges.saves.contains { $0.recordName == searchEngine })
+        }
+
+        // A pending save later than the refused value, which the merge chose over it, keeps the key in with its own edit time.
+        let later = changes.saves.map { $0.recordName == searchEngine ? record(searchEngine, "google", at: 350) : $0 }
+        let kept = SyncedSettings(defaults: store).comparison(mirror: newerMirror, pending: later)
+        #expect(kept.records.map(\.recordName) == [appearance, searchEngine, archiveAfterHours])
+        #expect(kept.heldOut == [tintStrength])
+        let keptSave = SyncDiff.changes(local: kept.records, scope: kept.contains, mirror: newerMirror, pending: later, foundAt: date(400)).saves.first { $0.recordName == searchEngine }
+        #expect(keptSave?[.value] == .text("google"))
+        #expect(keptSave?.fieldModifiedAt["value"] == date(350))
     }
 
     @Test func comparisonDeletesNoSettingRecord() {

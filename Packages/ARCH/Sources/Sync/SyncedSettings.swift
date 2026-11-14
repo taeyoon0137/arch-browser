@@ -60,7 +60,7 @@ public struct SyncedSetting: Hashable, Sendable {
 /// let comparison = settings.comparison(mirror: mirror, pending: pending)
 /// let changes = SyncDiff.changes(local: comparison.records, scope: comparison.contains, mirror: mirror, pending: pending, foundAt: Date())
 /// ```
-/// Its result replaces the pending saves that `comparison.contains` covers.
+/// Its result replaces the pending saves that `comparison.contains` covers, and the pending `Setting` saves of the keys in `comparison.heldOut` are dropped.
 @MainActor
 public final class SyncedSettings {
     /// The keys that sync, in the order of the note's Settings list. `ARCHUnloadAfterHours` (0 to 168) joins after `ARCHArchiveAfterHours` once III.17, which adds the key, is on `main`.
@@ -83,10 +83,13 @@ public final class SyncedSettings {
     public struct Comparison: Hashable, Sendable {
         /// One record for each compared key, in list order, holding the value saved here, without edit times.
         public let records: [SyncRecord]
+        /// The listed keys left out because this build refuses their mirror value and no edit here is later, in list order. A pending save of one of them is older than the refused value, which the merge chose as the later edit, so the controller drops it rather than send it over that value.
+        public let heldOut: [String]
         private let keys: Set<String>
 
-        init(records: [SyncRecord]) {
+        init(records: [SyncRecord], heldOut: [String]) {
             self.records = records
+            self.heldOut = heldOut
             keys = Set(records.map(\.recordName))
         }
 
@@ -118,7 +121,7 @@ public final class SyncedSettings {
         Self.setting(forKey: key)?.text(in: defaults)
     }
 
-    /// Saves the value of an incoming `Setting` record when its key is listed and its `value` is allowed text, and returns whether it is. A refused value leaves the key's local value, and holds the key out of the comparison until that value changes here (`docs/sync.md`, Settings list).
+    /// Saves the value of an incoming `Setting` record when its key is listed and its `value` is allowed text, and returns whether it is. The record is a server record merged with this Mac's value (`SyncMerge`), so a refused value is later than every edit of the key here. It leaves the key's local value, and holds the key out of the comparison until that value changes here (`docs/sync.md`, Settings list).
     @discardableResult
     public func apply(_ record: SyncRecord) -> Bool {
         guard record.recordType == .setting, let setting = Self.setting(forKey: record.recordName) else { return false }
@@ -151,24 +154,34 @@ public final class SyncedSettings {
         return changed
     }
 
-    /// The settings comparison's records and scope: each listed key with an allowed value saved here, except a key whose mirror value is not allowed here, such as a value of a newer build. That key stays out, so its record keeps the other Mac's value, until its local value changes here; its pending save then keeps it in across launches until the save is sent. Keys that only a newer build lists are never in scope.
+    /// The settings comparison's records and scope: each listed key with an allowed value saved here, except a key whose mirror value is not allowed here, such as a value of a newer build. That key stays out (`Comparison.heldOut`), so its record keeps the other Mac's value, until its local value changes here; its pending save then keeps it in across launches until the save is sent, while the save's edit is later than the refused value's. Keys that only a newer build lists are never in scope.
     /// - Parameters:
     ///   - mirror: The mirror's records, as for `SyncDiff`.
     ///   - pending: Every save not sent yet.
     public func comparison(mirror: [SyncRecord], pending: [SyncRecord]) -> Comparison {
-        let mirrorValues = Dictionary(mirror.filter { $0.recordType == .setting }.map { ($0.recordName, $0[.value]) }) { first, _ in first }
-        let pendingKeys = Set(pending.filter { $0.recordType == .setting }.map(\.recordName))
+        let mirrorCopies = Dictionary(mirror.filter { $0.recordType == .setting }.map { ($0.recordName, $0) }) { first, _ in first }
+        let pendingSaves = Dictionary(pending.filter { $0.recordType == .setting }.map { ($0.recordName, $0) }) { first, _ in first }
         var records: [SyncRecord] = []
+        var heldOut: [String] = []
         for setting in Self.list {
-            guard let text = setting.text(in: defaults) else { continue }
-            if let mirrorValue = mirrorValues[setting.key], !isAllowed(mirrorValue, for: setting) {
-                // A change that no check has found yet counts too, so the comparison does not depend on when the notification arrives.
-                let changed = changedHere.contains(setting.key) || pendingKeys.contains(setting.key) || text != checked[setting.key]
-                if !changed { continue }
+            let text = setting.text(in: defaults)
+            if let copy = mirrorCopies[setting.key], !isAllowed(copy[.value], for: setting) {
+                // A change that no check has found yet counts too, so the comparison does not depend on when the notification arrives. A pending save counts only when its edit is later than the refused value's, as after a relaunch; an earlier one lost the merge to that value.
+                let laterSave = pendingSaves[setting.key].map { valueEditTime(of: $0) > valueEditTime(of: copy) } ?? false
+                if !changedHere.contains(setting.key) && !laterSave && text == checked[setting.key] {
+                    heldOut.append(setting.key)
+                    continue
+                }
             }
+            guard let text else { continue }
             records.append(SyncRecord(recordType: .setting, recordName: setting.key, fields: [SyncField.value.rawValue: .text(text)], modifiedAt: .distantPast))
         }
-        return Comparison(records: records)
+        return Comparison(records: records, heldOut: heldOut)
+    }
+
+    /// When `record`'s `value` was edited, as the merge reads it.
+    private func valueEditTime(of record: SyncRecord) -> Date {
+        record.fieldModifiedAt[SyncField.value.rawValue] ?? record.modifiedAt
     }
 
     private func isAllowed(_ value: SyncValue?, for setting: SyncedSetting) -> Bool {
