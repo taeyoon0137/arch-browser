@@ -1,4 +1,4 @@
-// The tab places the items an engine hands it in the page context menu in the order of WebKit's own menu, the same on both engines: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, the link and image items, editing or Copy, the field's text submenus, and Share… with Speech outside a field, separated by lines; Back, Forward, and Reload only when nothing else applies. The engine's own items take the tab's titles, and macOS's text items keep theirs. The preview panel places the same items in the same sections, without the tab's own. The tests hand the tab and the preview the items an adapter would and open no menu.
+// The tab places the items an engine hands it in the page context menu in the order of WebKit's own menu, the same on both engines: spelling suggestions, Ignore and Learn Spelling, the link and image items, Look Up and Translate, Search with, editing or Copy, the field's text submenus, and Share… with Speech outside a field, separated by lines; Back, Forward, and Reload only when nothing else applies. The engine's own items take the tab's titles, and macOS's text items keep theirs. The preview panel places the same items in the same sections, without the tab's own. The tests hand the tab and the preview the items an adapter would and open no menu.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -50,6 +50,18 @@ import Testing
         #expect(titles(menu) == ["0", "—", "Ignore Spelling", "Learn Spelling", "—", "Look Up “mispeled”"] + translate("“mispeled”") + ["—", search, "—",
                                  "Cut", "Copy", "Paste", "Select All", "—", "Spelling and Grammar", "Substitutions", "Transformations", "Speech", "—", share])
         #expect(!menu.autoenablesItems)
+    }
+
+    /// In a field, as in a message being written, WebKit puts a link's items before the selection's.
+    @Test func aLinkInAFieldComesBeforeTheSelectionsItems() throws {
+        let tab = tab()
+        tab.searchInNewTab = { _ in }
+        let element = EngineContextMenuElement(linkURL: URL(string: "https://example.com/next"), selectedText: "Next page", isEditable: true)
+        let menu = handedMenu([EngineContextMenuItem.cut, EngineContextMenuItem.copy, EngineContextMenuItem.paste, EngineContextMenuItem.selectAll], for: element)
+        let share = try shareTitle(menu)
+        tab.webContents(tab.webContents, willShowContextMenuFor: element, menu: menu)
+        #expect(titles(menu) == ["Open Link in New Tab", "Copy Link", "—", "Look Up “Next page”"] + translate("“Next page”") + ["—", search, "—",
+                                 "Cut", "Copy", "Paste", "Select All", "—", "Spelling and Grammar", "Substitutions", "Transformations", "Speech", "—", share])
     }
 
     @Test func thePreviewPlacesTheHandedItemsAsTheTabDoesWithoutTheTabsOwn() throws {

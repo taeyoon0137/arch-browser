@@ -45,6 +45,17 @@ import Testing
                                                                              EngineContextMenuItem.speech])
     }
 
+    /// As in WebKit's own menu, Transformations ▸ needs a letter with case, unless the selection is longer than WebKit reads for this.
+    @Test func aSelectionWithoutCaseGetsNoTransformations() {
+        let withoutCase = selectionItems + [EngineContextMenuItem.spellingAndGrammar, EngineContextMenuItem.substitutions, EngineContextMenuItem.speech,
+                                            EngineContextMenuItem.share]
+        #expect(identifiers(EngineContextMenuElement(selectedText: "안녕하세요", isEditable: true)) == withoutCase)
+        #expect(identifiers(EngineContextMenuElement(selectedText: "2026", isEditable: true)) == withoutCase)
+        #expect(identifiers(EngineContextMenuElement(selectedText: "안녕 Arch", isEditable: true)).contains(EngineContextMenuItem.transformations))
+        #expect(identifiers(EngineContextMenuElement(selectedText: String(repeating: "7", count: 201), isEditable: true)).contains(EngineContextMenuItem.transformations))
+        #expect(!identifiers(EngineContextMenuElement(selectedText: String(repeating: "7", count: 200), isEditable: true)).contains(EngineContextMenuItem.transformations))
+    }
+
     @Test func aPasswordFieldGetsNoTextItems() {
         #expect(identifiers(EngineContextMenuElement(selectedText: "secret", isEditable: true, isPasswordField: true)).isEmpty)
         #expect(identifiers(EngineContextMenuElement(isEditable: true, isPasswordField: true)).isEmpty)

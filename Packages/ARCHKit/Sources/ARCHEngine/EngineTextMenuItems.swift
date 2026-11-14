@@ -1,4 +1,4 @@
-// macOS's text items in the page context menu, built once for both engines so that both menus hold the same items (docs/features.md row 49): Look Up “…” and Translate “…” for a selection, the Spelling and Grammar, Substitutions, Transformations, and Speech submenus, and Share…, in the order and wording of WebKit's own menu. The submenus send AppKit's standard actions to the engine's page view, through `EngineStandardActionSubmenu`. Each action is one that both page views take: WebKit's `WKWebView`, and Chromium's `RenderWidgetHostViewCocoa` through its own methods, its edit command list (`render_widget_host_view_mac_editcommand_helper.mm`), and the responder delegate that CEF sets on it (`ChromeRenderWidgetHostViewMacDelegate`, from `ChromeWebContentsViewDelegateCef`). The items of WebKit's menu that Chromium's view cannot run stay out on both engines: Check Grammar With Spelling and Correct Spelling Automatically (no `toggleGrammarChecking:` or `toggleAutomaticSpellingCorrection:`), Smart Copy/Paste and Smart Links (no `toggleSmartInsertDelete:` or `toggleAutomaticLinkDetection:`), the Font submenu (only `underline:`, no font or color panel), Paragraph Direction (no base writing direction actions), and Selection Direction (Blink runs those actions only in rich text, and Chromium's view shows no check marks for them).
+// macOS's text items in the page context menu, built once for both engines so that both menus hold the same items (docs/features.md row 49): Look Up “…” and Translate “…” for a selection, the Spelling and Grammar, Substitutions, Transformations, and Speech submenus, and Share…, in the order and wording of WebKit's own menu. The submenus send AppKit's standard actions to the engine's page view, through `EngineStandardActionSubmenu`. Each action is one that both page views take: WebKit's `WKWebView`, and Chromium's `RenderWidgetHostViewCocoa` through its own methods, its edit command list (`render_widget_host_view_mac_editcommand_helper.mm`), and the responder delegate that CEF sets on it (`ChromeRenderWidgetHostViewMacDelegate`, from `ChromeWebContentsViewDelegateCef`). The items of WebKit's menu that Chromium's view cannot run stay out on both engines: Check Grammar With Spelling and Correct Spelling Automatically (no `toggleGrammarChecking:` or `toggleAutomaticSpellingCorrection:`), Smart Copy/Paste and Smart Links (no `toggleSmartInsertDelete:` or `toggleAutomaticLinkDetection:`), the Font submenu (only `underline:`, no font or color panel), Paragraph Direction (no base writing direction actions), Selection Direction (Blink runs those actions only in rich text, and Chromium's view shows no check marks for them), and Transformations' Convert to Traditional Chinese and Convert to Simplified Chinese (WebKit's own editing commands, with no standard action).
 import AppKit
 
 /// Builds macOS's text items for a page context menu. The UI delegate places them by their `EngineContextMenuItem` identifiers.
@@ -27,7 +27,7 @@ public enum EngineTextMenuItems {
         return text
     }
 
-    /// The text items for `element`, in WebKit's order: Look Up and Translate (macOS 14.4 and later) for a selection; in a field that is not a password field, the Spelling and Grammar, Substitutions, Transformations (with a selection), and Speech submenus, then Share…; outside a field, Share…, then Speech for a selection. The submenus' actions go to `pageView`; without it there are none. Look Up and Translate open at `location`, in `anchor`'s coordinates. `panels` defaults to the system's panels as they are now.
+    /// The text items for `element`, in WebKit's order: Look Up and Translate (macOS 14.4 and later) for a selection; in a field that is not a password field, the Spelling and Grammar, Substitutions, Transformations (for a selection whose case can change, `canChangeCase(of:)`), and Speech submenus, then Share…; outside a field, Share…, then Speech for a selection. The submenus' actions go to `pageView`; without it there are none. Look Up and Translate open at `location`, in `anchor`'s coordinates. `panels` defaults to the system's panels as they are now.
     public static func items(for element: EngineContextMenuElement, pageView: NSView?, anchor: NSView, at location: NSPoint, panels: Panels? = nil) -> [NSMenuItem] {
         let selection = selection(of: element)
         var items: [NSMenuItem] = []
@@ -43,14 +43,19 @@ public enum EngineTextMenuItems {
         if isField, let pageView {
             let panels = panels ?? .current
             items += [spellingAndGrammarItem(pageView: pageView, panels: panels), substitutionsItem(pageView: pageView, panels: panels),
-                      selection == nil ? nil : transformationsItem(pageView: pageView), speech, share].compactMap { $0 }
+                      selection.flatMap { canChangeCase(of: $0) ? transformationsItem(pageView: pageView) : nil }, speech, share].compactMap { $0 }
         } else {
             items += [share, speech].compactMap { $0 }
         }
         return items
     }
 
-    /// A menu title that quotes `text` as WebKit's Look Up and Translate items do: without surrounding spaces, cut after 24 characters with an ellipsis. Runs of spaces and line breaks become one space, so the title stays on one line.
+    /// Whether Transformations ▸ shows for `selection`, as in WebKit's own menu: when the selection holds an upper or lower case letter, or is longer than the 200 UTF-16 code units WebKit reads for this. A selection of digits or of Korean, which no change of case alters, gets none.
+    private static func canChangeCase(of selection: String) -> Bool {
+        selection.utf16.count > 200 || selection.rangeOfCharacter(from: CharacterSet.lowercaseLetters.union(.uppercaseLetters)) != nil
+    }
+
+    /// A menu title that quotes `text` as WebKit's Look Up and Translate items do: without surrounding spaces, cut after 24 characters with an ellipsis. Runs of spaces and line breaks become one space, so the title stays on one line, where WebKit's own titles keep them.
     public static func quoted(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let limit = 24

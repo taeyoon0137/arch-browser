@@ -274,18 +274,20 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Context menus
 
-    /// Builds the same menu on both engines, in the order of WebKit's own menu: the sections of the items the engine hands (`PageContextMenuSections`) with the tab's own between them: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, then the link, the image, editing or Copy, Ask About Selection, the field's text submenus, and Share… (with Speech outside a field), separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow.
+    /// Builds the same menu on both engines, in the order of WebKit's own menu: the sections of the items the engine hands (`PageContextMenuSections`) with the tab's own between them: spelling suggestions, Ignore and Learn Spelling, the link, the image, Look Up and Translate, Search with, then editing or Copy, Ask About Selection, the field's text submenus, and Share… (with Speech outside a field), separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow.
     public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
         let handed = PageContextMenuSections(takingItemsOf: menu, for: element)
-        var sections = [handed.suggestions, handed.spelling, handed.lookUp]
-        if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
-            sections.append([EngineActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
-        }
+        var sections = [handed.suggestions, handed.spelling]
+        // WebKit puts a link's items before the selection's in a field; outside one, a click on a link or image gets no selection items.
         if let link = element.linkURL {
             sections.append([newTabItem("Open Link in New Tab", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
             sections.append([newTabItem("Open Image in New Tab", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+        }
+        sections.append(handed.lookUp)
+        if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
+            sections.append([EngineActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
         }
         sections.append(handed.editing)
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
