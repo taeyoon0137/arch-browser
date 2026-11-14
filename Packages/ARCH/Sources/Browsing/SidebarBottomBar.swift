@@ -11,6 +11,8 @@ struct SidebarBottomBar: View {
     @Environment(\.sidebarIsFloating) private var isFloating
     @Environment(\.spaceTheme) private var theme
     @Environment(\.libraryReveal) private var libraryReveal
+    /// The space whose symbol is under the pointer, which brightens as the new space button does.
+    @State private var hoveredSpaceID: UUID?
 
     /// The maximum centered width of the symbols and new space button. Each side reserves room for the 30-point library button and its gap to avoid overlap.
     private var groupWidth: CGFloat { width - 2 * SidebarView.inset - 2 * (30 + 4) }
@@ -40,21 +42,24 @@ struct SidebarBottomBar: View {
                 }
                 let isCurrent = space.id == windowModel.currentSpaceID
                 let isTabTarget = sidebarDrag.targetSpaceID == space.id
+                // Spaces of different Personas can share a name and symbol, so the tooltip and VoiceOver name the Persona with the space (Persona rule 7).
+                let place = session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space) ?? space.name
                 // The release that ends a drag of the symbol does not also switch spaces.
                 Button(action: { if sidebarDrag.item == nil { windowModel.switchToSpace(space.id) } }) {
                     Image(systemName: space.symbol)
                         .font(.system(size: isCurrent ? 12 : 9))
-                        .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : Color.secondary.opacity(0.6))
+                        .foregroundStyle(isCurrent || isTabTarget ? theme.symbolColor(for: space.tint) : (hoveredSpaceID == space.id && sidebarDrag.item == nil ? Color.primary : Color.secondary))
                         .scaleEffect(scale(at: index) * (isTabTarget ? 1.4 : 1))
                         .frame(width: Self.itemWidth, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .onHover { if $0 { hoveredSpaceID = space.id } else if hoveredSpaceID == space.id { hoveredSpaceID = nil } }
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
                 .modifier(SidebarItemDrag(item: .space(space.id), cornerRadius: 6) { reorder(space, at: $0) })
                 .contextMenu { SpaceMenuItems(session: session, space: space) }
-                .help(space.name)
-                .accessibilityLabel(space.name)
+                .help(place)
+                .accessibilityLabel(place)
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }
@@ -142,17 +147,19 @@ private struct PersonaDivider: View {
     }
 }
 
-/// A small, dim plus makes the new space button look like part of the symbols row rather than a toolbar button.
+/// A small plus in the symbols' gray, brightening under the pointer as they do, makes the new space button look like part of the symbols row rather than a toolbar button.
 private struct NewSpaceButton: View {
     let scale: CGFloat
     let action: () -> Void
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.secondary.opacity(isHovering ? 1 : 0.6))
+                // Like the symbols, the plus ignores the pointer while an item is dragged.
+                .foregroundStyle(isHovering && sidebarDrag.item == nil ? Color.primary : Color.secondary)
                 .scaleEffect(scale)
                 .frame(width: SidebarBottomBar.itemWidth, height: 26)
                 .contentShape(Rectangle())

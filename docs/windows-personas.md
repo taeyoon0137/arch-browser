@@ -641,8 +641,8 @@ Preference
 
 - With one Persona, nothing visible changes. That is the state after the migration.
 - With two or more Personas:
-  - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking.
-  - `SpaceHeaderView` shows the Persona and the space on one line, "Work / Research" (Persona rule 7), at one size: the Persona's name in regular secondary text, the slash in tertiary, and the space's name in semibold primary, with the Persona's name truncating before the space name in a narrow sidebar, and only the space's name editable.
+  - The bottom bar's symbol strip groups the spaces in Persona order, with a 1-point divider and 6 points of extra space between groups. Dividers have a fixed width and do not count as items in the strip's sizing and shrinking. Each symbol's tooltip and VoiceOver label name its place, "Work / Personal" (Persona rule 7), since every new Persona's space is named Personal and spaces of different Personas can share a symbol.
+  - `SpaceHeaderView` shows the Persona and the space on one line, "Work / Research" (Persona rule 7), at one size: the Persona's name in regular secondary text, the slash in tertiary, and the space's name in semibold primary, with the Persona's name truncating before the space name in a narrow sidebar, down to its first 36 points, and only the space's name editable.
   - The favorites grid shows `favorites(in: windowModel.personaID)` and cross-fades when the window enters another Persona's space.
   - The window title adds the Persona and the space, as "Example Domain — Work / Research" (Persona rule 7), and with no tab selected is "Work / Research" alone, which already holds the space's name.
   - Swipes and ⌃⌘←/→ cross group boundaries in strip order, which changes the window's Persona.

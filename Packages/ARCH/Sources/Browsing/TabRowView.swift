@@ -18,8 +18,8 @@ struct TabRowView: View {
 
     private var fill: Color {
         if isSelected { return SidebarFill.selected.color(in: colorScheme) }
-        // The other panes of the split view on screen show a lighter selection.
-        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(0.5) }
+        // The other panes of the split view on screen show a lighter selection. The dark selection is faint, so half of it would read as hover; there it sits halfway between hover and selected.
+        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(colorScheme == .dark ? 0.7 : 0.5) }
         return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -282,7 +282,7 @@ struct NewTabButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
                 Text("New Tab")
                     .font(.system(size: 14))

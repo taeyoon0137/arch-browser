@@ -1,4 +1,4 @@
-// The downloads list fills the top of the sidebar's library. Each row reflects one download's entry (`DownloadEntry.swift`) and offers open, reveal, pause, resume, cancel, and remove actions, and gives a file that a hook renamed its original name back.
+// The downloads list fills the top of the sidebar's library. Each row reflects one download's entry (`DownloadEntry.swift`) and offers open, reveal, pause, resume, retry, cancel, and remove actions, and gives a file that a hook renamed its original name back.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -7,6 +7,11 @@ import UniformTypeIdentifiers
 struct DownloadsSectionView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject private var summary: DownloadSummary
+    @State private var isClearHovering = false
+    /// The list's content in the scroll view's visible area, and the visible area's height, which tell how much is hidden above and below.
+    @State private var contentFrame = CGRect.zero
+    @State private var listHeight: CGFloat = 0
+    private static let scrollSpace = "DownloadsScroll"
 
     init(session: BrowserSession) {
         self.session = session
@@ -15,15 +20,18 @@ struct DownloadsSectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            // The section's title and its action share one size and baseline, as the space header's line does.
+            HStack(alignment: .firstTextBaseline) {
                 Text("Downloads")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Clear", action: session.clearFinishedDownloads)
                     .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                    // Brightens under the pointer while there is something to clear, as the new space button does.
+                    .foregroundStyle(isClearHovering && summary.hasFinished ? .primary : .secondary)
+                    .onHover { isClearHovering = $0 }
                     .disabled(!summary.hasFinished)
             }
             .padding(.horizontal, 10)
@@ -31,7 +39,7 @@ struct DownloadsSectionView: View {
             if session.downloads.isEmpty {
                 Text("No downloads")
                     .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 16)
             } else {
@@ -42,8 +50,22 @@ struct DownloadsSectionView: View {
                             DownloadRowView(session: session, entry: entry)
                         }
                     }
+                    .background(GeometryReader { proxy in
+                        let frame = proxy.frame(in: .named(Self.scrollSpace))
+                        Color.clear
+                            .onAppear { contentFrame = frame }
+                            .onChange(of: frame) { contentFrame = $1 }
+                    })
                 }
                 .scrollIndicators(.never)
+                .coordinateSpace(name: Self.scrollSpace)
+                // Rows fade out under the header and above the divider instead of being cut off, at each end only while rows are hidden past it, as the tab list's do.
+                .mask(ScrollEdgeFade(hiddenAbove: -contentFrame.minY, hiddenBelow: contentFrame.maxY - listHeight))
+                .background(GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { listHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { listHeight = $1 }
+                })
             }
         }
     }
@@ -53,6 +75,15 @@ struct DownloadRowView: View {
     /// Only the row's actions use the session, so the row does not follow its changes.
     let session: BrowserSession
     @ObservedObject var entry: DownloadEntry
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+
+    /// A finished file opens on a click, so only its row shows the hover fill and answers VoiceOver's press.
+    private var opensFile: Bool { entry.state == .completed && entry.fileURL != nil }
+
+    private func openFile() {
+        if opensFile, let path = entry.fileURL { NSWorkspace.shared.open(path) }
+    }
 
     private var icon: NSImage {
         if let path = entry.fileURL?.path, entry.state == .completed { return NSWorkspace.shared.icon(forFile: path) }
@@ -81,9 +112,18 @@ struct DownloadRowView: View {
                 Text(entry.filename)
                     .font(.system(size: 13))
                     .lineLimit(1)
-                if entry.state == .inProgress, entry.totalBytes > 0 {
-                    ProgressView(value: Double(entry.completedBytes), total: Double(entry.totalBytes))
-                        .progressViewStyle(.linear)
+                    // Keeps the extension, as the Finder does.
+                    .truncationMode(.middle)
+                // Without a known size the bar is indeterminate, as the library button's is, so a running download always shows one.
+                if entry.state == .inProgress {
+                    Group {
+                        if entry.totalBytes > 0 {
+                            ProgressView(value: Double(entry.completedBytes), total: Double(entry.totalBytes))
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                    .progressViewStyle(.linear)
                 }
                 Text(status)
                     .font(.system(size: 11))
@@ -91,21 +131,31 @@ struct DownloadRowView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            // A pair of buttons touches, as the address pill's do. A failed download starts a new attempt, which may begin again from the start, so it offers Retry rather than Resume.
             if entry.state == .inProgress {
-                SidebarIconButton(symbol: "pause.circle", label: "Pause", action: entry.item.pause)
-                SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
-            } else if entry.state == .paused || entry.state == .failed {
-                SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
-                SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                HStack(spacing: 0) {
+                    SidebarIconButton(symbol: "pause.circle", label: "Pause", action: entry.item.pause)
+                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                }
+            } else if entry.state == .paused {
+                HStack(spacing: 0) {
+                    SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
+                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                }
+            } else if entry.state == .failed {
+                HStack(spacing: 0) {
+                    SidebarIconButton(symbol: "arrow.clockwise.circle", label: "Retry", action: entry.item.resume)
+                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                }
             } else if entry.state == .completed, let path = entry.fileURL {
                 SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
             }
         }
         .padding(6)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering && opensFile ? SidebarFill.hover.color(in: colorScheme) : .clear))
         .contentShape(Rectangle())
-        .onTapGesture {
-            if entry.state == .completed, let path = entry.fileURL { NSWorkspace.shared.open(path) }
-        }
+        .onHover { isHovering = $0 }
+        .onTapGesture(perform: openFile)
         .contextMenu {
             if let path = entry.fileURL, entry.state == .completed {
                 Button("Open") { NSWorkspace.shared.open(path) }
@@ -117,5 +167,9 @@ struct DownloadRowView: View {
             }
             Button("Remove from List") { session.removeDownload(entry) }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(opensFile ? .isButton : [])
+        // A tap gesture alone does not answer the accessibility press, so VoiceOver could not open the file.
+        .accessibilityAction { openFile() }
     }
 }

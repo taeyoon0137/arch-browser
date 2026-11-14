@@ -101,10 +101,12 @@ struct SidebarItemDragLayer: View {
                     .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
+            // The symbol keeps the size and color it has in the strip, as a lifted favorite keeps its tile, so it does not jump on lift or when it settles back.
             if let space = session.spaces.first(where: { $0.id == id }) {
+                let isCurrent = space.id == windowModel.currentSpaceID
                 Image(systemName: space.symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.symbolColor(for: space.tint))
+                    .font(.system(size: isCurrent ? 12 : 9))
+                    .foregroundStyle(isCurrent ? theme.symbolColor(for: space.tint) : Color.secondary)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }

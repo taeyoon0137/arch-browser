@@ -32,7 +32,7 @@ struct FavoritesGridView: View {
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
                     .contextMenu {
-                        Button("Close") { session.closeFavorite(favorite) }
+                        Button("Close Tab") { session.closeFavorite(favorite) }
                             .disabled(!session.hasTab(favorite))
                         Divider()
                         Button("Remove from Favorites") { session.removeFavorite(favorite) }
@@ -62,8 +62,11 @@ struct FavoriteTileView: View {
     @State private var isHovering = false
 
     var body: some View {
+        // The selection lies over the tile's own fill and adds the step a tab row's selection adds, so in the dark appearance a selected tile stays apart from a hovered one. As with the selected row, only the light appearance lifts it.
         RoundedRectangle(cornerRadius: 13, style: .continuous)
-            .fill((isActive ? SidebarFill.selected : SidebarFill.field).color(in: colorScheme))
+            .fill(SidebarFill.field.color(in: colorScheme))
+            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(isActive ? 1 : 0))
+            .shadow(color: .black.opacity(isActive && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
             .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
             .aspectRatio(1.5, contentMode: .fit)
             .overlay {
