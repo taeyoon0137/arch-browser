@@ -103,6 +103,20 @@ extension AgentAPISession: AgentSessionRunning {
     private(set) var spawnedProcess: AgentProcessRecord?
     /// Counts what ends the calls of the turn before: a new turn, Stop, a new runner, and the end. A call that waited at a gate runs only when the count is still the one it arrived with.
     private(set) var callEpoch = 0
+    /// A page result started before the user took over stays invalid after Hand Back.
+    private(set) var takeoverGeneration = 0
+    /// The tab currently being read, keyed by each host call so overlapping reads retain their own lifetime.
+    private var readingTabs: [(call: UUID, tab: UUID)] = []
+    var latestActiveTab: UUID? { readingTabs.last?.tab }
+
+    func beganReading(_ tabID: UUID) -> UUID {
+        let call = UUID()
+        readingTabs.append((call, tabID))
+        return call
+    }
+
+    func finishedReading(_ call: UUID) { readingTabs.removeAll { $0.call == call } }
+
     private(set) var callsThisTurn = 0
     private(set) var callsThisSession = 0
     /// The last tool list reported to the runner, so that a later `tools/list` answer that differs reaches it once.
@@ -338,12 +352,14 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// Take Over: the session pauses, and its calls wait until Hand Back.
     public func takeOver() {
-        guard !hasEnded else { return }
+        guard !hasEnded, !isTakenOver else { return }
+        takeoverGeneration += 1
         isTakenOver = true
         handedBack.close()
     }
 
     public func handBack() {
+        guard !hasEnded, isTakenOver else { return }
         isTakenOver = false
         handedBack.open()
     }

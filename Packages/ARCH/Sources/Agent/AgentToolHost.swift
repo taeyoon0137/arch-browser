@@ -1034,6 +1034,8 @@ extension AgentToolHost {
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
+            let reading = session.beganReading(id)
+            defer { session.finishedReading(reading) }
             let read = await readText(call.arguments, tab: tab, handle: handle) { current in
                 guard session.handles.tabs.id(for: handle) == id else { return false }
                 if current.agentOwnerID == session.id { return true }

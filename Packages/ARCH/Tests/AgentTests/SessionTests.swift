@@ -399,6 +399,13 @@ import Testing
         try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://example.org/another") }, code: "pageChanged")
         try await checkRead(after: { host.tabs.removeAll() }, code: "tabNotFound")
+        try await checkRead(after: {
+            var shown: UUID?
+            service.takeOver(session) { shown = $0 }
+            #expect(shown == tab.id)
+            session.handBack()
+        }, code: "stopped")
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).status == .ok)
         try await checkRead(after: { session.takeOver() }, code: "stopped")
         session.handBack()
         try await checkRead(after: {
@@ -409,6 +416,50 @@ import Testing
         #expect(try await client.callTool("read_text", ["tab": "t2"]).status == .ok)
         host.beforeReturningContent = { session.stop() }
         #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "stopped")
+    }
+
+    @Test func takeOverSelectsOnlyATabTheSessionStillOwnsOrShares() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let first = AgentTabInfo(id: UUID(), spaceID: space.id, title: "First", url: URL(string: "https://example.org/first"), isLoading: false, engine: .webKit)
+        var second = first
+        second.id = UUID()
+        var other = first
+        other.id = UUID()
+        other.agentOwnerID = UUID()
+        host.tabs = [first, second, other]
+        host.userTabIDs = [first.id, second.id]
+        let (session, _) = try start(service, harness, attaching: [first.id, second.id])
+        var shown: [UUID] = []
+        func takeOver() { service.takeOver(session) { shown.append($0) } }
+        session.record(AgentStep(tool: "read_text", sentence: "Read second", tabHandle: "t2", tabID: second.id, status: .ok))
+        session.record(AgentStep(tool: "read_text", sentence: "Other", tabHandle: "t3", tabID: other.id, status: .refused))
+        takeOver()
+        #expect(shown == [second.id])
+        takeOver()
+        #expect(shown == [second.id])
+        session.handBack()
+        let firstRead = session.beganReading(first.id)
+        let secondRead = session.beganReading(second.id)
+        session.finishedReading(secondRead)
+        takeOver()
+        #expect(shown.last == first.id && shown.count == 2)
+        session.finishedReading(firstRead)
+        session.handBack()
+        service.stopSharing(second.id, with: session)
+        takeOver()
+        #expect(shown.last == first.id && shown.count == 3)
+        session.handBack()
+        service.stopSharing(first.id, with: session)
+        takeOver()
+        #expect(session.isTakenOver && shown.count == 3)
+        session.handBack()
+        await service.deleteSession(session.id)
+        takeOver()
+        #expect(shown.count == 3)
     }
 
     @Test func callsWaitAgainAfterEachProcessStartUntilItsOwnOutput() async throws {
