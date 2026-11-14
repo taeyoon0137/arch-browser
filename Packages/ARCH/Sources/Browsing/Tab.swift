@@ -392,7 +392,8 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
             reportToAgent(.downloadStarted(url))
             return true
         }
-        guard !hasPage else { return true }
+        // The engine can report no current document while a link to an attachment navigates away.
+        guard !hasPage, engineCommittedURL == nil else { return true }
         isDownloadOnly = true
         didOpenOnlyDownload?(!isRestored)
         return !isRestored

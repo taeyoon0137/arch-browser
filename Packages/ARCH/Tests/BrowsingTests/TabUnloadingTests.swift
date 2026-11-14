@@ -129,6 +129,19 @@ import Testing
         #expect(tab.url == elsewhere && tab.title == "Other" && !tab.isLoaded)
     }
 
+    @Test func aDownloadKeepsTheDocumentThatStartedItDuringANavigation() {
+        let (tab, page) = tab(at: home, title: "Source", pinned: false)
+        let file = URL(string: "https://downloads.example/report.pdf")!
+        tab.webContents(page, didCommitDocumentAt: home)
+        var downloadOnly: [Bool] = []
+        tab.didOpenOnlyDownload = { downloadOnly.append($0) }
+        for restored in [false, true] {
+            tab.isRestored = restored
+            #expect(tab.webContents(page, shouldDownload: file, hasPage: false))
+            #expect(!tab.isDownloadOnly && downloadOnly.isEmpty)
+        }
+    }
+
     @Test func aDownloadOnlyPinnedTabUnloadsAndDownloadsItsFileWhenOpenedAgain() {
         let file = URL(string: "https://site.example/report.pdf")!
         let record = SessionSnapshot.TabRecord(id: UUID(), spaceID: spaceID, url: file, title: "", isPinned: true, engine: .chromium, personaID: personaID,
