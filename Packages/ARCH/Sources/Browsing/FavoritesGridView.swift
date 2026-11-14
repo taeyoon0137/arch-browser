@@ -27,12 +27,8 @@ struct FavoritesGridView: View {
         let selectedFavoriteID = windowModel.selectedFavoriteID
         return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(favorites) { favorite in
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasOpenPage(favorite))
-                    // The favorite's tab waits for the user's answer to a prompt.
-                    .overlay(alignment: .topTrailing) {
-                        TabPromptIndicator(prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
-                            .padding(5)
-                    }
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasOpenPage(favorite),
+                                 prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
                     // The release that ends a drag does not also open the favorite.
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
@@ -62,6 +58,10 @@ struct FavoriteTileView: View {
     let isActive: Bool
     /// Set while the favorite's page is open, which a dot below the tile shows, as the Dock does for an open app. Otherwise the icon is dimmed, as an unopened tab's row is.
     let isOpen: Bool
+    /// Observed for the waiting mark, since the session does not republish the queue's changes.
+    @ObservedObject var prompts: TabPromptQueue
+    /// The favorite's tab, whose prompts the mark shows.
+    let tabID: UUID?
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
     @State private var isHovering = false
@@ -99,12 +99,18 @@ struct FavoriteTileView: View {
                         .offset(y: 5)
                 }
             }
+            // The favorite's tab waits for the user's answer to a prompt. The mark sits on the tile's corner, as the Library button's count does, clear of the icon even in the narrowest sidebar.
+            .overlay(alignment: .topTrailing) {
+                TabPromptIndicator(prompts: prompts, tabID: tabID)
+                    .offset(x: 3, y: -2)
+            }
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .help(favorite.title)
+            // One element for VoiceOver, whose value says what the dot and the mark show.
             .accessibilityElement()
             .accessibilityLabel(favorite.title)
-            .accessibilityValue(isOpen ? "Open" : "")
+            .accessibilityValue([isOpen ? "Open" : nil, prompts.hasPrompt(for: tabID) ? "Waiting for your answer" : nil].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
             .onAppear {
                 guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
