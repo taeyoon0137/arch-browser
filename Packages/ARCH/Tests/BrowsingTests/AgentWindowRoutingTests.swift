@@ -1,5 +1,6 @@
 // A conversation chosen in another Persona stays in its invoking window. Its tab buttons follow the tab's place.
 import AppKit
+import Combine
 import ARCHEngine
 import Foundation
 import Testing
@@ -61,6 +62,55 @@ import Testing
             #expect(main.currentSpaceID == research.id && main.selectedTab === favoriteTab)
             main.showAgentTab(UUID())
             #expect(main.selectedTab === favoriteTab && main.agentPanel == .session(remoteConversation))
+        }
+    }
+
+    enum Reply: CaseIterable { case agent, page }
+
+    @Test(arguments: Reply.allCases) func replyLinksFollowTheirWindowAndPersona(reply: Reply) throws {
+        try withWindows { session, main, small, home, research in
+            let homeTab = try #require(main.selectedTab)
+            let popup = try #require(small.selectedTab)
+            let address = try #require(URL(string: "https://fixture.invalid/reply"))
+            let conversation = UUID()
+
+            @MainActor func openReply(in window: BrowserWindowModel, about source: Tab) {
+                switch reply {
+                case .agent:
+                    window.showAgentSession(conversation)
+                    window.openAgentPanelLink(address)
+                case .page:
+                    _ = session.pageAssistant.openLink(address, from: source)
+                }
+            }
+
+            // The other Persona's small window was last active.
+            #expect(session.activeWindow === small)
+            openReply(in: main, about: homeTab)
+            let opened = try #require(main.selectedTab)
+            #expect(opened.url == address && opened.spaceID == home.id && opened.personaID == home.resolvedPersonaID)
+            #expect(opened.isListedInSidebar && opened.agentOwnerID == nil && opened !== homeTab)
+            #expect(session.windows.count == 2 && small.selectedTab === popup)
+
+            main.switchToSpace(research.id)
+            main.switchToSpace(home.id)
+            session.windowDidBecomeMain(main)
+            let mainSelection = main.selectedTabID
+            // Redirect the new window's raise once its controller exists, before the open makes it key.
+            let destinationWindow = WindowSpy()
+            let selection = session.$focusedTabID.sink { id in
+                guard let id, let window = session.activeWindow, window !== main, window !== small, window.selectedTabID == id else { return }
+                window.nsWindow = destinationWindow
+            }
+            defer { selection.cancel() }
+            openReply(in: small, about: popup)
+            let destination = try #require(session.windows.first { $0 !== main && $0 !== small })
+            defer { session.windowWillClose(destination) }
+            let linked = try #require(destination.selectedTab)
+            #expect(session.windows.count == 3 && destination.kind == .small && destinationWindow.raises == 1)
+            #expect(linked.url == address && linked.spaceID == research.id && linked.personaID == research.resolvedPersonaID)
+            #expect(linked.isInSmallWindow && !linked.isListedInSidebar && linked.agentOwnerID == nil)
+            #expect(main.currentSpaceID == home.id && main.selectedTabID == mainSelection && small.selectedTab === popup)
         }
     }
 
