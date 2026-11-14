@@ -550,6 +550,30 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(tools.calls.count == 1)
     }
 
+    @Test func aBlockedTurnShowsFailureUntilTheNextTurnAnswers() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { number in
+            number == 0 ? [.fail(.budgetReached(.monthlySpending))] : roundSteps(text: "Back.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let session = try service.startSession(.init(task: "Check the notes.", personaID: persona, spaceID: space.id,
+                                                     attachedTabIDs: [], mode: .readOnly, model: nil, effort: nil))
+        try await waitUntil { !session.isTurnRunning }
+        #expect(session.statusText == "Turn failed")
+        #expect(session.state.name == "failed")
+        #expect(session.model == nil)
+        #expect(session.items.contains { if case .error(_, .openAISettings) = $0.kind { true } else { false } })
+        try session.send("Now continue.")
+        try await waitUntil { !session.isTurnRunning }
+        #expect(session.statusText == "Done")
+        #expect(session.model == model)
+    }
+
     @Test func aFailedMessageLeavesTheSessionOpen() async throws {
         let client = ScriptedClient { number in
             number == 0 ? [.fail(.providerUnavailable(AIProviderID(), detail: "down"))] : roundSteps(text: "Back.")

@@ -51,6 +51,8 @@ extension AgentAPISession: AgentSessionRunning {
         case waitingForUser
         /// The last turn ended; the next message continues the session.
         case done
+        /// The last turn failed. The same session still accepts messages.
+        case turnFailed
         case stopped
         /// The session cannot go on, with the sentence and the panel's action.
         case failed(String, AgentErrorAction?)
@@ -62,7 +64,7 @@ extension AgentAPISession: AgentSessionRunning {
             case .waitingForUser: return "waitingForUser"
             case .done: return "done"
             case .stopped: return "stopped"
-            case .failed: return "failed"
+            case .turnFailed, .failed: return "failed"
             }
         }
     }
@@ -149,6 +151,7 @@ extension AgentAPISession: AgentSessionRunning {
         case .running: return "Working"
         case .waitingForUser: return "Waiting for you"
         case .done: return "Done"
+        case .turnFailed: return "Turn failed"
         case .stopped: return "Stopped"
         case .failed: return "Failed"
         }
@@ -267,7 +270,7 @@ extension AgentAPISession: AgentSessionRunning {
             let (sentence, action) = describe(error)
             transcript.append(.error(sentence, action))
             taskEvent?(.failed, sentence)
-            turnEnded(.done)
+            turnEnded(.turnFailed)
         }
     }
 
