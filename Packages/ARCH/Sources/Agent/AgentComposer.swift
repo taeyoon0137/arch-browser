@@ -119,7 +119,7 @@ public struct AgentComposer: View {
     @State private var mode: AgentAccessLevel?
     @State private var model: AIModelRef?
     @State private var effort: String?
-    @State private var effortLevels: [String] = []
+    @State private var loadedEffort: (source: EffortSource, levels: [String])?
     @State private var problem: String?
 
     public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, didStart: @escaping (AgentSession) -> Void) {
@@ -221,7 +221,7 @@ public struct AgentComposer: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .task(id: selectedModel) { await loadEffortLevels() }
+            .task(id: effortSource) { await loadEffortLevels() }
         }
     }
 
@@ -295,12 +295,36 @@ public struct AgentComposer: View {
         return models.first
     }
 
+    /// A CLI preset can change executable or environment without changing its model reference.
+    struct EffortSource: Equatable {
+        let model: AIModelRef
+        let tool: AICommandLineConfiguration
+
+        init?(_ model: AIModelRef?, providers: [AIProviderConfiguration]) {
+            guard let model, let provider = providers.first(where: { $0.id == model.provider }),
+                  case .commandLine(let tool) = provider.kind, tool.agent != nil else { return nil }
+            self.model = model
+            self.tool = tool
+        }
+    }
+
+    private var effortSource: EffortSource? { EffortSource(selectedModel, providers: settings.providers) }
+
+    private var effortLevels: [String] {
+        guard let loadedEffort, loadedEffort.source == effortSource else { return [] }
+        return loadedEffort.levels
+    }
+
     private func loadEffortLevels() async {
-        guard let selectedModel else { return effortLevels = [] }
-        let levels = await AIService.shared.agentEffortLevels(for: selectedModel)
-        guard !Task.isCancelled, selectedModel == self.selectedModel else { return }
-        effortLevels = levels
-        if let effort, !effortLevels.contains(effort) { self.effort = nil }
+        guard let source = effortSource else {
+            loadedEffort = nil
+            effort = nil
+            return
+        }
+        let levels = await AIService.shared.agentEffortLevels(for: source.model)
+        guard !Task.isCancelled, source == effortSource else { return }
+        loadedEffort = (source, levels)
+        if let effort, !levels.contains(effort) { self.effort = nil }
     }
 
     /// Codex adds a non-empty `AGENTS.md` (or `AGENTS.override.md`) in its home folder to every turn, which no argument keeps out.
@@ -323,7 +347,8 @@ public struct AgentComposer: View {
         guard !task.isEmpty, selectedModel != nil else { return }
         let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
         var start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
-                                              mode: chosenMode, model: model, effort: effort, usesAgentsPersona: usesAgentsPersona)
+                                              mode: chosenMode, model: model, effort: effort.flatMap { effortLevels.contains($0) ? $0 : nil },
+                                              usesAgentsPersona: usesAgentsPersona)
         if !attached.isEmpty { start.reviewedDocument = attachableTab }
         if sharesExcerpt, let excerpt = context.readerExcerpt, attached.contains(excerpt.tabID) { start.readerExcerpt = excerpt }
         do {

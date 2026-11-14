@@ -27,6 +27,20 @@ import UserNotifications
         runner.startProcess(Self.cliProcess)
     }
 
+    @Test func draftEffortFollowsTheSelectedCLIPresetAndItsExecutable() throws {
+        let one = URL(fileURLWithPath: "/fixture/one/codex"), two = URL(fileURLWithPath: "/fixture/two/codex")
+        var provider = AIProviderConfiguration(name: "Fixture", kind: .commandLine(.init(executable: one, agent: .codex)), models: [.init(name: "model")])
+        let model = AIModelRef(provider: provider.id, model: "model")
+        let first = try #require(AgentComposer.EffortSource(model, providers: [provider]))
+        provider.name = "Renamed"
+        #expect(AgentComposer.EffortSource(model, providers: [provider]) == first)
+        provider.kind = .commandLine(.init(executable: two, agent: .codex))
+        #expect(try #require(AgentComposer.EffortSource(model, providers: [provider])) != first)
+        provider.kind = .http(.init(format: .messages, baseURL: URL(string: "https://fixture.invalid")!))
+        #expect(AgentComposer.EffortSource(model, providers: [provider]) == nil)
+        #expect(AgentComposer.EffortSource(model, providers: []) == nil)
+    }
+
     @Test func followupDraftBelongsToOneSessionUntilSubmittedOrDeleted() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

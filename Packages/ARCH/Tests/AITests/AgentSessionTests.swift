@@ -967,6 +967,14 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(try service.agentSessionCandidates(named: nil, for: agentFeature, commandLineOnly: true).map(\.ref) == [luna, sonnet])
         #expect(try service.agentSessionRoute(for: apiModel) == .http(pinnedModel: apiModel))
         #expect(try service.agentSessionRoute(for: haiku) == .commandLine)
+        var withoutTools = api
+        withoutTools.models[0].capabilities = [.jsonOutput]
+        settings.save(withoutTools)
+        #expect(!service.agentSessionModels().contains(apiModel) && service.agentSessionModels().first == luna)
+        #expect(throws: AIError.self) { try service.agentSessionRoute(for: apiModel) }
+        #expect(try service.agentSessionRoute(for: nil) == .commandLine)
+        settings.save(api)
+        #expect(service.agentSessionModels().first == apiModel && service.agentSessionModels().contains(haiku))
         settings.providers = [api]
         #expect(try candidates() == [apiModel])
         #expect(throws: AIError.self) { try service.agentSessionRoute(for: haiku) }
