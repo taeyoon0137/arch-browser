@@ -84,6 +84,7 @@ import Terminal
         session.showSettings = { PreferencesWindowController.shared.show() }
         session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($2, in: $0, space: $1, installingVersionFor: $3) }
         session.installFromWebStore = { PreferencesWindowController.shared.showWebStoreInstall(of: $2, in: $0, space: $1) }
+        session.showAgentModelSettings = { PreferencesWindowController.shared.showAgentModelSettings($0) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         session.openTerminal = { TerminalWindowController.shared.show() }

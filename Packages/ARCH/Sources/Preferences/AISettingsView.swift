@@ -13,7 +13,7 @@ extension AIFeature {
 
 /// The AI section has more to show than the others, so it keeps one height and its pages scroll.
 struct AISettingsView: View {
-    private enum Page: String, CaseIterable {
+    enum Page: String, CaseIterable {
         case providers = "Providers"
         case features = "Features"
         case modelTiers = "Model Tiers"
@@ -24,19 +24,23 @@ struct AISettingsView: View {
         case agentHooks = "Agent Hooks"
     }
 
+    final class Navigation: ObservableObject {
+        @Published var page = Page.providers
+    }
+
     /// The agents' service, whose page shows only when the app shell set one.
     let agents: AgentService?
     /// The hook registry, whose page shows only when the app shell set one.
     let hooks: HookRegistry?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
-    @State private var page = Page.providers
+    @ObservedObject var navigation: Navigation
     /// The Test Prompt request, kept here rather than in its rows, so that leaving the Features page or the section stops it: it then neither runs on unseen nor lets Send start a second one when the page shows again.
     @State private var testPromptTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Page", selection: $page) {
+            Picker("Page", selection: $navigation.page) {
                 ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || hooks != nil) }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
@@ -50,7 +54,7 @@ struct AISettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                switch page {
+                switch navigation.page {
                 case .providers: AIProvidersPage(service: service, settings: settings)
                 case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks, testPromptTask: $testPromptTask)
                 case .modelTiers: AIModelTiersPage(settings: settings)
@@ -69,7 +73,7 @@ struct AISettingsView: View {
         }
         .frame(width: sectionWidth, height: 540)
         .onAppear { service.register(.testPrompt) }
-        .onChange(of: page) { testPromptTask?.cancel() }
+        .onChange(of: navigation.page) { testPromptTask?.cancel() }
         .onDisappear { testPromptTask?.cancel() }
     }
 }
