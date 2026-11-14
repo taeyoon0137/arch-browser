@@ -220,8 +220,18 @@ extension SessionSnapshot {
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
     static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
-        let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
-        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
+        var agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
+        guard !agentFolderIDs.isEmpty else { return (tabs, folders) }
+        // An older hierarchy can contain descendants of an agent folder. Its owner marker is
+        // intentionally never encoded, so exclude the whole subtree before writing the file.
+        let children = Dictionary(grouping: folders, by: \.parentID)
+        var pending = Array(agentFolderIDs)
+        while let parent = pending.popLast() {
+            for folder in children[parent] ?? [] where agentFolderIDs.insert(folder.id).inserted {
+                pending.append(folder.id)
+            }
+        }
+        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !agentFolderIDs.contains($0.id) })
     }
 }
 
@@ -237,6 +247,12 @@ extension SessionSnapshot.TabRecord {
 final class SessionStore {
     let fileURL: URL
     private var pendingSave: DispatchWorkItem?
+    /// Set on the main thread. Replacing the observer discards deliveries for the previous one.
+    var didWrite: ((SessionSnapshot) -> Void)? {
+        didSet { observerRevision &+= 1 }
+    }
+    private var observerRevision: UInt64 = 0
+
     private static let log = Logger(subsystem: "xyz.taeyoon.arch", category: "Session")
     /// Encodes and writes the snapshots in the order they were taken, away from the main thread.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.session-store", qos: .utility)
@@ -300,7 +316,10 @@ final class SessionStore {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, let snapshot = snapshot() else { return }
-            self.writeQueue.async { self.write(snapshot) }
+            let notify = self.completion(for: snapshot)
+            self.writeQueue.async {
+                if case .success = self.write(snapshot) { notify?() }
+            }
         }
         pendingSave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -310,7 +329,25 @@ final class SessionStore {
     @discardableResult
     func saveNow(_ snapshot: SessionSnapshot) -> Result<Void, Error> {
         pendingSave?.cancel()
-        return writeQueue.sync { write(snapshot) }
+        let notify = completion(for: snapshot)
+        return writeQueue.sync {
+            let result = write(snapshot)
+            if case .success = result { notify?() }
+            return result
+        }
+    }
+
+    /// The serial writer queues successful captures back onto main in their actual file order,
+    /// including synchronous flushes that overtake a previously queued main-thread callback.
+    private func completion(for snapshot: SessionSnapshot) -> (() -> Void)? {
+        guard didWrite != nil else { return nil }
+        let revision = observerRevision
+        return { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.observerRevision == revision else { return }
+                self.didWrite?(snapshot)
+            }
+        }
     }
 
     @discardableResult

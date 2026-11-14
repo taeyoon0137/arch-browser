@@ -242,11 +242,11 @@ import Testing
     }
 
     @Test func fieldsUnknownToThisBuildKeepTheMirrorsValues() {
-        // `live` stands for a field that a newer build writes on folders (docs/sync.md, Schema versions).
+        // `futureField` stands for a field that a newer build writes on folders (docs/sync.md, Schema versions).
         let folder = local(.folder, "folder-1", ["persona": .reference("default"), "space": .reference("space-1"), "name": .text("News")])
         var mirrorFolder = mirrored(folder, order: 1, at: 10)
-        mirrorFolder.fields["live"] = .text("feed-1")
-        mirrorFolder.fieldModifiedAt["live"] = date(20)
+        mirrorFolder.fields["futureField"] = .text("feed-1")
+        mirrorFolder.fieldModifiedAt["futureField"] = date(20)
         mirrorFolder.modifiedAt = date(20)
         mirrorFolder.schemaVersion = 2
 
@@ -255,10 +255,10 @@ import Testing
 
         var renamed = folder
         renamed[.name] = .text("Reading")
-        renamed.fields["live"] = .text("feed-2")
+        renamed.fields["futureField"] = .text("feed-2")
         let save = SyncDiff.changes(local: [renamed], scope: inSidebar, mirror: [mirrorFolder], pending: [], foundAt: date(100)).saves.first
-        #expect(save?.fields["live"] == .text("feed-1"))
-        #expect(save?.fieldModifiedAt["live"] == date(20))
+        #expect(save?.fields["futureField"] == .text("feed-1"))
+        #expect(save?.fieldModifiedAt["futureField"] == date(20))
         #expect(save?[.name] == .text("Reading"))
         #expect(save?.schemaVersion == 2)
     }

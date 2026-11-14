@@ -75,16 +75,16 @@ import Testing
         let mirrorRecord = SyncRecord(
             recordType: .folder, recordName: "folder-1",
             fields: ["persona": .reference("default"), "space": .reference("space-1"), "parent": .reference("folder-0"), "name": .text("News"), "order": .number(1)],
-            fieldModifiedAt: ["name": date(10), "live": date(11), "reviewedAt": date(12)],
+            fieldModifiedAt: ["name": date(10), "futureField": date(11), "reviewedAt": date(12)],
             modifiedAt: date(12), schemaVersion: 2
         )
         let mirror = SyncCloudKitRecords.ckRecord(from: mirrorRecord)
-        mirror.encryptedValues["live"] = "https://feeds.example/rss"
+        mirror.encryptedValues["futureField"] = "https://feeds.example/rss"
         mirror["reviewedAt"] = date(12)
 
         // The mirror's copy reads with the text field; the date field has no `SyncValue`.
         let read = try #require(SyncCloudKitRecords.syncRecord(from: mirror))
-        #expect(read.fields["live"] == .text("https://feeds.example/rss"))
+        #expect(read.fields["futureField"] == .text("https://feeds.example/rss"))
         #expect(read.fields["reviewedAt"] == nil)
         #expect(read.schemaVersion == 2)
 
@@ -92,19 +92,19 @@ import Testing
         var save = read
         save[.name] = .text("Reading")
         save[.parent] = nil
-        save.fields["live"] = .text("changed here, which this build cannot do")
+        save.fields["futureField"] = .text("changed here, which this build cannot do")
         save.fieldModifiedAt = ["name": date(30), "parent": date(30), "space": date(30), "order": date(30)]
         save.modifiedAt = date(30)
         let outgoing = SyncCloudKitRecords.ckRecord(from: save, base: mirror)
 
         #expect(outgoing !== mirror)
         #expect(outgoing.recordID == mirror.recordID)
-        #expect(outgoing.encryptedValues["live"] as? String == "https://feeds.example/rss")
+        #expect(outgoing.encryptedValues["futureField"] as? String == "https://feeds.example/rss")
         #expect(outgoing["reviewedAt"] as? Date == date(12))
         #expect(outgoing.encryptedValues["name"] as? String == "Reading")
         #expect(outgoing["parent"] == nil)
         let sent = try #require(SyncCloudKitRecords.syncRecord(from: outgoing))
-        #expect(sent.fieldModifiedAt == ["name": date(30), "parent": date(30), "space": date(30), "order": date(30), "live": date(11), "reviewedAt": date(12)])
+        #expect(sent.fieldModifiedAt == ["name": date(30), "parent": date(30), "space": date(30), "order": date(30), "futureField": date(11), "reviewedAt": date(12)])
         #expect(sent.modifiedAt == date(30))
 
         // The mirror's copy is left as it was.

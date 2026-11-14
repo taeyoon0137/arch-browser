@@ -83,7 +83,7 @@ let package = Package(
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
-        .target(name: "Sync", path: "Packages/ARCH/Sources/Sync"),
+        .target(name: "Sync", dependencies: ["Browsing", "ARCHEngine"], path: "Packages/ARCH/Sources/Sync"),
         // libbsm reads process IDs from audit tokens.
         .target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
         .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Agent"),
