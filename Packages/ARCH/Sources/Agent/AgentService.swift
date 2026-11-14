@@ -690,7 +690,11 @@ import Foundation
     }
 
     @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
-        guard researchChoices(for: session).contains(choice), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return false }
+        openReviewedResearchTab(choice, in: session) != nil
+    }
+
+    private func openReviewedResearchTab(_ choice: AgentResearchPage, in session: AgentSession) -> AgentTabInfo? {
+        guard researchChoices(for: session).contains(choice), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return nil }
         let owner = AgentTabOwner(id: session.id, spaceID: session.spaceID, folderName: session.title)
         let epoch = session.callEpoch
         let takeover = session.takeoverGeneration
@@ -700,9 +704,9 @@ import Foundation
                   choice.matches(url), session.permits(choice, host: self.host, allowsAI: self.dependencies.allowsAI) else { return false }
             mayStart = false
             return true
-        }) else { return false }
+        }) else { return nil }
         session.researchPages[tab.id] = choice
-        return true
+        return tab
     }
 
     /// The panel pauses its session and shows a tab it can still reach. An ended or detached session cannot change the visible tab.
@@ -798,6 +802,9 @@ import Foundation
         session.attachmentDidChange = { [weak approvals, id = session.id] tabID in
             guard let approvals else { return }
             for card in approvals.pending where card.ownerID == id {
+                if case .openSessionResearch = card.kind, card.tabID == tabID {
+                    approvals.end(card.id, because: "The research tab’s source changed.")
+                }
                 if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
                     approvals.end(card.id, because: "The tabs available to share changed.")
                 }
@@ -1022,7 +1029,7 @@ import Foundation
 
     private func listedTools(for session: AgentSession) -> [String] {
         AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false))
-            .filter { $0.name != "request_tab" || session.origin == .app }
+            .filter { session.origin == .app || ($0.name != "request_tab" && $0.name != "open_tab") }
             .map(\.name)
     }
 
@@ -1087,14 +1094,14 @@ import Foundation
     }
 
     private func record(_ call: AgentToolCall, result: AgentToolResult, in session: AgentSession) {
-        let tool = AgentToolCatalog.tool(named: call.name)
-        let tabHandle = call.arguments["tab"]?.stringValue
+        let tool = AgentToolCatalog.sessionTool(named: call.name)
+        let tabHandle = call.arguments["tab"]?.stringValue ?? result.structured?["tab"]?.stringValue
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
-        case ("ask_user", .ok), ("request_tab", .ok): decision = .approved
-        case ("ask_user", .denied), ("request_tab", .denied): decision = .denied
-        case ("ask_user", .timeout), ("request_tab", .timeout): decision = .timedOut
+        case ("ask_user", .ok), ("request_tab", .ok), ("open_tab", .ok): decision = .approved
+        case ("ask_user", .denied), ("request_tab", .denied), ("open_tab", .denied): decision = .denied
+        case ("ask_user", .timeout), ("request_tab", .timeout), ("open_tab", .timeout): decision = .timedOut
         case (_, .refused): decision = .refused
         default: decision = .auto
         }
@@ -1212,8 +1219,8 @@ import Foundation
         toolHost.approvalWindow = sessionQuestionWindow
         let generation = session.takeoverGeneration
         let result: AgentToolResult
-        if call.name == "request_tab" {
-            result = await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
+        if call.name == "request_tab" || call.name == "open_tab" {
+            result = await requestSessionTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
         } else {
             result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
         }
@@ -1228,28 +1235,57 @@ import Foundation
         return result
     }
 
-    /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
-    private func requestSharedTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
+    /// A tab request waits for the user to choose the attachment or confirm the reviewed research address.
+    private func requestSessionTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
                                   connectionID: UUID?, isConnected: () -> Bool) async -> AgentToolResult {
         guard canEditAttachments(of: session) else {
-            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can ask to share a tab here.")
+            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can make this request.")
         }
-        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.sessionTabRequest) {
+        let opensResearch = call.name == "open_tab"
+        let tool = opensResearch ? AgentToolCatalog.sessionResearchRequest : AgentToolCatalog.sessionTabRequest
+        if let problem = AgentToolHost.problem(with: call.arguments, for: tool) {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         guard session.acceptsQuestions, session.isTurnRunning else { return AgentToolHost.ended.result }
-        let choices = shareableTabs(for: session)
-        guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         let now = dependencies.now()
+        let kind: AgentApprovalKind
+        let research: AgentResearchPage?
+        let action: String
+        if opensResearch {
+            guard let url = call.arguments["url"]?.stringValue,
+                  let choice = researchChoices(for: session).first(where: { $0.url.absoluteString == url }) else {
+                return AgentToolResult(status: .refused, code: "notAvailable", text: "The address is unavailable for this session.")
+            }
+            guard host.agentTabs(of: session.id).count < AgentLimits.agentTabs else {
+                return AgentToolResult(status: .refused, code: "limitReached", text: "The session has reached its tab limit.")
+            }
+            research = choice
+            kind = .openSessionResearch(choice.url)
+            action = "Open a background research tab"
+        } else {
+            let choices = shareableTabs(for: session)
+            guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+            research = nil
+            kind = .shareSessionTab(choices)
+            action = "Choose a tab for this session to read"
+        }
         let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
-                                 kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
-                                 action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
-                                 connectionID: connectionID, createdAt: now, deadline: now.addingTimeInterval(sessionQuestionWindow))
+                                 kind: kind, isSensitive: false, offers: [.deny], action: action, tabID: research?.source.attachmentID,
+                                 agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
+                                 deadline: now.addingTimeInterval(sessionQuestionWindow))
         let answer = await approvals.request(card)
         guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
               session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
-        if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "No tab was shared in time.") }
-        guard case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
+        if let research {
+            guard answer == .allowOnce else { return AgentToolResult(status: .denied, text: "No research tab was opened.") }
+            guard let tab = openReviewedResearchTab(research, in: session) else {
+                return AgentToolResult(status: .stale, code: "stale", text: "The address is no longer available for this session.")
+            }
+            let handle = session.handles.tabs.handle(for: tab.id)
+            return AgentToolResult(status: .ok, text: "Opened background research tab \(handle).", structured: ["tab": .string(handle)])
+        }
+        guard case .shareSessionTab(let choices) = kind, case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         guard let choice = choices.first(where: { $0.id == id }), share(choice, with: session) else {
             return AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared.")
         }

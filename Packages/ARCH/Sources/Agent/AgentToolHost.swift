@@ -1014,7 +1014,7 @@ struct AgentToolClient {
 /// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
 extension AgentToolHost {
     /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]
+    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"]
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {

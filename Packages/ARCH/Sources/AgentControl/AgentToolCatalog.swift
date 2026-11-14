@@ -282,9 +282,16 @@ public enum AgentToolCatalog {
         AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
     ])
 
-    /// A session's read-only tab request has a narrower schema than an outside grant's.
+    public static let sessionResearchRequest = AgentTool("open_tab", .navigates, [.waitsForUser], "Asks the user to open an eligible address from their message or a shared tab in a background research tab.", [
+        AgentToolParameter("url", .string, required: true, "The exact address to show for review."),
+    ])
+
     public static func sessionTool(named name: String) -> AgentTool? {
-        name == sessionTabRequest.name ? sessionTabRequest : tool(named: name)
+        switch name {
+        case sessionTabRequest.name: return sessionTabRequest
+        case sessionResearchRequest.name: return sessionResearchRequest
+        default: return tool(named: name)
+        }
     }
 
     public static func tool(named name: String) -> AgentTool? {
