@@ -9,8 +9,13 @@ import Foundation
     var events: AsyncThrowingStream<AIAgentEvent, any Error> { get }
     func checkMessage(_ message: String) throws
     func send(_ message: String) throws
+    func retry(_ message: String) throws
     func stop()
     func end(keepingThread: Bool) async
+}
+
+extension AgentSessionRunning {
+    public func retry(_ message: String) throws { try send(message) }
 }
 
 /// Only a command-line runner binds an MCP ticket and manages child processes.
@@ -294,7 +299,7 @@ extension AgentAPISession: AgentSessionRunning {
         callEpoch += 1
         let message = hasSentFirstMessage ? text : AgentSessionPreamble.firstMessage(text, attachedTabHandles: handles.sharedTabIDs.map { handles.tabs.handle(for: $0) })
         do {
-            try runner.send(message)
+            if isRetry { try runner.retry(message) } else { try runner.send(message) }
             hasSentFirstMessage = true
             isTurnRunning = true
             state = model == nil ? .starting : .running

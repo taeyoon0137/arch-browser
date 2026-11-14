@@ -63,6 +63,13 @@ import Foundation
         startNextTurn()
     }
 
+    /// Completed rounds already include the original task, its preamble and any tool results.
+    public func retry(_ message: String) {
+        guard !hasEnded, !isTurnRunning else { return }
+        if conversation.isEmpty { return send(message) }
+        startTurn()
+    }
+
     /// Ends the running turn at once and drops the queued messages. The rounds that finished stay in the conversation; a call the tool host is running sees its task cancelled (`AgentSessionTools.run(_:)`).
     public func stop() {
         queuedMessages.removeAll()
@@ -82,11 +89,14 @@ import Foundation
 
     private func startNextTurn() {
         guard !isTurnRunning, !hasEnded, !queuedMessages.isEmpty else { return }
-        let message = queuedMessages.removeFirst()
+        conversation.append(AIMessage(role: .user, parts: [.text(queuedMessages.removeFirst())]))
+        startTurn()
+    }
+
+    private func startTurn() {
         isTurnRunning = true
         turn += 1
         turnUsage = nil
-        conversation.append(AIMessage(role: .user, parts: [.text(message)]))
         let number = turn
         let request = AIRequest(feature: feature, instructions: instructions, messages: conversation, maxOutputTokens: Self.outputTokensPerRound, pinnedModel: model)
         let handlers = tools.tools.map { handler(for: $0, turn: number) }

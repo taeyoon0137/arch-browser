@@ -401,6 +401,55 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(events.entries.suffix(2) == ["text:Fine.", "turnFinished:completed"])
     }
 
+    @Test func retryingARefusedFirstHTTPRoundKeepsOneCopyOfTheTask() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { number in
+            number == 0 ? [.fail(.invalidRequest("First round refused."))] : roundSteps(text: "Done.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { selection in .http(pinnedModel: selection) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let session = try service.startSession(.init(task: "Summarize these notes.", personaID: persona, spaceID: space.id,
+                                                     attachedTabIDs: [], mode: .readOnly, model: nil, effort: nil))
+        try await waitUntil { session.transcript.retryableErrorID != nil }
+        await service.retry(session)
+        try await waitUntil { session.items.contains { $0.kind == .reply("Done.") } }
+        #expect(client.requests.count == 2)
+        let original = try #require(client.requests.first)
+        let retry = try #require(client.requests.last)
+        #expect(retry.messages.count == 1)
+        guard case .text(let expected) = original.messages.first?.parts.first,
+              case .text(let actual) = retry.messages.last?.parts.first else {
+            Issue.record("The request must carry the task as text.")
+            return
+        }
+        #expect(actual == expected && actual.contains("Summarize these notes."))
+    }
+
+    @Test func anHTTPRetryAfterAToolRoundContinuesFromItsResult() async throws {
+        let client = ScriptedClient { number in
+            switch number {
+            case 0: return roundSteps([toolCall("one", "session_info")])
+            case 1: return [.fail(.invalidRequest("The reply could not finish."))]
+            default: return roundSteps(text: "Complete.")
+            }
+        }
+        let tools = FakeSessionTools()
+        let runner = AgentAPISession(client: client, tools: tools)
+        let events = SessionEvents(runner)
+        runner.send("Read the session details.")
+        try await waitUntil { events.entries.contains { $0.hasPrefix("turnFailed:") } }
+        runner.retry("Read the session details.")
+        try await waitUntil { events.entries.contains("turnFinished:completed") }
+        let continued = try #require(client.requests.last)
+        #expect(continued.messages.map(\.role) == [.user, .assistant, .user])
+        #expect(toolResults(in: continued.messages.last).map(\.callID) == ["one"])
+        #expect(tools.calls.count == 1)
+    }
+
     @Test func aFailedMessageLeavesTheSessionOpen() async throws {
         let client = ScriptedClient { number in
             number == 0 ? [.fail(.providerUnavailable(AIProviderID(), detail: "down"))] : roundSteps(text: "Back.")
