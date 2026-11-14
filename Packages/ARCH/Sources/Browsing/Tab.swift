@@ -17,6 +17,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public internal(set) var isInSmallWindow = false
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
+    /// The current main document, including reloads at the same address. Never stored or sent to a model.
+    @Published private(set) var documentID = UUID()
     /// Pinning saves the page the tab shows as its saved page, or the first address its page reports when it shows none yet, and unpinning forgets it (bookmark rule 2). Pin Tab, Unpin Tab, and drops among the pinned or open tabs or into a folder of either list all set it, so each follows the rule; a tab made pinned, as one that restores or reopens, takes its saved page from the caller.
     @Published public var isPinned: Bool {
         didSet {
@@ -275,6 +277,7 @@ extension Tab: EngineWebContentsUIDelegate {
         }
     }
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        documentID = UUID()
         committedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
     }
@@ -326,6 +329,7 @@ extension Tab: EngineWebContentsUIDelegate {
         webContents.uiDelegate = nil
         webContents.navigationDelegate = nil
         webContents.pageScriptDelegate = nil
+        documentID = UUID()
         webContents = replacement
         replacement.uiDelegate = self
         replacement.navigationDelegate = self
@@ -420,7 +424,11 @@ extension Tab: EngineWebContentsUIDelegate {
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
            let sourceURL = url, let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
-            sections.append([EngineActionMenuItem("Ask About Selection\u{2026}") { askAboutSelection(selection, sourceURL) }])
+            let sourceDocument = documentID
+            sections.append([EngineActionMenuItem("Ask About Selection\u{2026}") { [weak self] in
+                guard self?.documentID == sourceDocument else { return }
+                askAboutSelection(selection, sourceURL)
+            }])
         }
         sections += [handed.fieldSubmenus, handed.share]
         if sections.allSatisfy(\.isEmpty) {

@@ -96,20 +96,24 @@ import Testing
         let id = UUID()
         let selection = AISelection(pageURL: Self.page, pageTitle: "Plans", text: "A particular clause")
         var exchange = PageConversation.Exchange(prompt: "Explain this", title: "Explain this", selectionSource: .current)
+        let documentID = UUID()
+        exchange.selectionDocumentID = documentID
+        exchange.replyDocumentID = documentID
         exchange.selection = selection
         exchange.reply = "The reader’s explanation."
         exchange.replySourceURL = Self.page
         exchange.state = .finished(.completed)
-        let excerpt = try #require(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: exchange, selection: nil))
+        let excerpt = try #require(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: documentID, url: Self.page, exchange: exchange, selection: nil))
         #expect(excerpt.selection == selection.text)
         #expect(excerpt.reply == exchange.reply)
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: UUID(), url: Self.page, exchange: exchange, selection: nil) == nil)
         #expect(ContinueAsAgentTaskButton.task(draft: "Check the older terms", exchanges: [exchange]) == "Check the older terms")
         let changed = Self.page.appendingPathComponent("other")
-        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: changed, exchange: exchange, selection: nil) == nil)
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: documentID, url: changed, exchange: exchange, selection: nil) == nil)
         exchange.state = .stopped
-        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: exchange, selection: nil)?.reply == nil)
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: documentID, url: Self.page, exchange: exchange, selection: nil)?.reply == nil)
         // The popover offers the chosen text even before its first question.
-        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: nil, selection: selection)?.selection == selection.text)
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: documentID, url: Self.page, exchange: nil, selection: selection)?.selection == selection.text)
         #expect(PageAssistant.matchesMenuSelection("One\nTwo", "One  \r\n  Two "))
         #expect(!PageAssistant.matchesMenuSelection("One", "Other"))
     }

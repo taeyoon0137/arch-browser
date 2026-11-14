@@ -158,7 +158,7 @@ struct ContinueAsAgentTaskButton: View {
     var body: some View {
         if windowModel.canStartAgentTask {
             SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") {
-                let excerpt = Self.excerpt(tabID: tab.id, url: tab.url, exchange: exchanges.last, selection: selection)
+                let excerpt = Self.excerpt(tabID: tab.id, documentID: tab.documentID, url: tab.url, exchange: exchanges.last, selection: selection)
                 windowModel.continueAsAgentTask(Self.task(draft: draft, exchanges: exchanges), excerpt: excerpt)
             }
         }
@@ -172,15 +172,15 @@ struct ContinueAsAgentTaskButton: View {
     }
 
     /// Only the visible selection and a completed answer from this page are offered to the composer.
-    static func excerpt(tabID: UUID, url: URL?, exchange: PageConversation.Exchange?, selection: AISelection?) -> AgentReaderExcerpt? {
+    static func excerpt(tabID: UUID, documentID: UUID, url: URL?, exchange: PageConversation.Exchange?, selection: AISelection?) -> AgentReaderExcerpt? {
         guard let url else { return nil }
-        let selected = selection ?? exchange?.selection
+        let selected = selection ?? (exchange?.selectionDocumentID == documentID ? exchange?.selection : nil)
         let reply: String?
-        if let exchange, exchange.replySourceURL == url, case .finished(.completed) = exchange.state {
+        if let exchange, exchange.replyDocumentID == documentID, exchange.replySourceURL == url, case .finished(.completed) = exchange.state {
             reply = exchange.reply
         } else {
             reply = nil
         }
-        return AgentReaderExcerpt(tabID: tabID, url: url, selection: selected?.pageURL == url ? selected?.text : nil, reply: reply)
+        return AgentReaderExcerpt(tabID: tabID, documentID: documentID, url: url, selection: selected?.pageURL == url ? selected?.text : nil, reply: reply)
     }
 }

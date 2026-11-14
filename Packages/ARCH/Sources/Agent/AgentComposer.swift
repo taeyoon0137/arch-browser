@@ -27,13 +27,15 @@ public struct AgentPanelActions {
 /// A bounded excerpt the user can attach from the page reader. The task field holds only their own instructions.
 public struct AgentReaderExcerpt: Equatable {
     public let tabID: UUID
+    public let documentID: UUID
     public let url: URL
     public let selection: String?
     public let reply: String?
 
-    public init?(tabID: UUID, url: URL, selection: String?, reply: String?) {
+    public init?(tabID: UUID, documentID: UUID, url: URL, selection: String?, reply: String?) {
         guard AgentSite.of(url) != nil else { return nil }
         self.tabID = tabID
+        self.documentID = documentID
         self.url = url
         self.selection = Self.excerpt(selection)
         self.reply = Self.excerpt(reply)
@@ -54,7 +56,7 @@ public struct AgentReaderExcerpt: Equatable {
     }
 
     func matches(_ tab: AgentTabInfo?) -> Bool {
-        tab?.id == tabID && tab?.url == url
+        tab?.id == tabID && tab?.documentID == documentID && tab?.url == url
     }
 }
 

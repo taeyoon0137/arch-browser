@@ -560,7 +560,7 @@ import Foundation
                     return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
                 }
             }
-            guard tab.url == content.url, current.url == content.url else {
+            guard current.documentID == tab.documentID, tab.url == content.url, current.url == content.url else {
                 return .outcome(Self.error("pageChanged", "\(handle) changed pages during the read. Read the current page again."))
             }
             return .value(content)

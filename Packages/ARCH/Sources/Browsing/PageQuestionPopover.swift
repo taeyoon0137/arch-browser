@@ -63,6 +63,9 @@ private struct PageQuestionPopover: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFieldFocused = true } }
+        .onChange(of: tab.documentID) { _, current in
+            if current != question.documentID { windowModel.dismissPageQuestion() }
+        }
         // Allow AI on This Site puts the field in the notice's place, and the field takes the keys as on opening.
         .onChange(of: tab.url.map { settings.allowsAI(on: $0) }) { _, allows in
             if allows == true { DispatchQueue.main.async { isFieldFocused = true } }
@@ -77,7 +80,7 @@ private struct PageQuestionPopover: View {
                 .reportsFocus(of: .question, isFocused: isFieldFocused)
                 .onSubmit(send)
                 .onExitCommand(perform: windowModel.dismissPageQuestion)
-            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges, selection: question.selection)
+            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges, selection: question.documentID == tab.documentID ? question.selection : nil)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {
@@ -90,7 +93,7 @@ private struct PageQuestionPopover: View {
     private var text: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func send() {
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, question.documentID == tab.documentID else { return }
         question.ask(text)
         draft = ""
     }
