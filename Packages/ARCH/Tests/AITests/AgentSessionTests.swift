@@ -443,8 +443,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
             try session.send(message)
         }
         try await log.wait { $0.filter { $0.hasPrefix("finished:") }.count == 4 }
-        let ref = AIModelRef(provider: fixture.provider.id, model: "haiku")
-        #expect(log.events.first == "ready:haiku")
+        let ref = AIModelRef(provider: fixture.provider.id, model: "claude-haiku-5-5")
+        #expect(log.events.first == "ready:claude-haiku-5-5")
         #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
         #expect(session.model == ref)
         #expect(log.events.filter { $0.hasPrefix("finished:") } == ["finished:completed", "finished:completed", "finished:stopped", "finished:completed"])
@@ -453,6 +453,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         // The interrupted third turn counts each of its requests from the stream, the interrupted one included.
         #expect(log.events.filter { $0.hasPrefix("usage:") } == ["usage:3269/40/3170", "usage:143/38/6584", "usage:140/54/6808", "usage:190/5/3486"])
         let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
+        #expect(total.model == ref.model)
         #expect(total.requests == 4)
         #expect(total.errors == 0)
         #expect(total.usage == AIUsage(inputTokens: 3742, outputTokens: 137, cachedInputTokens: 20048))
@@ -461,6 +462,46 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let input = cli.text("stdin.log").split(separator: "\n")
         #expect(input.count == 4)
         #expect(input.allSatisfy { $0.contains(#""type":"user""#) })
+        await session.end()
+    }
+
+    @Test func aLaterClaudeTurnCanReportADifferentModelWithoutReopeningTheProcess() async throws {
+        var turns = try claudeTurns("claude-session")
+        // The start omits its model, the assistant names it, and the final per-turn usage confirms the resolved name.
+        let lines = try turns[1].split(separator: "\n").map { line -> String in
+            var object = try #require(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            if var event = object["event"] as? [String: Any], var message = event["message"] as? [String: Any] {
+                message.removeValue(forKey: "model")
+                event["message"] = message
+                object["event"] = event
+            } else if var message = object["message"] as? [String: Any], object["type"] as? String == "assistant" {
+                message["model"] = "fixture-assistant"
+                object["message"] = message
+            } else if object["type"] as? String == "result" {
+                object["model_usage_since_last_result"] = ["fixture-follow-up": [:] as [String: Any]]
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        turns[1] = lines.joined(separator: "\n")
+        let cli = try FakeCLI.claude(turns: turns)
+        let fixture = try AgentFixture(cli: cli, model: "haiku")
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("First")
+        try await log.wait { $0.contains("finished:completed") }
+        try session.send("Second")
+        try await log.wait { $0.filter { $0 == "finished:completed" }.count == 2 }
+        #expect(session.model == AIModelRef(provider: fixture.provider.id, model: "fixture-follow-up"))
+        #expect(log.events.contains("model:fixture-assistant"))
+        #expect(log.events.contains("model:fixture-follow-up"))
+        #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
+        #expect(!log.events.contains("processReady"))
+        let usage = fixture.service.usage.totals(monthsAgo: 0)
+        #expect(usage.first { $0.model == "claude-haiku-5-5" }?.usage.outputTokens == 40)
+        #expect(usage.first { $0.model == "fixture-follow-up" }?.usage.outputTokens == 38)
+        let calls = cli.calls().filter { $0.contains("--input-format") }
+        #expect(calls.count == 1)
+        #expect(calls.first?.contains("haiku") == true)
         await session.end()
     }
 
@@ -554,7 +595,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let log = AgentEventLog(session)
         try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
-        #expect(session.model == AIModelRef(provider: fixture.providers[2].id, model: ""))
+        #expect(session.model == AIModelRef(provider: fixture.providers[2].id, model: "claude-haiku-5-5"))
         #expect(signedOut.calls().allSatisfy { !$0.contains("--input-format") })
         #expect(refused.calls().filter { $0.contains("--input-format") }.count == 1)
         #expect(good.calls().allSatisfy { !$0.contains("--fallback-model") })
@@ -684,7 +725,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
         // The init passed, but the model never replied, so the route's next model holds the session.
-        #expect(session.model == AIModelRef(provider: fixture.providers[1].id, model: ""))
+        #expect(session.model == AIModelRef(provider: fixture.providers[1].id, model: "claude-haiku-5-5"))
         #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
         #expect(log.events.first?.hasPrefix("notice:Claude Code reports its usage limit (five hour): rejected") == true)
         #expect(!log.events.contains { $0.hasPrefix("failed:") })
@@ -717,7 +758,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         try session.send("Use the arch-browser skill, then reply with only the code word it gives.")
         try await log.wait { $0.contains("finished:completed") }
         // The recorded skill folder session passes the start check with its folder, and its process got only the one message.
-        #expect(log.events.first == "ready:haiku")
+        #expect(log.events.first == "ready:claude-haiku-5-5")
         #expect(log.text(ofTurn: 0) == "MARTEN")
         #expect(cli.text("stdin.log").split(separator: "\n").count == 1)
         await session.end()
@@ -1259,6 +1300,7 @@ private final class AgentEventLog {
     static func describe(_ event: AIAgentEvent) -> String {
         switch event {
         case .ready(let ref): return "ready:\(ref.model)"
+        case .modelChanged(let ref): return "model:\(ref.model)"
         case .processReady: return "processReady"
         case .text(let text): return "text:\(text)"
         case .thinking: return "thinking"

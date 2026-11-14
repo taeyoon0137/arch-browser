@@ -212,7 +212,7 @@ struct ClaudeCodeStartCheck {
 
 // MARK: - Stream
 
-/// Turns Claude Code's stream-json lines into the runner's events. Text comes only from `stream_event` deltas; `user`, `assistant`, `control_response`, and unknown line types are skipped. Every `init` goes through the start check, and one that fails throws `blockedByPolicy(.agentUsedOwnTools)`. Each `message_start` is the model's output, which the runner's `ready` waits for.
+/// Turns Claude Code's stream-json lines into the runner's events. Text comes only from `stream_event` deltas. The assistant message also names the model that served it. Every `init` goes through the start check, and one that fails throws `blockedByPolicy(.agentUsedOwnTools)`. Each `message_start` is the model's output, which the runner's `ready` waits for.
 struct ClaudeCodeStreamDecoder {
     var check: ClaudeCodeStartCheck
     let provider: AIProviderID
@@ -240,6 +240,8 @@ struct ClaudeCodeStreamDecoder {
             return hasPassedInit ? [] : [.started(threadID: nil)]
         case "stream_event":
             return streamEvent(object["event"] as? [String: Any] ?? [:])
+        case "assistant":
+            return Self.reportedModel((object["message"] as? [String: Any])?["model"])
         case "rate_limit_event":
             let info = object["rate_limit_info"] as? [String: Any] ?? [:]
             if info["status"] as? String == "rejected" {
@@ -254,11 +256,17 @@ struct ClaudeCodeStreamDecoder {
         }
     }
 
+    private static func reportedModel(_ value: Any?) -> [AIAgentStreamEvent] {
+        guard let name = value as? String, !name.isEmpty, name != "<synthetic>" else { return [] }
+        return [.reportedModel(name)]
+    }
+
     private mutating func streamEvent(_ event: [String: Any]) -> [AIAgentStreamEvent] {
         switch event["type"] as? String {
         case "message_start":
-            if let usage = (event["message"] as? [String: Any])?["usage"] as? [String: Any] { requestUsages.append(Self.usage(usage)) }
-            return [.output]
+            let message = event["message"] as? [String: Any]
+            if let usage = message?["usage"] as? [String: Any] { requestUsages.append(Self.usage(usage)) }
+            return Self.reportedModel(message?["model"]) + [.output]
         case "message_delta":
             if let usage = event["usage"] as? [String: Any], !requestUsages.isEmpty {
                 requestUsages[requestUsages.count - 1] = Self.usage(usage, over: requestUsages[requestUsages.count - 1])
@@ -291,7 +299,12 @@ struct ClaudeCodeStreamDecoder {
         let usage: AIUsage? = reason == "aborted_streaming"
             ? requestUsages.reduce(AIUsage(inputTokens: 0, outputTokens: 0), +)
             : (object["usage"] as? [String: Any]).map { Self.usage($0) }
-        var events = usage.map { [AIAgentStreamEvent.usage($0)] } ?? []
+        var events: [AIAgentStreamEvent] = []
+        if reason != "aborted_streaming", let models = object["model_usage_since_last_result"] as? [String: Any],
+           models.count == 1 {
+            events += Self.reportedModel(models.keys.first)
+        }
+        if let usage { events.append(.usage(usage)) }
         if subtype == "error_max_turns" {
             events.append(.turnEnded(.turnLimit))
         } else if object["is_error"] as? Bool == true || subtype != "success" {

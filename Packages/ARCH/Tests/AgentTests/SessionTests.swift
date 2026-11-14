@@ -347,7 +347,14 @@ import Testing
         #expect(runner.sent[1] == "And the second link?")
         #expect(session.queuedMessages.isEmpty)
         #expect(session.items.contains { $0.kind == .reply("Done.") })
-        #expect(session.items.contains { $0.kind == .turnFooter(model: AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), usage: AIUsage(inputTokens: 10, outputTokens: 2)) })
+        let firstModel = AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")
+        let second = AIModelRef(provider: firstModel.provider, model: "fixture-follow-up")
+        runner.emit(.modelChanged(second))
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { session.state == .done }
+        #expect(session.model == second)
+        #expect(session.items.contains { $0.kind == .turnFooter(model: firstModel, usage: AIUsage(inputTokens: 10, outputTokens: 2)) })
+        #expect(session.items.contains { $0.kind == .turnFooter(model: second, usage: nil) })
     }
 
     @Test func readerDataTravelsOnlyThroughTheSharedPagesToolResult() async throws {

@@ -265,6 +265,7 @@ public final class AgentRunner: ObservableObject {
                 try Task.checkCancellation()
                 switch event {
                 case .ready(let model): result.model = model; binding.ready.open()
+                case .modelChanged(let model): result.model = model
                 case .processReady: binding.ready.open()
                 case .text(let delta): reply += delta
                 case .usage(let usage): result.usage = usage
