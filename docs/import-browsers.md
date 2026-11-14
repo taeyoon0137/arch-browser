@@ -220,6 +220,8 @@ Every fixture is synthetic and built by the tests: JSON and property lists from 
   - `SiteSearchStore.add(_:)` skips keywords in use and shortcuts `canSave` rejects; an undecodable `site-search.json` moves to `site-search.unreadable.json` at the first write.
   - `SpaceTint.nearest`: each system tint's own color maps to it, and a color below 20% saturation maps to gray.
 
+A synthetic sidebar import also runs through source discovery, the reviewed selection, `BrowserSession.addImport`, a normal save and a fresh session. After the user moves and renames a pin, navigates it to another address and renames its original space, importing again adds zero items. The restored fixture retains two ordered spaces, five pinned tabs, two folders and two favorites while the source files retain their original bytes.
+
 ## Implementation order
 
 Each step builds, keeps the app working, passes `swift test`, and forms one commit with the subject `Task(V.13): …`.
