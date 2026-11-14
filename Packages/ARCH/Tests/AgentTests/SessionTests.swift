@@ -1257,7 +1257,7 @@ import UserNotifications
         let guide = try await client.callTool("guide")
         #expect(guide.text == AgentHarness.sessionInstructions)
         let research = try await client.callTool("guide", ["topic": "research"])
-        #expect(research.text.contains("Open in Research Tab") && !research.text.contains("open_tab"))
+        #expect(research.text.contains("Open in Research Tab") && research.text.contains("tab handle, ref and name") && !research.text.contains("open_tab"))
         // Raising the mode tells the session's connection. This build serves reading tools only, so the next list is the same and the runner hears of no change; a list that differs from the last one reported reaches it once.
         session.setMode(.askBeforeActing)
         #expect(try await client.receive() == .notification(method: AgentControlMethod.toolsChangedNotification, params: nil))
