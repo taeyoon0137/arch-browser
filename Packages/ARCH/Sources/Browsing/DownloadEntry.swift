@@ -79,10 +79,13 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         return nil
     }
 
-    /// Failed downloads can still retry in the profile that started them.
+    var canRetry: Bool { item.canRetry }
+
+    /// Retiring the profile cancels any transfer that can still make a request.
     var canCancel: Bool {
         switch item.state {
-        case .inProgress, .paused, .failed: return true
+        case .inProgress, .paused: return true
+        case .failed: return canRetry
         case .completed, .cancelled: return false
         }
     }

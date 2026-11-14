@@ -16,12 +16,18 @@ public protocol EngineDownloadItem: AnyObject {
     var webContents: (any EngineWebContents)? { get }
     var targetPath: URL? { get }
     var state: EngineDownloadState { get }
+    /// Whether the engine can retry this failed download with the original transfer.
+    var canRetry: Bool { get }
     var completedBytes: Int64 { get }
     var totalBytes: Int64 { get }
     func pause()
     func resume()
     func cancel()
     func remove()
+}
+
+public extension EngineDownloadItem {
+    var canRetry: Bool { state == .failed }
 }
 
 public protocol EngineDownloadsDelegate: AnyObject {

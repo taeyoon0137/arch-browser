@@ -6,6 +6,40 @@ import Testing
 @Suite struct WebKitDownloadLifecycleTests {
     private let data = Data("resume".utf8)
 
+    @Test func onlyAnIntactGetRestartsWithoutResumeData() {
+        let url = URL(string: "https://example.test/export")!
+        var request = URLRequest(url: url)
+        request.setValue("text/csv", forHTTPHeaderField: "Accept")
+        #expect(WebKitDownloadItem.restartRequest(for: request) == request)
+        request.httpMethod = "POST"
+        #expect(WebKitDownloadItem.restartRequest(for: request) == nil)
+        request.httpBody = Data("report=one".utf8)
+        #expect(WebKitDownloadItem.restartRequest(for: request) == nil)
+        request.httpMethod = "GET"
+        #expect(WebKitDownloadItem.restartRequest(for: request) == nil)
+        request.httpBodyStream = InputStream(data: Data([1]))
+        #expect(WebKitDownloadItem.restartRequest(for: request) == nil)
+        #expect(WebKitDownloadItem.restartRequest(for: nil) == nil)
+    }
+
+    @Test func aFormDownloadOnlyRetriesUsingNativeResumeData() {
+        var item = WebKitDownloadLifecycle(canRestartFromBeginning: false)
+        item.didFail(resumeData: nil)
+        let attempt = item.resume()
+        #expect(attempt == nil && !item.isRestarting && item.state == .failed)
+
+        var paused = WebKitDownloadLifecycle(canRestartFromBeginning: false)
+        _ = paused.pause()
+        _ = paused.resume()
+        let restart = paused.didStop(resumeData: nil)
+        #expect(restart == nil && !paused.isRestarting && paused.state == .failed)
+
+        var resumable = WebKitDownloadLifecycle(canRestartFromBeginning: false)
+        resumable.didFail(resumeData: data)
+        let resumed = resumable.resume()
+        #expect(resumed == .resumeData(data))
+    }
+
     @Test func aPauseThatMeetsTheFinishCompletes() {
         var lifecycle = WebKitDownloadLifecycle()
         let stops = lifecycle.pause()

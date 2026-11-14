@@ -114,7 +114,7 @@ struct DownloadRowView: View {
         case .paused: return "Paused"
         case .completed: return formatter.string(fromByteCount: entry.totalBytes > 0 ? entry.totalBytes : entry.completedBytes)
         case .cancelled: return "Cancelled"
-        case .failed: return "Failed"
+        case .failed: return entry.canRetry ? "Failed" : "Failed — start again from the page"
         }
     }
 
@@ -167,7 +167,7 @@ struct DownloadRowView: View {
                     SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
                     SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
                 }
-            } else if entry.state == .failed {
+            } else if entry.state == .failed, entry.canRetry {
                 HStack(spacing: 0) {
                     SidebarIconButton(symbol: "arrow.clockwise.circle", label: "Retry", action: entry.item.resume)
                     SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)

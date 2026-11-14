@@ -48,7 +48,7 @@ public final class WebKitDownloads: EngineDownloads {
     }
 }
 
-/// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. `WebKitDownloadLifecycle` decides pause, resume, and cancel; the item carries out its decisions on WebKit's objects: a resume restarts from WebKit's resume data, or from the start without it, on the originating web view, or on the list's own web view once that one has closed.
+/// One `WKDownload`. Progress arrives through key-value observing of the download's `Progress`. `WebKitDownloadLifecycle` decides pause, resume, and cancel; the item carries out its decisions on WebKit's objects: a resume restarts from WebKit's resume data, or from an intact original GET without it, on the originating web view, or on the list's own web view once that one has closed.
 final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate {
     let sourceURL: URL
     let pageURL: URL?
@@ -60,7 +60,9 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
     private var download: WKDownload
     private weak var webView: WKWebView?
     private unowned let owner: WebKitDownloads
-    private var lifecycle = WebKitDownloadLifecycle()
+    private let restartRequest: URLRequest?
+    private var lifecycle: WebKitDownloadLifecycle
+    var canRetry: Bool { state == .failed && lifecycle.canRestart }
     private var observations: [NSKeyValueObservation] = []
 
     init(download: WKDownload, webContents: WebKitWebContents, owner: WebKitDownloads) {
@@ -69,11 +71,20 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
         self.webView = webView
         self.webContents = webContents
         self.owner = owner
+        self.restartRequest = Self.restartRequest(for: download.originalRequest)
+        self.lifecycle = WebKitDownloadLifecycle(canRestartFromBeginning: restartRequest != nil)
         self.sourceURL = download.originalRequest?.url ?? webView.url ?? URL(string: "about:blank")!
         // While a navigation turns into a download, the web view's address can already be the download's, so the page is the current back-forward item.
         self.pageURL = webView.backForwardList.currentItem?.url
         super.init()
         attach(download)
+    }
+
+    /// WebKit can omit a submitted form's body from its public request. Only an intact GET can restart without native resume data.
+    static func restartRequest(for request: URLRequest?) -> URLRequest? {
+        guard let request, request.url != nil, request.httpMethod == "GET",
+              request.httpBody == nil, request.httpBodyStream == nil else { return nil }
+        return request
     }
 
     private func attach(_ download: WKDownload) {
@@ -123,7 +134,8 @@ final class WebKitDownloadItem: NSObject, EngineDownloadItem, WKDownloadDelegate
         }
         switch restart {
         case .resumeData(let data): webView.resumeDownload(fromResumeData: data, completionHandler: take)
-        case .start: webView.startDownload(using: URLRequest(url: sourceURL), completionHandler: take)
+        case .start:
+            if let restartRequest { webView.startDownload(using: restartRequest, completionHandler: take) }
         }
     }
 
@@ -171,6 +183,14 @@ struct WebKitDownloadLifecycle {
         case start
     }
 
+    private let canRestartFromBeginning: Bool
+
+    init(canRestartFromBeginning: Bool = true) {
+        self.canRestartFromBeginning = canRestartFromBeginning
+    }
+
+    var canRestart: Bool { resumeData != nil || canRestartFromBeginning }
+
     private(set) var state: EngineDownloadState = .inProgress
     /// What WebKit left to resume from: a pause's or a failure's resume data.
     private(set) var resumeData: Data?
@@ -189,11 +209,16 @@ struct WebKitDownloadLifecycle {
         return true
     }
 
-    /// WebKit stopped the download that `pause()` paused. A download that finished or was cancelled meanwhile keeps that state. A resume that waited restarts the download, from the start without resume data; otherwise a pause without resume data cancels the download.
+    /// WebKit stopped the download that `pause()` paused. A download that finished or was cancelled meanwhile keeps that state. A resume that waited restarts the download, from the start without resume data; otherwise a paused GET without resume data cancels. A request that cannot restart stays failed for the user to start again on the page.
     mutating func didStop(resumeData data: Data?) -> Restart? {
         isStopping = false
         guard state == .paused else { return nil }
         resumeData = data
+        guard canRestart else {
+            resumesAfterStop = false
+            state = .failed
+            return nil
+        }
         if resumesAfterStop {
             resumesAfterStop = false
             return restart()
@@ -202,7 +227,7 @@ struct WebKitDownloadLifecycle {
         return nil
     }
 
-    /// Restarts a paused or failed download, from the start for a failed one that left no resume data. The download stays paused or failed until WebKit hands over the new one, and a second resume meanwhile does nothing. A resume while the pause stops the download waits for its resume data.
+    /// Restarts a paused or failed download, from the original GET for a failed one that left no resume data. The download stays paused or failed until WebKit hands over the new one, and a second resume meanwhile does nothing. A resume while the pause stops the download waits for its resume data.
     mutating func resume() -> Restart? {
         guard state == .paused || state == .failed, !isRestarting else { return nil }
         guard !isStopping else {
@@ -212,7 +237,8 @@ struct WebKitDownloadLifecycle {
         return restart()
     }
 
-    private mutating func restart() -> Restart {
+    private mutating func restart() -> Restart? {
+        guard canRestart else { return nil }
         isRestarting = true
         return resumeData.map(Restart.resumeData) ?? .start
     }
