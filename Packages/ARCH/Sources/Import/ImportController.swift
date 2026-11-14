@@ -65,14 +65,15 @@ public final class ImportController {
                 summary.favorites += addedCount
                 summary.presentFavorites += file.favorites.count - addedCount
                 pages += file.history
-                summary.historyPages += file.history.count
             case .failure(let error):
                 summary.failures.append(error.localizedDescription)
             }
         }
-        // Only files without bookmarks or pages get this line; bookmarks already in favorites have a line of their own.
-        let emptyLine = summary.lines.isEmpty && summary.failures.count < results.count ? "No bookmarks or history pages with web addresses were found." : nil
-        history.importEntries(pages) { [weak self] _ in
+        var emptyLine: String?
+        if summary.lines.isEmpty && summary.failures.count < results.count {
+            emptyLine = pages.isEmpty ? "No bookmarks or history pages with web addresses were found." : "No history pages were added or updated."
+        }
+        summary.importHistory(pages, into: history) { [weak self] summary in
             self?.show(summary, emptyLine: emptyLine, in: window)
         }
     }
@@ -152,8 +153,7 @@ public final class ImportController {
         }
         if !selection.rows.isEmpty { record.write() }
         summary.failures = selection.failures
-        history.importEntries(selection.history) { [weak self] pageCount in
-            summary.historyPages = pageCount
+        summary.importHistory(selection.history, into: history) { [weak self] summary in
             self?.show(summary, emptyLine: "Everything checked was in Arch already.", in: window)
         }
     }
@@ -185,7 +185,7 @@ struct ImportSummary {
     var favorites = 0
     /// The favorites, or bookmarks that would have become favorites, whose addresses the Persona's favorites had already.
     var presentFavorites = 0
-    /// The pages that came into history: for the browser import, those the history store added or changed; for the file import, those the files held.
+    /// The distinct pages the history store added or updated.
     var historyPages = 0
     var shortcuts = 0
     /// The shortcuts left out because another shortcut uses their keyword or Arch cannot use them.
@@ -193,6 +193,14 @@ struct ImportSummary {
     var searchEngine: SearchEngine?
     /// Why files, browsers, or items could not be read.
     var failures: [String] = []
+
+    func importHistory(_ pages: [HistoryEntry], into history: HistoryStore, completion: @escaping (ImportSummary) -> Void) {
+        history.importEntries(pages) { changed in
+            var summary = self
+            summary.historyPages = changed
+            completion(summary)
+        }
+    }
 
     /// Adds what one profile brought to the sidebar.
     mutating func add(_ counts: SidebarImport.Counts) {

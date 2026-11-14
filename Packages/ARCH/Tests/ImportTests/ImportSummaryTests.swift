@@ -37,24 +37,27 @@ import Testing
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let history = HistoryStore(directory: folder.url)
-        func importPages(_ entries: [HistoryEntry]) async -> Int {
-            await withCheckedContinuation { continuation in history.importEntries(entries) { continuation.resume(returning: $0) } }
+        func importPages(_ entries: [HistoryEntry], summary: ImportSummary = ImportSummary()) async -> ImportSummary {
+            await withCheckedContinuation { continuation in
+                summary.importHistory(entries, into: history) { continuation.resume(returning: $0) }
+            }
         }
         let page = HistoryEntry(url: URL(string: "https://a.example/")!, title: "A", visitCount: 2, lastVisit: Date(timeIntervalSince1970: 100))
         let other = HistoryEntry(url: URL(string: "https://b.example/")!, title: "", visitCount: 1, lastVisit: Date(timeIntervalSince1970: 100))
         // Two profiles both list the first page, which counts once.
         let entries = [page, other, HistoryEntry(url: page.url, title: "A", visitCount: 3, lastVisit: page.lastVisit)]
-        #expect(await importPages(entries) == 2)
+        #expect(await importPages(entries).historyPages == 2)
 
         // Again, the history store changes nothing, and only favorites already present and skipped shortcuts remain.
         var summary = ImportSummary()
-        summary.historyPages = await importPages(entries)
         summary.presentFavorites = 12
         summary.skippedShortcuts = 3
+        summary = await importPages(entries, summary: summary)
         #expect(summary.historyPages == 0)
         #expect(!summary.hasAdditions)
+        #expect(summary.presentFavorites == 12 && summary.skippedShortcuts == 3)
         // A page without a title takes the import's, which counts as a change.
-        #expect(await importPages([HistoryEntry(url: other.url, title: "B", visitCount: 1, lastVisit: other.lastVisit)]) == 1)
+        #expect(await importPages([HistoryEntry(url: other.url, title: "B", visitCount: 1, lastVisit: other.lastVisit)]).historyPages == 1)
         summary.searchEngine = .bing
         #expect(summary.hasAdditions)
     }
