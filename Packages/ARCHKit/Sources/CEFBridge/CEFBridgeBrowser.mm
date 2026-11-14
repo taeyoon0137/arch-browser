@@ -1419,6 +1419,12 @@ private:
     }
 }
 
+- (void)addWordToDictionary:(NSString *)word {
+    if (_browser) {
+        _browser->GetHost()->AddWordToDictionary(CefString(word.UTF8String));
+    }
+}
+
 - (void)handleAuthenticationForHost:(NSString *)host
                                port:(int)port
                               realm:(NSString *)realm

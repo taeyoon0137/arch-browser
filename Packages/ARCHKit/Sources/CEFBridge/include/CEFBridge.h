@@ -483,6 +483,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
 /// Call with YES right before the app shows its own context menu for the browser's view with `+[NSMenu popUpContextMenu:withEvent:forView:]`, and with NO right after the menu closes (an experimental CEF API of Arch's engine, VI.9). Meanwhile a focused password field gives the page's view a text input context, so that AppKit adds AutoFill to the menu, and the view offers the field's text to no service; input methods stay off in password fields at all other times. Returns whether the focused field is a password field or has been one. Before CEF has created the browser, it does nothing and returns NO.
 - (BOOL)setContextMenuPasswordAutoFill:(BOOL)enabled NS_SWIFT_NAME(setContextMenuPasswordAutoFill(_:));
+/// Adds `word` to the profile's custom dictionary and to the system's spelling dictionary, which clears its marks in the page (`CefBrowserHost::AddWordToDictionary`).
+- (void)addWordToDictionary:(NSString *)word NS_SWIFT_NAME(addWordToDictionary(_:));
 @end
 
 NS_ASSUME_NONNULL_END

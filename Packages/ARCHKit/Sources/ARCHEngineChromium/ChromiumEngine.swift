@@ -583,21 +583,21 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return []
     }
 
-    /// Puts the spelling and editing items CEF can run into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu, so that AppKit adds its own items where it adds them on WebKit.
+    /// Puts the spelling and editing items CEF can run and macOS's text items into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu, so that AppKit adds its own items where it adds them on WebKit.
     public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
         guard let uiDelegate, view.window != nil else { return completion() }
         let menu = NSMenu()
         menu.autoenablesItems = false
         let suggestions = params.misspelledWord.isEmpty || !params.spellingSuggestions.isEmpty ? params.spellingSuggestions
             : Self.systemSpellingSuggestions(for: params.misspelledWord)
-        let element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
+        let pageView = EngineContextMenuPresenter.textInputView(at: params.location, in: view)
+        var element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
                                                mediaURL: params.mediaURL.flatMap(URL.init(engineString:)),
                                                selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable,
                                                isInMainFrame: params.isInMainFrame)
-        for item in Self.engineMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, element: element, editCommands: params.editCommands) {
-            item.target = self
-            menu.addItem(item)
-        }
+        element.isPasswordField = Self.isPasswordField(element, pageView: pageView)
+        Self.contextMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, element: element, editCommands: params.editCommands, target: self,
+                              pageView: pageView, anchor: view, at: params.location).forEach(menu.addItem)
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu
@@ -609,8 +609,22 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         completion()
     }
 
-    /// The spelling and editing items CEF can run, without a target, as the WebKit adapter hands them to the tab: the misspelled word's suggestions, or No Guesses Found, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one that is not on a link, image, or media, where WebKit's menu has no Copy. A right click on a text link selects the link's text on both engines. Select All is enabled in any field, as the WebKit adapter's is, also where Chromium would not run it, as in an empty field, where it selects nothing. A suggestion carries its word, and an editing item its command as its tag.
-    static func engineMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand) -> [NSMenuItem] {
+    /// The items the adapter hands the tab: the spelling and editing items CEF can run, aimed at `target` where they have no target of their own, then macOS's text items, whose submenus' actions go to `pageView`, Chromium's page view under the click, and whose Look Up and Translate open at `location` in `anchor`.
+    static func contextMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand, target: AnyObject?,
+                                 pageView: NSView?, anchor: NSView, at location: NSPoint, panels: EngineTextMenuItems.Panels? = nil) -> [NSMenuItem] {
+        let engineItems = engineMenuItems(misspelledWord: misspelledWord, suggestions: suggestions, element: element, editCommands: editCommands, pageView: pageView)
+        engineItems.filter { $0.target == nil }.forEach { $0.target = target }
+        return engineItems + EngineTextMenuItems.items(for: element, pageView: pageView, anchor: anchor, at: location, panels: panels)
+    }
+
+    /// Whether a field holds a password, from its page view: Chromium's page view has no text input context in a password field or in one that has been one, and a field without a page view counts as one, so that no item reads its text.
+    static func isPasswordField(_ element: EngineContextMenuElement, pageView: NSView?) -> Bool {
+        element.isEditable && pageView?.inputContext == nil
+    }
+
+    /// The spelling and editing items CEF can run, as the WebKit adapter hands them to the tab: the misspelled word's suggestions, or No Guesses Found, Ignore Spelling, and Learn Spelling, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one that is not on a link, image, or media, where WebKit's menu has no Copy. A right click on a text link selects the link's text on both engines. Select All is enabled in any field, as the WebKit adapter's is, also where Chromium would not run it, as in an empty field, where it selects nothing. Ignore Spelling sends AppKit's `ignoreSpelling:` to `pageView`, which runs Blink's IgnoreSpelling command on the selected misspelled word, and shows only when the view takes it. The other items have no target: a suggestion carries its word, Learn Spelling the misspelled word, and an editing item its command as its tag.
+    static func engineMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand,
+                                pageView: NSView? = nil) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         if !misspelledWord.isEmpty {
             for word in suggestions {
@@ -621,6 +635,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             if suggestions.isEmpty {
                 items.append(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
             }
+            let ignore = #selector(NSTextView.ignoreSpelling(_:))
+            if let pageView, pageView.responds(to: ignore) {
+                let item = engineMenuItem("Ignore Spelling", EngineContextMenuItem.ignoreSpelling, ignore, isEnabled: true)
+                item.target = pageView
+                items.append(item)
+            }
+            let learn = engineMenuItem("Learn Spelling", EngineContextMenuItem.learnSpelling, #selector(ChromiumWebContents.learnSpellingFromMenu(_:)), isEnabled: true)
+            learn.representedObject = misspelledWord
+            items.append(learn)
         }
         let commands: [(String, NSUserInterfaceItemIdentifier, ARCHCEFEditCommand)] = [
             ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
@@ -650,6 +673,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     @objc private func replaceMisspellingFromMenu(_ sender: NSMenuItem) {
         guard let word = sender.representedObject as? String else { return }
         browser?.replaceMisspelling(withWord: word)
+    }
+
+    /// Adds the word to the profile's custom dictionary, which clears its marks in every page of the profile, and to the system's spelling dictionary, as WebKit's Learn Spelling does. CEF learns the word in the system's dictionary too when Chromium checks spelling with it, as it does on macOS by default; the spell checker learns it here when it has not.
+    @objc private func learnSpellingFromMenu(_ sender: NSMenuItem) {
+        guard let word = sender.representedObject as? String else { return }
+        browser?.addWordToDictionary(word)
+        if !NSSpellChecker.shared.hasLearnedWord(word) {
+            NSSpellChecker.shared.learnWord(word)
+        }
     }
     public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
         guard let uiDelegate else { return completion(kind == .alert, nil) }
