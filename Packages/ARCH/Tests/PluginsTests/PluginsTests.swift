@@ -112,6 +112,15 @@ import Testing
         #expect(PluginGrant(permissions: [.nativeMessaging], sites: []).confirmationReason(for: "A") == "let \u{201C}A\u{201D} exchange messages with apps on this Mac")
         #expect(PluginGrant(permissions: [.tabs, .clipboard], sites: [try MatchPattern("https://*.example.com/*")]).confirmationReason(for: "A") == nil)
     }
+
+    /// A few patterns for top-level domains reach most of the web, so they ask for the same confirmation as every website.
+    @Test func asksToConfirmEveryWebsiteOfATopLevelDomain() throws {
+        let sites = try ["*://*.com/*", "*://*.org/*"].map(MatchPattern.init)
+        #expect(sites.allSatisfy { $0.coversEverySite })
+        #expect(sites[0].accessSummary == "Run scripts on pages from every .com website")
+        #expect(PluginGrant(permissions: [], sites: sites).confirmationReason(for: "A") == "let \u{201C}A\u{201D} run scripts on every website")
+        #expect(try !MatchPattern("https://example.com/*").coversEverySite && !MatchPattern("https://*.example.com/*").coversEverySite)
+    }
 }
 
 @MainActor
@@ -581,14 +590,14 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/org.example.recording/storage.json").path))
     }
 
-    @Test func removesTheDataOfADeletedPersona() throws {
+    @Test func removesTheDataOfADeletedPersona() async throws {
         let deleted = UUID(), kept = UUID()
         let setting = try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret })
         for persona in [deleted, kept] {
             let manager = manager(persona: persona, [SettingsPlugin.self])
             // Writes `plugins.json` in the Persona's folder.
             manager.setEnabled(false, for: SettingsPlugin.manifest.id)
-            try manager.setSecret("token", of: setting, for: SettingsPlugin.manifest.id)
+            try await manager.setSecret("token", of: setting, for: SettingsPlugin.manifest.id)
         }
         #expect(PluginManager.removeData(ofPersona: deleted, in: folder.url, secretStore: secrets))
         let plugins = folder.url.appendingPathComponent("Plugins", isDirectory: true)
@@ -614,7 +623,7 @@ import Testing
         #expect(manager.badge(on: item) == nil)
         #expect(throws: PluginError.stopped) { try old.copyToClipboard("text") }
         #expect(throws: PluginError.stopped) { try old.storage.setValue(.number(1), forKey: "key") }
-        #expect(throws: PluginError.stopped) { try old.secrets.setSecret("token", forKey: "key") }
+        await #expect(throws: PluginError.stopped) { try await old.secrets.setSecret("token", forKey: "key") }
         #expect(old.storage.allKeys().isEmpty && secrets.items.isEmpty)
         // The new instance acts, within its grant, and the old one still reads.
         current.setBadge("2", onSidebarItem: "panel")
@@ -654,36 +663,38 @@ import Testing
         #expect(try JSONDecoder().decode([String: PluginValue].self, from: Data(contentsOf: file)) == ["text": .number(1), "arch.setting:text": .string("b")])
     }
 
-    @Test func limitsTheSecretsOfAPlugin() throws {
+    @Test func limitsTheSecretsOfAPlugin() async throws {
         let persona = UUID()
         let manager = manager(persona: persona, [SettingsPlugin.self])
         let secrets = try context(for: SettingsPlugin.self, in: manager).secrets
         for index in 0..<ScopedPluginSecrets.countLimit {
-            try secrets.setSecret("token", forKey: "key\(index)")
+            try await secrets.setSecret("token", forKey: "key\(index)")
         }
-        #expect(throws: PluginError.quotaExceeded) { try secrets.setSecret("token", forKey: "one more") }
+        await #expect(throws: PluginError.quotaExceeded) { try await secrets.setSecret("token", forKey: "one more") }
         // A secret of another Persona does not count, a key the plugin keeps takes a new value, and a deleted one makes room.
-        try self.manager([SettingsPlugin.self]).setSecret("token", of: try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret }), for: SettingsPlugin.manifest.id)
-        try secrets.setSecret("new", forKey: "key0")
-        try secrets.setSecret(nil, forKey: "key1")
-        try secrets.setSecret("token", forKey: "one more")
-        #expect(throws: PluginError.quotaExceeded) { try secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit + 1), forKey: "key0") }
-        try secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit), forKey: "key0")
+        try await self.manager([SettingsPlugin.self]).setSecret("token", of: try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret }), for: SettingsPlugin.manifest.id)
+        try await secrets.setSecret("new", forKey: "key0")
+        try await secrets.setSecret(nil, forKey: "key1")
+        try await secrets.setSecret("token", forKey: "one more")
+        await #expect(throws: PluginError.quotaExceeded) { try await secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit + 1), forKey: "key0") }
+        try await secrets.setSecret(String(repeating: "x", count: ScopedPluginSecrets.sizeLimit), forKey: "key0")
         #expect(self.secrets.items.count == ScopedPluginSecrets.countLimit + 1)
     }
 
-    @Test func keepsSecretsInTheKeychainOfEachPersona() throws {
+    /// A read or write can wait while macOS asks for the keychain password, so it runs off the main thread.
+    @Test func keepsSecretsInTheKeychainOfEachPersona() async throws {
         let persona = UUID()
         let manager = manager(persona: persona, [SettingsPlugin.self])
         let setting = try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret })
         let id = SettingsPlugin.manifest.id
         #expect(try !manager.hasSecret(setting, for: id))
-        try manager.setSecret("token", of: setting, for: id)
+        try await manager.setSecret("token", of: setting, for: id)
         #expect(try manager.hasSecret(setting, for: id))
-        #expect(try context(for: SettingsPlugin.self, in: manager).secrets.secret(forKey: "secret") == "token")
+        #expect(try await context(for: SettingsPlugin.self, in: manager).secrets.secret(forKey: "secret") == "token")
+        #expect(secrets.readsOnMainThread == 0)
         #expect(secrets.items == ["xyz.taeyoon.arch.plugin.org.example.settings \(persona.uuidString)/secret": "token"])
         #expect(try self.manager([SettingsPlugin.self]).hasSecret(setting, for: id) == false)
-        try manager.setSecret(nil, of: setting, for: id)
+        try await manager.setSecret(nil, of: setting, for: id)
         #expect(secrets.items.isEmpty)
     }
 
@@ -867,31 +878,42 @@ private func installed(_ id: String, name: String, contributions: PluginContribu
     return InstalledPlugin(manifest: manifest, grant: PluginGrant(requestedBy: manifest), isEnabled: isEnabled)
 }
 
-/// Secrets in memory by service and account, so that tests never touch the Keychain.
-final class MemorySecretStore: PluginSecretStore {
-    private(set) var items: [String: String] = [:]
+/// Secrets in memory by service and account, so that tests never touch the Keychain. The scoped secrets call it on their own queue, which records whether a read ran on the main thread.
+final class MemorySecretStore: PluginSecretStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [String: String] = [:]
+    private var mainThreadReads = 0
+
+    var items: [String: String] { lock.withLock { stored } }
+    /// How many secrets were read on the main thread.
+    var readsOnMainThread: Int { lock.withLock { mainThreadReads } }
 
     func secret(service: String, account: String) throws -> String? {
-        items[service + " " + account]
+        lock.withLock {
+            if Thread.isMainThread { mainThreadReads += 1 }
+            return stored[service + " " + account]
+        }
     }
 
     func setSecret(_ secret: String?, service: String, account: String) throws {
-        items[service + " " + account] = secret
+        lock.withLock { stored[service + " " + account] = secret }
     }
 
     func containsSecret(service: String, account: String) throws -> Bool {
-        items[service + " " + account] != nil
+        lock.withLock { stored[service + " " + account] != nil }
     }
 
     func secretCount(service: String, accountPrefix: String) throws -> Int {
-        items.keys.filter { $0.hasPrefix(service + " " + accountPrefix) }.count
+        lock.withLock { stored.keys.filter { $0.hasPrefix(service + " " + accountPrefix) }.count }
     }
 
     func removeSecrets(service: String?, accountPrefix: String) throws {
-        items = items.filter { key, _ in
-            let parts = key.split(separator: " ", maxSplits: 1)
-            let isOfService = service.map { parts[0] == $0 } ?? parts[0].hasPrefix(PluginKeychain.servicePrefix)
-            return !(isOfService && parts[1].hasPrefix(accountPrefix))
+        lock.withLock {
+            stored = stored.filter { key, _ in
+                let parts = key.split(separator: " ", maxSplits: 1)
+                let isOfService = service.map { parts[0] == $0 } ?? parts[0].hasPrefix(PluginKeychain.servicePrefix)
+                return !(isOfService && parts[1].hasPrefix(accountPrefix))
+            }
         }
     }
 }

@@ -83,10 +83,10 @@ public final class AIService: ObservableObject, AIClient {
         return (try? settings.routeModels(for: feature)) != nil
     }
 
-    /// The provider's model names, for Settings ▸ AI. `key` is a key the user has typed but not saved; without one the provider's saved key is used.
+    /// The provider's model names, for Settings ▸ AI. `key` is a key the user has typed but not saved; without one the provider's saved key is used, while the configuration keeps the saved base URL.
     public func listModels(of configuration: AIProviderConfiguration, key: String? = nil) async throws -> [String] {
         var resolvedKey = key.flatMap { $0.isEmpty ? nil : $0 }
-        if resolvedKey == nil { resolvedKey = try await storedKey(for: configuration) }
+        if resolvedKey == nil { resolvedKey = try await savedKey(forUnsaved: configuration) }
         return try await makeProvider(configuration, resolvedKey).listModels()
     }
 
@@ -96,7 +96,7 @@ public final class AIService: ObservableObject, AIClient {
         let request = AIProviderRequest(model: model.name, instructions: nil, messages: [AIMessage(role: .user, parts: [.text("Reply with one short sentence.")])],
                                         tools: [], output: .text, maxOutputTokens: 256)
         var reply = ""
-        for try await event in makeProvider(configuration, try await storedKey(for: configuration)).stream(request) {
+        for try await event in makeProvider(configuration, try await savedKey(forUnsaved: configuration)).stream(request) {
             if case .text(let text) = event { reply += text }
         }
         // A stream read by a cancelled task ends without an error.
@@ -168,8 +168,11 @@ public final class AIService: ObservableObject, AIClient {
         let providerRequest: AIProviderRequest
         do {
             key = try await storedKey(for: candidate.provider)
-            // The waits for the slot, a cool-down, and the Keychain can last minutes. Meanwhile the request may have been cancelled, the user may have switched AI off for the page's site, or the request ahead of it may have reached the spending limit, so each is checked again just before the request goes out.
+            // The waits for the slot, a cool-down, and the Keychain can last minutes. Meanwhile the request may have been cancelled, the user may have moved the provider to another base URL with that server's key, which the read by the provider's ID gave, switched AI off for the page's site, or the request ahead of it may have reached the spending limit, so each is checked again just before the request goes out.
             try Task.checkCancellation()
+            if key != nil, settings.providers.first(where: { $0.id == candidate.provider.id })?.keepsItsKey(in: candidate.provider) != true {
+                throw AIError.providerUnavailable(candidate.provider.id, detail: "The provider's settings changed while the request waited.")
+            }
             if reachedSpendingLimit() { throw AIError.budgetReached(.monthlySpending) }
             providerRequest = try prepare(request, feature: feature, on: candidate, entry: &entry)
         } catch {
@@ -265,6 +268,15 @@ public final class AIService: ObservableObject, AIClient {
         } catch {
             throw AIError.providerUnavailable(provider.id, detail: "The key could not be read from the Keychain. \(error.localizedDescription)")
         }
+    }
+
+    /// The saved key for a configuration that Settings may not have saved yet. A key saved for another base URL never goes to the configuration's, so a provider moved to another server gets the key only once the user enters it again or saves the move.
+    private func savedKey(forUnsaved configuration: AIProviderConfiguration) async throws -> String? {
+        guard case .http(let http) = configuration.kind, http.hasKey else { return nil }
+        if let saved = settings.providers.first(where: { $0.id == configuration.id }), !saved.keepsItsKey(in: configuration) {
+            throw AIError.providerUnavailable(configuration.id, detail: "Enter the key again to use it with the new base URL, or save the change first.")
+        }
+        return try await storedKey(for: configuration)
     }
 
     private static func partSummary(_ messages: [AIMessage]) -> [(kind: String, characters: Int)] {

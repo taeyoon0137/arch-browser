@@ -101,7 +101,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         terminal = nil
     }
 
-    /// Quitting the app ends the shell as closing the window does, so while a program runs in front the terminal comes forward and the user confirms first. Returns whether the app may quit; it may when the terminal never showed. The app asks it when a quit starts, before it ends its windows' sheets.
+    /// Quitting the app ends the shell as closing the window does, so while a program runs in front the terminal comes forward and the user confirms first. Returns whether the app may quit; it may when the terminal never showed. The app asks it when a quit starts, before it answers the tabs' prompts.
     public static func allowsQuit() -> Bool {
         guard let controller = instance, controller.terminal?.hasRunningProgram == true else { return true }
         controller.window?.makeKeyAndOrderFront(nil)

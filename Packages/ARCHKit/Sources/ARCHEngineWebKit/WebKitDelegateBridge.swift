@@ -116,6 +116,10 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         owner.context.webKitDownloads.add(download, from: owner)
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        owner.uiDelegate?.webContents(owner, didCommitDocumentAt: webView.url)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         owner.uiDelegate?.webContentsDidFinishLoadingDocument(owner)
         owner.refreshFavicon()

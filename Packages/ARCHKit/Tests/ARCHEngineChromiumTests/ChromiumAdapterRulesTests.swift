@@ -1,4 +1,4 @@
-// The Chromium adapter's rules that need no engine: how cookies cross into CEF's store and back, where Chromium keeps a profile's caches, where an extension's grant lets it run and which granted sites go with a click, and when a load keeps the copy Chromium runs. Cookie stores and extensions in a profile need the engine and the app.
+// The Chromium adapter's rules that need no engine: how cookies cross into CEF's store and back, when a crashed page reloads, where Chromium keeps a profile's caches, where an extension's grant lets it run and which granted sites go with a click, and when a load keeps the copy Chromium runs. Cookie stores and extensions in a profile need the engine and the app.
 import ARCHEngine
 import CEFBridge
 import Foundation
@@ -29,6 +29,21 @@ import Testing
     @Test func anInsecureCookieForEverySiteGoesWithoutAPolicy() {
         #expect(ChromiumBrowser.bridgeCookie(EngineCookie(name: "id", value: "1", domain: ".example.org", sameSite: .noRestriction)).sameSite == .unspecified)
         #expect(ChromiumBrowser.bridgeCookie(EngineCookie(name: "id", value: "1", domain: ".example.org", isSecure: true, sameSite: .noRestriction)).sameSite == .noRestriction)
+    }
+
+    // MARK: Crashes
+
+    /// A page that crashes again within a minute of its reload stays blank, so that it cannot reload in a loop, and a crash later than that, or of another page, reloads it.
+    @Test func aCrashReloadsThePageUnlessItCrashedJustAfterItsLastReload() {
+        let page = URL(string: "https://mail.example.org/")!
+        let reload = (url: page, date: Date(timeIntervalSinceReferenceDate: 0))
+        let reloads = { (url: URL, seconds: TimeInterval, last: (url: URL, date: Date)?) in
+            ChromiumWebContents.reloadsAfterCrash(of: url, now: Date(timeIntervalSinceReferenceDate: seconds), lastReload: last)
+        }
+        #expect(reloads(page, 0, nil))
+        #expect(!reloads(page, 30, reload))
+        #expect(reloads(page, 4 * 3600, reload))
+        #expect(reloads(URL(string: "https://news.example.org/")!, 30, reload))
     }
 
     // MARK: Profiles

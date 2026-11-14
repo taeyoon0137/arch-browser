@@ -1,10 +1,10 @@
-// Page access: the checks every part passes before each attempt (declared kinds, site exclusions, addresses without query or fragment, and length limits), the switch that allows or excludes a page's site, and the delimited text blocks providers receive page data in.
+// Page access: the checks every part passes before each attempt (declared kinds, site exclusions, addresses without query, fragment, or user name and password, and length limits), the switch that allows or excludes a page's site, and the delimited text blocks providers receive page data in.
 import Darwin
 import Foundation
 
 /// A site on which AI is off. Encodes as its string.
 public struct AISitePattern: Codable, Hashable, Sendable {
-    /// `example.org` matches the host and its subdomains; `file:` matches a scheme; `local-network` matches `localhost`, `.local` hosts, and loopback, link-local, and private IP addresses.
+    /// `example.org` matches the host and its subdomains; `file:` matches a scheme; `local-network` matches `localhost`, `.local` hosts, and loopback, unspecified, link-local, and private IP addresses. Hosts compare without the root's trailing dot, so `example.org.` is `example.org`.
     public var value: String
 
     public init(_ value: String) {
@@ -24,9 +24,9 @@ public struct AISitePattern: Codable, Hashable, Sendable {
             return
         }
         let address = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard var host = URL(string: address)?.host?.lowercased(), !host.isEmpty else { return nil }
+        guard var host = URL(string: address)?.host.map(Self.normalizedHost), !host.isEmpty else { return nil }
         if host.hasPrefix("*.") { host.removeFirst(2) }
-        self.init(host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")))
+        self.init(host)
     }
 
     public func matches(_ url: URL) -> Bool {
@@ -34,11 +34,19 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         if pattern.hasSuffix(":") {
             return url.scheme?.lowercased() == String(pattern.dropLast())
         }
-        guard let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")), !host.isEmpty else { return false }
+        guard let host = url.host.map(Self.normalizedHost), !host.isEmpty else { return false }
         if pattern == Self.localNetwork.value {
             return host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || Self.isLocalAddress(host)
         }
-        return host == pattern || host.hasSuffix(".\(pattern)")
+        let site = Self.normalizedHost(pattern)
+        return !site.isEmpty && (host == site || host.hasSuffix(".\(site)"))
+    }
+
+    /// A host as patterns compare it: in lowercase, without the brackets of an IPv6 address and without the trailing dots that name the root, which both engines keep in a page's address, as in `https://example.org./`.
+    static func normalizedHost(_ host: String) -> String {
+        var host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        while host.hasSuffix(".") { host.removeLast() }
+        return host
     }
 
     public init(from decoder: any Decoder) throws {
@@ -57,13 +65,14 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         return false
     }
 
-    /// Loopback, link-local, and private addresses in IPv4 and IPv6, including IPv4 addresses mapped into IPv6.
+    /// Loopback, unspecified, link-local, and private addresses in IPv4 and IPv6, including IPv4 addresses mapped into IPv6. A page at the unspecified address, as `http://0.0.0.0:3000/`, comes from a server on this Mac.
     private static func isLocalAddress(_ host: String) -> Bool {
         if let ipv6 = ipv6Bytes(host) {
             if ipv6.prefix(10).allSatisfy({ $0 == 0 }), ipv6[10] == 0xFF, ipv6[11] == 0xFF {
                 return isLocalIPv4(Array(ipv6.suffix(4)))
             }
             return ipv6 == [UInt8](repeating: 0, count: 15) + [1]
+                || ipv6.allSatisfy { $0 == 0 }
                 || (ipv6[0] == 0xFE && ipv6[1] & 0xC0 == 0x80)
                 || ipv6[0] & 0xFE == 0xFC
         }
@@ -72,7 +81,7 @@ public struct AISitePattern: Codable, Hashable, Sendable {
 
     private static func isLocalIPv4(_ bytes: [UInt8]) -> Bool {
         switch (bytes[0], bytes[1]) {
-        case (127, _), (10, _), (192, 168), (169, 254): return true
+        case (0, _), (127, _), (10, _), (192, 168), (169, 254): return true
         case (172, let second): return (16...31).contains(second)
         default: return false
         }
@@ -97,7 +106,7 @@ public struct AISitePattern: Codable, Hashable, Sendable {
     static func excludedSite(of url: URL, in patterns: [AISitePattern]) -> String? {
         let scheme = url.scheme?.lowercased() ?? ""
         guard !sendableSchemes.contains(scheme) || patterns.contains(where: { $0.matches(url) }) else { return nil }
-        return url.host.flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
+        return url.host.map(normalizedHost).flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
     }
 }
 
@@ -112,7 +121,7 @@ extension AISettingsStore {
     /// The Allow AI on This Site switch beside a page. Allowing removes every exclusion that matches the address, such as its parent domain or `local-network`; excluding puts back what allowing the same site removed in this session, so switching on and off again leaves the exclusions as they were, and otherwise adds its host, or `file:` for a local file. Addresses that can never be sent stay as they are.
     public func setAllowsAI(_ isAllowed: Bool, on url: URL) {
         guard let scheme = url.scheme?.lowercased(), AISitePattern.sendableSchemes.contains(scheme), allowsAI(on: url) != isAllowed else { return }
-        let site = url.host.flatMap { $0.isEmpty ? nil : $0.lowercased() } ?? "\(scheme):"
+        let site = url.host.map(AISitePattern.normalizedHost).flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
         if isAllowed {
             exclusionsRemovedBySwitch[site] = excludedSites.filter { $0.matches(url) }
             excludedSites.removeAll { $0.matches(url) }
@@ -187,8 +196,11 @@ struct AIPartPolicy {
         }
     }
 
+    /// The address without its query and fragment, and without a user name and password, which an address a page loaded with can carry.
     static func stripped(_ url: URL) -> URL {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.user = nil
+        components.password = nil
         components.query = nil
         components.fragment = nil
         return components.url ?? url

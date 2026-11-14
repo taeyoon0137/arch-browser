@@ -10,15 +10,19 @@ public final class ChromiumDownloads: EngineDownloads {
     private var itemsByIdentifier: [UInt32: ChromiumDownloadItem] = [:]
 
     /// Announces a new download that `webContents` started from the page at `pageURL` and asks the delegate for its destination. The engine shows its Save As dialog if no delegate is set.
+    ///
+    /// Chromium asks again each time an interrupted download resumes, on its own after a network error or after `resume()`. Such a download keeps its item and the destination it got, which holds its partial file, so the list shows it once, nothing asks where to save it again, and it resumes into the same file.
     func begin(_ download: ARCHCEFDownload, from webContents: ChromiumWebContents, pageURL: URL?, suggestedName: String, decision: @escaping (String?, Bool) -> Void) {
+        if let destination = itemsByIdentifier[download.identifier]?.destination { return decision(destination.path, false) }
         let item = ChromiumDownloadItem(download: download, webContents: webContents, pageURL: pageURL, owner: self)
         itemsByIdentifier[download.identifier] = item
         items.append(item)
         delegate?.downloads(self, didCreate: item)
         guard let delegate else { return decision(nil, true) }
-        delegate.downloads(self, determineFilenameFor: item, defaultFilename: suggestedName) { url in
+        delegate.downloads(self, determineFilenameFor: item, defaultFilename: suggestedName) { [weak item] url in
             // A `nil` destination cancels the download by leaving the callback unexecuted.
             guard let url else { return }
+            item?.destination = url
             decision(url.path, false)
         }
     }
@@ -44,6 +48,8 @@ final class ChromiumDownloadItem: EngineDownloadItem {
     let download: ARCHCEFDownload
     private unowned let owner: ChromiumDownloads
     private var isPaused = false
+    /// The destination the delegate chose, which a resumed download keeps.
+    fileprivate(set) var destination: URL?
     private(set) var targetPath: URL?
     private(set) var state: EngineDownloadState = .inProgress
     private(set) var completedBytes: Int64 = 0

@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the windows' sheets, so that Cancel leaves them showing. Closing the last main window quits through the same path.
+    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the tabs' prompts, so that Cancel leaves their cards showing. Closing the last main window quits through the same path.
     func confirmsQuit() -> Bool {
         confirmsQuitStoppingDownloads() && TerminalWindowController.allowsQuit()
     }
@@ -461,7 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front, no prompt waiting on its tab, and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
@@ -520,7 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
         }
-        // Clearing site data needs a web page in front and no sheet on its window.
+        // Clearing site data needs a web page in front, no prompt waiting on its tab, and no sheet on its window.
         if item.action == #selector(clearSiteData) {
             return activeWindow?.canClearSiteData == true
         }
@@ -575,11 +575,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if !closesOrReopens { session.forgetUndoableCloses() }
             return event
         }
-        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
+        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page. A click in any page on the window's screen, also in a pane of its split view that the click is about to select, lets that page start one more download without asking.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let session = self?.session, let view = session.window(for: event.window)?.selectedTab?.webContents.view, view.window === event.window,
-               view.bounds.contains(view.convert(event.locationInWindow, from: nil)) {
-                session.forgetUndoableCloses()
+            if let session = self?.session, let windowModel = session.window(for: event.window), let tab = windowModel.tabOnScreen(at: event) {
+                if tab === windowModel.selectedTab { session.forgetUndoableCloses() }
+                tab.userDidClickInPage()
             }
             return event
         }

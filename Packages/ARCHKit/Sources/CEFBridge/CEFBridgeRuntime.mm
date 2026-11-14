@@ -228,6 +228,9 @@ int gUnshownBrowsers = 0;
     CefMainArgs mainArgs(*_NSGetArgc(), *_NSGetArgv());
     CefSettings settings;
     settings.external_message_pump = true;
+    // Chromium's log would keep pages' console messages with their script addresses, and downloads' file names, in `chrome_debug.log` under the root cache path, outside every Persona and out of reach of clearing history or website data. The browser and its helpers write no log, and the file an earlier build left goes.
+    settings.log_severity = LOGSEVERITY_DISABLE;
+    [[NSFileManager defaultManager] removeItemAtPath:[cachePath stringByAppendingPathComponent:@"chrome_debug.log"] error:nil];
     CefString(&settings.framework_dir_path) = frameworkPath.UTF8String;
     CefString(&settings.root_cache_path) = cachePath.UTF8String;
     CefString(&settings.cache_path) = cachePath.UTF8String;

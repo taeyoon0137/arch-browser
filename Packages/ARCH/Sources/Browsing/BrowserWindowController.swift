@@ -129,12 +129,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         model.session.windowWillClose(model)
     }
 
-    /// The next sheet of a tab on the window's screen can show once a sheet has left the window, the tab's own or another, such as a Persona's name prompt or the print panel. AppKit lets go of the sheet only after this call, so the queue looks on the next turn of the run loop.
-    func windowDidEndSheet(_ notification: Notification) {
-        let sheets = model.session.sheets
-        DispatchQueue.main.async { sheets.showNext() }
-    }
-
     func windowDidMove(_ notification: Notification) {
         recordFrame()
     }

@@ -125,8 +125,9 @@ public struct PluginPackage: Identifiable, Sendable {
         defer { try? FileManager.default.removeItem(at: archive) }
         try crx.archive.write(to: archive)
         try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
-        let manifest = root.appendingPathComponent(crxManifestFileName)
-        if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
+        // The package's check, which refuses symbolic links, comes before the write, so that the key never goes into a manifest outside the package, as through an archive whose only entry links to another folder.
+        _ = try files(in: root)
+        if let manifest = Self.file(crxManifestFileName, in: root) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
         return crx
     }
 

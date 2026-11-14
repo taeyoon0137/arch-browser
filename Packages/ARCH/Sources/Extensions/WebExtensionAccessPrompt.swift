@@ -1,5 +1,4 @@
-// The question that a web extension's request for more access asks, such as an optional permission or a site it requests with `permissions.request`: a sheet that names the extension, and for a version of a pair that version, states the access in the sentences of the install sheet, and Touch ID or the login password for access to every website, as at install. Native messaging is never granted here, since only the install grants it. The engines' own questions, in their own sentences, ask with sheets of the same kind.
-import AppKit
+// The question that a web extension's request for more access asks, such as an optional permission or a site it requests with `permissions.request`: it names the extension, and for a version of a pair that version, states the access in the sentences of the install sheet, and Touch ID or the login password for access to every website, as at install. Native messaging is never granted here, since only the install grants it. The engines' own questions, in their own sentences, ask in the same way. The questions carry no interface; the host shows them (`WebExtensionQuestion`).
 import ARCHEngine
 import LocalAuthentication
 import Plugins
@@ -46,16 +45,11 @@ struct WebExtensionAccessPrompt {
             + sites.map(\.accessSummary) + pages.map { "Run scripts on pages from \($0)" }
     }
 
-    /// Allow, then Don't Allow, under a title that names the version of a pair that asks, such as "Allow the Chromium version of “Reader” more access?". What the user allows lasts while the extension stays loaded.
-    func alert() -> NSAlert {
-        let alert = NSAlert()
-        let name = "\u{201C}\(extensionName)\u{201D}"
-        alert.messageText = "Allow \(version.map { "the \($0.displayName) version of \(name)" } ?? name) more access?"
+    /// The question, which names the extension and the version of a pair that asks. What the user allows lasts while the extension stays loaded, and Touch ID or the login password confirms access that needs it.
+    func question() -> WebExtensionQuestion {
         let keeper = version.map { "Only the \($0.displayName) version gets this access. It keeps it" } ?? "The extension keeps this access"
-        alert.informativeText = sentences.joined(separator: "\n") + "\n\n\(keeper) until you quit Arch or switch the extension off."
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Don\u{2019}t Allow")
-        return alert
+        return WebExtensionQuestion(kind: .access, extensionName: extensionName, version: version, items: sentences,
+                                    keeps: "\(keeper) until you quit Arch or switch the extension off.", confirmsNext: grant.confirmationReason(for: extensionName) != nil)
     }
 
     /// True at once for access that needs no confirmation.
@@ -66,28 +60,18 @@ struct WebExtensionAccessPrompt {
 
 /// The questions that an engine's extension runtime asks in its own words: more access that Chromium describes in its sentences, which do not say which permissions or sites they stand for, and a reload of a tab so that the extensions it kept from running there run.
 enum WebExtensionEnginePrompt {
-    /// Allow, then Don't Allow, under a title that names the version of a pair that asks. The engine keeps what the user allows until the extension's storage goes, as Chromium keeps the permissions it grants at run time, while sites can go sooner (`EngineExtensionPrompt.Kind.permissions`).
-    static func permissionsAlert(messages: [String], extensionName: String, version: EngineKind?, engine: EngineKind) -> NSAlert {
-        let alert = NSAlert()
-        let name = "\u{201C}\(extensionName)\u{201D}"
-        alert.messageText = "Allow \(version.map { "the \($0.displayName) version of \(name)" } ?? name) more access?"
+    /// More access in the engine's sentences, naming the version of a pair that asks. The engine keeps what the user allows until the extension's storage goes, as Chromium keeps the permissions it grants at run time, while sites can go sooner (`EngineExtensionPrompt.Kind.permissions`). `confirmsNext` says whether Touch ID or the login password follows Allow.
+    static func permissionsQuestion(messages: [String], extensionName: String, version: EngineKind?, engine: EngineKind, confirmsNext: Bool) -> WebExtensionQuestion {
         let keeper = version.map { "Only the \($0.displayName) version gets this access." } ?? "The extension gets this access on \(engine.displayName) tabs."
-        alert.informativeText = (messages.isEmpty ? "" : messages.joined(separator: "\n") + "\n\n")
-            + "\(keeper) \(engine.displayName) keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension\u{2019}s websites out."
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Don\u{2019}t Allow")
-        return alert
+        return WebExtensionQuestion(kind: .enginePermissions, extensionName: extensionName, version: version, items: messages,
+                                    keeps: "\(keeper) \(engine.displayName) keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension\u{2019}s websites out.",
+                                    confirmsNext: confirmsNext)
     }
 
-    /// Reload, then Cancel, naming the extensions that run on the page once it loads again.
-    static func reloadAlert(names: [String]) -> NSAlert {
-        let alert = NSAlert()
-        let list = names.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ")
-        alert.messageText = "Reload This Page?"
-        alert.informativeText = "\(list.isEmpty ? "The extension" : list) can run on this page once it loads again."
-        alert.addButton(withTitle: "Reload")
-        alert.addButton(withTitle: "Cancel")
-        return alert
+    /// A reload that names the extensions that run on the page once it loads again.
+    static func reloadQuestion(names: [String]) -> WebExtensionQuestion {
+        let list = ListFormatter.localizedString(byJoining: names.map { "\u{201C}\($0)\u{201D}" })
+        return WebExtensionQuestion(kind: .reload, extensionName: "", message: "\(list.isEmpty ? "The extension" : list) can run on this page once it loads again.")
     }
 
     /// Touch ID or the login password for a grant whose rule needs it, true at once otherwise.

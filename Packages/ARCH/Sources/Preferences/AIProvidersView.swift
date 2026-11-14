@@ -274,6 +274,12 @@ private struct AIProviderEditor: View {
                 message = "The key was not changed."
                 return
             }
+        } else if draft.hasKey, let saved = settings.providers.first(where: { $0.id == configuration.id }), !saved.keepsItsKey(in: configuration) {
+            // The saved key would go to the new base URL from now on, which asks as much as replacing the key does.
+            guard await Self.authorize("send the API key for \(configuration.name) to a new base URL") else {
+                message = "The provider was not changed."
+                return
+            }
         }
         settings.save(configuration)
         do {
@@ -462,7 +468,7 @@ private struct AIModelRow: View {
                 get: { model.price != nil },
                 set: { model.price = $0 ? AIPrice(currency: Locale.current.currency?.identifier ?? "USD", inputPerMillion: 0, outputPerMillion: 0) : nil }))
             if model.price != nil {
-                TextField("Currency", text: priceBinding(\.currency, fallback: ""))
+                TextField("Currency", text: Binding(get: { model.price?.currency ?? "" }, set: { model.price?.currency = $0.uppercased() }))
                 TextField("Input", value: priceBinding(\.inputPerMillion, fallback: 0), format: .number)
                 TextField("Output", value: priceBinding(\.outputPerMillion, fallback: 0), format: .number)
                 TextField("Cached input", value: priceBinding(\.cachedInputPerMillion, fallback: nil), format: .number, prompt: Text("Same as input"))

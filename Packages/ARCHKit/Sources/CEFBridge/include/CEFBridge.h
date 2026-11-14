@@ -298,6 +298,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeTitle:(NSString *)title;
 - (void)cefBrowserDidChangeURL:(NSString *)url;
 - (void)cefBrowserDidChangeLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+/// Reports that the main frame committed a new document at `url`, before `cefBrowserDidChangeURL:` reports it. Navigations within the document and loads that fail report nothing.
+- (void)cefBrowserDidCommitDocument:(NSString *)url;
 /// Reports that the main frame finished loading a document. The loading state, unlike this, also follows the frames inside the page.
 - (void)cefBrowserDidFinishLoadingDocument;
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;

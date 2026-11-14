@@ -8,6 +8,8 @@ struct WebContentsHostView: NSViewRepresentable {
     var cornerRadius = PageFrameShape.cornerRadius
     /// Runs when a click lands on the page, such as one in a split view pane that is not focused. `nil` when nothing needs to know.
     var onClick: (() -> Void)?
+    /// Set while a prompt card covers the page, so that VoiceOver reads the card and not the page that waits under it.
+    var hidesPageFromAccessibility = false
 
     func makeNSView(context: Context) -> ContainerView {
         let container = ContainerView()
@@ -20,6 +22,7 @@ struct WebContentsHostView: NSViewRepresentable {
     func updateNSView(_ container: ContainerView, context: Context) {
         container.layer?.cornerRadius = cornerRadius
         container.onClick = onClick
+        container.hidesPageFromAccessibility = hidesPageFromAccessibility
         if let current = container.subviews.first, current === contentView { return }
         container.subviews.forEach { $0.removeFromSuperview() }
         guard let contentView else { return }
@@ -37,7 +40,18 @@ struct WebContentsHostView: NSViewRepresentable {
         var onClick: (() -> Void)? {
             didSet { updateClickMonitor() }
         }
+        var hidesPageFromAccessibility = false {
+            didSet {
+                guard hidesPageFromAccessibility != oldValue else { return }
+                NSAccessibility.post(element: self, notification: .layoutChanged)
+            }
+        }
         private var clickMonitor: Any?
+
+        // The page under a card has no accessibility children, so VoiceOver cannot move into it.
+        override func accessibilityChildren() -> [Any]? {
+            hidesPageFromAccessibility ? [] : super.accessibilityChildren()
+        }
 
         deinit {
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }

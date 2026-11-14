@@ -85,6 +85,20 @@ import Testing
         #expect(items.readAloud.keyEquivalent == "r" && items.readAloud.keyEquivalentModifierMask == [.control, .option])
     }
 
+    /// Restoring a default that another command took after Replace asks again rather than giving both commands the shortcut.
+    @Test func restoringADefaultThatAnotherCommandUsesAsksFirst() throws {
+        let commandC = KeyShortcut(key: "c", modifiers: .command)
+        let (copyCommand, minimizeCommand) = (try command("Copy"), try command("Minimize"))
+        settings.setShortcut(nil, for: copyCommand)
+        settings.setShortcut(commandC, for: minimizeCommand)
+        #expect(settings.resetShortcut(for: copyCommand)?.title == "Minimize")
+        #expect(settings.shortcut(for: copyCommand) == nil && copy.keyEquivalent.isEmpty)
+        #expect(settings.shortcut(for: minimizeCommand) == commandC)
+        settings.setShortcut(nil, for: minimizeCommand)
+        #expect(settings.resetShortcut(for: copyCommand) == nil)
+        #expect(settings.shortcut(for: copyCommand) == commandC && !settings.isChanged(copyCommand))
+    }
+
     @Test func givesTheFirstOfTwoItemsAChoiceTheyShare() throws {
         let shortcut = KeyShortcut(key: "x", modifiers: [.control, .option])
         let items = fillPluginsMenu()

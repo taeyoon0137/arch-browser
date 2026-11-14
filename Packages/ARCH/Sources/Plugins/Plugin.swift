@@ -167,12 +167,12 @@ public protocol PluginStorage: AnyObject {
     func allKeys() -> [String]
 }
 
-/// A plugin's secrets in one Persona, kept in the Keychain.
+/// A plugin's secrets in one Persona, kept in the Keychain. Each call waits off the main thread, since macOS may first ask for the login keychain password.
 @MainActor
 public protocol PluginSecrets: AnyObject {
-    func secret(forKey key: String) throws -> String?
+    func secret(forKey key: String) async throws -> String?
     /// nil deletes the Keychain item. Throws `PluginError.quotaExceeded` for a secret of more than 16 KB, and for a new key once the plugin keeps 64 secrets in the Persona, its secret settings among them.
-    func setSecret(_ secret: String?, forKey key: String) throws
+    func setSecret(_ secret: String?, forKey key: String) async throws
 }
 
 public enum PluginError: Error, Hashable, Sendable {

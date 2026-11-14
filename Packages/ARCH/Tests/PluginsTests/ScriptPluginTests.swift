@@ -351,7 +351,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let manager = manager()
         try await installSample(in: manager)
         let installed = try #require(manager.plugins.first)
-        try manager.makeContext(for: installed).secrets.setSecret("token", forKey: "key")
+        try await manager.makeContext(for: installed).secrets.setSecret("token", forKey: "key")
         try secrets.setSecret("other", service: "xyz.taeyoon.arch.plugin.org.example.sample", account: "\(UUID().uuidString)/key")
         try manager.setValue(.string("Kept"), of: installed.manifest.contributions.settings[0], for: sampleID)
         try manager.remove(sampleID)

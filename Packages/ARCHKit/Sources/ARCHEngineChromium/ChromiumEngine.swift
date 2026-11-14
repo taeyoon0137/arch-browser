@@ -288,8 +288,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var lastFind: (text: String, matchCase: Bool, forward: Bool)?
     private var lastActiveMatchOrdinal = 0
     private var didSelectFirstMatch = false
-    /// The page that last crashed. Skipping a reload after two consecutive crashes on the same page prevents a reload loop.
-    private var lastCrashedURL: URL?
+    /// The page whose crash the adapter last reloaded, and when. Leaving the page blank when it crashes again soon after prevents a reload loop.
+    private var lastCrashReload: (url: URL, date: Date)?
     /// Credentials sent per protection space since the last page finished loading; a further request for that space means they failed.
     private var authenticationAttempts: [String: Int] = [:]
     /// The context menu while it tracks, so that a closing browser can end it.
@@ -488,6 +488,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.canGoForward = canGoForward
         uiDelegate?.webContentsDidChangeLoadingState(self)
     }
+    public func cefBrowserDidCommitDocument(_ url: String) { uiDelegate?.webContents(self, didCommitDocumentAt: URL(string: url)) }
     public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
@@ -751,7 +752,16 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             uiDelegate?.webContentsDidRequestExitFullscreen(self)
         }
     }
-    /// Reports the crash, then reloads the page once. The page stays blank after two consecutive crashes on the same URL.
+    /// How soon after its reload a page's next crash leaves it blank. A crash later than this, as hours after a page ran out of memory once, reloads the page again.
+    static let repeatedCrashInterval: TimeInterval = 60
+
+    /// Whether the crash of the page at `url` at `now` reloads it: unless the adapter reloaded the same page after a crash less than `repeatedCrashInterval` before.
+    static func reloadsAfterCrash(of url: URL, now: Date, lastReload: (url: URL, date: Date)?) -> Bool {
+        guard let lastReload, lastReload.url == url else { return true }
+        return now.timeIntervalSince(lastReload.date) >= repeatedCrashInterval
+    }
+
+    /// Reports the crash, then reloads the page. The page stays blank when it crashes again within `repeatedCrashInterval` of that reload.
     public func cefBrowserRenderProcessDidTerminate() {
         // The page's frames never report their media again.
         chromiumMediaSession.removeAllDocuments()
@@ -759,8 +769,9 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate?.webContentsDidChangeLoadingState(self)
         uiDelegate?.webContentsProcessDidTerminate(self)
         context?.application?.rendererDidCrash()
-        guard let url, url != lastCrashedURL else { return }
-        lastCrashedURL = url
+        let now = Date()
+        guard let url, Self.reloadsAfterCrash(of: url, now: now, lastReload: lastCrashReload) else { return }
+        lastCrashReload = (url, now)
         browser?.loadURL(url.absoluteString)
     }
 }

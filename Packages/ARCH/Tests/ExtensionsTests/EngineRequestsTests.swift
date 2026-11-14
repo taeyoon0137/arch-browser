@@ -1,4 +1,4 @@
-// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, the store's install button, which starts Arch's store install only from a store page, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
+// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, the store's install button, which starts Arch's store install only from a store page, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages and the links they may hold, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
 import AppKit
 import ARCHEngine
 import CryptoKit
@@ -93,6 +93,21 @@ struct EngineRequestsTests {
         await #expect(throws: PluginError.invalidPackage("Packed.crx is a .crx file of format version 2, which Chromium no longer installs.")) { try await manager.stage(crx) }
     }
 
+    /// A `.crx` file whose archive holds only a link to a package elsewhere is refused before its key is written, so the manifest the link leads to stays as it was.
+    @Test func refusesACRXFileThatLinksOutOfItsPackage() async throws {
+        let outside = try folder.package("outside", ["manifest.json": #"{"manifest_version": 3, "name": "Outside", "version": "1", "key": "b3V0c2lkZQ=="}"#])
+        let linkOnly = folder.url.appendingPathComponent("link only", isDirectory: true)
+        try FileManager.default.createDirectory(at: linkOnly, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkOnly.appendingPathComponent("ext"), withDestinationURL: outside)
+        let archive = folder.url.appendingPathComponent("link.zip")
+        try compress(linkOnly, to: archive)
+        let crx = folder.url.appendingPathComponent("Link.crx")
+        try CRXFile.data(archive: Data(contentsOf: archive)).write(to: crx)
+        let manifest = outside.appendingPathComponent("manifest.json")
+        let before = try Data(contentsOf: manifest)
+        await #expect(throws: PluginError.invalidPackage("The package is a symbolic link, which could lead to files outside Arch.")) { try await manager.stage(crx) }
+        #expect(try Data(contentsOf: manifest) == before)
+    }
 
     // MARK: Launch
 
@@ -135,35 +150,39 @@ struct EngineRequestsTests {
 
     // MARK: Prompts
 
-    @Test func asksTheEnginesQuestionsWithSheets() async throws {
+    @Test func asksTheEnginesQuestions() async throws {
         let installed = try await installLoaded("asker", #"{"manifest_version": 3, "name": "Asker", "version": "1", "optional_host_permissions": ["https://example.com/*"]}"#)
         let id = WebExtensionManifest.extensionID(of: installed.id)
         var answer: Bool?
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .permissions(["Read and change your data on example.com"]), tab: nil)) { answer = $0 }
         #expect(await eventually { answer != nil })
-        #expect(answer == true && host.sheets.last?.messageText == "Allow \u{201C}Asker\u{201D} more access?")
-        #expect(host.sheets.last?.informativeText.hasPrefix("Read and change your data on example.com\n\nThe extension gets this access on Chromium tabs.") == true)
-        host.sheetAnswer = .alertSecondButtonReturn
+        #expect(answer == true)
+        #expect(host.questions.last == WebExtensionQuestion(kind: .enginePermissions, extensionName: "Asker", items: ["Read and change your data on example.com"],
+                                                            keeps: "The extension gets this access on Chromium tabs. Chromium keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension\u{2019}s websites out.",
+                                                            confirmsNext: false))
+        host.answer = false
         answer = nil
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .reload(["Asker"]), tab: nil)) { answer = $0 }
-        #expect(answer == false && host.sheets.last?.messageText == "Reload This Page?")
-        // A question from an extension that the engine did not load is refused without a sheet.
-        let sheets = host.sheets.count
+        #expect(answer == false)
+        #expect(host.questions.last == WebExtensionQuestion(kind: .reload, extensionName: "", message: "\u{201C}Asker\u{201D} can run on this page once it loads again."))
+        #expect(WebExtensionEnginePrompt.reloadQuestion(names: []).message == "The extension can run on this page once it loads again.")
+        // A question from an extension that the engine did not load is refused without asking.
+        let questions = host.questions.count
         answer = nil
         runtime.extensions(chromium, extension: "unknown", asks: EngineExtensionPrompt(kind: .permissions([]), tab: nil)) { answer = $0 }
-        #expect(answer == false && host.sheets.count == sheets)
+        #expect(answer == false && host.questions.count == questions)
     }
 
     @Test func refusesRunTimeNativeMessagingAndConfirmsEveryWebsite() async throws {
         let messenger = try await installLoaded("messenger", #"{"manifest_version": 3, "name": "M", "version": "1", "optional_permissions": ["nativeMessaging"]}"#)
         var answer: Bool?
         runtime.extensions(chromium, extension: WebExtensionManifest.extensionID(of: messenger.id), asks: EngineExtensionPrompt(kind: .permissions(["Communicate with cooperating native applications"]), tab: nil)) { answer = $0 }
-        #expect(answer == false && host.sheets.isEmpty)
+        #expect(answer == false && host.questions.isEmpty)
         // An entry with arguments, which Chromium reads, leaves the list's other names in sight.
         let mixed = try await installLoaded("mixed", #"{"manifest_version": 3, "name": "X", "version": "1", "optional_permissions": ["nativeMessaging", {"usb": []}]}"#)
         answer = nil
         runtime.extensions(chromium, extension: WebExtensionManifest.extensionID(of: mixed.id), asks: EngineExtensionPrompt(kind: .permissions(["Communicate with cooperating native applications"]), tab: nil)) { answer = $0 }
-        #expect(answer == false && host.sheets.isEmpty)
+        #expect(answer == false && host.questions.isEmpty)
         let everywhere = try #require(WebExtensionManifest.optionalAccess(ofPackageAt: try folder.package("everywhere", [
             "manifest.json": #"{"manifest_version": 3, "name": "E", "version": "1", "optional_permissions": ["cookies"], "optional_host_permissions": ["<all_urls>"]}"#,
         ])))
@@ -208,7 +227,7 @@ struct EngineRequestsTests {
             delegate.extensions(chromium, extension: asking, asks: EngineExtensionPrompt(kind: .install, tab: tab)) { answer = $0 }
             #expect(answer == false, "\(asking) \(String(describing: tab?.url))")
         }
-        #expect(host.storeInstalls.count == 1 && host.sheets.isEmpty && chromium.loaded.isEmpty)
+        #expect(host.storeInstalls.count == 1 && host.questions.isEmpty && chromium.loaded.isEmpty)
     }
 
     // MARK: Site access

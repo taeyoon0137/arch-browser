@@ -22,8 +22,8 @@ public protocol WebExtensionHost: AnyObject {
     func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void)
     /// Opens a small window of the Persona whose one tab, in `engine`, loads the address, or the new tab page for none, in front when `focused`, which extensions see with only that tab. Several addresses open nothing, since a small window holds one tab. Completes once the window is reported, with its identity, or with nil when it opens none.
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
-    /// Shows the alert as a sheet for the tab, or for the front window's tab for no tab, and answers with the button the user chose.
-    func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
+    /// Asks the user the question for the tab, or for the front window's tab for no tab, and answers whether the user agreed. A question that ends without the user, as when its tab closes, answers false.
+    func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void)
     /// Starts Arch's install of the extension `id` from the Web Store in the Persona, as the store's own install button on the tab's store page asks: the store sheet in Settings ▸ Plugins, whose review names the Persona with the tab's space (`docs/web-store.md`, Chromium's store button).
     func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebContents)
 }
@@ -522,7 +522,7 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
     }
 
-    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for. An install is refused, so that the engine installs nothing outside the plugin list; from a tab on a store page, it starts Arch's store install of the identifier in the Persona with the tab instead, whose review comes before anything installs.
+    /// A reload asks on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for. An install is refused, so that the engine installs nothing outside the plugin list; from a tab on a store page, it starts Arch's store install of the identifier in the Persona with the tab instead, whose review comes before anything installs.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
         guard let host else { return completion(false) }
         switch prompt.kind {
@@ -531,22 +531,23 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
             guard let tab = prompt.tab, let page = tab.url, storePageReader(page) != nil, let storeID = WebStore.identifier(id) else { return }
             host.installFromWebStore(storeID, persona: persona, tab: tab)
         case let .reload(names):
-            host.presentSheet(WebExtensionEnginePrompt.reloadAlert(names: names), for: prompt.tab) { completion($0 == .alertFirstButtonReturn) }
+            host.ask(WebExtensionEnginePrompt.reloadQuestion(names: names), for: prompt.tab, completion: completion)
         case let .permissions(messages):
             guard let loaded = loadedExtension(id, in: extensions), let kind = engineKind(of: extensions) else { return completion(false) }
             let installed = plugins.first { $0.id == loaded.id } ?? loaded
             let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
             guard let requestable = WebExtensionManifest.runTimeAccess(of: installed),
                   !requestable.permissions.contains("nativeMessaging") || installed.grant.permissions.contains(.nativeMessaging) else { return completion(false) }
-            let alert = WebExtensionEnginePrompt.permissionsAlert(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind)
-            host.presentSheet(alert, for: prompt.tab) { response in
-                guard response == .alertFirstButtonReturn else { return completion(false) }
+            let question = WebExtensionEnginePrompt.permissionsQuestion(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind,
+                                                                       confirmsNext: requestable.grant.confirmationReason(for: lead.manifest.name) != nil)
+            host.ask(question, for: prompt.tab) { allowed in
+                guard allowed else { return completion(false) }
                 Task { completion(await WebExtensionEnginePrompt.confirm(requestable.grant, extensionName: lead.manifest.name)) }
             }
         }
     }
 
-    /// Asks with a sheet for the tab, which for a version of a pair names the pair and the calling engine's version, whose copy alone the answer reaches. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
+    /// Asks on the tab, naming for a version of a pair the pair and the calling engine's version, whose copy alone the answer reaches. Access that reaches every website also needs Touch ID or the login password, as at install. Native messaging is never granted here.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, requests access: Set<EngineExtensionAccess>, in tab: (any EngineWebContents)?,
                            completion: @escaping (Set<EngineExtensionAccess>) -> Void) {
         guard let host, let loaded = loadedExtension(id, in: extensions) else { return completion([]) }
@@ -555,8 +556,8 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
         let prompt = WebExtensionAccessPrompt(requested: access, extensionName: lead.manifest.name, version: installed.pairEngine)
         guard !prompt.access.isEmpty else { return completion([]) }
-        host.presentSheet(prompt.alert(), for: tab) { response in
-            guard response == .alertFirstButtonReturn else { return completion([]) }
+        host.ask(prompt.question(), for: tab) { allowed in
+            guard allowed else { return completion([]) }
             Task { completion(await prompt.confirm() ? prompt.access : []) }
         }
     }

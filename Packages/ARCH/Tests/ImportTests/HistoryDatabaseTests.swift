@@ -127,4 +127,19 @@ import Testing
         #expect(!always.isCopied)
         #expect(always.copiedFiles.count == 6)
     }
+
+    /// A log that stays as it was but does not copy, as one beside a database the user chose in a folder macOS protects, fails the copy rather than leaving out the changes it holds.
+    @Test func aLogThatDoesNotCopyFailsTheCopy() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let source = try folder.databaseWithLog("Default/History", [ChromiumDatabases.urlsTable])
+        let copy = folder.url.appendingPathComponent("Copy/History")
+        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #expect(throws: CocoaError.self) {
+            try DatabaseCopy.copyDatabase(at: source, to: copy) { from, to in
+                guard from.lastPathComponent != "History-wal" else { throw CocoaError(.fileReadNoPermission) }
+                try FileManager.default.copyItem(at: from, to: to)
+            }
+        }
+    }
 }

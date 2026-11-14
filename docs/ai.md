@@ -89,7 +89,7 @@ public enum AIPart: Sendable {
 }
 
 public struct AIPageContent: Sendable {
-    /// The page's address. The service removes the query and fragment before sending.
+    /// The page's address. The service removes the query, fragment, user name, and password before sending.
     public var url: URL
     public var title: String
     /// Readable text from the engine (VII.4).
@@ -538,14 +538,14 @@ Before each attempt the service checks every part, including parts in tool resul
 
 1. A part whose kind is not in the feature's scope throws `blockedByPolicy(.dataNotDeclared)`. This catches programming mistakes; it is not a security boundary (see Content parts).
 2. A part whose address is on an excluded site throws `blockedByPolicy(.siteExcluded(host))`. The address is the page's for page and selection parts and both the source and the page for file and download parts.
-3. Addresses in parts lose their query and fragment.
+3. Addresses in parts lose their query, fragment, user name, and password.
 4. The service cuts page text to the scope's limit, then cuts the combined parts to the model's `inputCharacterLimit` by cutting page text only, from the end of the last page part backward. A cut page part gets `isTruncated`. Parts that still do not fit, such as a long selection, end the attempt with `contextTooLong`.
 
 ### Site exclusions
 
 ```swift
 public struct AISitePattern: Codable, Hashable, Sendable {
-    /// `example.org` matches the host and its subdomains; `file:` matches a scheme; `local-network` matches `localhost`, `.local` hosts, and loopback, link-local, and private IP addresses.
+    /// `example.org` matches the host and its subdomains; `file:` matches a scheme; `local-network` matches `localhost`, `.local` hosts, and loopback, unspecified, link-local, and private IP addresses. Hosts compare without the root's trailing dot, so `example.org.` is `example.org`.
     public var value: String
     public func matches(_ url: URL) -> Bool
 }

@@ -19,12 +19,24 @@ import Testing
 
     @Test func localNetworkCoversLoopbackLinkLocalAndPrivateAddresses() {
         let local = AISitePattern.localNetwork
-        for address in ["http://localhost:3000", "http://printer.local", "http://app.localhost", "http://127.0.0.1", "http://10.1.2.3", "http://172.16.0.1", "http://172.31.255.1", "http://192.168.1.1", "http://169.254.1.1", "http://[::1]/", "http://[fe80::1]/", "http://[fd12::1]/", "http://[::ffff:192.168.0.1]/"] {
+        for address in ["http://localhost:3000", "http://printer.local", "http://app.localhost", "http://127.0.0.1", "http://10.1.2.3", "http://172.16.0.1", "http://172.31.255.1", "http://192.168.1.1", "http://169.254.1.1", "http://[::1]/", "http://[fe80::1]/", "http://[fd12::1]/", "http://[::ffff:192.168.0.1]/",
+                        "http://0.0.0.0:3000/", "http://[::]:3000/", "http://localhost.:3000/", "http://printer.local./"] {
             #expect(local.matches(URL(string: address)!), "\(address)")
         }
         for address in ["https://example.org", "http://172.32.0.1", "http://8.8.8.8", "http://[2001:db8::1]/"] {
             #expect(!local.matches(URL(string: address)!), "\(address)")
         }
+    }
+
+    /// Both engines keep the root's trailing dot in a page's address, which names the same site.
+    @Test func aTrailingDotNamesTheSameSite() {
+        let pattern = AISitePattern("mybank.com")
+        #expect(pattern.matches(URL(string: "https://www.mybank.com./accounts")!))
+        #expect(pattern.matches(URL(string: "https://mybank.com../")!))
+        #expect(AISitePattern(parsing: "example.com.")?.value == "example.com")
+        #expect(AISitePattern("example.com.").matches(URL(string: "https://example.com/")!))
+        #expect(AISitePattern.excludedSite(of: URL(string: "https://www.mybank.com./")!, in: [pattern]) == "www.mybank.com")
+        #expect(!AISitePattern(".").matches(URL(string: "https://example.com/")!))
     }
 
     @Test func parsesWhatTheUserTypes() {
