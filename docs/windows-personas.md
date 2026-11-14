@@ -539,6 +539,8 @@ The Chromium cache root and the parent of each Persona directory use their exist
 
 Before migrations or session setup, Arch takes an exclusive advisory lock on its Application Support directory and holds it through process exit. Copies using this guard compete for the same directory even through a symlink. Distinct directories can open independently. If the directory is busy, Quit closes this copy and Try Again starts it after the other copy exits. The waiting copy keeps incoming web links in memory until a successful retry or discards them on Quit. The operating system releases ownership after a crash. Older builds do not take the lock and can still overwrite the saved session. Quit any older copy before opening the same profile in another build.
 
+While Arch starts, it queues HTTP and HTTPS addresses through window restoration and opens them in arrival order as tabs of the restored main window. Even two deliveries of the same address open two tabs. Deliveries received while handling an earlier batch join the end. Once startup finishes, links follow the user’s small-window preference. A signed fixture exercised the app delegate at those boundaries and after retrying a locked profile. The timing of OS delivery from Mail or Notes is a separate foreground check.
+
 A two-process test checks the same directory, a symlink, a separate directory, and recovery after the owner is killed. An offscreen check of the app executable used disposable profiles and supplied the alert choices. Quit preserved the blocked profile. Try Again after the owner exited opened two queued web links once in order and discarded a file URL. An inaccessible path showed a separate error and allowed quitting.
 
 ```swift
