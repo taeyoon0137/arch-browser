@@ -17,7 +17,7 @@
 
 - The engine modules and `CEFBridge` are declared manually in `Package.swift`.
 
-Both adapters pass the disposition of a user-activated link to the tab. Command-click and middle-click open a background tab, Shift-Command-click selects the new tab, and Shift-click opens a preview. The source tab stays in place. A page can cancel its link click.
+Both adapters pass the disposition of a user-activated link to the tab. Command-click and middle-click open a background tab, Shift-Command-click selects the new tab, and Shift-click opens a preview. The source tab stays in place. A page can cancel its link click. WebKit preserves its native request for a modified link. The pinned Chromium build supplies the address and disposition without a referrer for a modified ordinary link; explicit popups retain their native opener and referrer.
 
 ## Tier 1: protocols implemented by both engines
 
