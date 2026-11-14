@@ -122,7 +122,7 @@ public struct AgentSessionPanel: View {
 
     private var researchPages: some View {
         AgentResearchSheet(pages: service.researchChoices(for: session) + service.manualOutlineLinks(for: session),
-                           choice: $researchChoice, open: { await service.openManualResearchPage($0, in: session) },
+                           choice: $researchChoice, open: { await service.reviewManualResearchPage($0, in: session) },
                            close: { showsResearchPages = false })
     }
 
@@ -316,13 +316,18 @@ public struct AgentSessionPanel: View {
 struct AgentResearchSheet: View {
     let pages: [AgentResearchPage]
     @Binding var choice: AgentResearchPage?
-    let open: (AgentResearchPage) async -> Bool
+    let open: (AgentResearchPage) async -> AgentManualResearchResult
     let close: () -> Void
     @State private var opening: Task<Void, Never>?
     @State private var problem: String?
+    @State private var replacements: [AgentResearchPage: AgentResearchPage] = [:]
+
+    private var presentedPages: [AgentResearchPage] {
+        pages.map { replacements[$0] ?? $0 }
+    }
 
     private var currentChoice: AgentResearchPage? {
-        choice.flatMap { pages.contains($0) ? $0 : nil }
+        choice.flatMap { presentedPages.contains($0) ? $0 : nil }
     }
 
     var body: some View {
@@ -333,8 +338,9 @@ struct AgentResearchSheet: View {
             } else {
                 Picker("Address", selection: $choice) {
                     Text("Choose an address").tag(nil as AgentResearchPage?)
-                    ForEach(pages, id: \.self) { page in
-                        Text(verbatim: page.outlineLabel ?? page.url.absoluteString).tag(Optional(page))
+                    ForEach(presentedPages, id: \.self) { page in
+                        let label = page.outlineLabel ?? page.url.absoluteString
+                        Text(verbatim: page.originalOutlineChoice == nil ? label : "Updated · \(label)").tag(Optional(page))
                     }
                 }
                 .disabled(opening != nil)
@@ -364,9 +370,10 @@ struct AgentResearchSheet: View {
         }
         .padding(16).frame(width: 420)
         .onChange(of: pages) {
+            replacements = replacements.filter { pages.contains($0.key) }
             if currentChoice == nil { choice = nil }
         }
-        .onChange(of: choice) { problem = nil }
+        .onChange(of: choice) { if choice != nil { problem = nil } }
         .onDisappear { opening?.cancel() }
     }
 
@@ -374,11 +381,22 @@ struct AgentResearchSheet: View {
         guard opening == nil, let currentChoice else { return }
         opening = Task { @MainActor in
             guard !Task.isCancelled else { return }
-            let didOpen = await open(currentChoice)
+            let result = await open(currentChoice)
             guard !Task.isCancelled else { return }
             opening = nil
-            if didOpen { close() }
-            else { problem = "The address is unavailable or the session has reached its tab limit." }
+            switch result {
+            case .opened:
+                close()
+            case .changed(let updated):
+                if let original = updated.originalOutlineChoice { replacements[original] = updated }
+                choice = nil
+                problem = "This link’s address changed. Select the updated link to review its new address."
+            case .staleLink:
+                choice = nil
+                problem = "This link is no longer available. Choose another address or ask the agent for a fresh page outline."
+            case .unavailable:
+                problem = "The address is unavailable or the session has reached its tab limit."
+            }
         }
     }
 }

@@ -228,7 +228,7 @@ import UserNotifications
         var opens = 0
         func sheet(_ pages: [AgentResearchPage]) -> AgentResearchSheet {
             AgentResearchSheet(pages: pages, choice: Binding(get: { selected }, set: { selected = $0 }),
-                               open: { _ in opens += 1; return true }, close: {})
+                               open: { _ in opens += 1; return .opened }, close: {})
         }
         let host = NSHostingController(rootView: sheet([manual, first, second]))
         let window = NSWindow(contentViewController: host)
@@ -444,39 +444,87 @@ import UserNotifications
         #expect(proposed.status == .refused && service.approvals.pending.isEmpty)
         #expect(!service.openResearchPage(picked, in: session) && host.openedOwners.isEmpty)
         #expect(session.scope.written(picked.url) != .opens)
-        _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '/article?entry=changed#top'")
-        #expect(await !service.openManualResearchPage(picked, in: session))
+        func changeHref(to href: String) async throws {
+            _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '\(href)'")
+        }
+        func replacement(for choice: AgentResearchPage) async throws -> AgentResearchPage {
+            let result = await service.reviewManualResearchPage(choice, in: session)
+            guard case .changed(let next) = result else {
+                throw NSError(domain: "Expected an updated manual link", code: 1)
+            }
+            return next
+        }
+
+        try await changeHref(to: "/article?entry=changed#top")
+        host.onPageScript = { withUnsafeCurrentTask { $0?.cancel() } }
+        let cancelled = await Task { @MainActor in await service.reviewManualResearchPage(picked, in: session) }.value
+        #expect(cancelled == .unavailable && host.openedOwners.isEmpty)
+        host.onPageScript = nil
+        let updated = try await replacement(for: picked)
+        #expect(updated.originalOutlineChoice == picked && updated.url.query == "entry=changed")
+        #expect(service.manualOutlineLinks(for: session) == choices && host.openedOwners.isEmpty)
+        #expect(session.snapshots.records[source.id]?.refs["e2"]?.href == picked.url)
+        #expect(!service.openResearchPage(updated, in: session))
+        let refused = try await client.callTool("open_tab", ["url": .string(updated.url.absoluteString)])
+        #expect(refused.status == .refused && service.approvals.pending.isEmpty && session.scope.written(updated.url) != .opens)
+
+        try await changeHref(to: "/article?entry=third#end")
+        let third = try await replacement(for: updated)
+        #expect(third.originalOutlineChoice == picked && third.url.fragment == "end")
+        try await changeHref(to: "/article?entry=second#top")
+        let reverted = try await replacement(for: third)
+        #expect(reverted.originalOutlineChoice == picked && reverted.url == picked.url && reverted != picked)
+        try await changeHref(to: "https://elsewhere.example/out")
+        #expect(await service.reviewManualResearchPage(reverted, in: session) == .unavailable)
+        try await changeHref(to: "https://name:pw@fixture.example/article")
+        #expect(await service.reviewManualResearchPage(picked, in: session) == .unavailable)
+        try await changeHref(to: "/article?entry=changed#top")
+        _ = try await page.evaluate("document.querySelectorAll('a')[1].textContent = 'Different link'")
+        #expect(await service.reviewManualResearchPage(updated, in: session) == .staleLink)
+        _ = try await page.evaluate("document.querySelectorAll('a')[1].textContent = 'Read more'")
         #expect(host.openedOwners.isEmpty)
-        _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '/article?entry=second#top'")
-        #expect(await service.openManualResearchPage(picked, in: session))
+        let occupied = (0..<AgentLimits.agentTabs).map { _ in
+            AgentTabInfo(id: UUID(), spaceID: space.id, title: "Occupied", url: source.url, isLoading: false, engine: .webKit, agentOwnerID: session.id)
+        }
+        host.onPageScript = { host.tabs += occupied }
+        #expect(await service.reviewManualResearchPage(updated, in: session) == .unavailable && host.openedOwners.isEmpty)
+        host.onPageScript = nil
+        host.tabs = [source]
+        #expect(await service.reviewManualResearchPage(updated, in: session) == .opened)
         let copy = try #require(host.agentTabs(of: session.id).first)
         let mayLoad = try #require(host.researchLoads[copy.id])
-        #expect(!mayLoad(choices[0].url) && mayLoad(picked.url) && !mayLoad(picked.url))
-        #expect(session.scope.written(picked.url) != .opens)
+        #expect(!mayLoad(picked.url) && mayLoad(updated.url) && !mayLoad(updated.url))
+        #expect(session.scope.written(updated.url) != .opens && service.manualOutlineLinks(for: session) == choices)
+
+        // A fresh model outline supersedes the original proof, so the sheet must use its new row.
+        let revisedOutline = await snapshot()
+        #expect(revisedOutline.status == .ok && !revisedOutline.text.contains("entry=changed"))
+        #expect(await service.reviewManualResearchPage(updated, in: session) == .unavailable)
+        #expect(service.manualOutlineLinks(for: session).contains { $0.url == updated.url && $0.originalOutlineChoice == nil })
         service.stopSharing(source.id, with: session)
         #expect(host.agentTabs(of: session.id).isEmpty && service.manualOutlineLinks(for: session).isEmpty)
         #expect(service.share(source, with: session))
         _ = await snapshot()
-        #expect(await !service.openManualResearchPage(picked, in: session))
+        #expect(await service.reviewManualResearchPage(picked, in: session) == .unavailable)
         let fresh = try #require(service.manualOutlineLinks(for: session).first)
         host.onPageScript = { harness.excludedHosts.value.insert("fixture.example") }
-        #expect(await !service.openManualResearchPage(fresh, in: session))
+        #expect(await service.reviewManualResearchPage(fresh, in: session) == .unavailable)
         harness.excludedHosts.value.remove("fixture.example")
         host.onPageScript = {
             session.takeOver()
             session.handBack()
         }
-        #expect(await !service.openManualResearchPage(fresh, in: session))
+        #expect(await service.reviewManualResearchPage(fresh, in: session) == .unavailable)
         host.onPageScript = nil
         _ = await snapshot()
         let beforeStop = try #require(service.manualOutlineLinks(for: session).first)
         host.onPageScript = { session.stop() }
-        #expect(await !service.openManualResearchPage(beforeStop, in: session))
+        #expect(await service.reviewManualResearchPage(beforeStop, in: session) == .unavailable)
         host.onPageScript = nil
         _ = await snapshot()
         let beforeReload = try #require(service.manualOutlineLinks(for: session).first)
         host.onPageScript = { host.tabs[0].documentID = UUID() }
-        #expect(await !service.openManualResearchPage(beforeReload, in: session))
+        #expect(await service.reviewManualResearchPage(beforeReload, in: session) == .unavailable)
         #expect(host.agentTabs(of: session.id).isEmpty)
     }
 

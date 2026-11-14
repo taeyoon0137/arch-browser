@@ -2,6 +2,11 @@
 import AI
 import Foundation
 
+enum AgentManualResearchResult: Equatable {
+    case opened, unavailable, staleLink
+    case changed(AgentResearchPage)
+}
+
 struct AgentResearchPage: Hashable {
     enum Source: Hashable {
         case message(UUID)
@@ -18,6 +23,27 @@ struct AgentResearchPage: Hashable {
 
     let url: URL
     let source: Source
+    // Only set for a replacement offered in the human review sheet. The model's outline remains unchanged.
+    private let originalLink: AgentOutlineLink?
+
+    init(url: URL, source: Source) {
+        self.url = url
+        self.source = source
+        originalLink = nil
+    }
+
+    init?(reviewing link: AgentOutlineLink, from choice: Self) {
+        guard case .outline(let tab, let document, let address, let handle, let previous) = choice.source,
+              link.ref == previous.ref, link.name == previous.name, link.fingerprint == previous.fingerprint else { return nil }
+        url = link.url
+        source = .outline(tab: tab, document: document, address: address, handle: handle, link: link)
+        originalLink = choice.originalLink ?? previous
+    }
+
+    var originalOutlineChoice: Self? {
+        guard let originalLink, case .outline(let tab, let document, let address, let handle, _) = source else { return nil }
+        return Self(url: originalLink.url, source: .outline(tab: tab, document: document, address: address, handle: handle, link: originalLink))
+    }
 
     var isOutlineLink: Bool {
         if case .outline = source { return true }
