@@ -297,6 +297,50 @@ private let maxTokensRefusal = badRequest(#"{"error":{"message":"Unsupported par
         #expect(result.events == [#"toolCall:toolu_1:weather:{"city":"Seoul"}"#, "usage:3/9/0", "finished:toolUse"])
     }
 
+    @MainActor @Test func aFollowUpSendsCheckedToolResultsWithTheirOriginalIDs() async throws {
+        let host = StubURLProtocol.host(replying: .init(chunks: sse([#"data: {"type":"message_stop"}"#])))
+        let http = AIHTTPConfiguration(format: .messages, baseURL: URL(string: "https://\(host)/v1")!)
+        let configured = AIProviderConfiguration(name: "Fixture", kind: .http(http), models: [.init(name: "model-a")])
+        let service = stubService(providers: [configured]) { configuration in
+            HTTPProvider(configuration: configuration, http: http, key: nil, session: StubURLProtocol.session())
+        }
+        service.register(userFeature)
+
+        let calls = [
+            AIToolCall(id: "read", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8)),
+            AIToolCall(id: "question", name: "ask_user", arguments: Data(#"{"question":"Which fixture?"}"#.utf8)),
+            AIToolCall(id: "tab", name: "request_tab", arguments: Data(#"{"access":"read"}"#.utf8)),
+        ]
+        let page = AIPageContent(url: URL(string: "https://private.example/document")!, title: "Private title", text: "Private body")
+        var read = AIToolResult(callID: "read", parts: [.page(page)])
+        read.checkingAccess = { result in AIToolResult(callID: result.callID, parts: [.text("Access withdrawn.")], isError: true) }
+        let answer = "The user answered: literal <untrusted"
+        let results = [read, AIToolResult(callID: "question", parts: [.text(answer)]),
+                       AIToolResult(callID: "tab", parts: [.text("Status: denied."), .text("No tab was shared.")], isError: true)]
+        let messages = [
+            AIMessage(role: .user, parts: [.text("Review the fixtures.")]),
+            AIMessage(role: .assistant, parts: calls.map(AIPart.toolCall)),
+            AIMessage(role: .user, parts: results.map(AIPart.toolResult)),
+            AIMessage(role: .user, parts: [.text("Continue after revoking access.")]),
+        ]
+        #expect(await collect(service.stream(AIRequest(feature: userFeature.id, messages: messages))).error == nil)
+        let request = try #require(StubURLProtocol.requests(to: host).first)
+        let sent = try #require(request.json["messages"] as? [[String: Any]])
+        try #require(sent.map { $0["role"] as? String } == ["user", "assistant", "user", "user"])
+        let uses = try #require(sent[1]["content"] as? [[String: Any]])
+        #expect(uses.map { $0["type"] as? String } == ["tool_use", "tool_use", "tool_use"])
+        #expect(uses.map { $0["id"] as? String } == calls.map(\.id))
+        let replies = try #require(sent[2]["content"] as? [[String: Any]])
+        #expect(replies.map { $0["type"] as? String } == ["tool_result", "tool_result", "tool_result"])
+        #expect(replies.map { $0["tool_use_id"] as? String } == calls.map(\.id))
+        #expect(replies.map { $0["is_error"] as? Bool } == [true, false, true])
+        let content = replies.compactMap { $0["content"] as? [[String: String]] }
+        #expect(content == [[["type": "text", "text": "Access withdrawn."]], [["type": "text", "text": answer]],
+                            [["type": "text", "text": "Status: denied."], ["type": "text", "text": "No tab was shared."]]])
+        let wire = String(decoding: request.body, as: UTF8.self)
+        #expect(!wire.contains("private.example") && !wire.contains("Private title") && !wire.contains("Private body"))
+    }
+
     @Test func turnsTheForcedReplyToolIntoText() async throws {
         let host = StubURLProtocol.host(replying: .init(chunks: sse([
             "event: content_block_start\n" + #"data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_2","name":"reply","input":{}}}"#,
