@@ -1,6 +1,8 @@
 // Saves and restores sidebar state (Personas, spaces, favorites and their tabs, tabs, tab folders, closed tabs, and split views) and the main windows in the JSON file `session.json`. The session supplies the app's Application Support folder.
 import ARCHEngine
+import Darwin
 import Foundation
+import os
 
 struct SessionSnapshot: Codable {
     /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, version 13 seals the page state (`SessionStateSeal`), version 14 adds each pinned tab's saved page, version 15 each folder's parent folder, and version 16 each live folder's configuration and each item tab's item. Files without a version are version 1.
@@ -235,8 +237,11 @@ extension SessionSnapshot.TabRecord {
 final class SessionStore {
     let fileURL: URL
     private var pendingSave: DispatchWorkItem?
+    private static let log = Logger(subsystem: "xyz.taeyoon.arch", category: "Session")
     /// Encodes and writes the snapshots in the order they were taken, away from the main thread.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.session-store", qos: .utility)
+    /// If setting a file aside at launch failed, retry before the next write replaces its contents.
+    private var pendingBackup: URL?
     /// Seals the page state in the file. The tests give one with a key of their own, so they never touch the Keychain.
     private let seal: SessionStateSeal
 
@@ -246,17 +251,40 @@ final class SessionStore {
     }
 
     /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`LiveFolderService(keepsUnknownFolders:)`).
-    var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
+    private var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
+
+    /// Read at startup so a session still awaiting backup also keeps its live folders' local data.
+    var keepsUnknownLiveFolders: Bool { pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) }
 
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        } catch {
+            pendingBackup = unreadableFileURL
+            return nil
+        }
         let directory = fileURL.deletingLastPathComponent()
         if let version = try? JSONDecoder().decode(SavedVersion.self, from: data).version, version > SessionSnapshot.currentVersion {
-            try? data.write(to: directory.appendingPathComponent("session-v\(version).json"), options: .atomic)
+            let backup = directory.appendingPathComponent("session-v\(version).json")
+            do {
+                try Self.write(data, to: backup)
+            } catch {
+                pendingBackup = backup
+            }
         }
         guard let snapshot = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
-            _ = try? FileManager.default.replaceItemAt(unreadableFileURL, withItemAt: fileURL)
+            // Keep a newer version's original in place while its versioned backup is pending.
+            if pendingBackup == nil {
+                do {
+                    try Self.rename(fileURL, to: unreadableFileURL)
+                } catch {
+                    pendingBackup = unreadableFileURL
+                }
+            }
             return nil
         }
         return snapshot.mappingPageState(seal.open).normalized()
@@ -278,17 +306,44 @@ final class SessionStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    /// Writes `snapshot` in place of a scheduled save, after any write already queued, and returns once it is on disk, as quitting needs.
-    func saveNow(_ snapshot: SessionSnapshot) {
+    /// Saves in place of a scheduled write and waits for all earlier writes. Quitting checks the result.
+    @discardableResult
+    func saveNow(_ snapshot: SessionSnapshot) -> Result<Void, Error> {
         pendingSave?.cancel()
-        writeQueue.sync { write(snapshot) }
+        return writeQueue.sync { write(snapshot) }
     }
 
-    /// Only the user can read the file.
-    private func write(_ snapshot: SessionSnapshot) {
-        guard let data = try? JSONEncoder().encode(snapshot.mappingPageState(seal.seal)) else { return }
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    @discardableResult
+    private func write(_ snapshot: SessionSnapshot) -> Result<Void, Error> {
+        do {
+            let data = try JSONEncoder().encode(snapshot.mappingPageState(seal.seal))
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let backup = pendingBackup {
+                try Self.write(Data(contentsOf: fileURL), to: backup)
+                pendingBackup = nil
+            }
+            try Self.write(data, to: fileURL)
+            return .success(())
+        } catch {
+            let error = error as NSError
+            Self.log.error("Saving session.json failed (\(error.domain, privacy: .public) \(error.code)).")
+            return .failure(error)
+        }
+    }
+
+    /// Set permissions before the first byte is written. Only a complete file replaces the previous one.
+    private static func write(_ data: Data, to destination: URL) throws {
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".session-\(UUID().uuidString).tmp")
+        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        try file.write(contentsOf: data)
+        try file.close()
+        try rename(temporary, to: destination)
+    }
+
+    private static func rename(_ source: URL, to destination: URL) throws {
+        guard Darwin.rename(source.path, destination.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 }

@@ -148,7 +148,7 @@ public final class BrowserSession: ObservableObject {
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
-        let keepsUnknownLiveFolders = FileManager.default.fileExists(atPath: store.unreadableFileURL.path)
+        let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
         liveFolderService = MainActor.assumeIsolated {
             LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
         }
@@ -1835,14 +1835,14 @@ public final class BrowserSession: ObservableObject {
         store.scheduleSave { [weak self] in self?.snapshot() }
     }
 
-    public func saveNow() {
+    @discardableResult
+    public func saveNow() -> Result<Void, Error> {
         store.saveNow(snapshot())
     }
 
-    /// Writes `session.json` and each Persona's cookie record marked as written at quit (`CookieSync.saveAtQuit()`), then waits for the records still on their queue, as quitting needs.
-    public func saveAtQuit() {
+    /// The app saves the session before confirming quit. Stop live folders and flush each Persona's cookie record only once the app actually terminates.
+    public func finishWritesAtQuit() {
         MainActor.assumeIsolated { liveFolderService.stop() }
-        saveNow()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
     }
