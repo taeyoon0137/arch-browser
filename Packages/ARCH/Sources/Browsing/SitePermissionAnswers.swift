@@ -77,7 +77,7 @@ final class SitePermissionAnswers {
     static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity) -> PromptContent {
         var notes: [PromptNote] = []
         if remembersAnswer {
-            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website. You can change it in Settings > Websites.", tone: .info))
+            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", tone: .info))
         }
         if request.types.contains(.notifications) {
             notes.append(PromptNote(id: "banners", symbol: "bell.slash", text: "Websites\u{2019} notifications don\u{2019}t show as banners yet.", tone: .info))
@@ -102,11 +102,13 @@ final class SitePermissionAnswers {
         }
     }
 
+    /// The phrases of the request's types, with the camera and the microphone of a call as one phrase.
     private static func description(of types: [EnginePermissionType]) -> String {
-        let phrases = types.map { type -> String in
+        let asksForBoth = types.contains(.camera) && types.contains(.microphone)
+        let phrases = types.compactMap { type -> String? in
             switch type {
-            case .camera: return "use the camera"
-            case .microphone: return "use the microphone"
+            case .camera: return asksForBoth ? "use the camera and microphone" : "use the camera"
+            case .microphone: return asksForBoth ? nil : "use the microphone"
             case .screenCapture: return "record the screen"
             case .geolocation: return "see your location"
             case .notifications: return "send notifications"

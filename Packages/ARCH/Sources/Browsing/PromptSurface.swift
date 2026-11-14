@@ -1,4 +1,4 @@
-// The surface of a prompt card: the window background, a hairline edge that Increase Contrast strengthens, an inner highlight in the dark appearance, and a soft shadow with a tight contact shadow. It is opaque, like the find bar's, because a material over the engine's view cannot sample it; a screen check that finds a material that does would change only this file.
+// The surface of a prompt card: the window background, the separator edge of the find bar and the question popover, which Increase Contrast strengthens, an inner highlight in the dark appearance, and a soft shadow with a tight contact shadow. It is opaque, like the find bar's, because a material over the engine's view cannot sample it; a screen check that finds a material that does would change only this file.
 import AppKit
 import SwiftUI
 
@@ -20,9 +20,9 @@ struct PromptSurface<S: InsettableShape>: ViewModifier {
             .overlay {
                 ZStack {
                     if isDark, !isHighContrast {
-                        shape.inset(by: 0.5).strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                        shape.inset(by: 1).strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
                     }
-                    shape.strokeBorder(isHighContrast ? Color.primary.opacity(0.5) : Color(nsColor: .separatorColor), lineWidth: isHighContrast ? 1 : 0.5)
+                    shape.strokeBorder(isHighContrast ? Color.primary.opacity(0.5) : Color(nsColor: .separatorColor), lineWidth: 1)
                 }
                 .allowsHitTesting(false)
             }

@@ -70,7 +70,7 @@ enum WebExtensionEnginePrompt {
 
     /// A reload that names the extensions that run on the page once it loads again.
     static func reloadQuestion(names: [String]) -> WebExtensionQuestion {
-        let list = names.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ")
+        let list = ListFormatter.localizedString(byJoining: names.map { "\u{201C}\($0)\u{201D}" })
         return WebExtensionQuestion(kind: .reload, extensionName: "", message: "\(list.isEmpty ? "The extension" : list) can run on this page once it loads again.")
     }
 

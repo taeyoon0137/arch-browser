@@ -118,7 +118,7 @@ import Testing
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.contents.first)
         #expect(content.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"])
-        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings > Websites.", "Websites\u{2019} notifications don\u{2019}t show as banners yet."])
+        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "Websites\u{2019} notifications don\u{2019}t show as banners yet."])
         #expect(content.notes.map(\.symbol) == ["info.circle", "bell.slash"])
         prompts.respond(Self.allow)
         #expect(granted == [true])
@@ -139,8 +139,8 @@ import Testing
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.microphone, .camera]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.contents.first)
         #expect(content.kind == .sitePermission && content.identity == Self.identity)
-        // The list's words follow the Mac's language, so only its start and the camera's symbol, which comes before the microphone's, are checked.
-        #expect(content.title?.hasPrefix("Allow this website to use the microphone") == true)
+        // A call's camera and microphone read as one phrase, and the camera's symbol comes before the microphone's.
+        #expect(content.title == "Allow this website to use the camera and microphone?")
         #expect(content.glyph == .symbol("video.fill", tint: .green, label: "Camera"))
         #expect(content.buttons.first { $0.id == "allow" }?.needsArming == true)
         #expect(PromptKeys.returnButton(in: content) == "allow" && PromptKeys.escapeButton(in: content) == "deny")

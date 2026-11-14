@@ -118,14 +118,14 @@ enum TabPromptContent {
 
     // MARK: Downloads
 
-    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page's host, a file's name for a page without one, or else this page, never the page's own title. Allow waits for the card to arm.
+    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page's host, a file's name for a page without one, or else this page, never the page's own title. The question is about the page, since an Allow ends when the tab loads another one. Allow waits for the card to arm.
     static func pageDownloads(pageURL: URL?, identity: PromptIdentity) -> PromptContent {
         var identity = identity
         let hasHost = pageURL?.host?.isEmpty == false
         if !hasHost, let pageURL, pageURL.isFileURL, !pageURL.lastPathComponent.isEmpty { identity.name = pageURL.lastPathComponent }
         return PromptContent(kind: .pageDownloads, identity: identity, glyph: .symbol("arrow.down.circle.fill", tint: .accent, label: "Downloads"),
-                             title: "Allow \(hasHost ? "this website" : "this page") to download multiple files?",
-                             message: "The page started another download without a click in it. If you allow it, it can download files until it loads another page.",
+                             title: "Allow this page to download multiple files?",
+                             message: "This page started another download on its own. If you allow it, it can download files until it loads another page.",
                              buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
                              defaultButtonID: "allow", cancelButtonID: "deny")
     }
@@ -146,12 +146,12 @@ enum TabPromptContent {
 
     // MARK: Web extensions
 
-    /// An extension's question. More access names the extension, with the version of a pair as a tag, and its icon when the host has one; a reload is about the tab's page, under `identity`. Allow waits for the card to arm.
+    /// An extension's question. More access names the extension, with the version of a pair as a tag, and its icon when the host has one, and its tile shows what it asks for, so the extension's symbol does not show twice; a reload is about the tab's page, under `identity`. Allow waits for the card to arm.
     static func extensionQuestion(_ question: WebExtensionQuestion, icon: NSImage?, identity: PromptIdentity) -> PromptContent {
         switch question.kind {
         case .reload:
             return PromptContent(kind: .extensionReload, identity: identity, glyph: .symbol("arrow.clockwise", tint: .neutral, label: "Reload"),
-                                 title: "Reload This Page?", message: question.message,
+                                 title: "Reload this page?", message: question.message,
                                  buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "reload", title: "Reload")],
                                  defaultButtonID: "reload", cancelButtonID: "cancel")
         case .access, .enginePermissions:
@@ -160,7 +160,7 @@ enum TabPromptContent {
             if question.confirmsNext { notes.append(PromptNote(id: "confirms", symbol: "touchid", text: "Arch asks for Touch ID or your password next.", tone: .info)) }
             let extensionIdentity = PromptIdentity(icon: icon.map(PromptIcon.image) ?? .symbol("puzzlepiece.extension"), name: question.extensionName, isSecure: false,
                                                    tag: question.version.map { "\($0.displayName) version" })
-            return PromptContent(kind: .extensionAccess, identity: extensionIdentity, glyph: .symbol("puzzlepiece.extension.fill", tint: .accent, label: "Extension"),
+            return PromptContent(kind: .extensionAccess, identity: extensionIdentity, glyph: .symbol("hand.raised.fill", tint: .accent, label: "Extension Access"),
                                  title: "Allow this extension more access?", message: question.message, items: question.items, notes: notes,
                                  buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
                                  defaultButtonID: "allow", cancelButtonID: "deny")

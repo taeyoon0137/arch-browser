@@ -100,13 +100,13 @@ struct PromptCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The glyph tile beside the title and message, or in a compact card the glyph's symbol before the title.
+    /// The glyph tile beside the title and message, or in a compact card the glyph's symbol before the title. A title without a message centers on the tile.
     @ViewBuilder private var mainBlock: some View {
         if layout == .regular {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: content.message == nil ? .center : .top, spacing: 12) {
                 if let glyph = content.glyph { PromptGlyphTile(glyph: glyph) }
                 words
-                    .padding(.top, content.glyph == nil ? 0 : 1)
+                    .padding(.top, content.glyph == nil || content.message == nil ? 0 : 1)
             }
         } else {
             VStack(alignment: .leading, spacing: 3) {

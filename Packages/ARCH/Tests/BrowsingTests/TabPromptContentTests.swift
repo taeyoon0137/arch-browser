@@ -114,8 +114,8 @@ import Testing
     @Test func aPagesDownloadsQuestionNamesItsHostOrFileAndWaitsToArm() throws {
         let page = TabPromptContent.pageDownloads(pageURL: URL(string: "https://example.com/files"), identity: Self.site)
         #expect(page.kind == .pageDownloads && page.identity == Self.site)
-        #expect(page.title == "Allow this website to download multiple files?")
-        #expect(page.message == "The page started another download without a click in it. If you allow it, it can download files until it loads another page.")
+        #expect(page.title == "Allow this page to download multiple files?")
+        #expect(page.message == "This page started another download on its own. If you allow it, it can download files until it loads another page.")
         #expect(page.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"] && page.buttons.last?.needsArming == true)
         #expect(page.defaultButtonID == "allow" && page.cancelButtonID == "deny")
         #expect(TabPromptContent.pageDownloadsResult(Self.answered("allow")))
@@ -145,7 +145,7 @@ import Testing
         let reload = TabPromptContent.extensionQuestion(WebExtensionQuestion(kind: .reload, extensionName: "", message: "\u{201C}A\u{201D} can run on this page once it loads again."),
                                                         icon: nil, identity: Self.site)
         #expect(reload.kind == .extensionReload && reload.identity == Self.site)
-        #expect(reload.title == "Reload This Page?" && reload.message == "\u{201C}A\u{201D} can run on this page once it loads again.")
+        #expect(reload.title == "Reload this page?" && reload.message == "\u{201C}A\u{201D} can run on this page once it loads again.")
         #expect(TabPromptContent.extensionAnswer(Self.answered("reload")))
         #expect(!TabPromptContent.extensionAnswer(Self.answered("cancel")))
     }

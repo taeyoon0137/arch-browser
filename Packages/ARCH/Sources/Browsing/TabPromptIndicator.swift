@@ -8,7 +8,7 @@ struct TabPromptIndicator: View {
     var body: some View {
         if prompts.hasPrompt(for: tabID) {
             Image(systemName: "exclamationmark.bubble.fill")
-                .font(.system(size: 11))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .help("Waiting for your answer")
                 .accessibilityLabel("waiting for your answer")
