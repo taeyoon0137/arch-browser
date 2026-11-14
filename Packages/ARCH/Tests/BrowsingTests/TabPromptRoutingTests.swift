@@ -84,6 +84,27 @@ import Testing
         #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == .deny)
     }
 
+    @Test func modifiedLinksOpenOneTabInTheRequestedDisposition() async throws {
+        let tab = Self.tab()
+        let link = try #require(URL(string: "https://example.org/next"))
+        var opened: [URL] = []
+        var foreground: [Bool] = []
+        tab.openURLInNewTab = { url, selects in
+            opened.append(url)
+            foreground.append(selects)
+        }
+        for disposition in [EngineNavigationDisposition.newBackgroundTab, .newForegroundTab] {
+            let action = EngineNavigationAction(url: link, disposition: disposition, isUserInitiated: true, opensLinkInNewTab: true)
+            #expect(tab.webContents(tab.webContents, decidePolicyFor: action) == .cancel)
+        }
+        // An ordinary target=_blank link is adopted as the engine's popup, with its opener intact.
+        let popup = EngineNavigationAction(url: link, disposition: .newForegroundTab, isUserInitiated: true)
+        #expect(tab.webContents(tab.webContents, decidePolicyFor: popup) == .allow)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(opened == [link, link])
+        #expect(foreground == [false, true])
+    }
+
     @Test func aPagesDialogsAskUnderThePagesSiteAndTakeTheCardsAnswer() {
         let tab = Self.tab()
         let prompts = PromptRecorder()

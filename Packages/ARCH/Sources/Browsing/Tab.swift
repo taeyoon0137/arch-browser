@@ -97,8 +97,8 @@ import LiveFolders
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
-    /// The session sets this callback to open an address from the page's context menu in a background tab.
-    var openURLInNewTab: ((URL) -> Void)?
+    /// Opens a link in a new tab, optionally selecting it in the source window.
+    var openURLInNewTab: ((URL, Bool) -> Void)?
     /// The session sets this callback to show the search engine's results for text selected in the page in a new tab, for the context menu's Search with.
     var searchInNewTab: ((String) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
@@ -534,7 +534,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// Only web addresses open in a tab; a link for another app offers just Copy Link.
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
+        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
     }
 
     /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.
@@ -645,12 +645,19 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 // MARK: Navigation checks and link previews
 
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
-    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
         if agentOwnerID != nil, let researchLoad {
             return action.disposition == .currentTab && researchLoad(action.url) ? .allow : .cancel
         }
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
+        if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
+           ["http", "https", "file"].contains(scheme), let openURLInNewTab {
+            guard agentOwnerID == nil else { return .cancel }
+            let foreground = action.disposition == .newForegroundTab
+            DispatchQueue.main.async { openURLInNewTab(action.url, foreground) }
+            return .cancel
+        }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
         let url = action.url

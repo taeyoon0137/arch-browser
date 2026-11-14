@@ -14,10 +14,14 @@ public struct EngineNavigationAction: Sendable {
     public var url: URL
     public var disposition: EngineNavigationDisposition
     public var isUserInitiated: Bool
-    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool) {
+    /// The user asked to open this link in a tab with Command-click or the middle button.
+    public var opensLinkInNewTab: Bool
+
+    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, opensLinkInNewTab: Bool = false) {
         self.url = url
         self.disposition = disposition
         self.isUserInitiated = isUserInitiated
+        self.opensLinkInNewTab = opensLinkInNewTab
     }
 }
 
@@ -96,7 +100,7 @@ public struct EngineContextMenuElement: Sendable {
     }
 }
 
-/// Decides whether a navigation goes ahead. Both engines ask about every main frame navigation, again at each server redirect with the redirect's address, and about each link the user clicked with Shift (`newWindow`); a frame inside the page asks about nothing else.
+/// Decides whether a navigation goes ahead. Both engines ask about every main frame navigation, again at each server redirect with the redirect's address, and about links the user opens with modifiers or the middle button; a frame inside the page asks about nothing else.
 public protocol EngineWebContentsNavigationDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy
 }

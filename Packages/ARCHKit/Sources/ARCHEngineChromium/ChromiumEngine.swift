@@ -554,10 +554,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture)) == .allow
     }
 
-    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine; its load in place then asks again as a main frame navigation.
-    public func cefBrowserShouldOpenNewWindow(withURL url: String) -> Bool {
+    /// Lets the source tab handle a user-requested tab or window before Alloy loads the link in place.
+    public func cefBrowserShouldOpenURL(_ url: String, disposition: ARCHCEFPopupDisposition) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
-        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow
+        let requested: EngineNavigationDisposition = switch disposition {
+        case .backgroundTab: .newBackgroundTab
+        case .foregroundTab: .newForegroundTab
+        default: .newWindow
+        }
+        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: requested, isUserInitiated: true, opensLinkInNewTab: requested != .newWindow)) == .allow
     }
     /// Only the UI delegate adopts popups, so without one the page opens none, as on the WebKit engine.
     public func cefBrowserCanAdoptPopup() -> Bool { uiDelegate?.webContentsMayCreatePopup(self) == true }

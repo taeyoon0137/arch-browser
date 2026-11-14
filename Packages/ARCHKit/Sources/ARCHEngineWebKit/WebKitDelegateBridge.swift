@@ -62,11 +62,12 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Downloads a link marked for download instead of navigating, if the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         var policy = allowed
-        // The delegate hears of main frame navigations, each server redirect of one included, of navigations to a new web view, and of links clicked with Shift, as on Chromium; a frame inside the page loads without asking.
-        let disposition = Self.disposition(of: navigationAction)
+        // The delegate hears of main frame navigations, each server redirect of one included, of navigations to a new web view, and of modified links, as on Chromium; ordinary navigation inside a subframe proceeds without asking.
+        let linkTab = Self.linkTabDisposition(of: navigationAction)
+        let disposition = linkTab ?? Self.disposition(of: navigationAction)
         if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
-           navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow {
-            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated)
+           navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow || linkTab != nil {
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated, opensLinkInNewTab: linkTab != nil)
             if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
         }
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
@@ -80,6 +81,14 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         owner.stopWaitingForExtension()
         decisionHandler(policy)
+    }
+
+    private static func linkTabDisposition(of action: WKNavigationAction) -> EngineNavigationDisposition? {
+        // WKNavigationAction reports the button mask on macOS: primary is 1, middle is 4.
+        let middleButtonMask = 1 << CGMouseButton.center.rawValue
+        guard action.navigationType == .linkActivated, !action.shouldPerformDownload,
+              action.modifierFlags.contains(.command) || action.buttonNumber == middleButtonMask else { return nil }
+        return action.modifierFlags.contains(.shift) ? .newForegroundTab : .newBackgroundTab
     }
 
     /// A link clicked with Shift and without Command asks for a new window, as Chromium reads the click, so both engines report it alike. A link marked for download is not one. Other navigations open in place or, without a target frame, in a new tab.

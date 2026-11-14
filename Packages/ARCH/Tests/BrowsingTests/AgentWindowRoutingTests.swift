@@ -194,7 +194,7 @@ import Testing
         let research = try #require(browser.openAgentTab(url: address, engine: nil, owner: UUID(), folderName: "Research", in: space.id, researchLoad: { _ in true }))
         browser.keepTabs(ofFolder: try #require(research.folderID))
         main.selectTab(pin.id)
-        pin.openURLInNewTab?(address)
+        pin.openURLInNewTab?(address, false)
         let backgroundLink = try #require(browser.tabs.last)
         #expect(backgroundLink.isUnread && main.selectedTab === pin)
         pin.searchInNewTab?("daily browser")

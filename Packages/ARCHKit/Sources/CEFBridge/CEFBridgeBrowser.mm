@@ -617,7 +617,7 @@ public:
         return cancel;
     }
 
-    // Chromium opens a link the user clicked with Shift in a new window, which an Alloy style browser loads in place instead, so the app decides first. Returning true stops the link.
+    // Alloy defaults to loading modified links in place. Let the app honor the requested tab or window instead.
     bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &target_url,
                           CefRequestHandler::WindowOpenDisposition target_disposition, bool user_gesture) override {
         return owner_ != nil && ![owner_ handleMayOpenURL:ToNSString(target_url) disposition:target_disposition userGesture:user_gesture];
@@ -1187,13 +1187,13 @@ private:
     return delegate == nil || [delegate cefBrowserShouldBrowseToURL:url isRedirect:isRedirect userGesture:userGesture];
 }
 
-// Only a link the user clicked with Shift, which Chromium gives the new window disposition, asks the delegate. Every other link may open.
+// Alloy loads modified links in place unless the app handles their requested disposition.
 - (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
-    if (disposition != CEF_WOD_NEW_WINDOW || !userGesture) {
+    if (!userGesture || (disposition != CEF_WOD_NEW_WINDOW && disposition != CEF_WOD_NEW_BACKGROUND_TAB && disposition != CEF_WOD_NEW_FOREGROUND_TAB)) {
         return YES;
     }
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
-    return delegate == nil || [delegate cefBrowserShouldOpenNewWindowWithURL:url];
+    return delegate == nil || [delegate cefBrowserShouldOpenURL:url disposition:PopupDisposition(disposition)];
 }
 
 /// Fills CEF's parameters for a popup the page opens: CEF creates it in this browser's browsing context, as the bridge's own browser object, with its own client and a container view of this browser's size, and its renderers start with this browser's page scripts. CEF uses this browser's request context and settings. The object waits in `gPendingPopups` until CEF creates the popup or aborts it.
