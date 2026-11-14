@@ -251,6 +251,22 @@ import Testing
         #expect(await fixture.call("list_tabs").structured?["tabs"]?.array?.last == ["handle": .string(handle), "excluded": true])
     }
 
+    @Test func aTitleEqualToItsAddressIsReducedInBothListedRowsAndLoadEvents() async throws {
+        let fixture = Fixture()
+        let handle = await fixture.open()
+        let id = fixture.id(handle)
+        let address = try #require(URL(string: "https://docs.example/report?token=private#details"))
+        fixture.host.tabs[0].url = address
+        fixture.host.tabs[0].title = address.absoluteString
+        fixture.host.report(.loaded(url: address, title: address.absoluteString), in: id)
+        let result = await fixture.call("list_tabs")
+        #expect(result.status == .ok && Self.events(result) == ["loaded"])
+        let expectedTitle = AgentUntrusted.wrap("https://docs.example/report", url: address)
+        #expect(result.structured?["tabs"]?.array?.first?["title"] == .string(expectedTitle))
+        #expect(result.structured?["events"]?.array?.first?["title"] == .string(expectedTitle))
+        #expect(!result.text.contains("token=private") && !result.text.contains("#details"))
+    }
+
     @Test func namesAPageChoseStayInsideUntrustedBlocks() async {
         let fixture = Fixture()
         let handle = await fixture.open()

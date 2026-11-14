@@ -379,6 +379,47 @@ import Testing
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
     }
 
+    @Test func reviewDistinguishesSameTitleTabsAndSharesTheSelectedDocumentAfterReordering() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let addresses = ["https://alice:password@docs.example/projects?team=first#one",
+                         "https://docs.example/projects?team=second#two",
+                         "https://docs.example/notes?private=third"]
+        let tabs = addresses.map {
+            AgentTabInfo(id: UUID(), spaceID: space.id, title: "Report", url: URL(string: $0), isLoading: false, engine: .chromium)
+        }
+        host.tabs = tabs
+        host.userTabIDs = Set(tabs.map(\.id))
+        let (session, runner) = try start(service, harness)
+        let choices = service.shareableTabs(for: session)
+        let labels = AgentTabInfo.attachmentLabels(for: choices)
+        #expect(labels[tabs[0].id] == "Report · https://docs.example/projects?team=first#one")
+        #expect(labels[tabs[1].id] == "Report · https://docs.example/projects?team=second#two")
+        #expect(labels[tabs[2].id] == "Report · https://docs.example/notes")
+        #expect(tabs[0].attachmentLabel == "Report · https://docs.example/projects")
+        let duplicate = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Report", url: tabs[0].url, isLoading: false, engine: .chromium)
+        #expect(AgentTabInfo.attachmentLabels(for: [tabs[0], duplicate])[duplicate.id] == tabs[0].attachmentLabel)
+        host.tabs = Array(tabs.reversed())
+        #expect(service.share(choices[0], with: session))
+        #expect(session.handles.sharedTabIDs == [tabs[0].id])
+        host.tabs[1].documentID = UUID()
+        #expect(!service.share(choices[1], with: session))
+        host.tabs[2].title = addresses[0]
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "fixture"), model: "local")))
+        let result = try await client.callTool("list_tabs", ["scope": "shared"])
+        #expect(result.status == .ok && result.text.contains("https://docs.example/projects"))
+        let output = String(decoding: try JSONEncoder().encode(result), as: UTF8.self)
+        for privatePart in ["alice", "password", "team=", "#one", "private=third"] {
+            #expect(!output.contains(privatePart))
+        }
+    }
+
     @Test func sharingBelongsToTheOpenAppSessionAndRechecksTheUserChosenDocument() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

@@ -160,7 +160,7 @@ public struct AgentComposer: View {
                     .lineLimit(3...10)
                     .onSubmit(start)
                 if let tab = attachableTab, attachesTab, !usesAgentsPersona {
-                    AgentTabChip(title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title) { attachesTab = false }
+                    AgentTabChip(tab: tab) { attachesTab = false }
                     if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
                         Toggle("Share reader excerpt", isOn: $sharesExcerpt)
                             .toggleStyle(.checkbox)
@@ -319,18 +319,71 @@ public struct AgentComposer: View {
     }
 }
 
+extension AgentTabInfo {
+    /// For local review only. The model's tool results continue to use AgentAddress.reduced.
+    var attachmentAddress: String? {
+        guard let url, var address = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        address.user = nil
+        address.password = nil
+        return address.string
+    }
+
+    var attachmentLabel: String {
+        attachmentLabel(address: url.map { AgentAddress.reduced($0).absoluteString })
+    }
+
+    private func attachmentLabel(address: String?) -> String {
+        guard let address else { return title.isEmpty ? "Tab" : title }
+        if title.isEmpty || title == url?.host || title == url?.absoluteString { return address }
+        return "\(title) · \(address)"
+    }
+
+    /// Add query and fragment only to choices whose title and reduced address would otherwise be identical.
+    static func attachmentLabels(for tabs: [Self]) -> [UUID: String] {
+        var labels = [UUID: String]()
+        for (label, group) in Dictionary(grouping: tabs, by: \.attachmentLabel) {
+            let needsFullAddress = group.count > 1 && Set(group.compactMap(\.attachmentAddress)).count > 1
+            for tab in group {
+                labels[tab.id] = needsFullAddress ? tab.attachmentLabel(address: tab.attachmentAddress) : label
+            }
+        }
+        return labels
+    }
+}
+
+/// A compact attachment label opens the complete local address for visual or keyboard review.
+struct AgentAttachmentLabel: View {
+    let tab: AgentTabInfo
+    @State private var showsAddress = false
+
+    var body: some View {
+        Button { showsAddress = true } label: {
+            Text(verbatim: tab.attachmentLabel).lineLimit(1).truncationMode(.middle)
+        }
+        .buttonStyle(.plain)
+        .help("Review tab address")
+        .accessibilityLabel("Review tab: \(tab.attachmentLabel)")
+        .popover(isPresented: $showsAddress) {
+            Text(verbatim: tab.attachmentAddress ?? tab.attachmentLabel)
+                .textSelection(.enabled)
+                .frame(maxWidth: 360, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+        }
+    }
+}
+
 /// The attached tab, with a button that removes it.
 struct AgentTabChip: View {
-    let title: String
+    let tab: AgentTabInfo
     let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "doc.text")
                 .font(.system(size: 10))
-            Text(title)
+            AgentAttachmentLabel(tab: tab)
                 .font(.system(size: 11))
-                .lineLimit(1)
             Button(action: remove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .semibold))
