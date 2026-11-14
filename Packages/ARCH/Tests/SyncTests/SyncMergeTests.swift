@@ -297,36 +297,36 @@ import Testing
     }
 
     @Test func fieldUnknownToThisBuildSurvives() {
-        // `live` stands for a field that a newer build writes on folders (docs/sync.md, Schema versions); this build's records never have it.
+        // `futureField` stands for a field that a newer build writes on folders (docs/sync.md, Schema versions); this build's records never have it.
         let known: [String: SyncValue] = ["persona": .reference("default"), "space": .reference("space-1"), "name": .text("News")]
         var serverFields = known
-        serverFields["live"] = .text("feed-2")
+        serverFields["futureField"] = .text("feed-2")
         var baseFields = known
-        baseFields["live"] = .text("feed-1")
+        baseFields["futureField"] = .text("feed-1")
         var local = known
         local["name"] = .text("Reading")
 
         let changedOnServer = SyncMerge.merge(local: record(type: .folder, name: "folder-1", local, at: 30), server: record(type: .folder, name: "folder-1", serverFields, at: 20, schemaVersion: 2), base: .mirror(record(type: .folder, name: "folder-1", baseFields, at: 10, schemaVersion: 2)))
         #expect(changedOnServer.needsSend)
         #expect(changedOnServer.record[.name] == .text("Reading"))
-        #expect(changedOnServer.record.fields["live"] == .text("feed-2"))
+        #expect(changedOnServer.record.fields["futureField"] == .text("feed-2"))
         #expect(changedOnServer.record.schemaVersion == 2)
 
         let unchanged = SyncMerge.merge(local: record(type: .folder, name: "folder-1", local, at: 30), server: record(type: .folder, name: "folder-1", baseFields, at: 10, schemaVersion: 2), base: .mirror(record(type: .folder, name: "folder-1", baseFields, at: 10, schemaVersion: 2)))
-        #expect(unchanged.record.fields["live"] == .text("feed-1"))
+        #expect(unchanged.record.fields["futureField"] == .text("feed-1"))
 
         let withoutBase = SyncMerge.merge(local: record(type: .folder, name: "folder-1", local, at: 30), server: record(type: .folder, name: "folder-1", serverFields, at: 20, schemaVersion: 2), base: .firstWrite)
-        #expect(withoutBase.record.fields["live"] == .text("feed-2"))
+        #expect(withoutBase.record.fields["futureField"] == .text("feed-2"))
         #expect(withoutBase.record[.name] == .text("Reading"))
 
         // This Mac cannot edit a field it does not know, even one with a name it uses for other types.
         var localWithOtherValues = local
-        localWithOtherValues["live"] = .text("feed-3")
+        localWithOtherValues["futureField"] = .text("feed-3")
         localWithOtherValues["url"] = .text("https://example.org/")
         var serverWithURL = serverFields
         serverWithURL["url"] = .text("https://example.com/")
         let ignored = SyncMerge.merge(local: record(type: .folder, name: "folder-1", localWithOtherValues, at: 30), server: record(type: .folder, name: "folder-1", serverWithURL, at: 20, schemaVersion: 2), base: .mirror(record(type: .folder, name: "folder-1", baseFields, at: 10, schemaVersion: 2)))
-        #expect(ignored.record.fields["live"] == .text("feed-2"))
+        #expect(ignored.record.fields["futureField"] == .text("feed-2"))
         #expect(ignored.record.fields["url"] == .text("https://example.com/"))
     }
 
@@ -334,7 +334,7 @@ import Testing
         // docs/sync.md, Record types. Deployed record types and fields can never be removed or change type, so these lists only grow.
         #expect(SyncRecordType.persona.fields == [.name, .order])
         #expect(SyncRecordType.space.fields == [.persona, .name, .symbol, .tint, .homeURL, .order])
-        #expect(SyncRecordType.folder.fields == [.persona, .space, .parent, .name, .order])
+        #expect(SyncRecordType.folder.fields == [.persona, .space, .parent, .name, .live, .order])
         #expect(SyncRecordType.favorite.fields == [.persona, .url, .title, .order])
         #expect(SyncRecordType.tab.fields == [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order])
         #expect(SyncRecordType.setting.fields == [.value])

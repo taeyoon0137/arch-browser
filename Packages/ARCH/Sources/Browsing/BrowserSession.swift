@@ -1849,6 +1849,21 @@ public final class BrowserSession: ObservableObject {
         store.scheduleSave { [weak self] in self?.snapshot() }
     }
 
+    /// The syncable sidebar of this session, for the first sync or when enabling sync.
+    public var sidebarSyncState: SidebarSyncState { SidebarSyncState(snapshot: snapshot(), defaultEngine: defaultEngine) }
+
+    /// Observes successful saves on the main queue in file order. With no observer, saving does
+    /// not construct the projection. Replacing the observer drops its outstanding callbacks.
+    public var onSidebarSyncSave: ((SidebarSyncState) -> Void)? {
+        didSet {
+            guard let observer = onSidebarSyncSave else { store.didWrite = nil; return }
+            store.didWrite = { [weak self] snapshot in
+                guard let self else { return }
+                observer(SidebarSyncState(snapshot: snapshot, defaultEngine: self.defaultEngine))
+            }
+        }
+    }
+
     @discardableResult
     public func saveNow() -> Result<Void, Error> {
         store.saveNow(snapshot())

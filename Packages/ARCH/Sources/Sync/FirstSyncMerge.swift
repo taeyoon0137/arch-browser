@@ -108,7 +108,7 @@ public enum FirstSyncMerge {
         case .folder:
             guard case .reference(let space) = record[.space], case .text(let name) = record[.name],
                   isOptionalReference(record[.parent]) else { return nil }
-            return .folder(persona: persona, space: space, parent: record[.parent], name: name, live: record.fields["live"])
+            return .folder(persona: persona, space: space, parent: record[.parent], name: name, live: record[.live])
         case .favorite:
             guard case .text(let url) = record[.url], address(of: record) != nil else { return nil }
             return .favorite(persona: persona, address: url)
