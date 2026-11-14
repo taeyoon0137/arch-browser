@@ -47,6 +47,8 @@ import Testing
     var failingAddresses: Set<URL> = []
     /// Tabs whose page never answers a read, as while it shows a dialog.
     var silentTabIDs: Set<UUID> = []
+    /// Lets a test change the tab or turn after extraction, before the engine answers.
+    var beforeReturningContent: (() -> Void)?
     var history: [AgentHistoryPage] = []
     private(set) var openedOwners: [AgentTabOwner] = []
     private(set) var closedTabIDs: [UUID] = []
@@ -100,6 +102,7 @@ import Testing
         guard !silentTabIDs.contains(tabID) else { return }
         guard let tab = tabs.first(where: { $0.id == tabID }), let url = tab.url else { return completion(.failure(EngineReadableContentError.unreadable)) }
         let text = pages[url]?.text ?? ""
+        beforeReturningContent?()
         completion(.success(EngineReadableContent(url: url, title: tab.title, text: String(text.prefix(limit)), isTruncated: text.count > limit)))
     }
 

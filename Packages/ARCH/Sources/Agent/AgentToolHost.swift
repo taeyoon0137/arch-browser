@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session (`AgentToolClient`) the tools that need no agent tab. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, and readable text. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -492,9 +492,13 @@ import Foundation
         case .value(let resolved): (tab, handle) = resolved
         case .outcome(let failure): return failure
         }
+        return await readText(arguments, tab: tab, handle: handle) { mayStillRead($0, grant, state: state) }
+    }
+
+    private func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let content: EngineReadableContent
-        switch await read(tab, handle: handle, grant, state: state) {
+        switch await read(tab, handle: handle, mayReadTab: mayReadTab) {
         case .value(let read): content = read
         case .outcome(let failure):
             var outcome = failure
@@ -529,8 +533,8 @@ import Foundation
     }
 
     /// The page's text, at most `AgentLimits.readTextMaximumCharacters`, refused when the tab's page, before or after the read, is one agents do not read (P16) or the tab, before or after it, is no longer the client's to read (P17), as when the user takes it over meanwhile, and timed out when the page does not answer within `scriptWait`.
-    private func read(_ tab: AgentTabInfo, handle: String, _ grant: AgentGrant, state: AgentGrantState) async -> Resolved<EngineReadableContent> {
-        guard mayStillRead(tab, grant, state: state) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
+    private func read(_ tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Resolved<EngineReadableContent> {
+        guard mayReadTab(tab) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
         if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
             return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
         }
@@ -547,12 +551,17 @@ import Foundation
         case .failure?:
             return .outcome(Outcome(result: AgentToolResult(status: .error, code: "unreadable", text: "\(handle) has no document Arch can read, as while it shows an engine's error page.")))
         case .success(let content)?:
-            // The page may have moved on during the read, and the user may have taken the tab over; a tab that closed meanwhile was still the client's.
-            if let current = host.tabs(withIDs: [tab.id]).first, !mayStillRead(current, grant, state: state) {
+            guard let current = host.tabs(withIDs: [tab.id]).first else { return .outcome(Self.error("tabNotFound", "\(handle) is closed.")) }
+            guard mayReadTab(current) else {
                 return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)))
             }
-            if case .refused(let rule, let sentence) = AgentPolicy.mayRead(content.url, allowsAI: allowsAI) {
-                return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
+            for address in [current.url, content.url] {
+                if case .refused(let rule, let sentence) = AgentPolicy.mayRead(address, allowsAI: allowsAI) {
+                    return .outcome(Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)))
+                }
+            }
+            guard tab.url == content.url, current.url == content.url else {
+                return .outcome(Self.error("pageChanged", "\(handle) changed pages during the read. Read the current page again."))
             }
             return .value(content)
         }
@@ -598,7 +607,8 @@ import Foundation
             waited = "the text \u{201C}\(text)\u{201D} to appear"
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
-                switch await read(current, handle: handle, grant, state: state) {
+                let reading = await read(current, handle: handle) { mayStillRead($0, grant, state: state) }
+                switch reading {
                 case .value(let content): isMet = content.text.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 case .outcome(let failure) where failure.result.status == .refused: return Outcome(result: failure.result, site: site)
                 case .outcome: break
@@ -987,14 +997,15 @@ struct AgentToolClient {
 /// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
 extension AgentToolHost {
     /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "guide"]
+    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "read_text", "guide"]
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
         tools(for: mode, scopes: scopes).filter { sessionServedTools.contains($0.name) }
     }
 
-    func run(_ call: AgentToolCall, for client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
+    func run(_ call: AgentToolCall, in session: AgentSession, searchesHistory: Bool) async -> AgentToolResult {
+        let client = AgentToolClient(session: session, searchesHistory: searchesHistory)
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
             return AgentToolResult(status: .error, code: "unknownTool", text: "Arch has no tool named \(call.name).")
         }
@@ -1004,9 +1015,19 @@ extension AgentToolHost {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         switch tool.name {
-        case "session_info": return sessionInfo(ofSession: client, handles: &handles)
-        case "list_spaces": return listSpaces(ofSession: client, handles: &handles)
-        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &handles)
+        case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
+        case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
+        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles)
+        case "read_text":
+            let handle = call.arguments["tab"]?.stringValue ?? ""
+            guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
+                return Self.error("tabNotFound", "This session has no open tab \(handle).").result
+            }
+            let read = await readText(call.arguments, tab: tab, handle: handle) { current in
+                if current.agentOwnerID == session.id { return true }
+                return session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
+            }
+            return read.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")
         }
     }
@@ -1077,7 +1098,8 @@ extension AgentToolHost {
 
     /// The session's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI, or on a page agents do not read, is listed without its title or address (rule P16).
     private func listTabs(shared: Bool, ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
-        let tabs = shared ? host.tabs(withIDs: Set(handles.sharedTabIDs)) : host.agentTabs(of: client.id)
+        let sharedIDs = Set(handles.sharedTabIDs)
+        let tabs = shared ? host.userTabs(in: client.personaID).filter { sharedIDs.contains($0.id) } : host.agentTabs(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for tab in tabs {
