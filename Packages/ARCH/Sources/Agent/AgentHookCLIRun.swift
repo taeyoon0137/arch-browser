@@ -16,7 +16,7 @@ final class AgentHookCLIRun {
     var spawnedProcess: AgentProcessRecord?
     var didReachLimit = false
     private var calls = 0
-    private var executing = false
+    private var executing: Task<AgentToolResult, Never>?
 
     init(tools: [AgentTool], limit: Int, knownProviders: [AIProviderID: String], dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
         self.tools = tools
@@ -30,17 +30,24 @@ final class AgentHookCLIRun {
         return spawnedProcess
     }
 
+    /// Ends the private tool binding, including a page read whose engine may never answer.
+    func finish() {
+        ready.shut()
+        executing?.cancel()
+    }
+
     func call(_ call: AgentToolCall) async -> AgentToolResult {
         guard !Task.isCancelled, await ready.wait(timeout: AgentSession.readyWait), !Task.isCancelled else {
             return AgentToolResult(status: .refused, code: "notReady", text: "The run has not passed its CLI start check.")
         }
-        guard !executing else { return AgentToolResult(status: .refused, code: "busy", text: "The run is already handling a tool call.") }
+        guard executing == nil else { return AgentToolResult(status: .refused, code: "busy", text: "The run is already handling a tool call.") }
         guard calls < limit else { return AgentToolResult(status: .refused, code: "toolCallLimit", text: "The run reached its tool call limit.") }
         calls += 1
-        executing = true
+        let task = Task { await dispatch(call) }
+        executing = task
         runner?.toolCallDidStart()
         defer {
-            executing = false
+            executing = nil
             runner?.toolCallDidEnd()
             if calls == limit {
                 didReachLimit = true
@@ -48,7 +55,6 @@ final class AgentHookCLIRun {
                 runner?.stop()
             }
         }
-        guard tools.contains(where: { $0.name == call.name }) else { return AgentToolResult(status: .refused, code: "notGranted", text: "The hook did not grant this tool.") }
-        return await dispatch(call)
+        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 }

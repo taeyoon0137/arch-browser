@@ -35,7 +35,7 @@ import Foundation
     private var runService: AgentRunner?
     public var runs: AgentRunner {
         if let runService { return runService }
-        let runner = AgentRunner(host: host, ai: .shared)
+        let runner = AgentRunner(host: host, ai: .shared, activity: activity)
         runObserver = runner.$isRunning.dropFirst().removeDuplicates().sink { [weak self] _ in self?.objectWillChange.send() }
         runner.startCLI = { [weak self] binding, feature, models, turns, instructions in
             guard let self else { throw AIError.cancelled }
@@ -347,7 +347,7 @@ import Foundation
         dependencies.prompt.cancelAll()
         runService?.cancelAll()
         for binding in hookCLIs.values {
-            binding.ready.shut()
+            binding.finish()
             binding.runner?.endProcesses()
         }
         for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
@@ -901,7 +901,7 @@ import Foundation
     }
 
     func finishHookCLI(_ binding: AgentHookCLIRun) {
-        binding.ready.shut()
+        binding.finish()
         hookCLIs.removeValue(forKey: binding.id)
         for connection in connections.values where connection.sessionID == binding.id { endpoint?.close(connection.id) }
         if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty { updateListening() }

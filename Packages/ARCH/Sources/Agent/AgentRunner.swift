@@ -16,6 +16,7 @@ public final class AgentRunner: ObservableObject {
     @Published public private(set) var keptRuns: [KeptRun] = []
     private let host: any AgentBrowserHost
     private let client: any AIClient
+    private let activity: AgentActivityLog?
     private let resolve: (AIFeatureID, AIRouteChoice) throws -> [AIModelRef]
     private let provider: (AIProviderID) -> AIProviderConfiguration?
     private let allowsAI: (URL) -> Bool
@@ -25,20 +26,21 @@ public final class AgentRunner: ObservableObject {
     @Published public private(set) var isRunning = false
     private var running: [UUID: Task<AgentRunResult, Never>] = [:]
 
-    init(host: any AgentBrowserHost, client: any AIClient,
+    init(host: any AgentBrowserHost, client: any AIClient, activity: AgentActivityLog? = nil,
          resolve: @escaping (AIFeatureID, AIRouteChoice) throws -> [AIModelRef],
          provider: @escaping (AIProviderID) -> AIProviderConfiguration?,
          allowsAI: @escaping (URL) -> Bool, reserve: @escaping (AIFeatureID, Int) -> Bool) {
         self.host = host
         self.client = client
+        self.activity = activity
         self.resolve = resolve
         self.provider = provider
         self.allowsAI = allowsAI
         self.reserve = reserve
     }
 
-    convenience init(host: any AgentBrowserHost, ai: AIService) {
-        self.init(host: host, client: ai, resolve: { try ai.resolvedModels(for: $0, route: $1) },
+    convenience init(host: any AgentBrowserHost, ai: AIService, activity: AgentActivityLog) {
+        self.init(host: host, client: ai, activity: activity, resolve: { try ai.resolvedModels(for: $0, route: $1) },
                   provider: { id in ai.settings.providers.first { $0.id == id } }, allowsAI: { ai.settings.allowsAI(on: $0) },
                   reserve: { ai.usage.reserveAgentRun(for: $0, dailyLimit: $1) })
     }
@@ -187,6 +189,7 @@ public final class AgentRunner: ObservableObject {
             let tools = grantedTools.map { handler(for: $0, run: run) }
             do {
                 for try await event in client.run(modelRequest, tools: tools, maxRounds: request.options.limits.rounds, performsFinalCalls: true, maximumToolCalls: request.options.limits.toolCalls,
+                                                  unavailableTool: { await self.record(.refused, tool: nil, in: run) },
                                                   conversationDidChange: { messages in if keepsSession { await MainActor.run { run.messages = messages } } }) {
                     try Task.checkCancellation()
                     switch event {
@@ -228,6 +231,7 @@ public final class AgentRunner: ObservableObject {
         guard let startCLI, !Task.isCancelled else { return AgentRunResult(status: .cancelled) }
         let binding = AgentHookCLIRun(tools: tools, limit: run.request.options.limits.toolCalls, knownProviders: run.request.knownProviders ?? [:]) { call in
             guard let tool = tools.first(where: { $0.name == call.name }) else {
+                self.record(.refused, tool: nil, in: run)
                 return AgentToolResult(status: .refused, code: "notGranted", text: "This tool is outside the hook's grant.")
             }
             let result = await self.perform(call, tool: tool, in: run)
@@ -278,7 +282,7 @@ public final class AgentRunner: ObservableObject {
             result.message = error.localizedDescription
         }
         run.active = false
-        binding.ready.shut()
+        binding.finish()
         await session.end(keepingThread: false)
         if !reply.isEmpty {
             result.reply = reply
@@ -293,15 +297,30 @@ public final class AgentRunner: ObservableObject {
 
     private func handler(for tool: AgentTool, run: Execution) -> AIToolHandler {
         AIToolHandler(tool: AITool(name: tool.name, description: tool.description, inputSchema: (try? tool.inputSchema.encoded()) ?? Data())) { call in
-            guard let args = AgentAPISession.arguments(call.arguments) else {
-                return AIToolResult(callID: call.id, parts: [.text("invalidArguments")], isError: true)
-            }
-            let input = AgentToolCall(name: call.name, arguments: args)
+            let input = AgentToolCall(name: call.name, arguments: AgentAPISession.arguments(call.arguments) ?? [:])
             return AgentAPISession.result(await self.perform(input, tool: tool, in: run), of: input, callID: call.id)
         }
     }
 
+    private func record(_ status: AgentResultStatus, tool: AgentTool?, in run: Execution) {
+        guard run.request.options.record != .none, let activity else { return }
+        let hook: UUID
+        let id: UUID?
+        switch run.request.origin {
+        case .hook(let owner, let runID): (hook, id) = (owner, runID)
+        case .test(let owner): (hook, id) = (owner, nil)
+        case .outsideClient: return
+        }
+        activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: Task.isCancelled || !run.active, dryRun: run.request.options.dryRun)
+    }
+
     private func perform(_ call: AgentToolCall, tool: AgentTool, in run: Execution) async -> AgentToolResult {
+        let result = await execute(call, tool: tool, in: run)
+        record(result.status, tool: tool, in: run)
+        return result
+    }
+
+    private func execute(_ call: AgentToolCall, tool: AgentTool, in run: Execution) async -> AgentToolResult {
         func response(_ message: String, error: Bool = false) -> AgentToolResult {
             AgentToolResult(status: error ? .refused : .ok, code: error ? message : nil, text: message)
         }
