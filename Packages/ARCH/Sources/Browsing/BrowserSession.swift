@@ -176,6 +176,7 @@ final class EngineRuntime {
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
+        downloadNotifier.showWaitingAgent = { [weak self] owner in self?.showWaitingAgent(owner) }
         start(primary)
         nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
@@ -224,6 +225,17 @@ final class EngineRuntime {
 
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
+
+    /// Opening a notification selects its still-waiting conversation without navigating the user's page.
+    func showWaitingAgent(_ ownerID: UUID) {
+        guard let agents, agents.pendingAttention(for: ownerID) else { return }
+        let isSession = agents.session(withID: ownerID) != nil
+        let panel: AgentPanelContent = isSession ? .session(ownerID) : .client(ownerID)
+        let window = windows.first { $0.agentPanel == panel } ?? windows.first { $0.agentPanel == nil }
+            ?? activeWindow ?? sidebarTarget()
+        if isSession { window.showAgentSession(ownerID) } else { window.showClientPanel(ownerID) }
+        window.nsWindow?.makeKeyAndOrderFront(nil)
+    }
 
     /// The Persona of the sidebar target, read without opening a window: the last main window's, or, while none is open, that of the space the front window of `windowsToReopen` would open on, or of the first space once that one is gone, as `currentSpace` falls back. The Bookmarks menu lists its favorites.
     var sidebarTargetPersonaID: Persona.ID {

@@ -17,8 +17,7 @@ struct AgentPanelColumn: View {
 
     var body: some View {
         if case .client(let ownerID) = windowModel.agentPanel, let agents = session.agents {
-            // A selected agent tab shows its own client's panel.
-            AgentPanel(model: agents.panel, ownerID: windowModel.selectedTab?.agentOwnerID.flatMap { agents.panel.owners[$0] != nil ? $0 : nil } ?? ownerID, close: windowModel.hideAgentPanel)
+            AgentPanel(model: agents.panel, ownerID: ownerID, close: windowModel.hideAgentPanel)
                 .frame(width: PageReaderColumn.width)
                 .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)))
                 .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))

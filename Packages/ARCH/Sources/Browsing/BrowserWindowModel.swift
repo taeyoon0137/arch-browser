@@ -148,6 +148,9 @@ public enum BrowserWindowKind {
         if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
         selectedTab?.lastActivatedAt = Date()
         recordActivation()
+        if previousID != selectedTabID, case .client = agentPanel, let owner = selectedTab?.agentOwnerID, session.agents?.panel.owners[owner] != nil {
+            showClientPanel(owner)
+        }
         // An item tab's dot follows its item's read state, which a window marks viewed as it starts showing the tab (`BrowserSession.windowDidChangeShownTabs(from:to:)`), so selecting the tab it shows already keeps a dot from Mark as Unread.
         if let tab = selectedTab, tab.isUnread, tab.liveItemID == nil { tab.isUnread = false }
         // A favorite can be shown in any space of its Persona, including when a session in another Persona links to it.
