@@ -1334,13 +1334,18 @@ final class EngineRuntime {
     /// The hours while nothing is saved under `archiveAfterHoursKey`.
     public static let archiveAfterHoursByDefault = 12
 
-    /// Closes unpinned listed tabs inactive for the hours saved under `archiveAfterHoursKey` (`archiveAfterHoursByDefault` while none are; 0 disables), so a small window's tab stays, and so does an agent's tab, which closes with its agent or at quit. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now.
+    /// Closes unpinned listed tabs inactive for the hours saved under `archiveAfterHoursKey` (`archiveAfterHoursByDefault` while none are; 0 disables), so a small window's tab stays, and so does an agent's tab, which closes with its agent or at quit. The tabs windows show, each window's selected tab and the other panes of its split view, count as active now. Background drafts, playback and capture also count as active.
     public func archiveInactiveTabs() {
-        guard let cutoff = Self.archiveCutoff(now: Date()) else { return }
-        windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = Date() }
-        for tab in tabs where tab.isListedInSidebar && !tab.isPinned && tab.agentOwnerID == nil && tab.lastActivatedAt < cutoff {
-            closeTab(tab, reason: .archive)
-            undoableCloseCount = 0
+        let now = Date()
+        guard let cutoff = Self.archiveCutoff(now: now) else { return }
+        windows.flatMap(\.paneTabs).forEach { $0.lastActivatedAt = now }
+        for tab in tabs where tab.isListedInSidebar && !tab.isPinned && tab.agentOwnerID == nil {
+            if tab.hasActivityToPreserve {
+                tab.lastActivatedAt = now
+            } else if tab.lastActivatedAt < cutoff {
+                closeTab(tab, reason: .archive)
+                undoableCloseCount = 0
+            }
         }
     }
 
@@ -1996,7 +2001,7 @@ final class EngineRuntime {
         let windowRecords = Self.windowsKeepingSelections(windowsToSave, among: savedTabIDs)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, needsFullSidebarSync: needsFullSidebarSync ? true : nil, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
-                               tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt) },
+                               tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) || $0.hasActivityToPreserve ? now : $0.lastActivatedAt) },
                                folders: kept.folders, selectedTabIndex: kept.tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
                                splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
@@ -2219,7 +2224,7 @@ extension BrowserSession {
         let page = tab.webContents
         var exclusions: Set<UnloadExclusion> = []
         if tab.agentOwnerID != nil { exclusions.insert(.agent) }
-        if tab.isAudible || page.mediaSession.playbackState == .playing { exclusions.insert(.media) }
+        if tab.hasPlayingMedia { exclusions.insert(.media) }
         if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
         if tab.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }

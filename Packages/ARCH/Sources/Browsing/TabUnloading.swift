@@ -71,6 +71,15 @@ enum UnloadExclusion: CaseIterable {
     case opener
 }
 
+extension Tab {
+    var hasPlayingMedia: Bool { isAudible || webContents.mediaSession.playbackState == .playing }
+
+    /// These live pages count as active when the timer archives tabs and when a saved sidebar is restored.
+    var hasActivityToPreserve: Bool {
+        hasTypedInput || isCapturingMedia || hasPlayingMedia || webContents.isInPictureInPicture
+    }
+}
+
 /// A loaded tab that no window shows, as automatic unloading weighs it: its ID, its kind, when a window last showed it, and what keeps it loaded. The session makes these, so tests can drive `TabUnloading.tabsToUnload` without one.
 struct UnloadCandidate {
     enum Kind {

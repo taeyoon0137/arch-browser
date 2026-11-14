@@ -282,15 +282,15 @@ final class PageStub: EngineWebContents {
     /// The addresses loaded through the navigation controller, in order.
     var loadedURLs: [URL?] { navigation.loadedURLs }
 
-    /// The page's icon, page state, and capture, which a test sets as an engine's page would have them.
+    /// The page state and activity that tests drive as an engine would report them.
     var favicon: NSImage?
     var restorableState: Data?
     var isCapturingMedia = false
     let isLoading = true
     let canGoBack = false
     let canGoForward = false
-    let isAudible = false
-    let isInPictureInPicture = false
+    var isAudible = false
+    var isInPictureInPicture = false
     var zoomFactor = 1.0
     lazy var view = NSView()
     private let navigation = NavigationStub()

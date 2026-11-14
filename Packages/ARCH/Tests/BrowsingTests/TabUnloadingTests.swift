@@ -303,6 +303,57 @@ import Testing
         #expect(!tab.isCapturingMedia && !tab.webContents.isCapturingMedia)
     }
 
+    @Test func backgroundDraftAndMediaSurviveTimedArchivingAndImmediateRelaunch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        func openBackgroundPage() -> (Tab, PageStub) {
+            let page = PageStub(engine: .webKit, url: home)
+            let tab = session.adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false)
+            tab.lastActivatedAt = .distantPast
+            return (tab, page)
+        }
+        let (draft, page) = openBackgroundPage()
+        draft.webContents(page, didReceive: inputMessage("\"typed\"", mainFrame: false)) { _ in }
+        let (capture, cameraPage) = openBackgroundPage()
+        cameraPage.isCapturingMedia = true
+        capture.webContentsDidChangeMediaCapture(cameraPage)
+        let (radio, audioPage) = openBackgroundPage()
+        audioPage.isAudible = true
+        radio.webContentsDidChangeAudibleState(audioPage)
+        let (movie, videoPage) = openBackgroundPage()
+        videoPage.isInPictureInPicture = true
+        let (idle, _) = openBackgroundPage()
+        let (unloaded, _) = openBackgroundPage()
+        _ = unloaded.unloadKeepingPage()
+
+        // A quit before the timer runs must preserve the active pages in the restored sidebar.
+        try session.saveNow().get()
+        let restored = try BrowserSession(testRegistry: registry, directory: directory)
+        let active = Set([draft.id, capture.id, radio.id, movie.id])
+        #expect(Set(restored.tabs.map(\.id)) == active)
+        session.archiveInactiveTabs()
+        #expect(Set(session.tabs.map(\.id)) == active)
+        #expect(!session.tabs.contains { $0 === idle || $0 === unloaded })
+        #expect(draft.hasTypedInput && capture.isCapturingMedia)
+        #expect(draft.lastActivatedAt > .distantPast && capture.lastActivatedAt > .distantPast)
+
+        // Once the activity ends, these same tabs become eligible after the next idle period.
+        draft.webContents(page, didReceive: inputMessage("\"start\"")) { _ in }
+        cameraPage.isCapturingMedia = false
+        capture.webContentsDidChangeMediaCapture(cameraPage)
+        audioPage.isAudible = false
+        radio.webContentsDidChangeAudibleState(audioPage)
+        videoPage.isInPictureInPicture = false
+        session.tabs.forEach { $0.lastActivatedAt = .distantPast }
+        session.archiveInactiveTabs()
+        #expect(session.tabs.isEmpty)
+    }
+
     @Test func theInputScriptRunsFirstInEveryFrameInAWorldOfItsOwn() {
         let script = TabUnloading.inputScript
         #expect(script.world == "arch.unloading")
