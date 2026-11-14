@@ -311,6 +311,84 @@ import Testing
         #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
     }
 
+    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, exclude, revoke, takeOver, stop, decline }
+
+    @Test(arguments: ChangeBeforeTabConsent.allCases)
+    func aTabRequestCannotShareAfterItsReviewedChoiceChanges(_ change: ChangeBeforeTabConsent) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (session, runner) = try start(service, harness)
+        let client = try await connectQuestionClient(session, runner, harness)
+        let tab = AgentTabInfo(id: UUID(), spaceID: session.spaceID, title: "Private choice", url: URL(string: "https://fixture.invalid/private"), isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let request = Task { try await client.callTool("request_tab", ["reason": "Read the chosen page", "access": "read"]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        #expect(card.kind == .shareSessionTab([tab]) && session.state == .waitingForUser)
+        switch change {
+        case .reload: harness.host.tabs[0].documentID = UUID()
+        case .navigate: harness.host.tabs[0].url = URL(string: "https://fixture.invalid/new")
+        case .close: harness.host.tabs.removeAll()
+        case .unload: harness.host.tabs[0].isLoaded = false
+        case .exclude: harness.excludedHosts.value.insert("fixture.invalid")
+        case .revoke:
+            #expect(service.share(tab, with: session))
+            service.stopSharing(tab.id, with: session)
+        case .takeOver:
+            session.takeOver()
+            session.handBack()
+        case .stop: session.stop()
+        case .decline: break
+        }
+        _ = await service.approvals.answer(card.id, with: change == .decline ? .deny : .tab(tab.id))
+        let reply = try await request.value
+        #expect(reply.status != .ok && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
+        #expect(!reply.text.contains(tab.title) && !reply.text.contains("fixture.invalid"))
+        #expect(reply.structured?["tab"] == nil)
+    }
+
+    @Test func theModelCannotExpandAReadRequestOrReuseARevokedHandle() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (session, runner) = try start(service, harness, mode: .actInAgentTabs)
+        let client = try await connectQuestionClient(session, runner, harness)
+        let tab = AgentTabInfo(id: UUID(), spaceID: session.spaceID, title: "Report", url: URL(string: "https://fixture.invalid/private"), isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let arguments: [String: AgentJSON] = ["reason": "Review the report", "access": "read"]
+        let acting = try await client.callTool("request_tab", ["reason": "Use this tab", "access": "act"])
+        let preselected = try await client.callTool("request_tab", ["reason": "Use this tab", "access": "read", "tab": .string(tab.id.uuidString)])
+        #expect(acting.status != .ok && preselected.status != .ok && service.approvals.pending.isEmpty)
+        #expect(session.handles.sharedTabIDs.isEmpty)
+
+        #expect(service.share(tab, with: session))
+        #expect(session.handles.tabs.id(for: "t1") == tab.id)
+        let existing = try await client.callTool("request_tab", arguments)
+        #expect(service.approvals.pending.isEmpty && session.handles.sharedTabIDs == [tab.id])
+        #expect(existing.status == .denied && existing.structured?["tab"] == nil)
+        service.stopSharing(tab.id, with: session)
+        let secondClient = try TestClient(harness.location)
+        _ = try await secondClient.hello(ticket: session.ticket?.text)
+        let call = Task { try await client.callTool("request_tab", arguments) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        let concurrent = Task { try await secondClient.callTool("request_tab", arguments) }
+        try await waitUntil { service.approvals.pending.count == 2 }
+        let otherCard = try #require(service.approvals.pending.first { $0.id != card.id })
+        #expect(await service.approvals.answer(card.id, with: .tab(tab.id)))
+        let result = try await call.value
+        _ = await service.approvals.answer(otherCard.id, with: .tab(tab.id))
+        let otherResult = try await concurrent.value
+        #expect(otherResult.status != .ok && otherResult.structured?["tab"] == nil)
+        #expect(result.status == .ok && result.structured == ["tab": "t2", "access": "read"])
+        #expect(session.handles.tabs.id(for: "t1") == nil && session.handles.tabs.id(for: "t2") == tab.id)
+        let oldRead = try await client.callTool("read_text", ["tab": "t1"])
+        #expect(oldRead.status != .ok)
+    }
+
     enum QuestionEnd: CaseIterable { case stop, takeOver, completed, failed, processExit, delete, quit }
 
     @Test(arguments: QuestionEnd.allCases) func endingAQuestionRejectsItsLateAnswer(_ end: QuestionEnd) async throws {
@@ -1066,6 +1144,10 @@ import Testing
         let bound = try await connectQuestionClient(session, #require(harness.runners.last), harness)
         let denied = try await bound.callTool("ask_user", ["question": "Show a question despite the task setting"])
         #expect(denied.status == .denied && service.approvals.pending.isEmpty)
+        let tools = try await bound.call(AgentControlMethod.toolsList).decode(as: AgentToolList.self)
+        #expect(!tools.tools.contains("request_tab"))
+        let outsidePick = try await bound.callTool("request_tab", ["access": "read", "reason": "Pick any tab"])
+        #expect(outsidePick.status == .refused && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         // A space of another Persona is not the grant's.
         await #expect(throws: AgentClientError.self) { try await client.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: AgentTaskStart(task: "Read", space: "Home"))) }
         // The client lists and stops only its own sessions.

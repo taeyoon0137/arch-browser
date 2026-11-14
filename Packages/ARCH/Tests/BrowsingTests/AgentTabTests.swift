@@ -147,6 +147,31 @@ import Testing
         #expect(BrowserSession.emptyAgentFolderIDs(in: [agentFolder, child], tabs: []).isEmpty)
     }
 
+    @Test func userTabChoicesBelongToTheirPersonaAndReportWhetherTheDocumentIsLoaded() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchTabRequest-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let host = BrowserAgentHost(session: session)
+        let home = try #require(session.spaces.first)
+        let work = session.addPersona(named: "Work")
+        let otherSpace = try #require(session.spaces(in: work.id).first)
+        let url = try #require(URL(string: "https://fixture.invalid/report"))
+        let ordinary = session.openTab(url: url, in: home.id, select: false)
+        let pinned = session.openTab(url: url, in: home.id, pinned: true, select: false)
+        let elsewhere = session.openTab(url: url, in: otherSpace.id, select: false)
+        _ = try #require(host.openAgentTab(at: url, engine: .webKit, for: AgentTabOwner(id: owner, spaceID: home.id, folderName: "Task")))
+        #expect(session.closeTab(pinned))
+
+        let homeChoices = host.userTabs(in: home.resolvedPersonaID)
+        #expect(Set(homeChoices.map(\.id)) == [ordinary.id, pinned.id])
+        #expect(homeChoices.filter(\.isLoaded).map(\.id) == [ordinary.id])
+        #expect(host.userTabs(in: work.id).map(\.id) == [elsewhere.id])
+    }
+
     @Test func keepingMovingClosingAndReopeningReleaseTheOriginalResearchNavigation() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchResearchLifetime-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

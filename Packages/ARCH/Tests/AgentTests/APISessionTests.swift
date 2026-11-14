@@ -360,6 +360,67 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         await service.deleteSession(session.id)
     }
 
+    @Test func aTabRequestRevealsOnlyTheApprovedReadHandleToTheModel() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            switch round {
+            case 0: return roundSteps([toolCall("pick", "request_tab", #"{"reason":"Choose a source","access":"read"}"#)])
+            case 1: return roundSteps([toolCall("read", "read_text", #"{"tab":"t1"}"#)])
+            default: return roundSteps(text: "Done.")
+            }
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let otherSpace = try #require(harness.host.spaces(in: FakeHost.workPersona.id).first)
+        let addresses = ["https://chosen.invalid/report?private=one", "https://other.invalid/report?private=two",
+                         "https://excluded.invalid", "arch://settings", "https://unloaded.invalid", "https://owned.invalid", "https://elsewhere.invalid"]
+        var tabs = addresses.map { AgentTabInfo(id: UUID(), spaceID: space.id, title: "Duplicate fixture title", url: URL(string: $0), isLoading: false, engine: .webKit) }
+        tabs[4].isLoaded = false
+        tabs[5].agentOwnerID = UUID()
+        tabs[6].spaceID = otherSpace.id
+        harness.host.tabs = tabs
+        // FakeHost's userTabIDs represent the user's tabs returned for the requested Persona.
+        harness.host.userTabIDs = Set(tabs.dropLast().map(\.id))
+        let approved = tabs[0], other = tabs[1]
+        harness.host.pages[try #require(approved.url)] = (approved.title, "Chosen body sentinel")
+        harness.host.pages[try #require(other.url)] = (other.title, "Unchosen body sentinel")
+        harness.excludedHosts.value.insert("excluded.invalid")
+        let start = AgentService.SessionStart(task: "Review the source", personaID: persona, spaceID: space.id, attachedTabIDs: [], mode: .readOnly, model: model, effort: nil)
+        let session = try service.startSession(start)
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        #expect(card.ownerID == session.id && !card.needsAuthentication(for: .tab(approved.id)))
+        #expect(card.kind == .shareSessionTab([approved, other]))
+        #expect(client.requests.count == 1 && session.handles.sharedTabIDs.isEmpty && session.handles.tabs.id(for: "t1") == nil)
+        let initial = try #require(client.requests.first)
+        let initialTool = try #require(initial.tools.first { $0.name == "request_tab" })
+        let schema = try JSONDecoder().decode(AgentJSON.self, from: initialTool.inputSchema)
+        #expect(schema["properties"]?["access"]?["enum"] == ["read"])
+        let before = initial.messages.description
+        #expect(!before.contains(approved.title) && !before.contains("body sentinel") && !before.contains("chosen.invalid") && !before.contains("other.invalid"))
+
+        harness.host.tabs.reverse()
+        #expect(await service.approvals.answer(card.id, with: .tab(approved.id)))
+        try await waitUntil { client.requests.count == 3 && session.state == .done }
+        #expect(session.handles.sharedTabIDs == [approved.id] && session.handles.tabs.id(for: "t1") == approved.id)
+        let second = client.requests[1]
+        let picked = try #require(toolResults(in: second.messages.last).first)
+        #expect(picked.callID == "pick" && !picked.isError)
+        let confirmation = picked.parts.compactMap { if case .text(let text) = $0 { return text }; return nil }
+        #expect(confirmation.count == 1 && picked.parts.count == 1 && confirmation[0].contains("t1"))
+        #expect(!second.messages.description.contains(approved.title) && !second.messages.description.contains("chosen.invalid") && !second.messages.description.contains("body sentinel"))
+        let last = client.requests[2]
+        let read = try #require(toolResults(in: last.messages.last).first)
+        let pages = read.parts.compactMap { if case .page(let page) = $0 { return page }; return nil }
+        #expect(read.callID == "read" && !read.isError && pages.map(\.text) == ["Chosen body sentinel"])
+        #expect(!last.messages.description.contains("other.invalid") && !last.messages.description.contains("Unchosen body sentinel"))
+        await service.deleteSession(session.id)
+    }
+
     enum HistoryAccessChange: CaseIterable { case stopSharing, shareAgain, reload, takeOver }
 
     @Test(arguments: HistoryAccessChange.allCases)
