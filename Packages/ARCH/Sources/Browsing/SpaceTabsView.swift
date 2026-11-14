@@ -23,18 +23,7 @@ struct SpacePagesView: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == windowModel.currentSpaceID
-                VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
-                    if !session.favorites(in: space.resolvedPersonaID).isEmpty {
-                        FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
-                            .modifier(FavoriteDropArea(spaceID: space.id))
-                            .padding(.horizontal, SidebarView.inset)
-                    }
-                    if let plugins = isCurrent ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
-                        PluginSidebarItemsView(plugins: plugins)
-                    }
-                    if let agents = session.agents { ConnectedAgentRows(agents: agents) }
-                    SpaceTabsView(session: session, space: space)
-                }
+                SpaceTabsView(session: session, space: space)
                 .frame(width: width, alignment: .topLeading)
                 // Clipping alone does not keep offscreen pages from receiving clicks or accessibility actions.
                 .allowsHitTesting(isCurrent)
@@ -130,60 +119,74 @@ struct SpaceTabsView: View {
         return tab.spaceID == space.id && tab.agentOwnerID == nil && session.canAddFavorite(tab)
     }
 
+    private var tabRows: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            SpaceHeaderView(session: session, space: space)
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
+                .opacity(offersFirstFavorite ? 0 : 1)
+                .overlay {
+                    if offersFirstFavorite {
+                        Label("Add to Favorites", systemImage: "star")
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                            .modifier(FavoriteDropArea(spaceID: space.id))
+                            .allowsHitTesting(false)
+                    }
+                }
+            ForEach(items) { item in
+                Group {
+                    switch item {
+                    case .row(.folder(let folder, let depth)):
+                        row(for: folder)
+                            .padding(.leading, CGFloat(depth) * Self.folderIndent)
+                    case .row(.tab(let tab, let depth)):
+                        row(for: tab)
+                            .padding(.leading, CGFloat(depth) * Self.folderIndent)
+                    case .divider(let empty):
+                        let draggedHere = sidebarDrag.owner == dragOwner && sidebarDrag.tabID != nil
+                        ZStack {
+                            if empty && draggedHere {
+                                Label("Pin Tab", systemImage: "pin")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Divider().padding(.horizontal, 10)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: empty || (draggedHere && startedWithoutPins) ? 26 : 10)
+                        .background(frameReader(for: Self.pinnedListEndID))
+                        .accessibilityHidden(true)
+                    case .newTab:
+                        NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
+                            .background(frameReader(for: Self.openListEndID))
+                    }
+                }
+                .transition(Self.rowTransition)
+            }
+        }
+        // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
+        .animation(sidebarDrag.item?.isRow == true ? nil : .easeInOut(duration: 0.2), value: Set(items.map(\.id)))
+        // While a dragged folder hides its rows, the list keeps their height below its end, so that a list scrolled to its end does not scroll back and move other rows under the pointer.
+        .padding(.bottom, sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                SpaceHeaderView(session: session, space: space)
-                    .padding(.leading, 10)
-                    .padding(.trailing, 4)
-                    .padding(.bottom, 4)
-                    .opacity(offersFirstFavorite ? 0 : 1)
-                    .overlay {
-                        if offersFirstFavorite {
-                            Label("Add to Favorites", systemImage: "star")
-                                .font(.callout)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                                .modifier(FavoriteDropArea(spaceID: space.id))
-                                .allowsHitTesting(false)
-                        }
-                    }
-                ForEach(items) { item in
-                    Group {
-                        switch item {
-                        case .row(.folder(let folder, let depth)):
-                            row(for: folder)
-                                .padding(.leading, CGFloat(depth) * Self.folderIndent)
-                        case .row(.tab(let tab, let depth)):
-                            row(for: tab)
-                                .padding(.leading, CGFloat(depth) * Self.folderIndent)
-                        case .divider(let empty):
-                            let draggedHere = sidebarDrag.owner == dragOwner && sidebarDrag.tabID != nil
-                            ZStack {
-                                if empty && draggedHere {
-                                    Label("Pin Tab", systemImage: "pin")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Divider().padding(.horizontal, 10)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: empty || (draggedHere && startedWithoutPins) ? 26 : 10)
-                            .background(frameReader(for: Self.pinnedListEndID))
-                            .accessibilityHidden(true)
-                        case .newTab:
-                            NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
-                                .background(frameReader(for: Self.openListEndID))
-                        }
-                    }
-                    .transition(Self.rowTransition)
+            VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
+                if !session.favorites(in: space.resolvedPersonaID).isEmpty {
+                    FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
+                        .modifier(FavoriteDropArea(spaceID: space.id))
                 }
+                if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
+                    PluginSidebarItemsView(plugins: plugins)
+                }
+                if let agents = session.agents { ConnectedAgentRows(agents: agents) }
+                tabRows
             }
-            // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
-            .animation(sidebarDrag.item?.isRow == true ? nil : .easeInOut(duration: 0.2), value: Set(items.map(\.id)))
-            // While a dragged folder hides its rows, the list keeps their height below its end, so that a list scrolled to its end does not scroll back and move other rows under the pointer.
-            .padding(.bottom, sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0)
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
             .background(GeometryReader { proxy in
