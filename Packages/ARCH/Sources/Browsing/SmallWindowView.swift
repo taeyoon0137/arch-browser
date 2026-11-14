@@ -87,6 +87,9 @@ private struct SmallWindowTopRow: View {
             .onHover { isHoveringSite = $0 }
             .help(windowModel.internalPage?.address ?? tab.url?.absoluteString ?? "")
             .accessibilityLabel(siteName)
+            if !windowModel.isSelectedPageCovered {
+                TemporaryEngineLabel(tab: tab)
+            }
             Spacer(minLength: 8)
             SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: session.menuShortcut("goBack"), action: windowModel.goBack).disabled(!tab.canGoBack)
             SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: session.menuShortcut("goForward"), action: windowModel.goForward).disabled(!tab.canGoForward)

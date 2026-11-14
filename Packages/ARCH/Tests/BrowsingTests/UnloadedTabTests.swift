@@ -131,7 +131,10 @@ import Testing
 
         let fallback = try launch([.webKit])
         let selected = try #require(fallback.tabs.first { $0.id == id })
+        #expect(TemporaryEngineLabel.explanation(for: selected) == nil)
         fallback.loadPage(of: selected)
+        let explanation = try #require(TemporaryEngineLabel.explanation(for: selected))
+        #expect(explanation.contains("temporarily using WebKit") && explanation.contains("saved engine, Chromium"))
         #expect(selected.engineKind == .webKit && fallback.openTab(for: favorite).engineKind == .webKit)
         #expect(fallback.tabs.first { $0.id == background }?.isLoaded == false)
         #expect(fallback.sidebarSyncState.pinnedTabs.allSatisfy { $0.engine == .chromium })
@@ -146,6 +149,7 @@ import Testing
         let visiblePage = selected.webContents
         fallback.switchEngine(of: selected, to: .webKit)
         #expect(selected.webContents === visiblePage)
+        #expect(TemporaryEngineLabel.explanation(for: selected) == nil)
         try fallback.saveNow().get()
         #expect(try #require(store.load()).tabs.first { $0.id == id }?.engine == .webKit)
     }

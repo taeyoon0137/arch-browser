@@ -58,6 +58,9 @@ struct AddressPillView: View {
             .buttonStyle(.plain)
             .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
             .accessibilityLabel(host)
+            if let tab, !windowModel.isSelectedPageCovered {
+                TemporaryEngineLabel(tab: tab)
+            }
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
@@ -77,6 +80,27 @@ struct AddressPillView: View {
         .background(GeometryReader { proxy in
             Color.clear.preference(key: AddressPillFrameKey.self, value: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))
         })
+    }
+}
+
+/// The address bar names the current renderer while the tab's saved engine is unavailable.
+struct TemporaryEngineLabel: View {
+    @ObservedObject var tab: Tab
+
+    static func explanation(for tab: Tab) -> String? {
+        guard tab.isLoaded, tab.engineKind != tab.preferredEngine else { return nil }
+        return "This tab is temporarily using \(tab.engineKind.displayName) because its saved engine, \(tab.preferredEngine.displayName), was unavailable."
+    }
+
+    var body: some View {
+        if let explanation = Self.explanation(for: tab) {
+            Text(tab.engineKind.displayName)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .help(explanation)
+                .accessibilityLabel(explanation)
+        }
     }
 }
 
@@ -192,12 +216,7 @@ struct TabEngineSection: View {
 
     /// WebKit gives the app no public way to let a page show notifications: a page's request is refused without asking the app, so Arch cannot tell whether a page asked, and a WebKit tab's note always says so.
     private var note: String {
-        let switching: String
-        if tab.preferredEngine == tab.engineKind {
-            switching = "Switching loads the page again in the other engine."
-        } else {
-            switching = "This tab is using \(tab.engineKind.displayName) because its saved engine, \(tab.preferredEngine.displayName), was unavailable."
-        }
+        let switching = TemporaryEngineLabel.explanation(for: tab) ?? "Switching loads the page again in the other engine."
         return tab.engineKind == .webKit ? switching + " Websites can\u{2019}t show notifications in WebKit tabs." : switching
     }
 
