@@ -16,12 +16,23 @@ import Testing
     private static let page = """
         <!doctype html><title>Test</title>
         <p id="intro">Intro text</p>
+        <input value="Field value"><textarea>Textarea value</textarea>
         <div contenteditable>My draft reply</div>
         <p id="middle">Middle text</p>
         <div id="host"></div>
         <p id="outro">Outro text</p>
         <script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<div contenteditable>Shadow draft</div>";</script>
         """
+
+    @Test func readsVisibleTextAndLeavesOutFieldsAndDrafts() async throws {
+        let tab = try await loadedTab()
+        let content = try await withCheckedThrowingContinuation { continuation in
+            tab.readableContent(limit: 2000) { continuation.resume(with: $0) }
+        }
+        #expect(content.title == "Test")
+        #expect(content.text == "Intro text\n\nMiddle text\n\nOutro text")
+        #expect(!content.isTruncated)
+    }
 
     @Test func textSelectedOutsideEditableAreasIsTheSelection() async throws {
         let tab = try await loadedTab()

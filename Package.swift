@@ -89,6 +89,8 @@ let package = Package(
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         // `scripts/bundle_app.sh` copies it into Contents/Helpers as arch-cli, with arch-mcp as a link to it.
         .executableTarget(name: "ArchCLI", dependencies: ["AgentControl"], path: "Packages/ARCHApp/Sources/ArchCLI"),
+        // A disposable app bundle starts this test executable with the real renderer and helper processes.
+        .executableTarget(name: "ARCHEngineReadCheck", dependencies: ["ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHKit/Tests/ARCHEngineReadCheck"),
         // Needs no CEF framework: the bridge loads it at run time, and these tests start no Chromium engine. The WebKit adapter is there for the context menu parity tests, which make WebKit web views without a page.
         .testTarget(name: "ARCHEngineChromiumTests", dependencies: ["ARCHEngineChromium", "ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineChromiumTests"),
         // `Fixtures/Agent` holds the Claude Code and Codex streams that the agent session decoders are written against.
