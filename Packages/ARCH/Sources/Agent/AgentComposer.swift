@@ -112,6 +112,7 @@ public struct AgentComposer: View {
     let actions: AgentPanelActions
     let didStart: (AgentSession) -> Void
     @State private var text: String
+    @FocusState private var isTaskFocused: Bool
     @State private var attachesTab = true
     @State private var sharesExcerpt = false
     @State private var usesAgentsPersona = false
@@ -158,6 +159,8 @@ public struct AgentComposer: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .lineLimit(3...10)
+                    .focused($isTaskFocused)
+                    .onAppear { isTaskFocused = true }
                     .onSubmit(start)
                 if let tab = attachableTab, attachesTab, !usesAgentsPersona {
                     AgentTabChip(tab: tab) {
