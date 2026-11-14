@@ -1033,19 +1033,26 @@ extension AgentToolHost {
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
-            let reading = session.beganReading(id)
-            defer { session.finishedReading(reading) }
             let epoch = session.callEpoch
+            let generation = session.takeoverGeneration
             func mayRead(_ current: AgentTabInfo) -> Bool {
-                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.handles.tabs.id(for: handle) == id else { return false }
+                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.takeoverGeneration == generation,
+                      current.agentOwnerID == tab.agentOwnerID, session.handles.tabs.id(for: handle) == id else { return false }
                 if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
                 return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
+            guard !Task.isCancelled else { return Self.ended.result }
+            guard mayRead(tab) else { return Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle) }
+            if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
+                return Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)
+            }
+            let reading = session.beganReading(id)
+            defer { session.finishedReading(reading) }
             if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
             let snapshots = session.snapshots
             let shared = tab.agentOwnerID == nil
             return await snapshot(call.arguments, tab: tab, handle: handle, shared: shared, store: snapshots, pages: 0) { current in
-                session.snapshots === snapshots && current.agentOwnerID == tab.agentOwnerID && mayRead(current)
+                session.snapshots === snapshots && mayRead(current)
             }.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")
         }
