@@ -12,6 +12,8 @@ public final class HookScriptRunner: HookScriptRunning {
     /// The instances a hook keeps in one Persona.
     public static let instancesPerHook = 2
 
+    public typealias AgentCall = @MainActor (AgentRunRequest, HookInvocation) async -> AgentRunResult
+    private let runAgent: AgentCall?
     private let host: any PluginBrowserHost
     private let allowsAI: (URL) -> Bool
     private let idleLimit: TimeInterval
@@ -23,7 +25,8 @@ public final class HookScriptRunner: HookScriptRunning {
     private var parsedDigests: Set<String> = []
 
     /// `host` reaches the tabs, and `allowsAI` is the AI interface's site check, which a hook with `agent` applies to the titles and addresses it lists. Tests give a shorter `idleLimit`.
-    public init(host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool, idleLimit: TimeInterval = 30) {
+    public init(host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool, idleLimit: TimeInterval = 30, runAgent: AgentCall? = nil) {
+        self.runAgent = runAgent
         self.host = host
         self.allowsAI = allowsAI
         self.idleLimit = idleLimit
@@ -59,14 +62,15 @@ public final class HookScriptRunner: HookScriptRunning {
             end(instance, as: .failed(error.localizedDescription))
             return .failed(code: "loadFailed", message: "The script did not load: \(error.localizedDescription)")
         }
+        if let reason = instance.endReason { return reason.outcome }
         instance.context.begin(invocation)
         do {
             try await instance.plugin.handle(.browser(invocation.event, extra: ["hook": Self.hookValue(of: invocation.hook)]))
-            let actions = instance.context.finish()
+            let outcome = instance.context.finish()
             release(instance)
-            return .completed(actions: actions, agent: nil)
+            return outcome
         } catch {
-            _ = instance.context.finish()
+            let agentOutcome = instance.context.finish()
             // A call the script left unanswered past the hang limit, which backs up the watchdog.
             if case PluginError.timedOut = error {
                 end(instance, as: .timedOut)
@@ -74,6 +78,7 @@ public final class HookScriptRunner: HookScriptRunning {
             }
             if let reason = instance.endReason { return reason.outcome }
             release(instance)
+            if case .failed("unknownProvider", _) = agentOutcome { return agentOutcome }
             return Self.outcome(of: error, kind: invocation.event.kind)
         }
     }
@@ -123,7 +128,8 @@ public final class HookScriptRunner: HookScriptRunning {
         let instance = makeInstance(for: invocation, key: key, configuration: configuration)
         instance.run = invocation.run
         instance.plugin.isHeld = true
-        if (instances[key]?.count ?? 0) < Self.instancesPerHook {
+        // An agent-capable script gets its own lifetime, so a delayed callback cannot spend the next invocation’s grant.
+        if !invocation.hook.usesAgent, (instances[key]?.count ?? 0) < Self.instancesPerHook {
             instances[key, default: []].append(instance)
         } else {
             instance.isRetired = true
@@ -139,7 +145,7 @@ public final class HookScriptRunner: HookScriptRunning {
         let package = PluginPackage(manifest: manifest, background: "hook.js", source: invocation.script, rootURL: URL(string: "arch-plugin://\(id.rawValue)/")!)
         // The runner's watchdog ends a run at the hook's timeout; the hang limit only backs it up.
         let plugin = ScriptPlugin(package: package, limits: ScriptPluginLimits(hang: hook.timing.timeout.hookSeconds + 1, idle: idleLimit))
-        let context = HookScriptContext(hook: hook, personaID: invocation.personaID, host: host, allowsAI: allowsAI)
+        let context = HookScriptContext(hook: hook, personaID: invocation.personaID, host: host, allowsAI: allowsAI, runAgent: runAgent)
         let instance = Instance(key: key, configuration: configuration, plugin: plugin, context: context)
         plugin.onStop = { [weak self, weak instance] reason in
             guard let self, let instance else { return }

@@ -63,6 +63,13 @@ public protocol PluginContext: AnyObject {
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
 }
 
+/// A sandbox that may hand a script's agent options to a user-authorized browser hook.
+@MainActor
+public protocol PluginAgentContext: PluginContext {
+    var permitsAgentRuns: Bool { get }
+    func runAgent(_ options: PluginValue) async throws -> PluginValue
+}
+
 /// What `Browsing` provides so that plugins and hook scripts reach tabs without `Plugins` depending on `Browsing`. One host serves every Persona.
 @MainActor
 public protocol PluginBrowserHost: AnyObject {

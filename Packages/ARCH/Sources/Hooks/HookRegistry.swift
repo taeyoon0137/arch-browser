@@ -66,7 +66,9 @@ public struct HookInvocation: Sendable {
     public var cause: BrowserEventCause
     /// The hook's timeout from the run's start; the scheduler cancels the run then.
     public var deadline: ContinuousClock.Instant
-    /// false for a test without Apply Changes: actions are reported, not applied.
+    /// An editor test can either preview actions or apply them.
+    public var isTest = false
+    /// False for a test without Apply Changes.
     public var appliesActions: Bool
     /// The script's bytes, checked against the digest in `hooks.json`.
     public var script: Data
@@ -247,6 +249,8 @@ public final class HookRegistry: ObservableObject {
     private var limiter = BrowserEventRateLimiter()
     private let slots = HookRunSlots(total: HookRegistry.maximumRunning, perHook: HookRegistry.maximumRunningPerHook, waiting: HookRegistry.maximumWaiting)
     private var failureCounts: [UUID: Int] = [:]
+    /// Scripts that must stop immediately when their grant changes, including tests outside the scheduler.
+    private var activeRuns: [UUID: HookRun] = [:]
     /// Each tab's last loaded document, which `newAddress` compares.
     private var lastDocuments: [UUID: URL] = [:]
     /// The `firstAfterOpen` hooks of each tab whose run has not completed: a new document or a newer load that ended it lets the tab's next load count as its first.
@@ -394,7 +398,7 @@ public final class HookRegistry: ObservableObject {
         updated.script = try script.map { try store.writeScript($0, for: updated) } ?? stored.script
         hooks[index] = updated
         register(updated)
-        if updated.state != .active { scheduler.cancel(owner: updated.owner) }
+        if updated.state != .active || updated.usesAgent || stored.usesAgent { cancelRuns(of: updated) }
         persist()
     }
 
@@ -402,7 +406,7 @@ public final class HookRegistry: ObservableObject {
     public func remove(_ id: UUID) {
         guard let index = index(of: id) else { return }
         let hook = hooks.remove(at: index)
-        scheduler.cancel(owner: hook.owner)
+        cancelRuns(of: hook)
         store.removeScripts(of: id)
         ai.unregister(.agentHook(id))
         lastRuns[id] = nil
@@ -432,11 +436,34 @@ public final class HookRegistry: ObservableObject {
         return HookScriptFile(contents: contents, matchesDigest: matchesDigest)
     }
 
-    /// The user's pause: the hook's waiting runs skip and its running run stops.
+    /// The scheduler owns event runs. The registry owns the editor’s test runs.
+    private func cancelRuns(of hook: Hook) {
+        for run in activeRuns.values where run.hookID == hook.id { run.cancelScript() }
+        scheduler.cancel(owner: hook.owner)
+    }
+
+    /// Provider destinations on this paused hook’s current route that the user has not yet approved.
+    public func providersForReview(of id: UUID) -> [HookKnownProvider] {
+        guard let hook = hook(withID: id), hook.state == .paused(.unknownProvider), let route = hook.agent?.model,
+              let models = try? ai.resolvedModels(for: .agentHook(id), route: route) else { return [] }
+        let ids = Set(models.map(\.provider))
+        return ai.settings.providers.filter { ids.contains($0.id) }.map(HookKnownProvider.init).filter { !knownProviders.contains($0) }
+    }
+
+    /// Records only destinations that still match the review the user just confirmed.
+    public func approveProviders(_ reviewed: [HookKnownProvider], for id: UUID) {
+        guard isReady, !reviewed.isEmpty, providersForReview(of: id) == reviewed else { return }
+        let ids = Set(reviewed.map(\.id))
+        knownProviders.removeAll { ids.contains($0.id) }
+        knownProviders += reviewed
+        resume(id)
+    }
+
+    /// A paused hook stops its runs and skips waiting events.
     public func pause(_ id: UUID) {
         guard let index = index(of: id), hooks[index].state == .active else { return }
         hooks[index].state = .paused(.user)
-        scheduler.cancel(owner: hooks[index].owner)
+        cancelRuns(of: hooks[index])
         persist()
     }
 
@@ -454,7 +481,7 @@ public final class HookRegistry: ObservableObject {
     public func stopAgentHooks() {
         var changed = false
         for index in hooks.indices where hooks[index].usesAgent {
-            scheduler.cancel(owner: hooks[index].owner)
+            cancelRuns(of: hooks[index])
             if hooks[index].state == .active {
                 hooks[index].state = .paused(.stopAllAgents)
                 changed = true
@@ -467,6 +494,7 @@ public final class HookRegistry: ObservableObject {
         if case .places(let places) = hook.filter.scope, places.isEmpty { return false }
         switch reason {
         case .needsNewerArch: return false
+        case .unknownProvider: return providersForReview(of: hook.id).isEmpty && !store.isUnreadable(hook.id)
         case .scriptChanged: return store.script(for: hook) != nil
         case .shellScriptsOff: return allowsShellScripts
         default: return !store.isUnreadable(hook.id)
@@ -477,14 +505,14 @@ public final class HookRegistry: ObservableObject {
     private func pauseHook(_ id: UUID, _ reason: HookPauseReason, stopping: Bool = false) {
         guard let index = index(of: id), hooks[index].state == .active else { return }
         hooks[index].state = .paused(reason)
-        if stopping { scheduler.cancel(owner: hooks[index].owner) }
+        if stopping { cancelRuns(of: hooks[index]) }
         persist()
     }
 
     private func runsHooksDidChange(from wasOn: Bool) {
         guard !isApplyingSettings, runsHooks != wasOn else { return }
         if !runsHooks {
-            for hook in hooks { scheduler.cancel(owner: hook.owner) }
+            for hook in hooks { cancelRuns(of: hook) }
         }
         persist()
     }
@@ -547,7 +575,7 @@ public final class HookRegistry: ObservableObject {
             hooks[index].filter.scope = .places(kept)
             if kept.isEmpty, hooks[index].state == .active {
                 hooks[index].state = .paused(.placeDeleted)
-                scheduler.cancel(owner: hooks[index].owner)
+                cancelRuns(of: hooks[index])
             }
             changed = true
         }
@@ -749,6 +777,8 @@ public final class HookRegistry: ObservableObject {
     /// Runs the script, canceling it in its runner when the step's task is canceled, as at a timeout, a newer event, or a close.
     private func perform(_ invocation: HookInvocation, run: HookRun, on runner: any HookScriptRunning) async -> HookRunOutcome {
         run.runner = runner
+        activeRuns[run.id] = run
+        defer { activeRuns[run.id] = nil }
         return await withTaskCancellationHandler {
             await runner.run(invocation)
         } onCancel: {
@@ -781,7 +811,7 @@ public final class HookRegistry: ObservableObject {
         if let id = eventTab, let document = Self.document(of: event) { documents[id] = document }
         let chain = Array(((event.cause?.hookChain ?? []) + [hook.id]).suffix(Self.maximumHookChain))
         return HookInvocation(hook: hook, run: run.id, personaID: event.personaID, event: view, cause: BrowserEventCause(origin: .hookRun(hook: hook.id, run: run.id), hookChain: chain),
-                              deadline: deadline, appliesActions: applying, script: script, tabs: runTabs, eventTab: eventTab, documents: documents,
+                              deadline: deadline, isTest: run.isTest, appliesActions: applying, script: script, tabs: runTabs, eventTab: eventTab, documents: documents,
                               closedTab: run.closedTab, knownProviders: Dictionary(knownProviders.map { ($0.id, $0.destination) }, uniquingKeysWith: { first, _ in first }),
                               requestDidEnd: requestDidEnd)
     }
@@ -869,7 +899,7 @@ public final class HookRegistry: ObservableObject {
             run.didTimeOut = true
             run.cancelScript()
         }
-        let ended = await runner.run(invocation)
+        let ended = await perform(invocation, run: run, on: runner)
         watchdog.cancel()
         let outcome = run.didTimeOut ? .timedOut : ended
         record(outcome, of: run)
@@ -923,6 +953,10 @@ public final class HookRegistry: ObservableObject {
         note(entry, message: message, of: hook)
         guard failed, !run.isTest else { return }
         dayCounts[hook.id] = dayCount(of: hook.id).adding(failures: 1)
+        if entry.code == "unknownProvider" {
+            pauseHook(hook.id, .unknownProvider, stopping: true)
+            return
+        }
         guard countsAsFailure else { return }
         let count = (failureCounts[hook.id] ?? 0) + 1
         failureCounts[hook.id] = count
@@ -1029,6 +1063,7 @@ final class HookRun {
 
     func cancelScript() {
         runner?.cancel(run: id)
+        runner = nil
     }
 }
 

@@ -7,7 +7,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let handlerName = "arch"
 
     /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
-    static let script = #"""
+    var script: String {
+        let permitsAgent = (context as? any PluginAgentContext)?.permitsAgentRuns == true
+        return #"""
     (() => {
       const handler = window.webkit.messageHandlers.arch;
       const call = async (name, args) => {
@@ -53,6 +55,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
       });
       Object.defineProperty(window, "arch", {
         value: Object.freeze({
+          ...(\#(permitsAgent) ? { agent: Object.freeze({ run: (options) => call("agent.run", [options]) }) } : {}),
           commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
           events: Object.freeze({
             on: (kind, listener) => {
@@ -84,6 +87,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
       });
     })();
     """#
+    }
 
     /// The body of the function through which the app delivers: `kind` is `command`, `message`, or `event`, and `payload` the JSON text the listener receives parsed.
     static let deliveryCall = "return await window.__archDeliver(kind, payload);"
@@ -105,6 +109,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             call = try JSONDecoder().decode(Call.self, from: Data(text.utf8))
         } catch {
             return replyHandler(nil, BridgeFailure.invalidCall.rawValue)
+        }
+        if call.call == "agent.run" {
+            guard let agent = context as? any PluginAgentContext, agent.permitsAgentRuns, call.args.count == 1,
+                  let options = call.value(0) else { return replyHandler(nil, "permissionDenied") }
+            Task {
+                do { Self.reply(.success(try await agent.runAgent(options)), to: replyHandler) }
+                catch { Self.reply(.failure(error), to: replyHandler) }
+            }
+            return
         }
         guard call.call.hasPrefix("secrets.") else { return Self.reply(Result { try perform(call) }, to: replyHandler) }
         let previous = secretCalls

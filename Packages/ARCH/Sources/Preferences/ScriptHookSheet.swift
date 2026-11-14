@@ -39,6 +39,11 @@ struct ScriptHookDraft: Identifiable {
     var tabKinds: Set<BrowserTabKind> = []
     var readsTabs = false
     var renamesTabs = false
+    var enablesAgent = false
+    var agentModel: AIRouteChoice?
+    var agentPrompt = ""
+    var agentRenamesTabs = false
+    var readsPageText = false
     var script: String
 
     init(new places: [HookPersonaPlaces]) {
@@ -88,8 +93,37 @@ struct ScriptHookDraft: Identifiable {
         }
         engine = hook.filter.engines == [.webKit] ? .webKit : hook.filter.engines == [.chromium] ? .chromium : .both
         tabKinds = hook.filter.tabKinds
+        enablesAgent = hook.usesAgent
+        agentModel = hook.agent?.model
+        agentPrompt = hook.agent?.prompt ?? ""
+        agentRenamesTabs = hook.grant.agent?.tools.contains("rename_tab") == true
+        readsPageText = hook.grant.agent?.tools.contains("read_text") == true
         readsTabs = hook.grant.permissions.contains(.tabs)
         renamesTabs = hook.grant.permissions.contains(.tabsRename)
+    }
+
+    /// Keep a stored grant's ceilings. A newly authorized script can use titles and suggest names only.
+    func configureAgent(in hook: inout Hook) throws {
+        guard enablesAgent else {
+            hook.grant.permissions.remove(.agent)
+            hook.grant.agent = nil
+            hook.agent = nil
+            return
+        }
+        guard let agentModel else { throw HookRegistryError.invalidAgentOptions("Choose the model for this hook.") }
+        var grant = hook.grant.agent ?? AgentRunGrant(tools: [], maximumRecord: .none)
+        let previouslyGranted = grant.tools
+        if agentRenamesTabs { grant.tools.insert("rename_tab") } else { grant.tools.remove("rename_tab") }
+        if readsPageText { grant.tools.insert("read_text") } else { grant.tools.remove("read_text") }
+        grant.tabAccess = grant.tools.contains("read_text") || grant.tools.contains("snapshot") ? .page : .title
+        var options = hook.agent ?? AgentRunOptions(prompt: agentPrompt, model: agentModel, tools: [])
+        options.tools = Set(options.tools).intersection(grant.tools).union(grant.tools.subtracting(previouslyGranted)).sorted()
+        options.tabAccess = grant.tabAccess
+        options.model = agentModel
+        options.prompt = agentPrompt
+        hook.grant.permissions.insert(.agent)
+        hook.agent = options
+        hook.grant.agent = grant
     }
 
     var trigger: HookTrigger {
@@ -184,6 +218,7 @@ struct ScriptHookDraft: Identifiable {
 
 struct ScriptHookSheet: View {
     @ObservedObject var registry: HookRegistry
+    @ObservedObject private var aiSettings = AIService.shared.settings
     @State var draft: ScriptHookDraft
     let dismiss: () -> Void
     @State private var problem: String?
@@ -208,6 +243,23 @@ struct ScriptHookSheet: View {
                     Text("Tabs")
                 } footer: {
                     aiFootnote("The script reaches only the tabs above, in the event's Persona. Without Read Tab Titles and Addresses, it sees which tabs they are but not their pages. A name from the script never replaces a name you gave a tab.")
+                }
+                if draft.stored?.origin.isOutsideProgram != true {
+                    Section("Agent") {
+                        Toggle("Allow Agent Runs", isOn: $draft.enablesAgent)
+                        if draft.enablesAgent {
+                            Picker("Model", selection: $draft.agentModel) {
+                                Text("Choose a model").tag(nil as AIRouteChoice?)
+                                ForEach(agentRoutes, id: \.self) { route in
+                                    Text(agentRouteName(route)).tag(Optional(route))
+                                }
+                            }
+                            Toggle("Allow the Agent to Rename Tabs", isOn: $draft.agentRenamesTabs)
+                            Toggle("Allow the Agent to Read Page Text", isOn: $draft.readsPageText)
+                            TextField("Instructions for the agent", text: $draft.agentPrompt, axis: .vertical)
+                            Text("Use await arch.agent.run(event.hook.agent) in your script to send these instructions and the event tab’s title and address to this provider.").font(.caption)
+                        }
+                    }
                 }
                 Section("Script") {
                     TextEditor(text: $draft.script)
@@ -322,6 +374,21 @@ struct ScriptHookSheet: View {
             .disabled(draft.includes(kind) && !draft.mayExclude(kind))
     }
 
+    private func agentRouteName(_ route: AIRouteChoice) -> String {
+        if case .models(let models) = route { return models.map(aiSettings.title(of:)).joined(separator: ", ") }
+        return HookSummary.model(of: route)
+    }
+
+    private var agentRoutes: [AIRouteChoice] {
+        var routes = aiSettings.providers.flatMap { provider -> [AIRouteChoice] in
+            guard case .http = provider.kind else { return [] }
+            return provider.models.filter { provider.capabilities(of: $0).contains(.agent) }
+                .map { .models([AIModelRef(provider: provider.id, model: $0.name)]) }
+        }
+        if let current = draft.agentModel, !routes.contains(current) { routes.append(current) }
+        return routes
+    }
+
     private func save() {
         let data = Data(draft.script.utf8)
         if let problem = HookScriptRunner.problem(in: data) {
@@ -357,6 +424,7 @@ struct ScriptHookSheet: View {
         // A script the user wrote or changed is the user's, which the agent hook editor no longer writes.
         if case .javaScript(let digest, true) = hook.script, HookStore.digest(of: data) != digest { hook.script = .javaScript(digest: digest, generated: false) }
         do {
+            if hook.origin.isOutsideProgram == false { try draft.configureAgent(in: &hook) }
             if draft.stored == nil {
                 try registry.add(hook, script: data)
             } else {
@@ -368,5 +436,13 @@ struct ScriptHookSheet: View {
         } catch {
             problem = error.localizedDescription
         }
+    }
+}
+
+
+private extension HookOrigin {
+    var isOutsideProgram: Bool {
+        if case .outsideClient = self { return true }
+        return false
     }
 }

@@ -78,8 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox; the shell runner comes with VII.31.
         let settings = AIService.shared.settings
+        let scriptHost = session.pluginBrowserHost
+        let javaScript = HookScriptRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }) { request, invocation in
+            await agents.runs.run(request, personaID: invocation.personaID) { tab, name, document, applying in
+                scriptHost.renameTab(tab, to: name, showing: document, cause: invocation.cause, applying: applying)
+            }
+        }
         let hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
-                                 javaScript: HookScriptRunner(host: session.pluginBrowserHost, allowsAI: { settings.allowsAI(on: $0) }), shell: UnavailableHookScriptRunner())
+                                 javaScript: javaScript, shell: UnavailableHookScriptRunner())
         self.hooks = hooks
         PreferencesWindowController.hooks = hooks
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -434,7 +440,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
     @MainActor @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
     @MainActor @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
-    @MainActor @objc private func stopAllAgents() { agents?.stopAllAgents() }
+    @MainActor @objc private func stopAllAgents() {
+        agents?.stopAllAgents()
+        hooks?.stopAgentHooks()
+    }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }

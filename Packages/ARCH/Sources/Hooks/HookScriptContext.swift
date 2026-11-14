@@ -1,11 +1,12 @@
 // The `PluginContext` of a JavaScript hook script's instance (`docs/hooks.md`, JavaScript scripts; Run tabs): bound to one hook in one Persona with the hook's grant, it acts only during a run, for that run. `arch.tabs` reaches only the run's tabs, renames go to the run's document for each tab with the run's cause and its test flag, and for a hook with `agent` the tabs on sites excluded from AI show neither title nor address. Storage and secrets are empty and take no values; a hook script has no settings, badges, or clipboard.
 import Agent
+import AI
 import Events
 import Foundation
 import Plugins
 
 @MainActor
-final class HookScriptContext: PluginContext {
+final class HookScriptContext: PluginAgentContext {
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -18,12 +19,23 @@ final class HookScriptContext: PluginContext {
     private var run: HookInvocation?
     private var actions: [AgentRunAction] = []
     private var hasEnded = false
+    private let callAgent: HookScriptRunner.AgentCall?
+    let permitsAgentRuns: Bool
+    private var pending: [UUID: Task<AgentRunResult, Never>] = [:]
+    private var agentUse: HookAgentUse?
+    private var failure: HookRunOutcome?
 
-    init(hook: Hook, personaID: PersonaID, host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool) {
+    init(hook: Hook, personaID: PersonaID, host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool, runAgent: HookScriptRunner.AgentCall? = nil) {
         pluginID = HookScriptContext.pluginID(of: hook.id)
         self.personaID = personaID
         grant = PluginGrant(permissions: HookScriptContext.permissions(of: hook.grant), sites: [])
         usesAgent = hook.usesAgent
+        callAgent = runAgent
+        if case .outsideClient = hook.origin {
+            permitsAgentRuns = false
+        } else {
+            permitsAgentRuns = hook.usesAgent && hook.grant.agent != nil && hook.agent != nil && runAgent != nil
+        }
         self.host = host
         self.allowsAI = allowsAI
     }
@@ -46,24 +58,68 @@ final class HookScriptContext: PluginContext {
     func begin(_ invocation: HookInvocation) {
         run = invocation
         actions = []
+        agentUse = nil
+        failure = nil
     }
 
     /// Ends the run and returns its actions: applied, or in a test proposed.
-    func finish() -> [AgentRunAction] {
+    func finish() -> HookRunOutcome {
         run = nil
-        defer { actions = [] }
-        return actions
+        for task in pending.values { task.cancel() }
+        pending.removeAll()
+        return failure ?? .completed(actions: actions, agent: agentUse)
     }
 
     /// The instance stopped; no call acts any more.
     func end() {
         hasEnded = true
-        run = nil
+        _ = finish()
     }
 
     private func currentRun() throws -> HookInvocation {
         guard !hasEnded, let run else { throw PluginError.stopped }
         return run
+    }
+
+    func runAgent(_ value: PluginValue) async throws -> PluginValue {
+        let invocation = try currentRun()
+        guard permitsAgentRuns, let callAgent, let grant = invocation.hook.grant.agent, let configured = invocation.hook.agent,
+              case .object(var fields) = value else { throw PluginError.stopped }
+        let tabsValue = fields.removeValue(forKey: "tabs")
+        fields["tools"] = fields["tools"] ?? .array(grant.tools.sorted().map(PluginValue.string))
+        fields["tabAccess"] = fields["tabAccess"] ?? .string(grant.tabAccess.rawValue)
+        let decoder = JSONDecoder()
+        let encoder = JSONEncoder()
+        var options = try decoder.decode(AgentRunOptions.self, from: encoder.encode(fields))
+        let tabs = try tabsValue.map { try decoder.decode([UUID].self, from: encoder.encode($0)) } ?? invocation.eventTab.map { [$0] } ?? []
+        func refused(_ message: String) throws -> PluginValue {
+            try decoder.decode(PluginValue.self, from: encoder.encode(AgentRunResult(status: .refused, code: "notGranted", message: message)))
+        }
+        guard options.model == configured.model else { return try refused("The model route must match the one saved for this hook.") }
+        if let reason = grant.refusal(for: options) { return try refused(reason) }
+        guard Set(tabs).isSubset(of: invocation.tabs) else { return try refused("A tab is outside this hook’s run.") }
+        if let closed = options.closedTab {
+            guard invocation.event.kind == .tabClosed, invocation.event.tab?.id == closed,
+                  invocation.closedTab != nil else { return try refused("The closed tab must belong to this close event.") }
+        }
+        options.dryRun = options.dryRun || !invocation.appliesActions
+        let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents,
+                                      closedTab: options.closedTab == nil ? nil : invocation.closedTab, knownProviders: invocation.knownProviders,
+                                      origin: invocation.isTest ? .test(hook: invocation.hook.id) : .hook(invocation.hook.id, run: invocation.run),
+                                      promptSource: .user, feature: .agentHook(invocation.hook.id), grant: grant)
+        let id = UUID()
+        let task = Task { await callAgent(request, invocation) }
+        pending[id] = task
+        defer { pending[id] = nil }
+        var result = await task.value
+        guard !task.isCancelled, run?.run == invocation.run else { throw PluginError.stopped }
+        if !grant.returnsReply { result.reply = nil }
+        actions.append(contentsOf: result.actions)
+        agentUse = HookAgentUse(model: result.model ?? agentUse?.model, usage: (agentUse?.usage ?? AIUsage(inputTokens: 0, outputTokens: 0)) + result.usage)
+        if result.status != .completed, failure == nil || result.code == "unknownProvider" {
+            failure = .failed(code: result.code ?? result.status.rawValue, message: result.message ?? "The agent run did not finish.")
+        }
+        return try decoder.decode(PluginValue.self, from: encoder.encode(result))
     }
 
     func setting(_ key: String) -> PluginValue? { nil }

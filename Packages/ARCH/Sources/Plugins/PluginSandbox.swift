@@ -24,7 +24,7 @@ enum PluginSandbox {
         let controller = configuration.userContentController
         controller.add(try await blockingRules())
         controller.addScriptMessageHandler(bridge, contentWorld: .page, name: ScriptPluginBridge.handlerName)
-        controller.addUserScript(WKUserScript(source: ScriptPluginBridge.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        controller.addUserScript(WKUserScript(source: bridge.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         return configuration
     }
 
