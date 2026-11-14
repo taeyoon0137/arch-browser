@@ -124,6 +124,15 @@ import Testing
         #expect(SyncCloudKitRecords.syncRecord(from: outgoing)?.fields == record.fields)
     }
 
+    @Test func tellsRecordsOfTheZoneFromThoseOfOtherZones() {
+        #expect(SyncCloudKitRecords.isInZone(SyncCloudKitRecords.recordID(named: "space-1")))
+        #expect(SyncCloudKitRecords.isInZone(SyncCloudKitRecords.ckRecord(from: fullRecord(.space)).recordID))
+        // A later build's zone, the default zone, and a zone of the same name with another owner.
+        #expect(!SyncCloudKitRecords.isInZone(CKRecord.ID(recordName: "space-1", zoneID: CKRecordZone.ID(zoneName: "ArchSync2", ownerName: CKCurrentUserDefaultName))))
+        #expect(!SyncCloudKitRecords.isInZone(CKRecord.ID(recordName: "space-1")))
+        #expect(!SyncCloudKitRecords.isInZone(CKRecord.ID(recordName: "space-1", zoneID: CKRecordZone.ID(zoneName: "ArchSync1", ownerName: "_another-owner"))))
+    }
+
     @Test func readsNoRecordOfATypeThisBuildDoesNotKnow() {
         let theme = CKRecord(recordType: "Theme", recordID: SyncCloudKitRecords.recordID(named: "theme-1"))
         theme.encryptedValues["name"] = "Dusk"

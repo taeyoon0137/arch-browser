@@ -64,28 +64,94 @@ import Testing
         }
     }
 
-    @Test func readsAMissingOrUnreadableFileAsEmpty() throws {
+    /// The names of the files in `folder`, sorted.
+    private func fileNames(in folder: URL) throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+    }
+
+    @Test func readsAMissingFileAsEmptyAndLeavesNoCopy() throws {
+        try withFolder { folder in
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            #expect(SyncMirror.read(from: folder.appendingPathComponent(SyncMirror.fileName)).isEmpty)
+            #expect(try fileNames(in: folder).isEmpty)
+        }
+    }
+
+    @Test func readsAnUnreadableFileAsEmptyAndMovesItAside() throws {
         try withFolder { folder in
             let url = folder.appendingPathComponent(SyncMirror.fileName)
-            #expect(SyncMirror.read(from: url).isEmpty)
-
+            let copy = folder.appendingPathComponent("sync.unreadable.json")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data("not JSON".utf8).write(to: url)
             #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(try fileNames(in: folder) == ["sync.unreadable.json"])
+            #expect(try Data(contentsOf: copy) == Data("not JSON".utf8))
 
-            // A file whose records do not unarchive.
+            // A file whose records do not unarchive replaces the older copy.
             let base64 = Data("not an archive".utf8).base64EncodedString()
-            try Data(#"{"version":1,"engineState":"\#(base64)","records":"\#(base64)","pendingSaves":[]}"#.utf8).write(to: url)
+            let unarchivable = Data(#"{"version":1,"engineState":"\#(base64)","records":"\#(base64)","pendingSaves":[]}"#.utf8)
+            try unarchivable.write(to: url)
             #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(try fileNames(in: folder) == ["sync.unreadable.json"])
+            #expect(try Data(contentsOf: copy) == unarchivable)
+        }
+    }
 
-            // A file from a newer format, and one with a pending save of an unknown type.
+    @Test func readsANewerFormatAsEmptyAndKeepsACopy() throws {
+        try withFolder { folder in
+            let url = folder.appendingPathComponent(SyncMirror.fileName)
             try SyncMirror(engineState: Data("state".utf8), pendingSaves: [space]).write(to: url)
-            #expect(SyncMirror.read(from: url).engineState == Data("state".utf8))
+            let newer = Data(try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: #""version":1"#, with: #""version":2"#).utf8)
+            try newer.write(to: url)
+            #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(try fileNames(in: folder) == ["sync-v2.json", "sync.json"])
+            #expect(try Data(contentsOf: folder.appendingPathComponent("sync-v2.json")) == newer)
+        }
+    }
+
+    @Test func skipsOnlyThePendingSavesThisBuildCannotRead() throws {
+        try withFolder { folder in
+            let url = folder.appendingPathComponent(SyncMirror.fileName)
+            var renamed = space
+            renamed[.name] = .text("Home")
+            renamed.fieldModifiedAt["name"] = date(22)
+            // Two saves that a newer build wrote within the same format: one of a record type this build does not know, and one with a kind of value it does not know.
+            var newType = space
+            newType.recordName = "theme-1"
+            let newValue = SyncRecord(recordType: .tab, recordName: "tab-1", fields: ["persona": .reference("default"), "reviewedAt": .text("placeholder")], modifiedAt: date(23))
+            let engineState = Data("engine state".utf8)
+            try SyncMirror(engineState: engineState, records: ["space-1": SyncCloudKitRecords.ckRecord(from: space)], pendingSaves: [renamed, newType, newValue]).write(to: url)
             let written = try String(contentsOf: url, encoding: .utf8)
-            try Data(written.replacingOccurrences(of: #""version":1"#, with: #""version":2"#).utf8).write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
-            try Data(written.replacingOccurrences(of: #""recordType":"Space""#, with: #""recordType":"Theme""#).utf8).write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
+            let newer = written
+                .replacingOccurrences(of: #""recordName":"theme-1","recordType":"Space""#, with: #""recordName":"theme-1","recordType":"Theme""#)
+                .replacingOccurrences(of: #""reviewedAt":{"text":"placeholder"}"#, with: #""reviewedAt":{"date":23}"#)
+            #expect(newer != written)
+            try Data(newer.utf8).write(to: url)
+
+            let read = SyncMirror.read(from: url)
+            #expect(read.engineState == engineState)
+            #expect(Set(read.records.keys) == ["space-1"])
+            #expect(read.pendingSaves == [renamed])
+            #expect(try fileNames(in: folder) == ["sync.json"])
+        }
+    }
+
+    @Test func skipsRecordsOfOtherZones() throws {
+        try withFolder { folder in
+            let url = folder.appendingPathComponent(SyncMirror.fileName)
+            // A later build's zone holds a record of the same name whose values mean something else. Its key sorts first, so it would win a name clash.
+            let laterZone = CKRecordZone.ID(zoneName: "ArchSync2", ownerName: CKCurrentUserDefaultName)
+            let laterSpace = CKRecord(recordType: "Space", recordID: CKRecord.ID(recordName: "space-1", zoneID: laterZone))
+            laterSpace.encryptedValues["name"] = "From the later zone"
+            let laterOnly = CKRecord(recordType: "Space", recordID: CKRecord.ID(recordName: "space-2", zoneID: laterZone))
+            let defaultZone = CKRecord(recordType: "Space", recordID: CKRecord.ID(recordName: "space-3"))
+            try SyncMirror(records: ["a": laterSpace, "b": laterOnly, "c": defaultZone, "space-1": SyncCloudKitRecords.ckRecord(from: space)]).write(to: url)
+
+            let read = SyncMirror.read(from: url)
+            #expect(Set(read.records.keys) == ["space-1"])
+            let readSpace = try #require(read.records["space-1"])
+            #expect(readSpace.recordID.zoneID == SyncCloudKitRecords.zoneID)
+            #expect(SyncCloudKitRecords.syncRecord(from: readSpace) == space)
         }
     }
 }

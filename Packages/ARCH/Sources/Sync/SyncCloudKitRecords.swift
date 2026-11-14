@@ -24,13 +24,18 @@ public enum SyncCloudKitRecords {
         CKRecord.ID(recordName: recordName, zoneID: zoneID)
     }
 
+    /// Whether `recordID` names a record of the zone. The sync engine can fetch every zone of the database, and a later build's zone, such as `ArchSync2`, holds records whose values mean something else, under the same record names (`docs/sync.md`, Container, database, and zone, and Schema versions). Sync converts, mirrors, and applies only records and deletions of this zone and drops the others. This is apart from `syncRecord(from:)`'s nil for a record type this build does not know, whose records the mirror keeps.
+    public static func isInZone(_ recordID: CKRecord.ID) -> Bool {
+        recordID.zoneID == zoneID
+    }
+
     /// The record to send for `record`.
     ///
     /// With `base`, the mirror's copy of the record or the server's record of a refused save, the result starts from a copy of it, so it keeps the system fields that hold the change tag, and the fields this build does not know for the record type keep the base's values and edit times, whatever their CloudKit type (`docs/sync.md`, Schema versions). The fields this build knows, and their edit times, come from `record`; a known field that `record` lacks is removed. Without `base`, every field of `record` is written. `base` itself is left unchanged.
     ///
     /// Each value is placed by its kind: text in `encryptedValues`, and numbers and references as plain values. A reference points to a record of the zone and has no delete action, because the Mac that deletes a parent also deletes or moves its children in the same batch.
     public static func ckRecord(from record: SyncRecord, base: CKRecord? = nil) -> CKRecord {
-        assert(base.map { $0.recordID.recordName == record.recordName && $0.recordType == record.recordType.rawValue } ?? true, "The base is a copy of the same record")
+        assert(base.map { isInZone($0.recordID) && $0.recordID.recordName == record.recordName && $0.recordType == record.recordType.rawValue } ?? true, "The base is a copy of the same record in the zone")
         let ckRecord = (base?.copy() as? CKRecord) ?? CKRecord(recordType: record.recordType.rawValue, recordID: recordID(named: record.recordName))
         let knownFields = Set(record.recordType.fields.map(\.rawValue))
         let writtenFields = base == nil ? knownFields.union(record.fields.keys) : knownFields
@@ -55,7 +60,7 @@ public enum SyncCloudKitRecords {
         return ckRecord
     }
 
-    /// The `SyncRecord` that `ckRecord` holds, or nil for a record type this build does not know, which the mirror keeps as it came.
+    /// The `SyncRecord` that `ckRecord` holds, or nil for a record type this build does not know, which the mirror keeps as it came. `ckRecord` is a record of the zone; Sync drops records of other zones before this (`isInZone(_:)`).
     ///
     /// Fields come from both the plain and the encrypted values: text as `.text`, numbers as `.number`, and references as `.reference` with the referenced record's name. A field of any other CloudKit type, which only a newer build writes, is left out here; an outgoing record built on the mirror's copy keeps it (`ckRecord(from:base:)`). A record without `modifiedAt` counts as modified at the server's modification date, and one without `schemaVersion` as version 1.
     public static func syncRecord(from ckRecord: CKRecord) -> SyncRecord? {

@@ -1,4 +1,4 @@
-// The file `sync.json`, beside `session.json` in the app's Application Support folder (`docs/sync.md`, Mapping the session store to records and Offline behavior). It keeps what sync needs between launches; `session.json` holds no sync fields. Sync writes it at every state update of the sync engine, and deleting it makes the next sync a first sync.
+// The file `sync.json`, beside `session.json` in the app's Application Support folder (`docs/sync.md`, Mapping the session store to records and Offline behavior). It keeps what sync needs between launches; `session.json` holds no sync fields. Sync writes it at every state update of the sync engine, once `session.json` holds every change applied from the mirror it writes, and deleting it makes the next sync a first sync.
 import CloudKit
 import Foundation
 
@@ -25,16 +25,24 @@ public struct SyncMirror: Sendable {
         engineState == nil && records.isEmpty && pendingSaves.isEmpty
     }
 
-    /// Reads the file at `url`. A missing file reads as empty, and so does one that does not decode, one from a newer format, or one whose records do not unarchive, since a partial mirror would disagree with the engine's change token.
+    /// Reads the file at `url`. A missing file reads as empty. A file from a newer format reads as empty and first leaves a copy, `sync-v<version>.json`. One that does not decode or whose records do not unarchive reads as empty, since a partial mirror would disagree with the engine's change token, and moves to `sync.unreadable.json`. Either copy, like those `SessionStore` makes of `session.json`, keeps the file from the next write and replaces an older copy. A pending save this build cannot read, of a record type or with a kind of value that only a newer build writes, is skipped and the rest reads: its record keeps its mirror copy, so the next comparison that covers its type finds the change again. Records of other zones are skipped (`SyncCloudKitRecords.isInZone(_:)`).
     public static func read(from url: URL) -> SyncMirror {
-        guard let data = try? Data(contentsOf: url), let file = try? decoder().decode(File.self, from: data), file.version == File.currentVersion,
+        guard let data = try? Data(contentsOf: url) else { return SyncMirror() }
+        let folder = url.deletingLastPathComponent()
+        if let version = try? JSONDecoder().decode(SavedVersion.self, from: data).version, version > File.currentVersion {
+            try? data.write(to: folder.appendingPathComponent("sync-v\(version).json"), options: .atomic)
+            return SyncMirror()
+        }
+        guard let file = try? decoder().decode(File.self, from: data), file.version == File.currentVersion,
               // An array of records unarchives only with the array class among the allowed classes; `unarchivedArrayOfObjects(ofClass:)` refuses the dictionaries inside a record.
-              let records = (try? NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, CKRecord.self], from: file.records)) as? [CKRecord],
-              let pendingSaves = try? file.pendingSaves.map({ try $0.record() }) else { return SyncMirror() }
+              let records = (try? NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, CKRecord.self], from: file.records)) as? [CKRecord] else {
+            _ = try? FileManager.default.replaceItemAt(folder.appendingPathComponent("sync.unreadable.json"), withItemAt: url)
+            return SyncMirror()
+        }
         return SyncMirror(
             engineState: file.engineState,
-            records: Dictionary(records.map { ($0.recordID.recordName, $0) }) { first, _ in first },
-            pendingSaves: pendingSaves
+            records: Dictionary(records.filter { SyncCloudKitRecords.isInZone($0.recordID) }.map { ($0.recordID.recordName, $0) }) { first, _ in first },
+            pendingSaves: file.pendingSaves.compactMap { try? $0.record() }
         )
     }
 
@@ -64,6 +72,11 @@ public struct SyncMirror: Sendable {
         return decoder
     }
 
+    /// The version a file was written with, read on its own so that a newer file is copied even when the rest does not decode.
+    private struct SavedVersion: Decodable {
+        var version: Int?
+    }
+
     /// The file's format. Dates are seconds since 2001-01-01, and data is Base64 text.
     private struct File: Codable {
         static let currentVersion = 1
@@ -72,7 +85,36 @@ public struct SyncMirror: Sendable {
         var engineState: Data?
         /// The mirror's records, sorted by record name, in one archive made with secure coding.
         var records: Data
+        /// The pending saves. Reading skips one that does not decode, such as one with a kind of value that only a newer build writes, so the rest of the file still reads.
         var pendingSaves: [PendingSave]
+
+        init(version: Int, engineState: Data?, records: Data, pendingSaves: [PendingSave]) {
+            self.version = version
+            self.engineState = engineState
+            self.records = records
+            self.pendingSaves = pendingSaves
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            version = try container.decode(Int.self, forKey: .version)
+            engineState = try container.decodeIfPresent(Data.self, forKey: .engineState)
+            records = try container.decode(Data.self, forKey: .records)
+            pendingSaves = try container.decode([Readable].self, forKey: .pendingSaves).compactMap(\.save)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case version, engineState, records, pendingSaves
+        }
+
+        /// One pending save as read, or nil when it does not decode. Decoding never fails, so the list goes on to the next save.
+        private struct Readable: Decodable {
+            var save: PendingSave?
+
+            init(from decoder: Decoder) throws {
+                save = try? PendingSave(from: decoder)
+            }
+        }
 
         /// A pending save with every field, edit time, and version that `SyncRecord` holds.
         struct PendingSave: Codable {
