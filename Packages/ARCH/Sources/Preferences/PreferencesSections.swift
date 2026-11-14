@@ -7,6 +7,16 @@ import SwiftUI
 /// Every section has the same width, so only the window's height changes between them.
 let sectionWidth: CGFloat = 540
 
+/// A grouped form's footer is trailing-aligned, primary, and sometimes cut to one line by default.
+func formFootnote(_ text: String) -> some View {
+    Text(text)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+}
+
 /// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, and where downloads go.
 struct GeneralSection: View {
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
@@ -31,7 +41,7 @@ struct GeneralSection: View {
                     }
                 }
                 Toggle("Open links from other apps in a small window when Arch is in the background", isOn: $opensLinksInSmallWindow)
-                Picker("Default engine", selection: defaultEngine) {
+                Picker("Engine for new tabs", selection: defaultEngine) {
                     ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
                         Text(kind.displayName)
                     }
@@ -103,19 +113,29 @@ struct SidebarSection: View {
     var body: some View {
         Form {
             Section {
-                Stepper(value: $archiveAfterHours, in: 0...168) {
-                    Text(archiveAfterHours == 0 ? "Archive tabs: Never" : "Archive tabs after \(archiveAfterHours) hours")
+                // A saved delay outside the choices, such as 5, stays listed and selected. The session archives nothing for 0 or less.
+                Picker("Archive unpinned tabs", selection: Binding(get: { max(archiveAfterHours, 0) }, set: { archiveAfterHours = $0 })) {
+                    ForEach(Set([0, 1, 12, 24, 168, max(archiveAfterHours, 0)]).sorted(), id: \.self) { hours in
+                        Text(Self.title(for: hours)).tag(hours)
+                    }
                 }
             } footer: {
-                // A grouped form's footer is trailing-aligned and primary by default.
-                Text("Unpinned tabs not selected for this long move to the closed list.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                formFootnote("Unpinned tabs not selected for this long move to the closed list.")
             }
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)
+    }
+
+    /// "Never", "After 1 Hour", "After 1 Day", "After 1 Week", or "After 5 Hours".
+    static func title(for hours: Int) -> String {
+        switch hours {
+        case 0: return "Never"
+        case 1: return "After 1 Hour"
+        case 24: return "After 1 Day"
+        case 168: return "After 1 Week"
+        default: return "After \(hours) Hours"
+        }
     }
 }
 

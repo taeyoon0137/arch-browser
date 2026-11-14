@@ -72,7 +72,7 @@ extension AIError: LocalizedError {
         case .notConfigured(.noModel):
             return "Choose a model for this feature in Settings \u{25B8} AI."
         case .notConfigured(.noUsableModel):
-            return "None of this feature's models can serve it. Choose another in Settings \u{25B8} AI."
+            return "None of this feature\u{2019}s models can serve it. Choose another in Settings \u{25B8} AI."
         case .notConfigured(.unknownFeature):
             return "This AI feature is not available."
         case .blockedByPolicy(.siteExcluded(let site)):
@@ -84,7 +84,7 @@ extension AIError: LocalizedError {
         case .budgetReached(.automaticRequestsPerDay):
             return "This feature reached its daily limit of automatic requests."
         case .budgetReached(.monthlySpending):
-            return "AI requests reached this month's spending limit."
+            return "AI requests reached this month\u{2019}s spending limit."
         case .providerUnavailable(_, let detail):
             return "The provider is unavailable: \(detail)"
         case .authentication:

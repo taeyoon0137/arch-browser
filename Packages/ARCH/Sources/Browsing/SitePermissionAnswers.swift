@@ -14,8 +14,8 @@ final class SitePermissionAnswers {
         self.store = store
     }
 
-    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
+    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page. `inEveryPersona` says that the session has several Personas, in all of which a remembered answer holds (Persona rule 6), so that the card says so.
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity, inEveryPersona: Bool = false,
                 ask: (PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
         let store = store
         // Chromium keeps every answer it receives, even the safe answer for a card that ended with its tab, so once it has the answer its kept answers return to the remembered ones.
@@ -37,7 +37,7 @@ final class SitePermissionAnswers {
             return
         }
         waiters[key] = [answer]
-        ask(Self.content(for: request, remembersAnswer: origin != nil, identity: identity)) { [weak self] response in
+        ask(Self.content(for: request, remembersAnswer: origin != nil, identity: identity, inEveryPersona: inEveryPersona)) { [weak self] response in
             let waiters = self?.waiters.removeValue(forKey: key) ?? [answer]
             let granted = response.buttonID == "allow"
             waiters.forEach { $0(granted) }
@@ -74,10 +74,11 @@ final class SitePermissionAnswers {
     }
 
     /// The card that asks, under the site that asks, with the symbol of the first of its types in the order screen, camera, microphone, location, notifications, clipboard, and MIDI. The engine asks from inside its own message loop, so the card never blocks, and the answer reaches the engine once. Allow waits for the card to arm. A request for notifications says that they don't show as banners yet: the pinned engine posts them through `NSUserNotificationCenter`, which macOS refuses for Arch whatever Arch's notification permission is, so the card neither asks macOS nor points to System Settings (`docs/plan.md`, VI.7).
-    static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity) -> PromptContent {
+    static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity, inEveryPersona: Bool = false) -> PromptContent {
         var notes: [PromptNote] = []
         if remembersAnswer {
-            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", tone: .info))
+            // With several Personas the answer holds in all of them (Persona rule 6); with one, the note says nothing of Personas (Persona rule 7).
+            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website\(inEveryPersona ? " in every Persona" : ""). You can change it in Settings \u{25B8} Websites.", tone: .info))
         }
         if request.types.contains(.notifications) {
             notes.append(PromptNote(id: "banners", symbol: "bell.slash", text: "Websites\u{2019} notifications don\u{2019}t show as banners yet.", tone: .info))
@@ -102,13 +103,13 @@ final class SitePermissionAnswers {
         }
     }
 
-    /// The phrases of the request's types, with the camera and the microphone of a call as one phrase.
+    /// The request's types as one phrase each, in the order they arrive. The camera and the microphone alone, as a video call asks for them, share one verb; with a third type, each keeps its own, so that the list has one "and".
     private static func description(of types: [EnginePermissionType]) -> String {
-        let asksForBoth = types.contains(.camera) && types.contains(.microphone)
+        let both = Set(types) == [.camera, .microphone]
         let phrases = types.compactMap { type -> String? in
             switch type {
-            case .camera: return asksForBoth ? "use the camera and microphone" : "use the camera"
-            case .microphone: return asksForBoth ? nil : "use the microphone"
+            case .camera: return both ? "use the camera and microphone" : "use the camera"
+            case .microphone: return both ? nil : "use the microphone"
             case .screenCapture: return "record the screen"
             case .geolocation: return "see your location"
             case .notifications: return "send notifications"

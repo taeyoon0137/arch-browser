@@ -1,4 +1,4 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
+// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from the Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
 import AI
 import ARCHEngine
 import Browsing
@@ -51,7 +51,8 @@ struct PluginsSection: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: sectionWidth, height: 440)
+        // The AI section's height, so that the review sheet, 520 points tall, stays within the window.
+        .frame(width: sectionWidth, height: 540)
         .onReceive(session.$personas) { personas = $0 }
         // The publisher sends a request before `pending` holds it.
         .onReceive(PluginsRequests.shared.$pending) { showPersona(of: $0) }
@@ -70,7 +71,7 @@ struct PluginsSection: View {
     }
 }
 
-/// Install Plugin…, Install from Web Store…, Check for Updates while the Persona has store installs, and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
+/// Install Plugin…, Install from the Web Store…, Check for Updates while the Persona has store installs, and New Feature with AI…, with why the plugin list could not be saved and Try Again while `plugins.json` lacks changes of the run, then one section per plugin, in the order the manager registered them, a pair once at the place of its version installed first.
 private struct PluginList: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -101,18 +102,24 @@ private struct PluginList: View {
 
     var body: some View {
         Section {
-            LabeledContent("Install a plugin or a web extension from a folder, a .zip archive, a .crx file, or the Web Store") {
+            LabeledContent {
                 HStack {
                     Button("Install Plugin…", action: choosePackage)
-                    Button("Install from Web Store\u{2026}") { showSheet(.webStore(WebStoreStart()), space: nil) }
+                    Button("Install from the Web Store\u{2026}") { showSheet(.webStore(WebStoreStart()), space: nil) }
                 }
+            } label: {
+                Text("Plugins and web extensions")
+                Text("Install one from a folder, a .zip archive, a .crx file, or the Web Store.")
             }
             if WebStoreInstaller.hasStoreInstalls(among: plugins.plugins) {
                 UpdateCheckRow(webStore: session.webStore, plugins: plugins)
             }
             if AIService.shared.isAvailable(.pluginComposer) {
-                LabeledContent("Describe a feature, and AI writes a plugin for it") {
+                LabeledContent {
                     Button("New Feature with AI\u{2026}") { isComposing = true }
+                } label: {
+                    Text("Describe a feature, and AI writes a plugin for it")
+                    Text("Uses the models chosen for Plugin Writer in Settings \u{25B8} AI.")
                 }
                 .sheet(isPresented: $isComposing) {
                     PluginComposerSheet(plugins: plugins, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: nil, among: session.personas))
@@ -132,6 +139,8 @@ private struct PluginList: View {
                     }
                 }
                 .font(.callout)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -256,6 +265,11 @@ private struct PluginSection: View {
         let isPair = plugin.counterpart != nil
         let missingEngine = plugins.missingEngine(of: plugin.id)
         let joinCandidates = plugins.joinCandidates(of: plugin.id)
+        let reloadable = plugin.isEnabled && !plugin.manifest.contributions.pageScripts.isEmpty
+        let versionEngines = !isPair && plugin.kind == .webExtension ? plugins.versionEngines(of: plugin.id).filter { $0 != missingEngine } : []
+        let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
+        let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
+        let removable = plugin.origin != .bundled
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)
@@ -274,37 +288,41 @@ private struct PluginSection: View {
                 PluginSettingRow(plugins: plugins, plugin: plugin.id, setting: setting) { failure = $0.localizedDescription }
             }
             .disabled(!plugin.isEnabled)
-            if plugin.isEnabled, !plugin.manifest.contributions.pageScripts.isEmpty {
-                Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
-            }
-            if !isPair, plugin.kind == .webExtension {
-                ForEach(plugins.versionEngines(of: plugin.id).filter { $0 != missingEngine }, id: \.self) { engine in
-                    InstallVersionMenu(engine: engine) { installVersion(plugin, engine, $0) }
-                }
-                if !joinCandidates.isEmpty {
-                    Button("Join With\u{2026}") { isJoining = true }
-                        .sheet(isPresented: $isJoining) { JoinSheet(plugins: plugins, plugin: plugin, candidates: joinCandidates) }
-                }
-            }
-            if let counterpart = versions.first(where: { $0.id != plugin.id }), counterpart.manifest.id != plugin.manifest.id {
-                Button("Separate Versions") {
-                    do {
-                        try plugins.separate(plugin.id)
-                    } catch {
-                        failure = error.localizedDescription
+            // The plugin's commands share one row at its trailing end, as the AI pages' commands do. The row shows only with a command, since an empty one would still take a row in the form.
+            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable {
+                HStack {
+                    Spacer()
+                    if reloadable {
+                        Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
+                    }
+                    ForEach(versionEngines, id: \.self) { engine in
+                        InstallVersionMenu(engine: engine) { installVersion(plugin, engine, $0) }
+                    }
+                    if canJoin {
+                        Button("Join With\u{2026}") { isJoining = true }
+                            .sheet(isPresented: $isJoining) { JoinSheet(plugins: plugins, plugin: plugin, candidates: joinCandidates) }
+                    }
+                    if separable {
+                        Button("Separate Versions") {
+                            do {
+                                try plugins.separate(plugin.id)
+                            } catch {
+                                failure = error.localizedDescription
+                            }
+                        }
+                    }
+                    if removable {
+                        Button("Remove\u{2026}", role: .destructive) { isConfirmingRemoval = true }
+                            .confirmationDialog("Remove \u{201C}\(plugin.manifest.name)\u{201D}?", isPresented: $isConfirmingRemoval) {
+                                Button("Remove", role: .destructive, action: remove)
+                            } message: {
+                                Text(isPair ? "Both versions\u{2019} files, storage, and saved secrets in this Persona are deleted." : "Its files, storage, and saved secrets in this Persona are deleted.")
+                            }
                     }
                 }
-            }
-            if plugin.origin != .bundled {
-                Button("Remove\u{2026}", role: .destructive) { isConfirmingRemoval = true }
-                    .confirmationDialog("Remove \u{201C}\(plugin.manifest.name)\u{201D}?", isPresented: $isConfirmingRemoval) {
-                        Button("Remove", role: .destructive, action: remove)
-                    } message: {
-                        Text(isPair ? "Both versions' files, storage, and saved secrets in this Persona are deleted." : "Its files, storage, and saved secrets in this Persona are deleted.")
-                    }
             }
         } footer: {
-            // A grouped form's footer is trailing-aligned and primary by default.
+            // A grouped form's footer is trailing-aligned, primary, and sometimes cut to one line by default.
             VStack(alignment: .leading, spacing: 4) {
                 if !isPair {
                     Text("Version \(plugin.manifest.version), \(origin(of: plugin)).")
@@ -342,6 +360,8 @@ private struct PluginSection: View {
                 }
             }
             .font(.callout)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .confirmationDialog(removingVersion.map { "Remove the \($0.pairEngine?.displayName ?? "") Version of \u{201C}\(plugin.manifest.name)\u{201D}?" } ?? "",
@@ -405,7 +425,7 @@ private struct UpdateCheckRow: View {
     }
 }
 
-/// "Version 8.12.0 is available from the Web Store." with Review Update…, while the last update check found a newer version of the plugin installed from the store.
+/// "Version 8.12.0 is available from the Web Store" with Review Update…, while the last update check found a newer version of the plugin installed from the store.
 private struct UpdateRow: View {
     @ObservedObject var webStore: WebStoreInstaller
     let plugins: PluginManager
@@ -414,7 +434,7 @@ private struct UpdateRow: View {
 
     var body: some View {
         if let release = webStore.update(of: plugin, in: plugins) {
-            LabeledContent("Version \(release.version) is available from the Web Store.") {
+            LabeledContent("Version \(release.version) is available from the Web Store") {
                 Button("Review Update\u{2026}", action: review)
             }
         }
@@ -480,14 +500,13 @@ private struct VersionRow: View {
         LabeledContent {
             Button("Remove Version\u{2026}", action: remove)
         } label: {
-            Text("\(version.pairEngine?.displayName ?? "") Version")
+            Text("\(version.pairEngine?.displayName ?? "") version")
             Text(["Version \(version.manifest.version), \(origin(of: version)).", plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
         }
         AccessRow(plugin: version)
-        VStack(alignment: .leading, spacing: 4) {
-            FailureNotes(plugin: version)
-        }
-        .font(.callout)
+        // Each failure is a red row of its own. A container would take a row in the form even without a failure.
+        FailureNotes(plugin: version)
+            .font(.callout)
     }
 }
 
@@ -512,11 +531,15 @@ private struct JoinSheet: View {
     }
 
     var body: some View {
+        // The form runs edge to edge, so its sections line up with the header and the buttons, as in the AI and Site Search editors.
         VStack(alignment: .leading, spacing: 12) {
-            Text("Join \u{201C}\(plugin.manifest.name)\u{201D} With Another Plugin")
-                .font(.headline)
-            Text("Arch shows the two as one plugin with a version for each engine, and each engine runs only its version. Each version keeps its own access and storage.")
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Join \u{201C}\(plugin.manifest.name)\u{201D} With Another Plugin")
+                    .font(.headline)
+                Text("Arch shows the two as one plugin with a version for each engine, and each engine runs only its version. Each version keeps its own access and storage.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding([.horizontal, .top], 20)
             Form {
                 Picker("Other plugin", selection: $other) {
                     ForEach(candidates) { Text(title(of: $0)).tag($0.id) }
@@ -531,6 +554,7 @@ private struct JoinSheet: View {
             if let failure {
                 Text(failure)
                     .foregroundStyle(.red)
+                    .padding(.horizontal, 20)
             }
             HStack {
                 Spacer()
@@ -546,9 +570,9 @@ private struct JoinSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
             }
+            .padding([.horizontal, .bottom], 20)
         }
-        .padding(20)
-        .frame(width: 440)
+        .frame(width: 480)
         .onChange(of: other) { versions = plugins.proposedJoin(of: plugin.id, with: $1)?.versions ?? [:] }
     }
 
@@ -642,7 +666,7 @@ private struct PluginSecretRow<Title: View>: View {
         let isSaved = (try? plugins.hasSecret(setting, for: plugin)) == true
         LabeledContent {
             HStack(spacing: 6) {
-                SecureField("Secret", text: $draft, prompt: Text(isSaved ? "Saved" : "Not Set"))
+                SecureField("Secret", text: $draft, prompt: Text(isSaved ? "Saved" : "Not set"))
                     .labelsHidden()
                     .frame(width: 160)
                     .onSubmit(save)

@@ -163,7 +163,7 @@ private struct LocalizedMessages {
                   let entries = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             return Dictionary(entries.compactMap { name, entry in ((entry as? [String: Any])?["message"] as? String).map { (name.lowercased(), $0) } }) { first, _ in first }
         }
-        if let defaultLocale, locales.isEmpty { throw invalidManifest("default_locale is \(defaultLocale), but _locales/\(defaultLocale)/messages.json does not read") }
+        if let defaultLocale, locales.isEmpty { throw invalidManifest("default_locale is \(defaultLocale), but _locales/\(defaultLocale)/messages.json could not be read") }
     }
 
     /// The text of `key` in `fields`, with a whole `__MSG_<name>__` replaced by its message. A missing text is empty unless `required`.

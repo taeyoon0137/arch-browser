@@ -1,7 +1,7 @@
 // A folder's row in a space's tab list, above the folder's indented tabs. `SpaceTabsView` places the row and reports its frame, so a dragged tab can find it.
 import SwiftUI
 
-/// Clicking the row collapses or expands the folder, and Rename Folder in its context menu edits the name in place. The row lights up while a dragged tab is over it, as a space's symbol does.
+/// Clicking the row collapses or expands the folder, and Rename Folder in its context menu edits the name in place. The row lights up while a dragged tab is over it, in the color a space's symbol lights up in during the same drag: the current space's tint, or the sidebar's text color where the wash comes too close to it.
 struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -9,14 +9,16 @@ struct TabFolderRowView: View {
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isDraggingTab) private var isDraggingTab
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
     private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
+    private var dropColor: Color { theme.symbolColor(for: windowModel.currentSpace.tint) }
 
     /// Rows ignore the pointer while a tab is dragged over them; the folder under it lights up instead.
     private var fill: Color {
-        if isDropTarget { return Color.accentColor.opacity(0.15) }
+        if isDropTarget { return dropColor.opacity(0.15) }
         return isHovering && !isDraggingTab ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -24,7 +26,7 @@ struct TabFolderRowView: View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isDropTarget ? Color.accentColor : .secondary)
+                .foregroundStyle(isDropTarget ? dropColor : .secondary)
                 .frame(width: 18, height: 18)
             if isRenaming {
                 SidebarNameField(placeholder: "Folder Name", name: folder.name,

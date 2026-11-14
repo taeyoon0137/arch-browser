@@ -108,8 +108,8 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         let links = links()
         await links.update()
         #expect(links.userHosts.keys.sorted() == ["org.example.own", "org.example.taken"] && links.userHosts["org.example.own"]?.folder == arch)
-        #expect(lines(messenger(extensionID), links) == ["Linked App, set up for Arch", "Own App, set up for Arch", "Taken App, set up for another browser"])
-        #expect(lines(messenger(other), links) == ["Other App, set up for Arch", "Mine, set up for Arch"])
+        #expect(lines(messenger(extensionID), links) == ["Linked App, set up for Arch.", "Own App, set up for Arch.", "Taken App, set up for another browser."])
+        #expect(lines(messenger(other), links) == ["Other App, set up for Arch.", "Mine, set up for Arch."])
     }
 
     @Test(.enabled(if: geteuid() != 0, "Root reads every folder")) func addsArchsConditionsOnlyWhileANativeAppAcceptsTheExtension() async throws {
@@ -121,14 +121,14 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         let links = links([locked, vendor])
         let plugin = messenger(extensionID)
         await links.update()
-        #expect(lines(plugin, links, installation: built) == [noApp, "macOS kept Arch from reading another browser's native app setup."])
+        #expect(lines(plugin, links, installation: built) == [noApp, "macOS kept Arch from reading another browser\u{2019}s native app setup."])
         try writeHostManifest("org.example.app", into: vendor, app: writeApp(in: folder), allowing: [extensionID])
         await links.update(force: true)
         let place = (built.folder.path as NSString).abbreviatingWithTildeInPath
-        #expect(lines(plugin, links, installation: built) == ["Example App, set up for Arch",
+        #expect(lines(plugin, links, installation: built) == ["Example App, set up for Arch.",
                                                               "Arch runs from \(place); some native apps accept only browsers in the Applications folder.",
                                                               "Arch is not signed by a developer team; some native apps accept only signed browsers."])
-        #expect(lines(plugin, links) == ["Example App, set up for Arch"])
+        #expect(lines(plugin, links) == ["Example App, set up for Arch."])
     }
 
     @Test func guidesByHostNameWithTheHelpersLaunchConstraints() async throws {
@@ -140,15 +140,15 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         let plugin = messenger(extensionID)
         let among = links(admitsArch: true)
         await among.update()
-        #expect(lines(plugin, among) == ["1Password BrowserSupport, set up for Arch", "Helper, set up for Arch", onePassword, iCloud, "Arch is among them on this Mac."])
+        #expect(lines(plugin, among) == ["1Password BrowserSupport, set up for Arch.", "Helper, set up for Arch.", onePassword, iCloud, "Arch is among them on this Mac."])
         let notAmong = links(admitsArch: false)
         await notAmong.update()
-        #expect(lines(plugin, notAmong) == ["1Password BrowserSupport, set up for Arch", "Helper, which macOS does not start for Arch on this Mac", onePassword, iCloud,
+        #expect(lines(plugin, notAmong) == ["1Password BrowserSupport, set up for Arch.", "Helper, which macOS does not start for Arch on this Mac.", onePassword, iCloud,
                                             "Arch is not among them on this Mac."])
         // Constraints that do not read give neither sentence.
         let unread = links(admitsArch: nil)
         await unread.update()
-        #expect(lines(plugin, unread) == ["1Password BrowserSupport, set up for Arch", "Helper, set up for Arch", onePassword, iCloud])
+        #expect(lines(plugin, unread) == ["1Password BrowserSupport, set up for Arch.", "Helper, set up for Arch.", onePassword, iCloud])
     }
 
     @Test func asksAboutTheHelperThatTheUsersManifestNames() async throws {
@@ -158,7 +158,7 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         await links.update()
         let iCloud = try #require(NativeAppGuide.guidance[helper])
         #expect(links.launchConstraintAnswers == [script.path: .some(false)] && links.hosts.isEmpty)
-        #expect(lines(messenger(extensionID), links) == ["Helper, set up for Arch", iCloud, "Arch is not among them on this Mac."])
+        #expect(lines(messenger(extensionID), links) == ["Helper, set up for Arch.", iCloud, "Arch is not among them on this Mac."])
     }
 }
 
@@ -220,7 +220,7 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         #expect(messaging.outcomes.outcome(of: first) == .held("Helper"))
         let iCloud = try #require(NativeAppGuide.guidance[helper])
         #expect(NativeAppGuide.lines(for: [first], links: links, installation: installedArch, outcomes: messaging.outcomes)
-            == ["Helper, which macOS does not start for Arch on this Mac", iCloud, "Arch is not among them on this Mac.",
+            == ["Helper, which macOS does not start for Arch on this Mac.", iCloud, "Arch is not among them on this Mac.",
                 "On WebKit tabs, Arch did not start Helper, which macOS does not start for Arch."])
     }
 }
@@ -251,7 +251,7 @@ struct NativeAppOutcomeRuntimeTests {
         #expect(await eventually { result != nil })
         #expect(runtime.nativeAppOutcomes.outcome(of: installed) == .failed(gateSentence()))
         #expect(NativeAppGuide.lines(for: [installed], links: links, installation: installedArch, outcomes: runtime.nativeAppOutcomes)
-            == ["Example App, set up for Arch", gateSentence()])
+            == ["Example App, set up for Arch.", gateSentence()])
     }
 }
 

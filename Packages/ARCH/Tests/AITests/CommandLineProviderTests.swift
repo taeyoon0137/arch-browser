@@ -100,7 +100,7 @@ import Testing
             Issue.record("Expected providerUnavailable, got \(String(describing: result.error))")
             return
         }
-        #expect(detail.hasPrefix("tool could not start:"))
+        #expect(detail.hasPrefix("tool could not start ("))
     }
 
     @Test func filesThatAreNotTextAreRefused() async {

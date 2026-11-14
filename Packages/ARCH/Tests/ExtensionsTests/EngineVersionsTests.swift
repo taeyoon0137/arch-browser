@@ -228,7 +228,7 @@ struct EngineVersionsTests {
         let staged = try await manager.stage(package("elsewhere", name: "Reader", version: "2", key: key))
         #expect(staged.joinableEngines == [.webKit, .chromium])
         #expect(manager.versionTakeover(for: staged, joining: reader.id, for: .chromium)
-            == "\u{201C}Reader\u{201D}, which you installed from reader, has this package's identifier, so as its Chromium version the package takes over the data that \u{201C}Reader\u{201D} keeps on Chromium tabs. Join only if both come from the same developer.")
+            == "\u{201C}Reader\u{201D}, which you installed from reader, has this package\u{2019}s identifier, so as its Chromium version the package takes over the data that \u{201C}Reader\u{201D} keeps on Chromium tabs. Join only if both come from the same developer.")
         let id = try manager.install(staged, grant: PluginGrant(requestedBy: staged.manifest), isEnabled: true, asVersionOf: reader.id, for: .chromium)
         await runtime.waitForEngines()
         // Chromium runs the version under the identifier it knew "Reader" by, with the data that "Reader"'s copy left there.
@@ -286,7 +286,7 @@ struct EngineVersionsTests {
         // A package with the identifier of another installed plugin cannot join here.
         let other = try await manager.installEverything(from: package("other", name: "Other", key: key))
         let sameKey = try await manager.stage(package("same-key", name: "Other", version: "2", key: key))
-        #expect(manager.versionRefusal(for: sameKey, joining: reader.id, for: .chromium)?.hasPrefix("Another installed plugin has this package's identifier") == true)
+        #expect(manager.versionRefusal(for: sameKey, joining: reader.id, for: .chromium)?.hasPrefix("Another installed plugin has this package\u{2019}s identifier") == true)
         #expect(manager.plugins.map(\.id) == [reader.id, other.id] && manager.engineVersions.isEmpty)
         manager.discard(refused)
         manager.discard(sameKey)

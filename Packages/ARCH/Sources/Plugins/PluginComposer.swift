@@ -6,7 +6,7 @@ import JavaScriptCore
 extension AIFeature {
     /// The composer's feature, which Settings registers.
     public static let pluginComposer = AIFeature(id: .pluginComposer, name: "Plugin Writer",
-                                                 summary: "Writes a plugin for the feature you describe in Settings \u{25B8} Plugins, which you review before it runs. It sends your description and Arch's plugin reference, never page data.",
+                                                 summary: "Writes a plugin, which you review before it runs, from the feature you describe in Settings \u{25B8} Plugins and Arch\u{2019}s plugin reference.",
                                                  trigger: .user, data: .textOnly, requirements: [.jsonOutput])
 }
 
@@ -101,7 +101,7 @@ public final class PluginComposer {
             guard Self.isScriptName(name) else { throw PluginError.invalidPackage("files names “\(name)”, which is not a plain file name that ends in .js.") }
             // The background document loads the background script and no other file.
             guard manifest["background"] == .string(name) else {
-                throw PluginError.invalidPackage("files names “\(name)”, which is not the manifest's background script. Only the background script runs, so put all the code in it.")
+                throw PluginError.invalidPackage("files names “\(name)”, which is not the manifest\u{2019}s background script. Only the background script runs, so put all the code in it.")
             }
             guard case let .string(source) = value else { throw PluginError.invalidPackage("files.\(name) must be text.") }
             if let error = Self.syntaxError(in: source, context: context) {
@@ -110,7 +110,7 @@ public final class PluginComposer {
             files[name] = source
         }
         guard files.values.reduce(0, { $0 + $1.utf8.count }) <= Self.sizeLimit else {
-            throw PluginError.invalidPackage("The plugin's files come to more than \(Self.sizeLimit / 1024) KB.")
+            throw PluginError.invalidPackage("The plugin\u{2019}s files come to more than \(Self.sizeLimit / 1024) KB.")
         }
         return files
     }

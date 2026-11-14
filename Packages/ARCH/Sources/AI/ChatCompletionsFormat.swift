@@ -146,7 +146,7 @@ struct ChatCompletionsCodec: AIWireCodec {
             switch reason {
             case "length": finishReason = .lengthLimit
             case "tool_calls", "function_call": finishReason = .toolUse
-            case "content_filter": throw AIError.refused("The provider's content filter stopped the reply.")
+            case "content_filter": throw AIError.refused("The provider\u{2019}s content filter stopped the reply.")
             default: finishReason = .completed
             }
             events += try completedToolCalls()

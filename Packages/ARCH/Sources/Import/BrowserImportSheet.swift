@@ -1,4 +1,4 @@
-// The sheet of File ▸ Import from Browser…: one section per browser found, with one row per profile that has a destination Persona and a checkbox per item, and the search engine choice below them. Its model keeps the browsers read and the user's choices; the import controller reads the browsers and applies the selection.
+// The sheet of File ▸ Import from Browser…: one section per browser found, with one row per profile that has a destination Persona and a checkbox per item, and the search engine section below them. Its model keeps the browsers read and the user's choices; the import controller reads the browsers and applies the selection.
 import AppKit
 import Browsing
 import Combine
@@ -13,8 +13,8 @@ final class BrowserImportModel: ObservableObject {
     @Published private(set) var personas: [Persona] = []
     /// Each shown profile's choices.
     @Published var choices: [SidebarImport.Profile: Choice] = [:]
-    /// The browser whose default engine becomes Arch's, if any.
-    @Published var engineBrowserID: BrowserSource.ID?
+    /// The engine that becomes Arch's, if any. It applies only while a browser still offers it.
+    @Published var chosenEngine: SearchEngine?
     /// The browsers whose privacy setting the user went to change. Those still blocked are read again when Arch becomes active, and their sections then say to reopen Arch.
     @Published private(set) var askedBrowserIDs: Set<BrowserSource.ID> = []
     /// What earlier imports made, read when the sheet opens. The default destinations follow it, and Import adds the selection's entries to it.
@@ -71,12 +71,26 @@ final class BrowserImportModel: ObservableObject {
 
     /// Import needs a checked item: a part of an included profile, or the search engine.
     var canImport: Bool {
-        includedProfiles.contains { !$0.choice.parts.isEmpty } || chosenEngine != nil
+        includedProfiles.contains { !$0.choice.parts.isEmpty } || appliedEngine != nil
     }
 
     /// The browsers that offer their default engine because it is not Arch's already.
     var engineOffers: [ImportedBrowser] {
         (browsers ?? []).filter { browser in browser.defaultEngine.map { $0 != SearchEngine.current } ?? false }
+    }
+
+    /// Each engine the browsers offer, once, in sheet order, with the names of the browsers that offer it. Two browsers on one engine give one choice.
+    var engineChoices: [(engine: SearchEngine, browsers: [String])] {
+        var choices: [(engine: SearchEngine, browsers: [String])] = []
+        for browser in engineOffers {
+            guard let engine = browser.defaultEngine else { continue }
+            if let index = choices.firstIndex(where: { $0.engine == engine }) {
+                choices[index].browsers.append(browser.source.name)
+            } else {
+                choices.append((engine, [browser.source.name]))
+            }
+        }
+        return choices
     }
 
     /// The destinations each profile's menu lists: the current Persona, the other Personas, and a new Persona named after the profile.
@@ -129,7 +143,7 @@ final class BrowserImportModel: ObservableObject {
             }
             selection.failures += profile.errors.map { "\(browser.source.name) \u{25B8} \(profile.name): \($0.localizedDescription)" }
         }
-        selection.searchEngine = chosenEngine
+        selection.searchEngine = appliedEngine
         return selection
     }
 
@@ -146,9 +160,9 @@ final class BrowserImportModel: ObservableObject {
         }
     }
 
-    /// The engine the user checked, while its browser still offers it.
-    private var chosenEngine: SearchEngine? {
-        engineOffers.first { $0.id == engineBrowserID }?.defaultEngine
+    /// The engine the user chose, while a browser still offers it.
+    private var appliedEngine: SearchEngine? {
+        engineChoices.contains { $0.engine == chosenEngine } ? chosenEngine : nil
     }
 
     /// Includes each of the browser's profiles with its default destination and its readable parts checked, except that a part that brings pinned tabs starts checked only when, with the parts checked before it in sheet order, it adds at most `pinnedTabLimit` of them.
@@ -206,7 +220,7 @@ struct BrowserImportSheet: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(browsers) { BrowserSection(model: model, browser: $0, actions: actions) }
-                            engineChoices
+                            if !model.engineChoices.isEmpty { engineSection }
                         }
                     }
                     .frame(maxHeight: 520)
@@ -219,10 +233,15 @@ struct BrowserImportSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // An orange triangle beside text in the primary color, as the plugin install sheet's warnings show: orange text falls below the contrast that body text needs.
             if model.checkedPinnedTabCount > BrowserImportModel.pinnedTabLimit {
-                Label("The checked items add \(model.checkedPinnedTabCount.formatted()) pinned tabs, which load each time Arch opens.", systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Label {
+                    Text("The checked items add \(model.checkedPinnedTabCount.formatted()) pinned tabs, which load whenever Arch opens.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+                .font(.callout)
             }
             buttons
         }
@@ -230,16 +249,39 @@ struct BrowserImportSheet: View {
         .frame(width: 540)
     }
 
-    /// "Use <engine> as the search engine, as in <browser>" for each browser that offers its engine. Checking one unchecks the others.
-    @ViewBuilder private var engineChoices: some View {
-        ForEach(model.engineOffers) { browser in
-            if let engine = browser.defaultEngine {
-                Toggle("Use \(engine.title) as the search engine, as in \(browser.source.name)", isOn: Binding {
-                    model.engineBrowserID == browser.id
-                } set: { isOn in
-                    model.engineBrowserID = isOn ? browser.id : nil
-                })
-                .toggleStyle(.checkbox)
+    /// A section of its own after the browsers', labeled as theirs are. One engine is a checkbox, "Use <engine> as the search engine, as in <browsers>". Two engines are exclusive choices, so they are radio buttons after one that keeps Arch's engine.
+    private var engineSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                if model.engineChoices.count == 1, let choice = model.engineChoices.first {
+                    Toggle("Use \(choice.engine.title) as the search engine, as in \(choice.browsers.formatted(.list(type: .and)))", isOn: Binding {
+                        model.chosenEngine == choice.engine
+                    } set: { isOn in
+                        model.chosenEngine = isOn ? choice.engine : nil
+                    })
+                    .toggleStyle(.checkbox)
+                } else {
+                    Picker("Search engine", selection: $model.chosenEngine) {
+                        Text("Keep \(SearchEngine.current.title)").tag(SearchEngine?.none)
+                        ForEach(model.engineChoices, id: \.engine) { choice in
+                            Text("Use \(choice.engine.title), as in \(choice.browsers.formatted(.list(type: .and)))").tag(Optional(choice.engine))
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(6)
+        } label: {
+            // A symbol in the app icons' box, so that its name starts where the browsers' names do.
+            Label {
+                Text("Search Engine")
+                    .font(.headline)
+            } icon: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+                    .frame(width: 18, height: 18)
             }
         }
     }
@@ -296,12 +338,15 @@ private struct BrowserSection: View {
                 Text(browser.source.name)
                     .font(.headline)
             } icon: {
+                // The symbol takes the app icon's box, so that every section's name starts at one place.
                 if let icon = model.icon(for: browser.source) {
                     Image(nsImage: icon)
                         .resizable()
                         .frame(width: 18, height: 18)
                 } else {
                     Image(systemName: "globe")
+                        .font(.system(size: 15))
+                        .frame(width: 18, height: 18)
                 }
             }
         }
@@ -335,11 +380,15 @@ private struct ProfileRow: View {
                 }
                 .toggleStyle(.checkbox)
                 Spacer()
+                // The existing Personas, then the one the import would create. The menu applies only to a checked profile that brings favorites, spaces, or bookmark folders; history and search shortcuts go to every Persona.
                 Picker("Persona", selection: choice.destination) {
-                    ForEach(model.destinations, id: \.self) { Text(model.title(of: $0, for: profile)).tag($0) }
+                    ForEach(model.destinations.filter { $0 != .newPersona }, id: \.self) { Text(model.title(of: $0, for: profile)).tag($0) }
+                    Divider()
+                    Text(model.title(of: .newPersona, for: profile)).tag(SidebarImport.Destination.newPersona)
                 }
                 .labelsHidden()
                 .fixedSize()
+                .disabled(!choice.wrappedValue.isIncluded || choice.wrappedValue.parts.isDisjoint(with: [.favorites, .spaces, .bookmarkFolders]))
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(ImportedProfile.Part.allCases.filter { profile.count(of: $0) != nil }, id: \.self, content: partToggle)
@@ -366,7 +415,8 @@ private struct ProfileRow: View {
             note = error.localizedDescription
         } else {
             switch part {
-            case .spaces, .bookmarkFolders: note = "Each pinned tab loads whenever Arch opens."
+            case .spaces: note = "Each pinned tab loads whenever Arch opens."
+            case .bookmarkFolders: note = "Each bookmark becomes a pinned tab, which loads whenever Arch opens."
             case .history, .searchShortcuts: note = "Applies to every Persona."
             case .favorites: note = nil
             }

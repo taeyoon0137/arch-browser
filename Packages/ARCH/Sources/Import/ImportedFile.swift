@@ -68,7 +68,7 @@ enum ImportError: LocalizedError, Equatable {
         case .notPermitted(let url):
             return "Arch does not have permission to read \u{201C}\(url.lastPathComponent)\u{201D}."
         case .encryptedBookmarks:
-            return "The bookmarks are encrypted with the browser's own key."
+            return "The bookmarks are encrypted with the browser\u{2019}s own key."
         }
     }
 }

@@ -80,7 +80,7 @@ struct PageExchangeView: View {
     /// One sentence and one action, as the AI interface shows every error. A page that could not be read offers Retry.
     private func failure(_ error: Error) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text((error as? AIError)?.localizedDescription ?? "Arch could not read this page.")
+            Text(error is AIError ? settings.message(for: error) : "Arch could not read this page.")
                 .font(.system(size: 12))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
@@ -134,8 +134,9 @@ struct PageAIOffNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Body text under the panel's semibold header, set apart from the note below by color alone.
             Text("AI is off for \(PageAssistant.siteName(of: url)).")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13))
             Text("Nothing from this site goes to any provider.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)

@@ -44,8 +44,13 @@ struct CaptureRegionOverlay: NSViewRepresentable {
         }
         /// A drag shorter than this on either side chooses nothing, so a click leaves the overlay for another try.
         private static let minimumSide: CGFloat = 4
-        private static let hint = NSAttributedString(string: "Drag across the page to capture a region. Press Escape to cancel.",
-                                                     attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white])
+        /// Centered, so that the lines of a hint that wraps in a narrow pane stay centered in its box.
+        private static let hint: NSAttributedString = {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            return NSAttributedString(string: "Drag across the page to capture a region. Press Escape to cancel.",
+                                      attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white, .paragraphStyle: paragraph])
+        }()
 
         override var acceptsFirstResponder: Bool { true }
         // A drag here chooses the region instead of moving the window.
@@ -116,13 +121,16 @@ struct CaptureRegionOverlay: NSViewRepresentable {
             border.stroke()
         }
 
+        /// One line in a capsule, 16 points below the page's top. A page too narrow for the line wraps the text, keeping 16 points beside the box, and the box keeps the capsule's corners.
         private func drawHint() {
-            let size = Self.hint.size()
+            let radius = (Self.hint.size().height + 12) / 2
+            let text = Self.hint.boundingRect(with: NSSize(width: max(0, bounds.width - 56), height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin)
+            let size = NSSize(width: ceil(text.width), height: ceil(text.height))
             let height = size.height + 12
             let box = NSRect(x: bounds.midX - size.width / 2 - 12, y: isFlipped ? bounds.minY + 16 : bounds.maxY - 16 - height, width: size.width + 24, height: height)
             NSColor.black.withAlphaComponent(0.6).setFill()
-            NSBezierPath(roundedRect: box, xRadius: height / 2, yRadius: height / 2).fill()
-            Self.hint.draw(at: NSPoint(x: box.minX + 12, y: box.minY + 6))
+            NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+            Self.hint.draw(in: box.insetBy(dx: 12, dy: 6))
         }
     }
 }

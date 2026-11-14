@@ -25,7 +25,7 @@ enum SidebarDimming {
 
 struct SidebarView: View {
     static let defaultWidth: CGFloat = 250
-    /// The top row needs about 235 points: the window buttons end 79 points in, and its four buttons, gaps, and spacer take 144 more inside the margins.
+    /// The top row needs about 231 points: the window buttons end 79 points in, and its four buttons, gaps, spacer, and trailing inset take 140 more inside the margins.
     static let minWidth: CGFloat = 240
     /// Leaves the page at least as wide as the sidebar in the smallest window.
     static let maxWidth: CGFloat = 400
@@ -270,21 +270,28 @@ struct SidebarTopRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", action: windowModel.toggleSidebar)
+            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", shortcut: shortcut("toggleSidebar"), action: windowModel.toggleSidebar)
             Spacer()
-            SidebarIconButton(symbol: "chevron.left", label: "Back", action: windowModel.goBack).disabled(tab?.canGoBack != true)
-            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: windowModel.goForward).disabled(tab?.canGoForward != true)
-            if tab?.isLoading == true {
-                SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: windowModel.stopLoading)
-            } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: windowModel.reload).disabled(tab == nil)
+            // The navigation buttons touch and end 4 points in, as the address pill's buttons below do, so the two rows' buttons line up.
+            HStack(spacing: 0) {
+                SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: shortcut("goBack"), action: windowModel.goBack).disabled(tab?.canGoBack != true)
+                SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: shortcut("goForward"), action: windowModel.goForward).disabled(tab?.canGoForward != true)
+                if tab?.isLoading == true {
+                    SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: shortcut("stopLoading"), action: windowModel.stopLoading)
+                } else {
+                    // Disabled where Reload Page is, as under an internal page, which it does not reach.
+                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: shortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
+                }
             }
         }
         .frame(height: Self.height)
         // The sidebar's margin comes on top of this, so the row starts one margin past the last traffic light.
         .padding(.leading, windowButtons.trailingEdge ?? 0)
+        .padding(.trailing, 4)
         .padding(.top, Self.topPadding(below: windowButtons))
     }
+
+    private func shortcut(_ action: String) -> String? { windowModel.session.menuShortcut(action) }
 }
 
 /// A borderless symbol button that shows a soft highlight under the pointer. `label` names it in its tooltip, after which comes its `shortcut` when it has one, and for VoiceOver.

@@ -406,7 +406,7 @@ extension JSONSerialization {
     static func toolArguments(_ text: String) throws -> Data {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "{}" : text
         let data = Data(text.utf8)
-        guard (try? jsonObject(with: data)) is [String: Any] else { throw AIError.malformedReply("A tool call's arguments are not a JSON object.") }
+        guard (try? jsonObject(with: data)) is [String: Any] else { throw AIError.malformedReply("A tool call\u{2019}s arguments are not a JSON object.") }
         return data
     }
 }

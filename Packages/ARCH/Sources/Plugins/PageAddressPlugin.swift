@@ -21,7 +21,7 @@ public final class PageAddressPlugin: BuiltInPlugin {
                 PluginMenuItem(command: "copy", location: .tabContextMenu, title: "Copy Address"),
             ],
             settings: [
-                PluginSetting(key: markdownKey, title: "Copy as a Markdown link", help: "Copies the page's title with its address, such as [Arch](https://example.com/).", kind: .toggle(default: false)),
+                PluginSetting(key: markdownKey, title: "Copy as a Markdown link", help: "Copies the page\u{2019}s title with its address, such as [Arch](https://example.com/).", kind: .toggle(default: false)),
             ]
         )
     )

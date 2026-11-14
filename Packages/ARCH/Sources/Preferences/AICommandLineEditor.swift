@@ -89,6 +89,9 @@ struct AICommandLineEditor: View {
     @ObservedObject var settings: AISettingsStore
     @Environment(\.dismiss) private var dismiss
     @State private var isLocating = false
+    /// Why the last Find did not find the tool, under the executable field until the field changes.
+    @State private var locateFailure: String?
+    /// Why the last removal failed, over the buttons.
     @State private var message: String?
     @State private var checkTask: Task<Void, Never>?
     @State private var checkResult: String?
@@ -96,47 +99,48 @@ struct AICommandLineEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(draft.isNew ? "Add Command-Line Tool" : "Edit Command-Line Tool")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.horizontal, .top], 20)
             Form {
                 toolSection
                 argumentsSection
                 Section {
-                    AINameValueRows(rows: $draft.environment, addTitle: "Add Variable")
+                    AINameValueRows(rows: $draft.environment, addTitle: "Add Variable", removeTitle: "Remove Variable")
                 } header: {
                     Text("Environment")
                 } footer: {
-                    aiFootnote("The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets.")
+                    formFootnote("The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets.")
                 }
                 outputSection
                 Section {
                     Toggle("Runs without its own tools", isOn: $draft.runsWithoutTools)
                 } footer: {
-                    aiFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
+                    formFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
                 }
                 Section {
                     AIModelList(models: $draft.models, defaultCapabilities: AICommandLineConfiguration.capabilities) {
                         if !draft.models.contains(where: { $0.name.isEmpty }) {
                             Button("Add Default") { draft.models.insert(AIModelConfiguration(name: ""), at: 0) }
-                                .help("Add the tool's own default model")
+                                .help("Add the tool\u{2019}s own default model")
                         }
                     }
                 } header: {
                     Text("Models")
                 } footer: {
-                    aiFootnote("The default model leaves out the arguments that name a model, so the tool uses its own choice.")
+                    formFootnote("The default model leaves out the arguments that name a model, so the tool uses its own choice.")
                 }
                 AIProviderLimitsSection(limits: $draft.limits)
                 checkSection
-                if let message {
-                    Section { Text(message).foregroundStyle(.secondary) }
-                }
             }
             .formStyle(.grouped)
             Divider()
-            AIProviderEditorButtons(name: draft.name, isNew: draft.isNew, canSave: draft.configuration != nil,
+            AIProviderEditorButtons(name: draft.name, isNew: draft.isNew, canSave: draft.configuration != nil, failure: message,
                                     removalNote: "Features that used its models fall back to their other models. The tool and its sign-in stay on this Mac.",
                                     remove: remove, save: save)
         }
-        .frame(width: 480, height: 580)
+        .frame(width: 480, height: 500)
         .onDisappear { checkTask?.cancel() }
     }
 
@@ -148,13 +152,19 @@ struct AICommandLineEditor: View {
             HStack {
                 TextField("Executable", text: $draft.executable, prompt: Text("Name or path"))
                     .onSubmit { Task { await locate() } }
-                Button(isLocating ? "Finding\u{2026}" : "Find") { Task { await locate() } }
+                    .onChange(of: draft.executable) { locateFailure = nil }
+                Button("Find") { Task { await locate() } }
                     .disabled(isLocating || draft.executable.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .help("Look the name up in your login shell's PATH")
+                    .help("Look the name up in your login shell\u{2019}s PATH")
                 Button("Choose\u{2026}", action: chooseExecutable)
             }
-            if !draft.executable.isEmpty, draft.executableURL == nil {
-                Text("Enter the tool's full path, or its name and click Find.").font(.callout).foregroundStyle(.red)
+            // The button keeps its width while it runs, so the field beside it stays still. Until Find fails, the line under the field is guidance, not an error.
+            if isLocating {
+                AIProgressRow(text: "Looking in your login shell\u{2019}s PATH\u{2026}")
+            } else if let locateFailure {
+                Text(locateFailure).font(.callout).foregroundStyle(.red)
+            } else if !draft.executable.isEmpty, draft.executableURL == nil {
+                Text("Enter the tool\u{2019}s full path, or its name and click Find.").font(.callout).foregroundStyle(.secondary)
             }
             if let openTerminal = PreferencesWindowController.openTerminal {
                 HStack {
@@ -165,20 +175,23 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Tool")
         } footer: {
-            aiFootnote("Install the tool and sign in to it in the terminal. The tool keeps its own sign-in; Arch never reads it.")
+            formFootnote("Install the tool and sign in to it in the terminal. The tool keeps its own sign-in; Arch never reads it.")
         }
     }
 
+    /// Return in the field runs this too, so a lookup under way makes it do nothing. A result for a name the user has since changed is dropped.
     private func locate() async {
         let name = draft.executable
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard !isLocating, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         isLocating = true
+        locateFailure = nil
         defer { isLocating = false }
-        if let url = await AICommandLineConfiguration.locateExecutable(named: name) {
+        let url = await AICommandLineConfiguration.locateExecutable(named: name)
+        guard draft.executable == name else { return }
+        if let url {
             draft.executable = url.path
-            message = nil
         } else {
-            message = "\(name) is not in your login shell's PATH. Install it in the terminal, or choose the file with Choose\u{2026}."
+            locateFailure = "\(name) is not in your login shell\u{2019}s PATH. Install it in the terminal, or choose the file with Choose\u{2026}."
         }
     }
 
@@ -214,6 +227,8 @@ struct AICommandLineEditor: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
+                    .help("Remove Argument")
+                    .accessibilityLabel("Remove Argument")
                 }
             }
             HStack {
@@ -223,15 +238,15 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Arguments")
         } footer: {
-            aiFootnote("Each row is one argument. \(AICommandLineConfiguration.modelPlaceholder) becomes the model's name, and an argument that contains it is left out for the default model, so write an option and its model as one argument, such as --model=\(AICommandLineConfiguration.modelPlaceholder). The prompt goes to the tool's standard input, never into its arguments.")
+            formFootnote("Each row is one argument. \(AICommandLineConfiguration.modelPlaceholder) becomes the model\u{2019}s name, and an argument that contains it is left out for the default model, so write an option and its model as one argument, such as --model=\(AICommandLineConfiguration.modelPlaceholder). The prompt goes to the tool\u{2019}s standard input, never into its arguments.")
         }
     }
 
     @ViewBuilder private var outputSection: some View {
         Section {
             Picker("Output", selection: $draft.outputFormat) {
-                Text("Plain text").tag(AICommandLineDraft.OutputFormat.text)
-                Text("JSON lines").tag(AICommandLineDraft.OutputFormat.jsonLines)
+                Text("Plain Text").tag(AICommandLineDraft.OutputFormat.text)
+                Text("JSON Lines").tag(AICommandLineDraft.OutputFormat.jsonLines)
             }
             if draft.outputFormat == .jsonLines {
                 TextField("Text delta", text: pathBinding(\.textDelta), prompt: Text("delta.text"))
@@ -243,9 +258,9 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Output")
         } footer: {
-            aiFootnote(draft.outputFormat == .text
-                       ? "The tool's standard output is the reply."
-                       : "Each line is a JSON object. Enter the dotted path of each field the tool prints; a number picks an array element. Lines that are not JSON are skipped, and the final text is used when no delta arrives.")
+            formFootnote(draft.outputFormat == .text
+                         ? "The tool\u{2019}s standard output is the reply."
+                         : "Each line is a JSON object. Enter the dotted path of each field the tool prints; a number picks an array element. Lines that are not JSON are skipped, and the final text is used when no delta arrives.")
         }
     }
 
@@ -273,7 +288,7 @@ struct AICommandLineEditor: View {
                 Text(checkResult).foregroundStyle(checkFailed ? .red : .secondary).textSelection(.enabled)
             }
         } footer: {
-            aiFootnote("Check sends a short request to the first model and shows the reply or the error.")
+            formFootnote("Check sends a short request to the first model and shows the reply or the error.")
         }
     }
 
@@ -287,7 +302,7 @@ struct AICommandLineEditor: View {
             } catch AIError.cancelled {
                 checkResult = nil
             } catch {
-                checkResult = error.localizedDescription
+                checkResult = settings.message(for: error)
                 checkFailed = true
             }
             checkTask = nil
@@ -307,7 +322,7 @@ struct AICommandLineEditor: View {
             try await settings.removeProvider(draft.id)
             dismiss()
         } catch {
-            message = error.localizedDescription
+            message = settings.message(for: error)
         }
     }
 }

@@ -57,7 +57,8 @@ private struct PluginSidebarItemRow: View {
         .buttonStyle(.plain)
         .background(PluginPanelAnchorView(anchor: anchor))
         .onHover { isHovering = $0 }
-        .help("\(item.item.title) (\(item.pluginName))")
+        // On a second line, as a tab row's address: parentheses in the sidebar's tooltips hold a shortcut.
+        .help("\(item.item.title)\n\(item.pluginName)")
         .accessibilityLabel(item.item.title)
         .accessibilityValue(badge ?? "")
     }

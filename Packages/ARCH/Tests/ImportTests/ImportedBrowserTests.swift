@@ -149,7 +149,7 @@ import Testing
         #expect(profiles.map(\.isFirst) == [true])
         #expect(profiles.map(\.id) == [SidebarImport.Profile(source: "test.webkit", folder: "Default")])
         #expect(try profiles[0].favorites?.get().map(\.url) == [Self.url("a.example")])
-        #expect(try profiles[0].bookmarkFolders?.get().map(\.name) == ["Bookmarks / Trips"])
+        #expect(try profiles[0].bookmarkFolders?.get().map(\.name) == ["Bookmarks \u{25B8} Trips"])
         #expect(try profiles[0].count(of: .history)?.get() == 1)
         #expect(profiles[0].searchKeywords == nil)
         #expect(browser.defaultEngine == nil)

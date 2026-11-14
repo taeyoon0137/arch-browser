@@ -28,8 +28,9 @@ struct AddressPillView: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    private var symbol: String {
-        if windowModel.internalPage != nil { return "flag" }
+    /// The symbol before a page's site, in the address pill and the small window: the internal page's, a search with no page, a file, or the connection, secure or not.
+    static func symbol(for url: URL?, internalPage: InternalPage?) -> String {
+        if internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
         if url.isFileURL { return "doc" }
         return url.scheme == "https" ? "lock.fill" : "globe"
@@ -38,14 +39,16 @@ struct AddressPillView: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: { windowModel.focusCommandBar(from: .addressPill) }) {
-                HStack(spacing: 6) {
-                    Image(systemName: symbol)
+                // The symbol takes the tab rows' icon column, so the host starts where their titles do, whichever symbol shows.
+                HStack(spacing: 8) {
+                    Image(systemName: Self.symbol(for: url, internalPage: windowModel.internalPage))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 18)
                     Text(host)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .foregroundStyle(url == nil ? .secondary : .primary)
+                        .foregroundStyle(url == nil && windowModel.internalPage == nil ? .secondary : .primary)
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 10)
@@ -53,7 +56,7 @@ struct AddressPillView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(url?.absoluteString ?? "")
+            .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
             .accessibilityLabel(host)
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
@@ -147,7 +150,7 @@ struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
+/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs. While an internal page or the preview panel covers the tab, it shows only the engine for new tabs, as in a window without a tab. A click closes the preview before it reaches the button, but a press through VoiceOver leaves the preview open.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -157,12 +160,12 @@ struct SiteSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let tab {
+            if let tab, !windowModel.isSelectedPageCovered {
                 TabEngineSection(session: session, tab: tab)
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
-                SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
+                SiteSettingsSection(title: "Site Data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
                     Button("Clear Site Data\u{2026}") {
                         close()
                         windowModel.confirmClearSiteData()
@@ -171,8 +174,8 @@ struct SiteSettingsView: View {
                 }
                 PageAISiteSection(tab: tab)
             }
-            SiteSettingsSection(title: "New tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
-                Picker("New tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+            SiteSettingsSection(title: "New Tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
+                Picker("New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
                     ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                 }
             }
@@ -194,8 +197,8 @@ struct TabEngineSection: View {
     }
 
     var body: some View {
-        SiteSettingsSection(title: "This tab", note: note) {
-            Picker("This tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+        SiteSettingsSection(title: "This Tab", note: note) {
+            Picker("This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
                 ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
             }
         }

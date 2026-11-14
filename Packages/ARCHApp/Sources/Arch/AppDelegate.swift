@@ -15,12 +15,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
+    /// Names Undo Close Tab in its Undo item while ⌘Z reopens closed tabs.
+    private var editMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
     private var undoItem: NSMenuItem?
     private var closingItems: [NSMenuItem] = []
     private static let recentPageTag = 9_100
-    /// The Window menu, which becomes `NSApp.windowsMenu` once the shortcut settings have listed the menu bar.
+    /// The longest title of a page in the History menu, which takes its width from its longest item.
+    private static let recentPageTitleLength = 60
+    /// The Window, Services, and Help menus, which become `NSApp.windowsMenu`, `servicesMenu`, and `helpMenu` once the shortcut settings have listed the menu bar.
     private var windowMenu: NSMenu?
+    private var servicesMenu: NSMenu?
+    private var helpMenu: NSMenu?
     /// Keeps the Plugins menu's controller, which its items target.
     private var pluginsMenu: PluginsMenu?
     /// URLs the app receives before the session exists. They open once the session is created.
@@ -69,11 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         installTabSwitcher()
         installShortcuts()
         installPluginsMenu()
-        // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu stays out of Settings ▸ Shortcuts.
+        // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu, the services it lists in the Services menu, and the search field it puts in the Help menu stay out of Settings ▸ Shortcuts.
         NSApp.windowsMenu = windowMenu
-        // The small window's button names the shortcut, which Settings ▸ Shortcuts can change.
-        session.moveToMainWindowShortcut = { [weak self] in
-            self?.windowMenu?.items.first { $0.action == #selector(AppDelegate.moveToMainWindow) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
+        NSApp.servicesMenu = servicesMenu
+        NSApp.helpMenu = helpMenu
+        // The sidebar's and the small window's buttons name their command's shortcut, which Settings ▸ Shortcuts can change, in their tooltips.
+        session.menuShortcut = { name in
+            NSApp.mainMenu.flatMap { Self.visibleItem(withAction: name, in: $0) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
         }
         session.restoreWindows()
         if !pendingURLs.isEmpty {
@@ -114,20 +122,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the tabs' prompts, so that Cancel leaves their cards showing. Closing the last main window quits through the same path.
-    func confirmsQuit() -> Bool {
-        confirmsQuitStoppingDownloads() && TerminalWindowController.allowsQuit()
+    /// The first item of `menu` or its submenus, in menu bar order, whose action has the name, leaving out hidden twins such as the second Zoom In.
+    private static func visibleItem(withAction name: String, in menu: NSMenu) -> NSMenuItem? {
+        for item in menu.items where !item.isHidden {
+            if let action = item.action, NSStringFromSelector(action) == name { return item }
+            if let submenu = item.submenu, let found = visibleItem(withAction: name, in: submenu) { return found }
+        }
+        return nil
     }
 
-    private func confirmsQuitStoppingDownloads() -> Bool {
-        guard let count = session?.unfinishedDownloadCount, count > 0 else { return true }
+    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms first in one alert that names both, with the terminal brought forward while a program runs there, as closing the terminal's window asks. `ArchApplication` asks before it answers the tabs' prompts, so that Cancel leaves their cards showing. Closing the last main window quits through the same path.
+    func confirmsQuit() -> Bool {
+        let downloads = session?.unfinishedDownloadCount ?? 0
+        let runsProgram = TerminalWindowController.hasRunningProgram
+        guard downloads > 0 || runsProgram else { return true }
         let alert = NSAlert()
         alert.messageText = "Quit Arch?"
-        alert.informativeText = count == 1 ? "A download has not finished. It stops when Arch quits." : "\(count) downloads have not finished. They stop when Arch quits."
+        alert.informativeText = Self.quitWarning(downloads: downloads, runsProgram: runsProgram)
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
+        if runsProgram { TerminalWindowController.bringForward() }
         NSApp.activate()
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// What stops when Arch quits.
+    private static func quitWarning(downloads: Int, runsProgram: Bool) -> String {
+        switch (downloads, runsProgram) {
+        case (0, _): return "A program is running in the terminal. It stops when Arch quits."
+        case (1, false): return "A download has not finished. It stops when Arch quits."
+        case (_, false): return "\(downloads) downloads have not finished. They stop when Arch quits."
+        case (1, true): return "A download has not finished, and a program is running in the terminal. Both stop when Arch quits."
+        case (_, true): return "\(downloads) downloads have not finished, and a program is running in the terminal. They all stop when Arch quits."
+        }
     }
 
     /// A Dock click opens a main window where the last one was while Settings, History, or another of the app's windows keeps the app running without one. Otherwise AppKit brings the windows forward as usual.
@@ -164,16 +191,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
+        // The application menu has the items every Mac app's has, in their order. NSApplication answers and validates About, Hide, Hide Others, and Show All itself.
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Arch", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings\u{2026}", action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(withTitle: "Set as Default Browser\u{2026}", action: #selector(setAsDefaultBrowser), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let servicesMenu = NSMenu(title: "Services")
+        appMenu.addItem(submenu(servicesMenu, title: "Services"))
+        self.servicesMenu = servicesMenu
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide Arch", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h").keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Arch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         mainMenu.addItem(submenu(appMenu, title: "Arch"))
 
+        // Open Location… asks for an address before it opens anything, so it sits with the New commands and ends with an ellipsis.
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(newTab), keyEquivalent: "t")
         fileMenu.addItem(withTitle: "New Window", action: #selector(newWindow), keyEquivalent: "n")
+        fileMenu.addItem(withTitle: "Open Location\u{2026}", action: #selector(openLocation), keyEquivalent: "l")
+        fileMenu.addItem(.separator())
         let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
         let closeWindowItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
         closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
@@ -182,7 +223,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
-        fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
@@ -193,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
 
+        // Undo becomes Undo Close Tab while ⌘Z reopens closed tabs (`menuNeedsUpdate(_:)`).
         let editMenu = NSMenu(title: "Edit")
         undoItem = editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -200,20 +241,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Paste and Match Style", action: #selector(pasteAndMatchStyle(_:)), keyEquivalent: "V").keyEquivalentModifierMask = [.command, .option, .shift]
+        // SwiftUI's delete commands, such as the History list's, answer Delete.
+        editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
         editMenu.addItem(withTitle: "Find Next", action: #selector(findNext), keyEquivalent: "g")
         let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPrevious), keyEquivalent: "G")
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.delegate = self
+        self.editMenu = editMenu
         mainMenu.addItem(submenu(editMenu, title: "Edit"))
 
+        // The panels' toggles name what they will do, as the sidebar's button does; Settings ▸ Shortcuts lists them by these launch titles. The library item keeps its `toggleDownloads` action, by which saved shortcuts know it.
         let viewMenu = NSMenu(title: "View")
-        viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
-        viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r")
-        let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
-        downloadsItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(withTitle: "Show Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
+        let libraryItem = viewMenu.addItem(withTitle: "Show Library", action: #selector(toggleDownloads), keyEquivalent: "J")
+        libraryItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
+        viewMenu.addItem(.separator())
+        // Targeted, so that a focused web view, which answers `reload:` itself, cannot take it past the window's rules.
+        viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r").target = self
+        // Without a shortcut of its own: ⌘. stays the terminal's, the sheets', and the prompt cards' cancel key. Settings ▸ Shortcuts can give it one.
+        viewMenu.addItem(withTitle: "Stop Loading", action: #selector(stopLoading), keyEquivalent: "").target = self
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
@@ -244,7 +295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         mainMenu.addItem(submenu(viewMenu, title: "View"))
 
         let tabMenu = NSMenu(title: "Tab")
-        tabMenu.addItem(withTitle: "Pin or Unpin Tab", action: #selector(togglePinned), keyEquivalent: "d")
+        // Unpin Tab while the selected tab is pinned (`validateMenuItem(_:)`), as in the tab row's context menu.
+        tabMenu.addItem(withTitle: "Pin Tab", action: #selector(togglePinned), keyEquivalent: "d")
         let favoriteItem = tabMenu.addItem(withTitle: "Add to Favorites", action: #selector(addFavorite), keyEquivalent: "D")
         favoriteItem.keyEquivalentModifierMask = [.command, .shift]
         let splitViewItem = tabMenu.addItem(withTitle: "Open in Split View", action: #selector(openInSplitView), keyEquivalent: "=")
@@ -278,9 +330,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         spacesMenu.addItem(withTitle: "Delete Persona\u{2026}", action: #selector(deletePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
 
+        // Back and Forward are targeted as Reload Page is: a focused web view answers `goBack:` and `goForward:` itself.
         let historyMenu = NSMenu(title: "History")
-        historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
-        historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]")
+        historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[").target = self
+        historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]").target = self
         let homeItem = historyMenu.addItem(withTitle: "Home", action: #selector(goHome), keyEquivalent: "H")
         homeItem.keyEquivalentModifierMask = [.command, .shift]
         historyMenu.addItem(.separator())
@@ -300,6 +353,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         self.windowMenu = windowMenu
         mainMenu.addItem(submenu(windowMenu, title: "Window"))
+
+        // AppKit puts its menu search field in the Help menu. Arch has no help of its own to add.
+        let helpMenu = NSMenu(title: "Help")
+        self.helpMenu = helpMenu
+        mainMenu.addItem(submenu(helpMenu, title: "Help"))
         return mainMenu
     }
 
@@ -368,12 +426,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     @objc private func reload() { session.activeWindow?.reload() }
+    @objc private func stopLoading() { session.activeWindow?.stopLoading() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
     @objc private func resetZoom() { session.activeWindow?.resetZoom() }
-    @objc private func showFindBar() { session.activeWindow?.showFindBar() }
+    /// Find… in the History window, which the browser window behind it does not answer, goes to the window's search field.
+    @objc private func showFindBar() {
+        if let history = keyHistoryWindow { return history.focusSearch() }
+        session.activeWindow?.showFindBar()
+    }
+
+    /// The History window while it, or its Clear History sheet, is key.
+    private var keyHistoryWindow: HistoryWindowController? {
+        var window = NSApp.keyWindow
+        while let parent = window?.sheetParent { window = parent }
+        return window?.windowController as? HistoryWindowController
+    }
     @objc private func findNext() { session.activeWindow?.findNext() }
     @objc private func findPrevious() { session.activeWindow?.findPrevious() }
+    /// Chromium's view answers Paste and Match Style itself. A WebKit page and AppKit's text views name the command `pasteAsPlainText:`, so it reaches them under that name.
+    @objc private func pasteAndMatchStyle(_ sender: Any?) {
+        NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: sender)
+    }
     @objc private func goBack() { session.activeWindow?.goBack() }
     @objc private func goForward() { session.activeWindow?.goForward() }
     @objc private func goHome() { session.activeWindow?.goHome() }
@@ -394,7 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return history
     }()
 
-    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. The list is made when the menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; the pages have no key equivalents.
+    /// Lists the active window's selected tab's previous ten pages, most recent first, under a This Tab header between Forward and Show All History. Each title ends with an ellipsis after 60 characters, as tab rows and History rows cut titles at their end, and the page's tooltip gives the full title and its address. The list is made when the menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; the pages have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
@@ -402,11 +476,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let pages = activeWindow?.recentBackItems(limit: 10) ?? []
         guard !pages.isEmpty, let tabID = activeWindow?.selectedTabID, let separator = menu.items.firstIndex(where: \.isSeparatorItem) else { return }
         var index = separator + 1
+        let header = NSMenuItem.sectionHeader(title: "This Tab")
+        header.tag = Self.recentPageTag
+        menu.insertItem(header, at: index)
+        index += 1
         for page in pages {
-            let item = NSMenuItem(title: page.title.isEmpty ? page.url.host ?? page.url.absoluteString : page.title, action: #selector(goToRecentPage(_:)), keyEquivalent: "")
+            let fullTitle = page.title.isEmpty ? page.url.host ?? page.url.absoluteString : page.title
+            let title = fullTitle.count > Self.recentPageTitleLength ? String(fullTitle.prefix(Self.recentPageTitleLength - 1)) + "\u{2026}" : fullTitle
+            let item = NSMenuItem(title: title, action: #selector(goToRecentPage(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = RecentPage(tabID: tabID, item: page)
-            item.toolTip = page.url.absoluteString
+            item.toolTip = [fullTitle, page.url.absoluteString].joined(separator: "\n")
             item.tag = Self.recentPageTag
             menu.insertItem(item, at: index)
             index += 1
@@ -414,6 +494,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let end = NSMenuItem.separator()
         end.tag = Self.recentPageTag
         menu.insertItem(end, at: index)
+    }
+
+    /// While ⌘Z reopens closed tabs (`installUndoCloseShortcut()`), Edit ▸ Undo is Undo Close Tab, so that choosing it does what pressing its shortcut does; otherwise it undoes in the first responder. AppKit calls this before the Edit menu shows and before it searches the menu for a key equivalent. The key monitor compares only the item's shortcut, which this leaves alone.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === editMenu, let undoItem else { return }
+        if (session?.undoableCloseCount ?? 0) > 0 {
+            undoItem.title = "Undo Close Tab"
+            undoItem.target = self
+            undoItem.action = #selector(reopenClosedTab)
+        } else {
+            undoItem.title = "Undo"
+            undoItem.target = nil
+            undoItem.action = Selector(("undo:"))
+        }
     }
 
     @objc private func goToRecentPage(_ sender: NSMenuItem) {
@@ -461,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front, no prompt waiting on its tab, and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Page commands check the active window and sidebar commands the last main window.
+    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front, no prompt waiting on its tab, and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Toggles name what they will do. Page commands check the active window and sidebar commands the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
@@ -494,10 +588,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(goHome) {
             return activeWindow?.canGoHome == true
         }
-        // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list.
+        // As the sidebar's buttons, Back, Forward, Reload Page, and Stop Loading need a page to act on, the preview's while the panel shows.
+        if item.action == #selector(addFavorite) { return activeWindow?.selectedTab.map(session.canAddFavorite) == true }
+        if item.action == #selector(goBack) { return activeWindow?.canGoBack == true }
+        if item.action == #selector(goForward) { return activeWindow?.canGoForward == true }
+        if item.action == #selector(reload) { return activeWindow?.canReload == true }
+        if item.action == #selector(stopLoading) { return activeWindow?.isLoadingPage == true }
+        // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list. Pin Tab names what it will do, as the tab row's context menu does.
         if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) {
+            if item.action == #selector(togglePinned) { item.title = session?.lastMainWindow?.selectedTab?.isPinned == true ? "Unpin Tab" : "Pin Tab" }
             return session?.lastMainWindow?.selectedTab?.spaceID != nil
+        }
+        // The sidebar and library toggles name what they will do, for the sidebar target, which they act on. With the sidebar hidden, the library always opens.
+        if item.action == #selector(toggleSidebar) {
+            item.title = session?.lastMainWindow?.isSidebarVisible == false ? "Show Sidebar" : "Hide Sidebar"
+        }
+        if item.action == #selector(toggleDownloads) {
+            let window = session?.lastMainWindow
+            item.title = window?.isSidebarVisible == true && window?.isLibraryVisible == true ? "Hide Library" : "Show Library"
+        }
+        // The History window's search field has no next or previous match, and the find bar of the window behind it does not show.
+        if item.action == #selector(findNext) || item.action == #selector(findPrevious) {
+            return keyHistoryWindow == nil
+        }
+        // Chromium's view answers the item before it reaches the app, so here it needs a web view or text view that answers `pasteAsPlainText:`.
+        if item.action == #selector(pasteAndMatchStyle(_:)) {
+            return NSApp.target(forAction: #selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: item) != nil
         }
         if item.action == #selector(closeTab) {
             return !showsSheetOfOtherWindow

@@ -164,7 +164,7 @@ public final class ImportController {
     private func show(_ summary: ImportSummary, emptyLine: String?, in window: NSWindow) {
         let lines = summary.hasAdditions ? summary.lines : emptyLine.map { [$0] } ?? summary.lines
         let alert = NSAlert()
-        alert.messageText = summary.hasAdditions ? "Import Finished" : "Nothing Was Imported"
+        alert.messageText = summary.hasAdditions ? "The import finished." : "Nothing was imported."
         alert.informativeText = (lines + summary.failures).joined(separator: "\n")
         guard let host = window.isVisible ? window : session.lastMainWindow?.nsWindow, host.attachedSheet == nil else {
             alert.runModal()

@@ -34,6 +34,34 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
     override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
+    // MARK: Focus
+
+    /// Whether typing reaches the terminal: its window is key and the view has focus. Otherwise the cursor shows as an outline and the selection in the unemphasized color, as text views show theirs.
+    private var isActive: Bool { window?.isKeyWindow == true && window?.firstResponder === self }
+
+    override func becomeFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.removeObserver(self, name: name, object: nil)
+            guard let window else { continue }
+            NotificationCenter.default.addObserver(self, selector: #selector(keyWindowDidChange), name: name, object: window)
+        }
+    }
+
+    @objc private func keyWindowDidChange() {
+        needsDisplay = true
+    }
+
     // MARK: Layout
 
     override func viewDidMoveToSuperview() {
@@ -92,18 +120,30 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
         if markedText.length > 0 {
             drawMarkedText()
         } else if screen.isCursorVisible {
-            NSColor.textColor.withAlphaComponent(0.4).setFill()
-            cursorRect.fill()
+            let color = NSColor.textColor.withAlphaComponent(0.4)
+            if isActive {
+                color.setFill()
+                cursorRect.fill()
+            } else {
+                color.setStroke()
+                NSBezierPath(rect: cursorRect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+            }
         }
+    }
+
+    /// The selection's color, which follows whether typing reaches the terminal.
+    private var selectionColor: NSColor {
+        isActive ? .selectedTextBackgroundColor : .unemphasizedSelectedTextBackgroundColor
     }
 
     /// Backgrounds and the selection first, then text. Runs of plain ASCII in one style draw as one string, since every such character advances one cell in the monospaced font; any other character draws at its own cell, so fallback fonts with other widths keep the grid.
     private func draw(_ line: TerminalLine, at index: Int) {
         let top = Self.inset + CGFloat(index) * lineHeight
         let selected = selectedColumns(onLine: screen.droppedLineCount + index)
+        let selectionColor = self.selectionColor
         for (column, cell) in line.cells.enumerated() where cell.width > 0 {
             let colors = Self.colors(for: cell.style)
-            let background = selected?.contains(column) == true ? NSColor.selectedTextBackgroundColor : colors.background
+            let background = selected?.contains(column) == true ? selectionColor : colors.background
             guard let background else { continue }
             background.setFill()
             cellRect(column: column, top: top, width: cell.width).fill()
@@ -112,7 +152,7 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
         if let selected, line.cells.count < screen.size.columns {
             let start = max(selected.lowerBound, line.cells.count), end = min(selected.upperBound, screen.size.columns)
             if start < end {
-                NSColor.selectedTextBackgroundColor.setFill()
+                selectionColor.setFill()
                 cellRect(column: start, top: top, width: end - start).fill()
             }
         }

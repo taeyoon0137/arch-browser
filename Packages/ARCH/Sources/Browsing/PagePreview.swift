@@ -30,8 +30,8 @@ final class PagePreview: ObservableObject {
         webContents.uiDelegate = self
     }
 
-    /// The site's host, or the whole address of a page without one.
-    var host: String { url.host ?? url.absoluteString }
+    /// The site as the address pill names it.
+    var host: String { AddressPillView.siteName(of: url) }
 }
 
 extension PagePreview: EngineWebContentsUIDelegate {
@@ -95,20 +95,21 @@ struct PagePreviewPanel: View {
                         .controlSize(.small)
                         .scaleEffect(0.7)
                 } else {
-                    Image(systemName: preview.url.scheme == "https" ? "lock.fill" : "globe")
+                    Image(systemName: AddressPillView.symbol(for: preview.url, internalPage: nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
             }
             .frame(width: 18, height: 18)
-            // The host follows a title; a page without a title yet shows only its host.
-            HStack(spacing: 6) {
-                Text(preview.title.isEmpty ? preview.host : preview.title)
+            // The site follows a title at the same size, set apart by weight and color, and keeps its width, so a long title truncates first. A page without a title yet, or a file titled with its own name, shows only the site.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(showsSite ? preview.title : preview.host)
                     .font(.system(size: 13, weight: .semibold))
-                if !preview.title.isEmpty {
+                if showsSite {
                     Text(preview.host)
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
+                        .layoutPriority(1)
                 }
             }
             .lineLimit(1)
@@ -120,6 +121,8 @@ struct PagePreviewPanel: View {
         .padding(.leading, 6)
         .frame(height: Self.headerHeight)
     }
+
+    private var showsSite: Bool { !preview.title.isEmpty && preview.title != preview.host }
 }
 
 /// Closes the preview on Escape and on a click in its window outside the panel, which then goes on to whatever it hit. A field of the app's own, such as the palette's or the find bar's, keeps its Escape. Clicks in other windows leave the panel open: the previewed page opens some of them, such as a date picker or the window a fullscreen video moves to.
