@@ -41,13 +41,14 @@ struct SmallWindowView: View {
     }
 }
 
-/// The small window's controls on the line of the traffic light buttons: the page's icon and site, which open the palette to edit the address, then back, forward, reload or stop, share, and Move to Main Window. In full screen, where the traffic lights hide, the row starts at the page's margin.
+/// The small window's controls on the line of the traffic light buttons: the page's icon, the address pill's symbol for the page, and its site, which open the palette to edit the address, then back, forward, reload or stop, share, and Move to Main Window. While an internal page covers the tab, the row names that page, as the address pill does. In full screen, where the traffic lights hide, the row starts at the page's margin.
 private struct SmallWindowTopRow: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Observed so that the controls follow navigation within the page.
     @ObservedObject var tab: Tab
     let windowButtons: WindowButtonMetrics
+    @State private var isHoveringSite = false
 
     private var siteName: String {
         windowModel.internalPage?.address ?? tab.url.map(AddressPillView.siteName(of:)) ?? tab.pageTitle
@@ -57,8 +58,16 @@ private struct SmallWindowTopRow: View {
         HStack(spacing: 4) {
             Button { windowModel.focusCommandBar() } label: {
                 HStack(spacing: 6) {
-                    TabIconView(tab: tab)
-                        .frame(width: 16, height: 16)
+                    // The icon belongs to the tab, which an internal page hides.
+                    if windowModel.internalPage == nil {
+                        TabIconView(tab: tab)
+                            .frame(width: 16, height: 16)
+                    }
+                    // As wide as the widest of the symbols, the globe, so that the site keeps its place between secure and insecure pages, as in the address pill.
+                    Image(systemName: AddressPillView.symbol(for: tab.url, internalPage: windowModel.internalPage))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 14)
                     Text(siteName)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
@@ -66,10 +75,13 @@ private struct SmallWindowTopRow: View {
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 28)
+                // The row's buttons show the same fill under the pointer.
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHoveringSite ? 0.08 : 0)))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(tab.url?.absoluteString ?? "")
+            .onHover { isHoveringSite = $0 }
+            .help(windowModel.internalPage?.address ?? tab.url?.absoluteString ?? "")
             .accessibilityLabel(siteName)
             Spacer(minLength: 8)
             SidebarIconButton(symbol: "chevron.left", label: "Back", action: windowModel.goBack).disabled(!tab.canGoBack)

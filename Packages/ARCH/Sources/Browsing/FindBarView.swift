@@ -1,4 +1,4 @@
-// The find bar floats over the page's top-right corner. Typing searches the selected tab, Return and the arrows move through matches, and Escape closes the bar.
+// The find bar floats over the page's top-right corner. Typing searches the selected tab, Return and the arrows move through matches, and Escape or its close button closes the bar.
 import SwiftUI
 
 struct FindBarView: View {
@@ -28,15 +28,16 @@ struct FindBarView: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                // A narrow pane shortens the field, not the count.
+                .fixedSize()
             SidebarIconButton(symbol: "chevron.up", label: "Previous Match", action: windowModel.findPrevious)
             SidebarIconButton(symbol: "chevron.down", label: "Next Match", action: windowModel.findNext)
-            Button("Done", action: windowModel.hideFindBar)
-                .font(.system(size: 12))
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+            SidebarIconButton(symbol: "xmark", label: "Close Find Bar", action: windowModel.hideFindBar)
         }
         .padding(.horizontal, 12)
-        .frame(width: 380, height: 40)
+        // The question popover's width, or less in a narrow pane.
+        .frame(maxWidth: 380)
+        .frame(height: 40)
         // A solid background: a material over the engine's view cannot sample it, which leaves the label and buttons nearly invisible.
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))

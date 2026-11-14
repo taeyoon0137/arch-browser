@@ -36,8 +36,8 @@ public struct BrowserWindowView: View {
     static let sidebarGap: CGFloat = 8
     /// The window's coordinate space, shared by the tab rows and the lifted row that follows a drag.
     static let coordinateSpace = "BrowserWindow"
-    /// The floating card's corners match the window's own 16-point corners rather than the page's.
-    static let cardCornerRadius: CGFloat = 16
+    /// The floating card sits at the page's 8-point margin, so its corners match the page frame's, concentric with the window's corner. Larger corners would leave a sliver of the page showing outside the card's curve where the two frames meet.
+    static let cardCornerRadius = PageFrameShape.cornerRadius
 
     /// The sidebar's own margin is part of the gap beside it.
     private var pageMargins: EdgeInsets {
@@ -353,6 +353,9 @@ struct PageCrashNoticeView: View {
                     .controlSize(.large)
                     .padding(.top, 6)
             }
+            // A narrow pane wraps the lines, centered like the rest, inside the margin of the placeholder for a tab shown elsewhere.
+            .multilineTextAlignment(.center)
+            .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)))
         }

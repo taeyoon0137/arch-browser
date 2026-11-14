@@ -244,7 +244,7 @@ final class DevToolsWindow: NSWindow {
     }
 
     static func title(for pageTitle: String?) -> String {
-        pageTitle.map { "Developer Tools \u{2013} \($0)" } ?? "Developer Tools"
+        pageTitle.map { "Developer Tools \u{2014} \($0)" } ?? "Developer Tools"
     }
 }
 
@@ -293,12 +293,14 @@ struct DevToolsDockSpace: ViewModifier {
                 DevToolsResizeHandle(axis: .vertical, size: $settings.height, shownSize: size, room: room, sign: -1)
                     .frame(height: margins.bottom)
                 WebContentsHostView(contentView: dock.view)
+                    .modifier(DevToolsFrame())
                     .frame(height: size)
             }
             .padding(EdgeInsets(top: 0, leading: margins.leading, bottom: margins.bottom, trailing: margins.trailing))
         case .left:
             HStack(spacing: 0) {
                 WebContentsHostView(contentView: dock.view)
+                    .modifier(DevToolsFrame())
                     .frame(width: size)
                 DevToolsResizeHandle(axis: .horizontal, size: $settings.width, shownSize: size, room: room, sign: 1)
                     .frame(width: margins.leading)
@@ -309,10 +311,20 @@ struct DevToolsDockSpace: ViewModifier {
                 DevToolsResizeHandle(axis: .horizontal, size: $settings.width, shownSize: size, room: room, sign: -1)
                     .frame(width: margins.trailing)
                 WebContentsHostView(contentView: dock.view)
+                    .modifier(DevToolsFrame())
                     .frame(width: size)
             }
             .padding(EdgeInsets(top: margins.top, leading: 0, bottom: margins.bottom, trailing: margins.trailing))
         }
+    }
+}
+
+/// The page's rounded frame around docked tools: the page's background and shadow under the engine's view, and the page's faint edge over it.
+private struct DevToolsFrame: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(PageBackgroundView(isEmpty: false))
+            .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
     }
 }
 

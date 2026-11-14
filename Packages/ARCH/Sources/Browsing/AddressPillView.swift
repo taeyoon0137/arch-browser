@@ -28,8 +28,9 @@ struct AddressPillView: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    private var symbol: String {
-        if windowModel.internalPage != nil { return "flag" }
+    /// The symbol before a page's site, in the address pill and the small window: the internal page's, a search with no page, a file, or the connection, secure or not.
+    static func symbol(for url: URL?, internalPage: InternalPage?) -> String {
+        if internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
         if url.isFileURL { return "doc" }
         return url.scheme == "https" ? "lock.fill" : "globe"
@@ -38,14 +39,16 @@ struct AddressPillView: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: { windowModel.focusCommandBar(from: .addressPill) }) {
-                HStack(spacing: 6) {
-                    Image(systemName: symbol)
+                // The symbol takes the tab rows' icon column, so the host starts where their titles do, whichever symbol shows.
+                HStack(spacing: 8) {
+                    Image(systemName: Self.symbol(for: url, internalPage: windowModel.internalPage))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 18)
                     Text(host)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .foregroundStyle(url == nil ? .secondary : .primary)
+                        .foregroundStyle(url == nil && windowModel.internalPage == nil ? .secondary : .primary)
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 10)
@@ -53,7 +56,7 @@ struct AddressPillView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(url?.absoluteString ?? "")
+            .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
             .accessibilityLabel(host)
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
