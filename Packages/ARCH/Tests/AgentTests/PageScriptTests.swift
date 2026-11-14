@@ -123,6 +123,23 @@ import Testing
         #expect(cut.structured?["limits"]?["leftOutLines"] != nil)
     }
 
+    @Test(arguments: ["reload", "closed", "excluded", "takenOver"])
+    func anImageNeverLeavesATabThatChangesDuringTheCapture(_ change: String) async throws {
+        let fixture = try await PageFixture()
+        let host = fixture.host
+        host.onCapture = { [unowned host] in
+            switch change {
+            case "reload": host.tabs[0].documentID = UUID()
+            case "closed": host.tabs.removeAll()
+            case "excluded": host.tabs[0].url = URL(string: "https://excluded.example/")
+            default: host.tabs[0].agentOwnerID = nil
+            }
+        }
+        let result = await fixture.call("screenshot", ["tab": "t1", "area": "viewport"])
+        #expect(result.status != .ok)
+        #expect(!result.content.contains { if case .image = $0 { return true }; return false })
+    }
+
     @Test func theBoxesAndAScreenshotWithTheFilledPasswordFieldPaintedOver() async throws {
         let fixture = try await PageFixture()
         // The user typed a password into the page, which a capture shows as dots unless it is painted over.

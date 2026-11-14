@@ -25,6 +25,7 @@ import Testing
     var webContents: [UUID: any EngineWebContents] = [:]
     /// What the fake engine captures for a tab in place of its web contents' capture; a tab with neither captures nothing, as Chromium may for a tab no window shows.
     var captures: [UUID: NSImage] = [:]
+    var onCapture: (() -> Void)?
     /// Tabs whose capture never answers, as a busy page's or one no window shows may not.
     var hangingCaptureTabIDs: Set<UUID> = []
     /// The apps that open links, by scheme.
@@ -113,6 +114,7 @@ import Testing
     }
 
     func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
+        onCapture?()
         guard !hangingCaptureTabIDs.contains(tabID) else { return }
         if let image = captures[tabID] { return completion(image) }
         guard let contents = webContents[tabID] else { return completion(nil) }
