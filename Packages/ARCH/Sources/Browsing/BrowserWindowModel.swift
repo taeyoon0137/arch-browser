@@ -56,8 +56,9 @@ public enum BrowserWindowKind {
     @Published public private(set) var isPageReaderVisible = false
     /// What the agent panel shows in the trailing column in place of the page reader, or nil while it is hidden; only one of the two shows.
     @Published public private(set) var agentPanel: AgentPanelContent?
-    /// The unsubmitted composer in this window. Closing the panel keeps it in its original space.
-    private var agentDraft: AgentComposerContext?
+    /// Unsubmitted tasks belong to this window and their original spaces.
+    private var agentDrafts: [Space.ID: AgentComposerContext] = [:]
+    private var draftSpaceObserver: AnyCancellable?
     /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
     @Published private(set) var pageQuestion: PageQuestion?
     /// Where the selected tab's developer tools show.
@@ -121,6 +122,13 @@ public enum BrowserWindowKind {
         currentSpaceID = record.currentSpaceID
         isSidebarVisible = record.isSidebarVisible
         restorableFrame = record.frame
+        draftSpaceObserver = session.$spaces.dropFirst().sink { [weak self] spaces in
+            guard let self, !agentDrafts.isEmpty else { return }
+            agentDrafts = agentDrafts.filter { spaceID, draft in
+                spaces.contains { $0.id == spaceID && $0.resolvedPersonaID == draft.personaID }
+            }
+            if case .composer(let draft) = agentPanel, agentDrafts[draft.spaceID] == nil { hideAgentPanel() }
+        }
     }
 
     // MARK: Selection
@@ -881,7 +889,7 @@ public enum BrowserWindowKind {
     /// Hides the panel, or resumes its draft in this space before showing the most recent session or a new composer.
     public func toggleAgentPanel() {
         guard agentPanel == nil else { return hideAgentPanel() }
-        if let agentDraft, agentDraft.spaceID == currentSpaceID, agentDraft.personaID == personaID {
+        if let agentDraft = agentDrafts[currentSpaceID], agentDraft.personaID == personaID {
             showAgentPanel(.composer(agentDraft))
         } else if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
             showAgentSession(latest.id)
@@ -895,12 +903,12 @@ public enum BrowserWindowKind {
     }
 
     func agentTaskDidStart(_ sessionID: UUID, from draft: AgentComposerContext) {
-        if agentDraft === draft { agentDraft = nil }
+        if agentDrafts[draft.spaceID] === draft { agentDrafts[draft.spaceID] = nil }
         showAgentSession(sessionID)
     }
 
     private func showAgentPanel(_ content: AgentPanelContent) {
-        if case .composer(let context) = content { agentDraft = context }
+        if case .composer(let context) = content { agentDrafts[context.spaceID] = context }
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible = false

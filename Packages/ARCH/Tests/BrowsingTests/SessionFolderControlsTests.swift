@@ -85,6 +85,17 @@ import Testing
         window.toggleAgentPanel()
         guard case .composer(let afterStart) = window.agentPanel else { Issue.record("Expected an empty composer"); return }
         #expect(afterStart !== replacement && afterStart.text.isEmpty)
+        window.hideAgentPanel()
+        window.currentSpaceID = space.id
+        window.toggleAgentPanel()
+        guard case .composer(let originalSpace) = window.agentPanel else { Issue.record("Expected the first space's draft"); return }
+        #expect(originalSpace === draft && !originalSpace.attachesTab)
+        browser.deleteSpace(space.id)
+        #expect(window.agentPanel == nil)
+        window.switchToSpace(anotherSpace.id)
+        window.toggleAgentPanel()
+        guard case .composer(let remaining) = window.agentPanel else { Issue.record("Expected the surviving space's draft"); return }
+        #expect(remaining === afterStart)
     }
 
     @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
