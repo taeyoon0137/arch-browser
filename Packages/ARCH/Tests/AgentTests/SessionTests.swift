@@ -718,7 +718,7 @@ import Testing
         let (session, runner) = try start(service, harness)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         runner.emit(.turnFailed(.invalidRequest("The first message failed.")))
-        try await waitUntil { session.state == .done }
+        try await waitUntil { session.state == .turnFailed }
         let firstError = try #require(session.transcript.retryableErrorID)
         try session.send("A different question")
         runner.emit(.turnFinished(.completed))
@@ -728,7 +728,7 @@ import Testing
         #expect(runner.sent.count == 2)
         try session.send("A third question")
         runner.emit(.turnFailed(.invalidRequest("This question failed.")))
-        try await waitUntil { session.state == .done }
+        try await waitUntil { session.state == .turnFailed }
         let latestError = try #require(session.transcript.retryableErrorID)
         await service.retry(session, errorID: firstError)
         #expect(runner.sent.count == 3)
