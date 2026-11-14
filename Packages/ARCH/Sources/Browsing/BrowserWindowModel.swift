@@ -270,7 +270,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
         let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
                                             tabCount: session.tabs.filter { $0.personaID == id }.count,
-                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished })
+                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished }, isSyncing: session.isSyncing)
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
@@ -282,13 +282,15 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes. The explanation leaves out what the Persona has none of, and names one space, tab, or download without a number, as the Quit sheet names one download; every Persona has a space.
-    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int) -> (message: String, information: String) {
+    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
         let spaces = spaceCount == 1 ? "Its space" : "Its \(spaceCount) spaces"
         let favorites = favoriteCount == 0 ? "" : favoriteCount == 1 ? " and 1 favorite" : " and \(favoriteCount) favorites"
         let removed = spaces + favorites + (spaceCount == 1 && favoriteCount == 0 ? " is removed" : " are removed")
         let closed = tabCount == 0 ? "" : tabCount == 1 ? ", and its tab closes into the closed list" : ", and its \(tabCount) tabs close into the closed list"
         let downloads = downloadCount == 0 ? "" : downloadCount == 1 ? " Its download in progress stops." : " Its \(downloadCount) downloads in progress stop."
-        return ("Delete \(persona)?", "\(removed)\(closed).\(downloads) Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
+        var information = "\(removed)\(closed).\(downloads) Arch removes its plugins, cookies, and website data from this Mac the next time it opens."
+        if isSyncing { information += " It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." }
+        return ("Delete \(persona)?", information)
     }
 
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.

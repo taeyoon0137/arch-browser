@@ -28,6 +28,8 @@ final class EngineRuntime {
 
 public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
+    /// Whether this Mac's Persona deletions can sync, including changes made while offline.
+    public var isSyncing = false
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
     /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.

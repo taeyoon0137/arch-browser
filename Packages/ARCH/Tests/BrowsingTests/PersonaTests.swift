@@ -45,6 +45,8 @@ import Testing
         #expect(clear.identity == site)
         #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
         let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, downloadCount: 2)
+        let synced = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, downloadCount: 2, isSyncing: true)
+        #expect(synced.information.hasSuffix("It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too."))
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
         #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its 2 downloads in progress stop. Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
         #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1, downloadCount: 0).information.hasPrefix("Its space is removed, and its tab closes into the closed list. Arch removes"))
