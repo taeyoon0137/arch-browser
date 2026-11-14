@@ -24,6 +24,8 @@ public final class Tab: ObservableObject, Identifiable {
             savedPage = isPinned ? currentPage : nil
         }
     }
+    /// A synced engine choice waits while a window shows this page.
+    var pendingSyncEngine: EngineKind?
     /// The page a pinned tab returns to (bookmark rule 2): set as the tab becomes pinned, from its record when it restores or reopens, and by Use Current Page as Saved Page and Edit Saved Address…. Nil for every other tab. `docs/bookmarks.md`, Saved pages, describes the rest.
     @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.

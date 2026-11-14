@@ -318,7 +318,7 @@ private final class MonitorDouble: AgentTabMonitor {
 
 /// An engine's page whose address and loading state the test sets, reporting to the tab as an engine does.
 private final class PageDouble: EngineWebContents {
-    let engineKind = EngineKind.webKit
+    let engineKind: EngineKind
     private(set) var url: URL?
     private(set) var isLoading = false
     let title = "Page"
@@ -339,7 +339,8 @@ private final class PageDouble: EngineWebContents {
     let closingStopsDownloads = false
     let devTools: (any EngineDevTools)? = nil
 
-    init(url: URL?) {
+    init(url: URL?, engine: EngineKind = .webKit) {
+        self.engineKind = engine
         self.url = url
     }
 
@@ -392,8 +393,9 @@ private final class NavigationDouble: EngineNavigationController, EngineBackForw
 }
 
 /// The session's in-memory engine. Each call for a profile gets its own context, and pages report only the initial address.
-private final class SessionTestEngine: Engine, EngineApplication {
-    let kind = EngineKind.webKit
+final class SessionTestEngine: Engine, EngineApplication {
+    let kind: EngineKind
+    init(kind: EngineKind = .webKit) { self.kind = kind }
     var engineKind: EngineKind { kind }
     let capabilities: Set<EngineCapability> = []
     let extensionRuntimeVersion: String? = nil
@@ -401,7 +403,7 @@ private final class SessionTestEngine: Engine, EngineApplication {
     func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication { self }
     func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) { completion(true) }
     func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { completion(.success(Context())) }
-    func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser { Browser() }
+    func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser { Browser(kind: kind) }
 
     private final class Context: EngineBrowserContext {
         let downloads: any EngineDownloads = Downloads()
@@ -415,8 +417,10 @@ private final class SessionTestEngine: Engine, EngineApplication {
     }
 
     private final class Browser: EngineBrowser {
+        let kind: EngineKind
+        init(kind: EngineKind) { self.kind = kind }
         var cookiesDidChange: (() -> Void)?
-        func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { PageDouble(url: configuration.initialURL) }
+        func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { PageDouble(url: configuration.initialURL, engine: kind) }
         func takeOwnership(of webContents: any EngineWebContents) {}
         func closeWebContents(_ webContents: any EngineWebContents) {}
         func closeAllWebContents() {}

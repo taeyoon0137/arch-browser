@@ -15,7 +15,7 @@ import Testing
     private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
     /// Every reason a tab closes for: ⌘W and the row's button, the page's `window.close()`, a crashed page, archiving, a tab that only pointed at a file, an extension's `tabs.remove`, and Delete Persona.
-    private let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .persona]
+    private let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .persona, .sync]
 
     /// A tab of the space, or a favorite's tab without `inSpace`, on a page in `engine` that shows `url` with `title`.
     private func tab(at url: URL, title: String, pinned: Bool, inSpace: Bool = true, engine: EngineKind = .webKit) -> (tab: Tab, page: PageStub) {
@@ -45,10 +45,10 @@ import Testing
 
     // MARK: What closing does
 
-    @Test func closingAPinnedTabUnloadsItOnEveryPathButDeletePersona() {
+    @Test func closingAPinnedTabUnloadsItExceptForPersonaAndSyncDeletions() {
         let (tab, _) = pinnedTabThatLeftHome()
         for reason in reasons {
-            #expect(TabCloseAction.of(tab, reason: reason) == (reason == .persona ? .close(remember: true) : .unload), "\(reason)")
+            #expect(TabCloseAction.of(tab, reason: reason) == (reason == .persona || reason == .sync ? .close(remember: true) : .unload), "\(reason)")
         }
         #expect(TabCloseAction.unload.closedRecord(of: tab) == nil)
     }
@@ -79,7 +79,7 @@ import Testing
         for reason in reasons {
             let expected: TabCloseAction = switch reason {
             case .user, .page, .webExtension: .dismiss
-            case .persona: .close(remember: false)
+            case .persona, .sync: .close(remember: false)
             case .crash, .download, .archive: .unload
             }
             #expect(TabCloseAction.of(tab, reason: reason) == expected, "\(reason)")
