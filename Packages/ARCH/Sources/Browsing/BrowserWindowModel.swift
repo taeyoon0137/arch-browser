@@ -752,7 +752,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Agent panel
 
-    /// Whether a Claude Code or Codex model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
+    /// Whether a connected model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
     @MainActor var canStartAgentTask: Bool {
         !(session.agents?.agentModels().isEmpty ?? true)
     }
@@ -767,6 +767,25 @@ public final class BrowserWindowModel: ObservableObject {
     static func agentComposerContext(in space: Space, personas: [Persona], selectedTab: AgentTabInfo?, isPageCovered: Bool, text: String) -> AgentComposerContext {
         let persona = personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
         return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: isPageCovered ? nil : selectedTab, text: text)
+    }
+
+    /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
+    @MainActor func sidebarAgentDraft(for tab: Tab) -> AgentComposerContext? {
+        guard kind == .main, canStartAgentTask, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+              session.allTabs.contains(where: { $0 === tab }) else { return nil }
+        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
+                                     allowsAI: AIService.shared.settings.allowsAI(on:))
+    }
+
+    static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
+        guard tab.spaceID == space.id else { return nil }
+        let context = agentComposerContext(in: space, personas: personas, selectedTab: tab, isPageCovered: false, text: "")
+        return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
+    }
+
+    @MainActor func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
+        guard let context = sidebarAgentDraft(for: tab), context.tab?.documentID == reviewed.tab?.documentID, context.tab?.url == reviewed.tab?.url else { return }
+        showAgentPanel(.composer(context))
     }
 
     /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.

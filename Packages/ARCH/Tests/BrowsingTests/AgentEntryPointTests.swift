@@ -43,6 +43,26 @@ import Testing
         #expect(old.place == "Default / Inbox")
     }
 
+    @Test func sidebarAgentDraftBelongsToTheClickedTabAndRemainsEmptyUntilTheUserWrites() throws {
+        let persona = Persona(name: "Research")
+        let space = Space(name: "Articles", personaID: persona.id)
+        var tab = Self.tab(url: Self.page)
+        tab.spaceID = space.id
+        let context = try #require(BrowserWindowModel.sidebarAgentDraft(for: tab, in: space, personas: [persona], allowsAI: { _ in true }))
+        #expect(context.tab == tab && context.spaceID == space.id && context.personaID == persona.id)
+        #expect(context.text.isEmpty && context.readerExcerpt == nil)
+        #expect(BrowserWindowModel.sidebarAgentDraft(for: tab, in: space, personas: [persona], allowsAI: { _ in false }) == nil)
+        var revised = tab
+        revised.spaceID = UUID()
+        #expect(BrowserWindowModel.sidebarAgentDraft(for: revised, in: space, personas: [persona], allowsAI: { _ in true }) == nil)
+        revised = tab
+        revised.agentOwnerID = UUID()
+        #expect(BrowserWindowModel.sidebarAgentDraft(for: revised, in: space, personas: [persona], allowsAI: { _ in true }) == nil)
+        revised = tab
+        revised.url = URL(string: "arch://settings")
+        #expect(BrowserWindowModel.sidebarAgentDraft(for: revised, in: space, personas: [persona], allowsAI: { _ in true }) == nil)
+    }
+
     @Test func askAgentStartsInTheWindowsPlaceWithItsTabAttached() throws {
         let tab = Self.tab(url: Self.page)
         let context = Self.context(tab: tab)
