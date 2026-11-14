@@ -50,6 +50,7 @@ import Testing
     var silentTabIDs: Set<UUID> = []
     /// Lets a test change the tab or turn after extraction, before the engine answers.
     var beforeReturningContent: (() -> Void)?
+    var onPageScript: (() -> Void)?
     var history: [AgentHistoryPage] = []
     private(set) var openedOwners: [AgentTabOwner] = []
     private(set) var closedTabIDs: [UUID] = []
@@ -108,6 +109,7 @@ import Testing
     }
 
     func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void) {
+        onPageScript?()
         guard !silentTabIDs.contains(tabID) else { return }
         guard let contents = webContents[tabID] else { return completion(.failure(EngineReadableContentError.unreadable)) }
         contents.executeJavaScript(source, inWorld: world, completion: completion)

@@ -96,6 +96,7 @@ extension AgentAPISession: AgentSessionRunning {
         didSet { siteScope = scope.sites }
     }
     var handles = AgentGrantHandles()
+    var snapshots = AgentSnapshotStore()
     let ready = AgentGate(isOpen: false)
     let handedBack = AgentGate(isOpen: true)
     private(set) var runner: (any AgentSessionRunning)?
@@ -299,6 +300,7 @@ extension AgentAPISession: AgentSessionRunning {
     /// Stop: the running turn ends and the queued messages go; the next message continues the session.
     public func stop() {
         queuedMessages = []
+        snapshots = AgentSnapshotStore()
         endCallsOfTheTurn()
         runner?.stop()
     }
@@ -340,6 +342,7 @@ extension AgentAPISession: AgentSessionRunning {
     public func takeOver() {
         guard !hasEnded else { return }
         isTakenOver = true
+        snapshots = AgentSnapshotStore()
         handedBack.close()
     }
 
@@ -394,6 +397,7 @@ extension AgentAPISession: AgentSessionRunning {
     func unshare(tabID: UUID) {
         guard handles.sharedTabIDs.contains(tabID) else { return }
         objectWillChange.send()
+        snapshots.remove(tabID)
         handles.sharedTabIDs.removeAll { $0 == tabID }
         handles.actingSharedTabIDs.remove(tabID)
         handles.tabs.remove(tabID)
@@ -406,6 +410,7 @@ extension AgentAPISession: AgentSessionRunning {
     func end(keepingThread: Bool, because reason: String = "The session was deleted.") async {
         guard !hasEnded else { return }
         hasEnded = true
+        snapshots = AgentSnapshotStore()
         readerExcerpt = nil
         queuedMessages = []
         callEpoch += 1
@@ -427,6 +432,7 @@ extension AgentAPISession: AgentSessionRunning {
     func replaceRunner(_ newRunner: any AgentSessionRunning, processRecord: @escaping (pid_t) -> AgentProcessRecord?) {
         hasSentFirstMessage = false
         spawnedProcess = nil
+        snapshots = AgentSnapshotStore()
         callEpoch += 1
         ready.close()
         state = .starting
