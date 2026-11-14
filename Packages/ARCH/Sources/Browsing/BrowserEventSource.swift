@@ -281,25 +281,29 @@ final class BrowserEventSource {
         for entry in current where downloads[entry.id] == nil {
             // A download joins the list as it starts, when Settings decides whether a save panel asks the user for its name.
             let isNamedByUser = UserDefaults.standard.bool(forKey: BrowserSession.asksWhereToSaveDownloadsKey)
+            // The tab may leave its agent folder or close before the download finishes.
+            let tab = entry.item.webContents.flatMap { page in tabs.values.first { $0.tab?.webContents === page }?.tab }
+            let tabID = tab?.id
+            let tabKind = tab.map(Self.kind(of:))
             // An entry publishes its state before its file's path, so the event waits for the rest of the update.
             downloads[entry.id] = entry.$state.removeDuplicates().dropFirst().filter { $0 == .completed }
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self, weak entry] _ in
                     MainActor.assumeIsolated {
-                        if let self, let entry { self.downloadDidFinish(entry, isNamedByUser: isNamedByUser) }
+                        if let self, let entry { self.downloadDidFinish(entry, isNamedByUser: isNamedByUser, tabID: tabID, tabKind: tabKind) }
                     }
                 }
         }
     }
 
-    /// The event names the file, its type from its extension, its size, its addresses, and the tab it started from, never its folder or contents. A file that is not in place posts nothing.
-    private func downloadDidFinish(_ entry: DownloadEntry, isNamedByUser: Bool) {
+    /// The event names the file, its type from its extension, its size, its addresses, and the tab it started from with its kind, never its folder or contents. A file that is not in place posts nothing.
+    private func downloadDidFinish(_ entry: DownloadEntry, isNamedByUser: Bool, tabID: UUID?, tabKind: BrowserTabKind?) {
         guard let fileURL = entry.fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return }
         let byteCount = max(entry.totalBytes, entry.completedBytes)
-        let tabID = entry.item.webContents.flatMap { page in tabs.values.first { $0.tab?.webContents === page }?.tab?.id }
-        bus.post(.downloadFinished(download: BrowserDownloadRef(id: entry.id, personaID: entry.personaID, tabID: tabID, filename: fileURL.lastPathComponent,
+        let openTabID = tabID.flatMap { tabs[$0]?.tab?.id }
+        bus.post(.downloadFinished(download: BrowserDownloadRef(id: entry.id, personaID: entry.personaID, tabID: openTabID, filename: fileURL.lastPathComponent,
                                                                 mediaType: UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType,
                                                                 byteCount: byteCount > 0 ? byteCount : nil, sourceURL: entry.item.sourceURL, pageURL: entry.item.pageURL,
-                                                                isNamedByUser: isNamedByUser)))
+                                                                isNamedByUser: isNamedByUser, tabKind: tabKind)))
     }
 }

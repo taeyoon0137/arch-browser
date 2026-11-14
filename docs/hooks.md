@@ -126,6 +126,8 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
     public var pageURL: URL?
     /// The user chose the name in a save panel.
     public var isNamedByUser: Bool
+    /// The source tab's kind when the download started. It survives takeover and close.
+    public var tabKind: BrowserTabKind?
 }
 
 public enum BrowserTabCloseReason: String, Codable, Hashable, Sendable {
@@ -613,7 +615,7 @@ What VII.25 decided while building the registry:
 ### Triggers and filters
 
 - A hook has one trigger and one filter. The editor shows the scope as "Persona / Space" entries, with a whole Persona shown alone, such as "Personal / Work" or "Personal".
-- Hooks never see agent tabs: the registry's filters never name `agent`.
+- Hooks skip agent tabs and downloads that started in them, including downloads that finish after the user takes over or closes the tab.
 - The filter is also the hook's reach: its script's tab calls and its agent runs accept only the tabs the filter covers in the event's Persona (hook decision 16, Run tabs).
 - An event whose `hookChain` holds three hooks reaches no hook, and a hook skips an event whose chain holds it (Loop protection).
 - A hook with `agent` gets no event from a site excluded from AI. Arch checks this when the event arrives and again after the delay (hook decision 14).

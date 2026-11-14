@@ -13,7 +13,7 @@ public struct BrowserEventFilter: Codable, Hashable, Sendable {
     public var exceptSites: [AISitePattern]
     /// Empty matches both engines. Events without a tab ignore it.
     public var engines: Set<EngineKind>
-    /// Empty matches every kind but `agent`, which only a filter that names it matches. Events without a tab ignore it.
+    /// Empty matches every user tab kind. Agent tabs and downloads started in them require an explicit `agent` kind. Other events without a tab ignore this filter.
     public var tabKinds: Set<BrowserTabKind>
 
     public init(kinds: Set<BrowserEventKind> = [], scope: BrowserEventScope = .everywhere, sites: [AISitePattern] = [], exceptSites: [AISitePattern] = [],
@@ -34,7 +34,10 @@ public struct BrowserEventFilter: Codable, Hashable, Sendable {
         let urls = event.urls
         guard sites.isEmpty || urls.contains(where: { url in sites.contains { $0.matches(url) } }),
               !urls.contains(where: { url in exceptSites.contains { $0.matches(url) } }) else { return false }
-        guard let tab = event.tab else { return true }
+        guard let tab = event.tab else {
+            if case .downloadFinished(let download) = event.payload, download.tabKind == .agent { return tabKinds.contains(.agent) }
+            return true
+        }
         return (engines.isEmpty || engines.contains(tab.engine)) && (tabKinds.isEmpty ? tab.kind != .agent : tabKinds.contains(tab.kind))
     }
 }

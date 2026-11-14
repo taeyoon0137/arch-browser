@@ -50,8 +50,11 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
     public var pageURL: URL?
     /// The user chose the name in a save panel.
     public var isNamedByUser: Bool
+    /// The source tab's kind when the download started, including after the user takes over or closes the tab. Nil for an unknown source.
+    public var tabKind: BrowserTabKind?
 
-    public init(id: UUID, personaID: UUID, tabID: UUID?, filename: String, mediaType: String?, byteCount: Int64?, sourceURL: URL?, pageURL: URL?, isNamedByUser: Bool) {
+    public init(id: UUID, personaID: UUID, tabID: UUID?, filename: String, mediaType: String?, byteCount: Int64?, sourceURL: URL?, pageURL: URL?, isNamedByUser: Bool,
+                tabKind: BrowserTabKind? = nil) {
         self.id = id
         self.personaID = personaID
         self.tabID = tabID
@@ -61,6 +64,7 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
         self.sourceURL = sourceURL
         self.pageURL = pageURL
         self.isNamedByUser = isNamedByUser
+        self.tabKind = tabKind
     }
 }
 

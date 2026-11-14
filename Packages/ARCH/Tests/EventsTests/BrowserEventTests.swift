@@ -186,6 +186,14 @@ let tabJSON = #"{"id":"00000000-0000-0000-0000-000000000001","personaID":"000000
         #expect(!BrowserEventFilter.everything.matches(agent))
         #expect(!BrowserEventFilter(tabKinds: [.open, .pinned, .favorite, .smallWindow]).matches(agent))
         #expect(BrowserEventFilter(tabKinds: [.agent]).matches(agent))
+        // A download keeps the rule of the agent tab it started from, while other downloads still ignore tab kinds.
+        var fromAgent = downloadRef()
+        fromAgent.tabKind = .agent
+        #expect(!BrowserEventFilter.everything.matches(event(.downloadFinished(download: fromAgent))))
+        #expect(BrowserEventFilter(tabKinds: [.agent]).matches(event(.downloadFinished(download: fromAgent))))
+        var fromOpen = downloadRef()
+        fromOpen.tabKind = .open
+        #expect(BrowserEventFilter(tabKinds: [.pinned]).matches(event(.downloadFinished(download: fromOpen))))
     }
 
     @Test func filtersHaveFixedJSON() throws {

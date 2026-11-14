@@ -352,7 +352,42 @@ import Testing
         try? await Task.sleep(for: .milliseconds(50))
         #expect(recorder.payloads == [.downloadFinished(download: BrowserDownloadRef(id: entries[0].id, personaID: persona, tabID: tab.id, filename: "a1b2.pdf", mediaType: "application/pdf",
                                                                                       byteCount: 3, sourceURL: URL(string: "https://example.org/files/a1b2.pdf"), pageURL: URL(string: "https://example.org/files"),
-                                                                                      isNamedByUser: false))])
+                                                                                      isNamedByUser: false, tabKind: .open))])
+    }
+
+    @Test(arguments: [false, true])
+    func anAgentDownloadStaysPrivateAfterTakeoverOrClose(closed: Bool) async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let (tab, page) = makeTab(space: space)
+        tab.folderID = UUID()
+        let owner = UUID()
+        tab.agentOwnerOfFolder = { _ in owner }
+        source.follow(tabs: [tab], postingNewTabs: false)
+        let userEvents = EventRecorder()
+        bus.subscribe(.everything) { userEvents.events.append($0) }
+        let item = EventTestDownload(page: page, targetPath: file)
+        let entry = DownloadEntry(item: item, personaID: persona)
+        source.follow(downloads: [entry])
+
+        tab.folderID = nil
+        if closed {
+            source.follow(tabs: [], postingNewTabs: false)
+            item.webContents = nil
+        }
+        item.state = .completed
+        entry.refresh()
+
+        #expect(await eventually { !recorder.events.isEmpty })
+        let event = try #require(recorder.events.last)
+        guard case .downloadFinished(let download) = event.payload else {
+            Issue.record("Expected a finished download")
+            return
+        }
+        #expect(download.tabKind == .agent)
+        #expect(download.tabID == (closed ? nil : tab.id))
+        #expect(userEvents.events.isEmpty)
     }
 
     @Test func aPendingCauseGoesToTheNextAddressChangeAndLoadOnly() {
