@@ -48,7 +48,8 @@ private struct PageReaderPanel: View {
                 PageReaderPlaceholder(text: "Open a page to read it here.")
             }
         }
-        .background(PageFrameShape().fill(Color(nsColor: .windowBackgroundColor)))
+        // The page's frame beside it, with the same faint shadow.
+        .background(PageBackgroundView(isEmpty: false))
         .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
     }
 }

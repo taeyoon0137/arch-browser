@@ -92,7 +92,8 @@ final class NowPlaying: EngineMediaSessionDelegate {
         let media = tab.webContents.mediaSession
         let metadata = media.metadata
         let title = metadata.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? tab.pageTitle
-        let artist = metadata.map(\.artist).flatMap { $0.isEmpty ? nil : $0 } ?? tab.url?.host
+        // The site as the address pill names it; a page without a host, such as a local file, leaves the line out.
+        let artist = metadata.map(\.artist).flatMap { $0.isEmpty ? nil : $0 } ?? tab.url.flatMap { $0.host == nil ? nil : AddressPillView.siteName(of: $0) }
         var info: [String: Any] = [MPMediaItemPropertyTitle: title]
         if let artist, !artist.isEmpty { info[MPMediaItemPropertyArtist] = artist }
         if let album = metadata?.album, !album.isEmpty { info[MPMediaItemPropertyAlbumTitle] = album }

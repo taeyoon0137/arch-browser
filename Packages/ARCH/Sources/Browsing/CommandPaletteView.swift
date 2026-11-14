@@ -1,4 +1,5 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Install from the Web Store for an extension that the text names, matching plugin commands, Ask About This Page when the words begin its name, Install Extension from This Page on a Web Store page, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Install from the Web Store… for an extension that the text names, matching plugin commands, Ask About This Page… when the words begin its name, Install Extension from This Page… on a Web Store page, open tabs to switch to, and pages from history. Up and Down move the selection through the rows, and Return runs the selected one. Text that starts with a site search keyword and a space searches that site.
+import AppKit
 import Extensions
 import History
 import Plugins
@@ -22,6 +23,8 @@ struct CommandPaletteView: View {
     @State private var hasArrived = false
     /// The pages from history for `text`, which `loadHistorySuggestions()` reads as the text changes. The palette redraws for many other changes, such as a loading page's title, and none of them queries the history store again.
     @State private var historySuggestions: [HistoryEntry] = []
+    /// The row that Up and Down selected, by its identity. Nil, or a row that has left the list, selects the first row; typing selects it again.
+    @State private var selectedRowID: AnyHashable?
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
@@ -38,12 +41,12 @@ struct CommandPaletteView: View {
         }.prefix(5))
     }
 
-    /// Pages that share a title and host, such as the steps of a sign-in flow, appear once. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
+    /// Pages that share a title and site, such as the steps of a sign-in flow, appear once. The site is the one the row shows, so a page with `www.` and one without it count as one. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
     private func loadHistorySuggestions() async {
         let entries = await session.history.suggestions(for: text, limit: 15)
         guard !Task.isCancelled else { return }
         var seen = Set<String>()
-        historySuggestions = Array(entries.filter { seen.insert("\($0.title)\u{1F}\($0.url.host ?? "")").inserted }.prefix(5))
+        historySuggestions = Array(entries.filter { seen.insert("\($0.title)\u{1F}\(AddressPillView.siteName(of: $0.url))").inserted }.prefix(5))
     }
 
     private var actionLabel: String {
@@ -52,10 +55,11 @@ struct CommandPaletteView: View {
         if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
         // The session reads the untrimmed text the same way, so a keyword and a space are enough, and searches the web for a keyword whose template makes no web address.
         if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil {
-            return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \"\(search.query)\""
+            return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \u{201C}\(search.query)\u{201D}"
         }
-        if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(url.host ?? trimmed)" }
-        return "Search for \"\(trimmed)\""
+        // The site as the address pill names it, so the current address that ⌘L starts with reads as the pill does.
+        if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(AddressPillView.siteName(of: url))" }
+        return "Search for \u{201C}\(trimmed)\u{201D}"
     }
 
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
@@ -94,60 +98,107 @@ struct CommandPaletteView: View {
     /// The results appear once there is something to act on, as in Spotlight.
     private var showsResults: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
 
+    /// The results panel's rows in the order it lists them, the order Up and Down move through.
+    private var rows: [PaletteItem] {
+        let storeRows = webStoreRows
+        var items: [PaletteItem] = [.primary]
+        if let id = storeRows.typedExtension { items.append(.typedStore(id)) }
+        items += pluginCommands.map(PaletteItem.command)
+        if offersAskAboutPage { items.append(.askAboutPage) }
+        if let id = storeRows.pageExtension { items.append(.pageStore(id)) }
+        items += matchingTabs.map(PaletteItem.tab)
+        items += historySuggestions.map(PaletteItem.history)
+        return items
+    }
+
+    private func selectedIndex(in items: [PaletteItem]) -> Int {
+        selectedRowID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
+    }
+
+    /// Up and Down stop at the first and the last row.
+    private func moveSelection(by step: Int) {
+        let items = rows
+        selectedRowID = items[max(0, min(selectedIndex(in: items) + step, items.count - 1))].id
+    }
+
+    /// Return runs the selected row while the results show, and otherwise acts on the text as before.
+    private func submit() {
+        guard showsResults else { return windowModel.submitCommandPalette(text) }
+        let items = rows
+        perform(items[selectedIndex(in: items)])
+    }
+
+    /// Runs a row, on a click or on Return while it is selected.
+    private func perform(_ row: PaletteItem) {
+        switch row {
+        case .primary:
+            windowModel.submitCommandPalette(text)
+        case .typedStore(let id):
+            installFromWebStore(id, fromPage: false)
+        case .command(let command):
+            windowModel.dismissCommandPalette()
+            windowModel.runPluginCommand(command.ref)
+        case .askAboutPage:
+            windowModel.dismissCommandPalette()
+            windowModel.askAboutPage()
+        case .pageStore(let id):
+            installFromWebStore(id, fromPage: true)
+        case .tab(let tab):
+            windowModel.selectTab(tab.id)
+            windowModel.dismissCommandPalette()
+        case .history(let entry):
+            windowModel.submitCommandPalette(entry.url.absoluteString)
+        }
+    }
+
+    @ViewBuilder private func rowView(for row: PaletteItem, isSelected: Bool) -> some View {
+        switch row {
+        case .primary:
+            PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true, isSelected: isSelected)
+        case .typedStore:
+            PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle, isSelected: isSelected)
+        case .command(let command):
+            PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName, isSelected: isSelected)
+        case .askAboutPage:
+            PaletteRow(symbol: "sparkles", title: "Ask About This Page\u{2026}", isSelected: isSelected)
+        case .pageStore:
+            PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle, isSelected: isSelected)
+        case .tab(let tab):
+            PaletteTabRow(tab: tab, isSelected: isSelected)
+        case .history(let entry):
+            // The site follows the title in the rows' trailing column, as a command's plugin does.
+            PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : entry.title,
+                       detail: entry.title.isEmpty ? nil : AddressPillView.siteName(of: entry.url), isSelected: isSelected)
+        }
+    }
+
     var body: some View {
         VStack(spacing: Self.surfaceSpacing) {
+            // The symbol's column and the text start line up with the rows' below.
             HStack(spacing: 14) {
                 Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: 24)
+                    .frame(width: 20)
                 TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 22))
                     .focused($isFocused)
-                    .onSubmit { windowModel.submitCommandPalette(text) }
+                    .onSubmit(submit)
                     .onExitCommand { windowModel.dismissCommandPalette() }
             }
-            .padding(.horizontal, 26)
+            .padding(.horizontal, 22)
             .frame(height: Self.fieldHeight)
             .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
+            .background(PaletteArrowKeys(isActive: isFocused && showsResults && !isLeaving && !isWarmUp, move: moveSelection))
             if showsResults {
-                let storeRows = webStoreRows
+                let items = rows
+                let selected = selectedIndex(in: items)
                 VStack(spacing: 2) {
-                    PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
-                        .paletteAction { windowModel.submitCommandPalette(text) }
-                    if let id = storeRows.typedExtension {
-                        PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle)
-                            .paletteAction { installFromWebStore(id, fromPage: false) }
-                    }
-                    ForEach(pluginCommands, id: \.ref) { command in
-                        PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
-                            .paletteAction {
-                                windowModel.dismissCommandPalette()
-                                windowModel.runPluginCommand(command.ref)
-                            }
-                    }
-                    if offersAskAboutPage {
-                        PaletteRow(symbol: "sparkles", title: "Ask About This Page")
-                            .paletteAction {
-                                windowModel.dismissCommandPalette()
-                                windowModel.askAboutPage()
-                            }
-                    }
-                    if let id = storeRows.pageExtension {
-                        PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle)
-                            .paletteAction { installFromWebStore(id, fromPage: true) }
-                    }
-                    ForEach(matchingTabs) { tab in
-                        PaletteTabRow(tab: tab)
-                            .paletteAction {
-                                windowModel.selectTab(tab.id)
-                                windowModel.dismissCommandPalette()
-                            }
-                    }
-                    ForEach(historySuggestions) { entry in
-                        PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : "\(entry.title) · \(entry.url.host ?? entry.url.absoluteString)")
-                            .paletteAction { windowModel.submitCommandPalette(entry.url.absoluteString) }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, row in
+                        rowView(for: row, isSelected: index == selected)
+                            .paletteAction { perform(row) }
+                            .accessibilityAddTraits(index == selected ? .isSelected : [])
                     }
                 }
                 .padding(PaletteRowHighlight.panelInset)
@@ -173,14 +224,92 @@ struct CommandPaletteView: View {
             }
             DispatchQueue.main.async { isFocused = true }
         }
+        // At once, unlike the history read, so Return right after typing runs the first row for the new text.
+        .onChange(of: text) { selectedRowID = nil }
         .task(id: text) { await loadHistorySuggestions() }
+    }
+}
+
+/// One row of the palette's results panel.
+private enum PaletteItem {
+    /// Acts on the text as typed: an address, a site search, or a web search.
+    case primary
+    case typedStore(String)
+    case command(Attributed<PluginCommand>)
+    case askAboutPage
+    case pageStore(String)
+    case tab(Tab)
+    case history(HistoryEntry)
+
+    /// Unique among the rows: each kind of row shows once at most, except commands, tabs, and history pages, which each have their own identity.
+    var id: AnyHashable {
+        switch self {
+        case .primary: return "primary"
+        case .typedStore: return "typedStore"
+        case .command(let command): return command.ref
+        case .askAboutPage: return "askAboutPage"
+        case .pageStore: return "pageStore"
+        case .tab(let tab): return tab.id
+        case .history(let entry): return entry.id
+        }
+    }
+}
+
+/// Moves the palette's selection with Up and Down while its field has the keyboard focus and no input method is composing text in it. The monitor sees the keys before the field's editor, which would move the caret to the text's start or end; other keys, and arrows with a modifier, go on to the field.
+private struct PaletteArrowKeys: NSViewRepresentable {
+    let isActive: Bool
+    let move: (Int) -> Void
+
+    func makeNSView(context: Context) -> MonitorView { MonitorView() }
+
+    func updateNSView(_ view: MonitorView, context: Context) {
+        view.isActive = isActive
+        view.move = move
+    }
+
+    /// Lies behind the field and takes no clicks.
+    final class MonitorView: NSView {
+        var isActive = false
+        var move: ((Int) -> Void)?
+        private var monitor: Any?
+
+        // A window that closes releases its views without moving them out of it first.
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let step = self.step(for: event) else { return event }
+                self.move?(step)
+                return nil
+            }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        private func step(for event: NSEvent) -> Int? {
+            guard isActive, let window, event.window === window,
+                  event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+                  (window.firstResponder as? NSTextView)?.hasMarkedText() != true else { return nil }
+            switch event.keyCode {
+            case 125: return 1
+            case 126: return -1
+            default: return nil
+            }
+        }
     }
 }
 
 /// The palette's Web Store rows (`docs/web-store.md`, Entry points), each with the identifier of the extension it installs, which name no Persona.
 struct PaletteWebStoreRows: Equatable {
-    static let pageTitle = "Install Extension from This Page"
-    static let typedTitle = "Install from the Web Store"
+    /// With an ellipsis, as both rows open the store sheet and its review before anything installs.
+    static let pageTitle = "Install Extension from This Page\u{2026}"
+    static let typedTitle = "Install from the Web Store\u{2026}"
     /// Install Extension from This Page: the extension of the store page that the selected tab shows, once the typed words begin the row's name or the text names that extension, as the page's address does, which the palette starts with when it edits the current address.
     var pageExtension: String?
     /// Install from the Web Store, below the primary row: another extension that the text names, as a store page's address or a bare identifier.
@@ -341,9 +470,11 @@ extension Animation {
 struct PaletteRow: View {
     let symbol: String
     let title: String
-    /// Dim text at the trailing end, such as the plugin that adds a command.
+    /// Dim text at the trailing end, such as the plugin that adds a command or a history page's site. It keeps its width, so a long title truncates first.
     var detail: String?
+    /// The first row, which acts on the text as typed, has a heavier title.
     var isPrimary = false
+    var isSelected = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -360,22 +491,26 @@ struct PaletteRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
         .contentShape(Rectangle())
-        .modifier(PaletteRowHighlight(isPrimary: isPrimary))
+        .modifier(PaletteRowHighlight(isSelected: isSelected))
     }
 }
 
 struct PaletteTabRow: View {
     @ObservedObject var tab: Tab
+    var isSelected = false
 
     var body: some View {
         HStack(spacing: 14) {
+            // Square, as every other list draws a tab's icon, and centered in the rows' symbol column.
             TabIconView(tab: tab)
-                .frame(width: 20, height: 18)
+                .frame(width: 18, height: 18)
+                .frame(width: 20)
             Text(tab.displayTitle)
                 .font(.system(size: 15))
                 .lineLimit(1)
@@ -383,11 +518,13 @@ struct PaletteTabRow: View {
             Text("Switch to Tab")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .layoutPriority(1)
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
         .contentShape(Rectangle())
-        .modifier(PaletteRowHighlight())
+        .modifier(PaletteRowHighlight(isSelected: isSelected))
     }
 }
 
@@ -401,18 +538,18 @@ extension View {
     }
 }
 
-/// Highlights a row under the pointer. The primary row, which Return opens, keeps an accent highlight. The highlight's corners follow the results panel's corners, offset inward by the panel's inset.
+/// Highlights a row under the pointer. The selected row, which Return runs and Up and Down move, the first row until then, keeps an accent highlight. The highlight's corners follow the results panel's corners, offset inward by the panel's inset.
 struct PaletteRowHighlight: ViewModifier {
     static let panelRadius: CGFloat = 26
     static let panelInset: CGFloat = 8
 
-    var isPrimary = false
+    var isSelected = false
     @State private var isHovering = false
 
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: Self.panelRadius - Self.panelInset, style: .continuous)
-                .fill(isPrimary ? Color.accentColor.opacity(isHovering ? 0.24 : 0.16) : Color.primary.opacity(isHovering ? 0.07 : 0)))
+                .fill(isSelected ? Color.accentColor.opacity(isHovering ? 0.24 : 0.16) : Color.primary.opacity(isHovering ? 0.07 : 0)))
             .onHover { isHovering = $0 }
     }
 }

@@ -134,8 +134,9 @@ struct PageAIOffNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Body text under the panel's semibold header, set apart from the note below by color alone.
             Text("AI is off for \(PageAssistant.siteName(of: url)).")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13))
             Text("Nothing from this site goes to any provider.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)

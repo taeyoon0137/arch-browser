@@ -23,7 +23,7 @@ import Testing
         for text in ["example.org", "install", "https://example.org/detail/\(id)", String(id.dropLast()) + "q", ""] {
             #expect(PaletteWebStoreRows(text: text, pageURL: other, reader: reader) == PaletteWebStoreRows(), "\(text)")
         }
-        #expect(PaletteWebStoreRows.typedTitle == "Install from the Web Store")
+        #expect(PaletteWebStoreRows.typedTitle == "Install from the Web Store\u{2026}")
     }
 
     @Test func aStorePageInTheSelectedTabOffersItsExtension() {
@@ -37,7 +37,7 @@ import Testing
         for (text, pageURL) in [("example.org", page(id)), ("install", URL(string: "https://example.org/")!), ("install", nil)] {
             #expect(PaletteWebStoreRows(text: text, pageURL: pageURL, reader: reader) == PaletteWebStoreRows(), "\(text)")
         }
-        #expect(PaletteWebStoreRows.pageTitle == "Install Extension from This Page")
+        #expect(PaletteWebStoreRows.pageTitle == "Install Extension from This Page\u{2026}")
     }
 
     @Test func thePopoverRowInstallsOrNamesThePagesExtension() {

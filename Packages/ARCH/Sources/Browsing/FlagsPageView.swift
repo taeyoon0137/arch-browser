@@ -52,8 +52,14 @@ struct FlagsPageView: View {
                 Text("Private APIs are parts of macOS and the engines that are not documented for apps. Arch uses one only while its flags are on and the running system has it; otherwise the feature falls back or stays hidden.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Toggle("Use private APIs", isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
-                    .toggleStyle(.switch)
+                HStack {
+                    Text("Use private APIs")
+                        .accessibilityHidden(true)
+                    Spacer()
+                    Toggle("Use private APIs", isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
                 FlagsSection(title: "Private APIs", emptyText: "Arch uses no private API yet.", isEmpty: flags.apis.isEmpty) {
                     ForEach(flags.apis) { api in
                         FlagRow(title: api.name, detail: "\(api.framework) · \(availabilityText(api.id))", isMonospaced: true,
@@ -111,14 +117,16 @@ private struct FlagsSection<Content: View>: View {
     }
 }
 
+/// The title and detail on the leading side and the switch at the trailing edge, so the switches of all rows form one column, as in Settings.
 private struct FlagRow: View {
     let title: String
     let detail: String
     let isMonospaced: Bool
     @Binding var isOn: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        Toggle(isOn: $isOn) {
+        HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(isMonospaced ? .system(size: 13, design: .monospaced) : .system(size: 13))
@@ -126,7 +134,15 @@ private struct FlagRow: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
+            // Dims with the switch while Use private APIs is off, which text beside a control does not do by itself.
+            .opacity(isEnabled ? 1 : 0.5)
+            // The switch carries the title as its label and the detail as its hint, so VoiceOver reads each row once.
+            .accessibilityHidden(true)
+            Spacer()
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityHint(detail)
         }
-        .toggleStyle(.switch)
     }
 }
