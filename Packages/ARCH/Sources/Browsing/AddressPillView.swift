@@ -150,7 +150,7 @@ struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs.
+/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs. While an internal page or the preview panel covers the tab, it shows only the engine for new tabs, as in a window without a tab. A click closes the preview before it reaches the button, but a press through VoiceOver leaves the preview open.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -160,7 +160,7 @@ struct SiteSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let tab {
+            if let tab, !windowModel.isSelectedPageCovered {
                 TabEngineSection(session: session, tab: tab)
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)

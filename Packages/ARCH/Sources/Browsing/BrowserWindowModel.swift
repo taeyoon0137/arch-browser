@@ -243,16 +243,16 @@ public final class BrowserWindowModel: ObservableObject {
     /// Whether New Persona…, Rename Persona…, and Delete Persona… can ask with their sheet: the window shows no other sheet, which theirs would wait behind.
     public var canShowPersonaSheet: Bool { nsWindow?.attachedSheet == nil }
 
-    /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. An empty name adds none.
+    /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. Create stays disabled until the field holds a name.
     public func promptForNewPersona() {
-        askForPersonaName(title: "New Persona", message: "A Persona has spaces of its own, and its tabs keep their own cookies, website data, and plugins.", name: "", button: "Create") { [weak self] name in
+        askForPersonaName(title: "New Persona", message: "A Persona has its own spaces and plugins, and its tabs keep their own cookies and website data.", name: "", button: "Create") { [weak self] name in
             guard let self else { return }
             let persona = self.session.addPersona(named: name)
             if let space = self.session.spaces(in: persona.id).first { self.switchToSpace(space.id) }
         }
     }
 
-    /// Asks for the Persona's new name in a sheet on the window. An empty name keeps the old one.
+    /// Asks for the Persona's new name in a sheet on the window. Rename stays disabled while the field holds no name.
     public func promptToRenamePersona(_ id: Persona.ID) {
         guard let persona = session.persona(withID: id) else { return }
         askForPersonaName(title: "Rename Persona", message: nil, name: persona.name, button: "Rename") { [weak self] name in
@@ -265,7 +265,8 @@ public final class BrowserWindowModel: ObservableObject {
         let id = space.resolvedPersonaID
         guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
         let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
-                                            tabCount: session.tabs.filter { $0.personaID == id }.count)
+                                            tabCount: session.tabs.filter { $0.personaID == id }.count,
+                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished })
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
@@ -276,11 +277,14 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes.
-    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int) -> (message: String, information: String) {
-        let removed = "Its \(spaceCount) \(spaceCount == 1 ? "space" : "spaces") and \(favoriteCount) \(favoriteCount == 1 ? "favorite" : "favorites") are removed"
-        let closed = tabCount == 1 ? "its 1 tab closes" : "its \(tabCount) tabs close"
-        return ("Delete \(persona)?", "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
+    /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes. The explanation leaves out what the Persona has none of, and names one space, tab, or download without a number, as the Quit sheet names one download; every Persona has a space.
+    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int) -> (message: String, information: String) {
+        let spaces = spaceCount == 1 ? "Its space" : "Its \(spaceCount) spaces"
+        let favorites = favoriteCount == 0 ? "" : favoriteCount == 1 ? " and 1 favorite" : " and \(favoriteCount) favorites"
+        let removed = spaces + favorites + (spaceCount == 1 && favoriteCount == 0 ? " is removed" : " are removed")
+        let closed = tabCount == 0 ? "" : tabCount == 1 ? ", and its tab closes into the closed list" : ", and its \(tabCount) tabs close into the closed list"
+        let downloads = downloadCount == 0 ? "" : downloadCount == 1 ? " Its download in progress stops." : " Its \(downloadCount) downloads in progress stop."
+        return ("Delete \(persona)?", "\(removed)\(closed).\(downloads) Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
     }
 
     /// How a sheet about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
@@ -289,20 +293,26 @@ public final class BrowserWindowModel: ObservableObject {
         return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
     }
 
-    /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels or leaves it empty.
+    /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels. The sheet's `button` stays disabled while the field is empty or holds only spaces, so that Return cannot close the sheet without a name.
     private func askForPersonaName(title: String, message: String?, name: String, button: String, then use: @escaping (String) -> Void) {
         guard canShowPersonaSheet, let nsWindow else { return }
         let alert = NSAlert()
         alert.messageText = title
         if let message { alert.informativeText = message }
-        alert.addButton(withTitle: button)
+        let confirm = alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(string: name)
         field.placeholderString = "Persona Name"
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
+        let hasName = { !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        confirm.isEnabled = hasName()
+        let observer = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: field, queue: .main) { _ in
+            MainActor.assumeIsolated { confirm.isEnabled = hasName() }
+        }
         alert.beginSheetModal(for: nsWindow) { response in
+            NotificationCenter.default.removeObserver(observer)
             let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if response == .alertFirstButtonReturn, !name.isEmpty { use(name) }
         }
@@ -350,8 +360,8 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Previews
 
-    /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front leave the tab alone.
-    private var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
+    /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front, and the site settings popover, leave the tab alone.
+    var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
 
     /// Previews a favorite in the default engine and the favorite's Persona, which opening the favorite would use.
     func previewFavorite(_ favorite: Favorite) {

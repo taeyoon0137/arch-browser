@@ -839,7 +839,7 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, inEveryPersona: self.personas.count > 1, ask: { alert, response in
                 self.enqueueSheet(alert, for: tab, completion: response)
             }, completion: completion)
         }

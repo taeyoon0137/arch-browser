@@ -15,8 +15,8 @@ final class SitePermissionAnswers {
         self.store = store
     }
 
-    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?,
+    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page. `inEveryPersona` says that the session has several Personas, in all of which a remembered answer holds (Persona rule 6), so that the sheet says so.
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, inEveryPersona: Bool = false,
                 ask: (NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
         let store = store
         // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
@@ -38,7 +38,7 @@ final class SitePermissionAnswers {
             return
         }
         waiters[key] = [answer]
-        ask(Self.alert(for: request, remembersAnswer: origin != nil)) { [weak self] response in
+        ask(Self.alert(for: request, remembersAnswer: origin != nil, inEveryPersona: inEveryPersona)) { [weak self] response in
             let waiters = self?.waiters.removeValue(forKey: key) ?? [answer]
             let granted = response == .alertFirstButtonReturn
             waiters.forEach { $0(granted) }
@@ -75,12 +75,13 @@ final class SitePermissionAnswers {
     }
 
     /// The sheet that asks. The engine asks from inside its own message loop, so the sheet never blocks, and the answer reaches the engine once. A request for notifications says that they don't show as banners yet: the pinned engine posts them through `NSUserNotificationCenter`, which macOS refuses for Arch whatever Arch's notification permission is, so the sheet neither asks macOS nor points to System Settings (`docs/plan.md`, VI.7).
-    private static func alert(for request: EnginePermissionRequest, remembersAnswer: Bool) -> NSAlert {
+    private static func alert(for request: EnginePermissionRequest, remembersAnswer: Bool, inEveryPersona: Bool) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(description(of: request.types))?"
         var notes: [String] = []
         if remembersAnswer {
-            notes.append("Arch remembers your answer for this website. You can change it in Settings > Websites.")
+            // With several Personas the answer holds in all of them (Persona rule 6); with one, the note says nothing of Personas (Persona rule 7).
+            notes.append("Arch remembers your answer for this website\(inEveryPersona ? " in every Persona" : ""). You can change it in Settings \u{25B8} Websites.")
         }
         if request.types.contains(.notifications) {
             notes.append("Websites\u{2019} notifications don\u{2019}t show as banners yet.")
@@ -91,11 +92,13 @@ final class SitePermissionAnswers {
         return alert
     }
 
+    /// The request's types as one phrase each, in the order they arrive. The camera and the microphone together, as a video call asks for them, share one verb.
     private static func description(of types: [EnginePermissionType]) -> String {
-        let phrases = types.map { type -> String in
+        let both = types.contains(.camera) && types.contains(.microphone)
+        let phrases = types.compactMap { type -> String? in
             switch type {
-            case .camera: return "use the camera"
-            case .microphone: return "use the microphone"
+            case .camera: return both ? "use the camera and microphone" : "use the camera"
+            case .microphone: return both ? nil : "use the microphone"
             case .screenCapture: return "record the screen"
             case .geolocation: return "see your location"
             case .notifications: return "send notifications"

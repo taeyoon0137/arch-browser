@@ -114,14 +114,14 @@ import Testing
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
         let alert = try #require(sheets.alerts.first)
         #expect(alert.buttons.map(\.title) == ["Allow", "Don\u{2019}t Allow"])
-        #expect(alert.informativeText == "Arch remembers your answer for this website. You can change it in Settings > Websites. Websites\u{2019} notifications don\u{2019}t show as banners yet.")
+        #expect(alert.informativeText == "Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites. Websites\u{2019} notifications don\u{2019}t show as banners yet.")
         sheets.respond(.alertFirstButtonReturn)
         #expect(granted == [true])
         #expect(store.decision(for: .notifications, origin: Self.origin) == .allow)
 
         // A sheet for another permission says nothing about notifications.
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, ask: sheets.ask) { granted.append($0) }
-        #expect(sheets.alerts.last?.informativeText == "Arch remembers your answer for this website. You can change it in Settings > Websites.")
+        #expect(sheets.alerts.last?.informativeText == "Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.")
     }
 }
 

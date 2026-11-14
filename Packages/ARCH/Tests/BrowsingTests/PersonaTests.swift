@@ -41,10 +41,10 @@ import Testing
         let clear = BrowserWindowModel.clearSiteDataTexts(site: "example.org", persona: persona)
         #expect(clear.message == "Clear the data stored by \u{201C}example.org\u{201D}?")
         #expect(clear.information == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
-        let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3)
+        let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, downloadCount: 2)
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
-        #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
-        #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1).information.hasPrefix("Its 1 space and 0 favorites are removed, and its 1 tab closes into"))
+        #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its 2 downloads in progress stop. Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
+        #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1, downloadCount: 0).information.hasPrefix("Its space is removed, and its tab closes into the closed list. Arch removes"))
     }
 
     /// A favorite's tab belongs to no space and shows in the window's current space, so a sheet about it names the Persona with that space, as the window title does.
