@@ -63,14 +63,51 @@ import Testing
     @Test func endedCardsKeepOnlyTheLatestOutcomes() async {
         let approvals = AgentApprovals()
         var ids: [UUID] = []
+        var delivered: [UUID: AgentApprovalAnswer] = [:]
         for _ in 0 ..< AgentApprovals.keptOutcomes + 5 {
             let card = Self.card()
             ids.append(card.id)
-            _ = approvals.open(card)
+            approvals.open(card) { delivered[card.id] = $0 }
         }
         approvals.end(because: "Arch quit.")
+        #expect(ids.allSatisfy { delivered[$0] == .ended("Arch quit.") })
         #expect(approvals.outcomes.count == AgentApprovals.keptOutcomes)
         #expect(approvals.outcomes[ids[0]] == nil && approvals.outcomes[ids.last!] == .ended("Arch quit."))
+    }
+
+    @Test func draftsBelongToTheirPendingQuestionAndAreClearedWhenItEnds() async {
+        let approvals = AgentApprovals()
+        var first = Self.card(), second = Self.card()
+        first.kind = .question([])
+        second.kind = .question(["Other"])
+        let firstTask = await Self.open(first, in: approvals)
+        let secondTask = await Self.open(second, in: approvals)
+        approvals.setDraftAnswer("Partial answer", to: first.id)
+        approvals.setDraftAnswer("Other draft", to: second.id)
+        #expect(approvals.draftAnswer(to: first.id) == "Partial answer")
+        #expect(approvals.draftAnswer(to: second.id) == "Other draft")
+        #expect(approvals.isPending(first.id) && approvals.isPending(second.id))
+        _ = await approvals.answer(first.id, with: .answer("Submitted text"))
+        #expect(await firstTask.value == .answer("Submitted text"))
+        approvals.setDraftAnswer("Late edit", to: first.id)
+        #expect(approvals.draftAnswer(to: first.id).isEmpty)
+        #expect(approvals.draftAnswer(to: second.id) == "Other draft")
+        approvals.end(second.id, because: "Stopped")
+        #expect(await secondTask.value == .ended("Stopped"))
+        #expect(approvals.draftAnswer(to: second.id).isEmpty)
+    }
+
+    @Test func endedCardReleasesItsCaptureBeforeTheDeadline() {
+        let approvals = AgentApprovals()
+        weak var releasedCapture: NSImage?
+        do {
+            var card = Self.card(deadline: 600)
+            card.capture = NSImage(size: NSSize(width: 2, height: 2))
+            releasedCapture = card.capture
+            approvals.open(card) { _ in }
+            approvals.end(card.id, because: "Stopped")
+        }
+        #expect(releasedCapture == nil)
     }
 
     @Test func sensitiveAllowOfAnOutsideClientNeedsTouchID() async {

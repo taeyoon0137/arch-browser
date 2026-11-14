@@ -150,9 +150,7 @@ extension AgentToolHost {
                                  offers: [.allowOnce, .allowDownloadsFromSite, .deny], action: "Download \u{201C}\(Self.quoted(name))\u{201D}\(site.map { " from \($0)" } ?? "") in \(handle)",
                                  tabID: tabID, tabHandle: handle, site: site, exactText: url.absoluteString, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         let host = host
-        let waiting = approvals.open(card)
-        Task {
-            let answer = await waiting.value
+        approvals.open(card) { answer in
             switch answer {
             case .allowOnce: state.allowedDownloads.insert(url)
             case .allowDownloadsFromSite: if let site { state.downloadSites.insert(site) }
@@ -177,9 +175,7 @@ extension AgentToolHost {
                                  offers: AgentApproval.offers(for: AgentAsk(rules: [.p11], isSensitive: true)), action: "Open a link in \(app) from \(handle)\(site.map { " on \($0)" } ?? "")",
                                  tabID: tabID, tabHandle: handle, site: site, exactText: url.absoluteString, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         let host = host
-        let waiting = approvals.open(card)
-        Task {
-            let answer = await waiting.value
+        approvals.open(card) { answer in
             if answer.allows { host.openExternally(url) }
             state.record(.decided("The user \(answer.allows ? "opened" : "did not open") the link from \(handle) in \(app)."), tab: tabID)
         }
