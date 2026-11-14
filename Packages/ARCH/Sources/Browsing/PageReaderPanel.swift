@@ -112,7 +112,7 @@ private struct PageReaderTabView: View {
                 .lineLimit(1...5)
                 .onSubmit(send)
                 .padding(.vertical, 6)
-            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges)
+            ContinueAsAgentTaskButton(source: .init(tab: tab, documentID: tab.documentID), draft: draft, exchanges: conversation.exchanges)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {
@@ -147,10 +147,25 @@ private struct PageReaderPlaceholder: View {
     }
 }
 
+/// The page and surface that offered Continue. A delayed button action keeps this reviewed identity.
+struct AgentHandoffSource {
+    let tabID: UUID
+    let documentID: UUID
+    let url: URL?
+    let questionID: UUID?
+
+    @MainActor init(tab: Tab, documentID: UUID, questionID: UUID? = nil) {
+        self.tabID = tab.id
+        self.documentID = documentID
+        self.url = tab.url
+        self.questionID = questionID
+    }
+}
+
 /// Continue as Agent Task beside Ask in the page reader and the question popover (docs/agents.md, In the browser ▸ Starting a session), while a Claude Code or Codex model can run a session: the composer with the question and the selected tab, whose page the question is about.
 struct ContinueAsAgentTaskButton: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    let tab: Tab
+    let source: AgentHandoffSource
     let draft: String
     let exchanges: [PageConversation.Exchange]
     var selection: AISelection? = nil
@@ -158,8 +173,8 @@ struct ContinueAsAgentTaskButton: View {
     var body: some View {
         if windowModel.canStartAgentTask {
             SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") {
-                let excerpt = Self.excerpt(tabID: tab.id, documentID: tab.documentID, url: tab.url, exchange: exchanges.last, selection: selection)
-                windowModel.continueAsAgentTask(Self.task(draft: draft, exchanges: exchanges), excerpt: excerpt)
+                let excerpt = Self.excerpt(tabID: source.tabID, documentID: source.documentID, url: source.url, exchange: exchanges.last, selection: selection)
+                windowModel.continueAsAgentTask(Self.task(draft: draft, exchanges: exchanges), from: source, excerpt: excerpt)
             }
         }
     }

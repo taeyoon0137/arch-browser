@@ -55,7 +55,7 @@ public struct AgentReaderExcerpt: Equatable {
         return nil
     }
 
-    func matches(_ tab: AgentTabInfo?) -> Bool {
+    public func matches(_ tab: AgentTabInfo?) -> Bool {
         tab?.id == tabID && tab?.documentID == documentID && tab?.url == url
     }
 }
