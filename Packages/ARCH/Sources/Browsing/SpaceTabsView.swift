@@ -51,6 +51,8 @@ struct SpaceTabsView: View {
     @State private var rowFrames: [UUID: CGRect] = [:]
     /// The visible part of the list in the window. Rows scrolled out of sight lie outside it.
     @State private var listFrame = CGRect.zero
+    @State private var tabReorder = SidebarReorderHover()
+    @State private var startedWithoutPins = false
     /// The list's content in the scroll view's visible area, which tells how much is hidden above and below.
     @State private var contentFrame = CGRect.zero
     private static let scrollSpace = "SpaceTabsScroll"
@@ -68,7 +70,7 @@ struct SpaceTabsView: View {
     /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them or into and out of a folder.
     private enum Item: Identifiable {
         case row(FolderTree.Row)
-        case divider
+        case divider(empty: Bool)
         case newTab
 
         var id: String {
@@ -83,7 +85,7 @@ struct SpaceTabsView: View {
     private var items: [Item] {
         let tree = session.folderTree
         let pinned = listItems(pinned: true, in: tree)
-        return pinned + (pinned.isEmpty ? [] : [.divider]) + listItems(pinned: false, in: tree) + [.newTab]
+        return pinned + [.divider(empty: pinned.isEmpty)] + listItems(pinned: false, in: tree) + [.newTab]
     }
 
     /// The pinned or open list's rows. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row. A dragged folder shows its row alone until release.
@@ -108,9 +110,21 @@ struct SpaceTabsView: View {
                         case .row(.tab(let tab, let depth)):
                             row(for: tab)
                                 .padding(.leading, CGFloat(depth) * Self.folderIndent)
-                        case .divider:
-                            Divider().padding(.vertical, 4).padding(.horizontal, 10)
-                                .background(frameReader(for: Self.pinnedListEndID))
+                        case .divider(let empty):
+                            let draggedHere = sidebarDrag.owner == dragOwner && sidebarDrag.tabID != nil
+                            ZStack {
+                                if empty && draggedHere {
+                                    Label("Pin Tab", systemImage: "pin")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Divider().padding(.horizontal, 10)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: empty || (draggedHere && startedWithoutPins) ? 26 : 10)
+                            .background(frameReader(for: Self.pinnedListEndID))
+                            .accessibilityHidden(true)
                         case .newTab:
                             NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
                                 .background(frameReader(for: Self.openListEndID))
@@ -120,7 +134,7 @@ struct SpaceTabsView: View {
                 }
             }
             // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
-            .animation(.easeInOut(duration: 0.2), value: Set(items.map(\.id)))
+            .animation(sidebarDrag.item?.isRow == true ? nil : .easeInOut(duration: 0.2), value: Set(items.map(\.id)))
             // While a dragged folder hides its rows, the list keeps their height below its end, so that a list scrolled to its end does not scroll back and move other rows under the pointer.
             .padding(.bottom, sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0)
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
@@ -167,7 +181,10 @@ struct SpaceTabsView: View {
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
-                .onEnded { _ in dragEnded() }, including: windowModel.renamingTabID == tab.id ? .subviews : .all)
+                .onEnded { value in
+                    if sidebarDrag.owner == dragOwner { dragChanged(tab, value) }
+                    dragEnded()
+                }, including: windowModel.renamingTabID == tab.id ? .subviews : .all)
     }
 
     /// A dragged folder leaves an empty, dimmed slot in the list, and the rows inside it hide until release.
@@ -191,8 +208,10 @@ struct SpaceTabsView: View {
 
     /// Starts the drag of a row, lifting it at its frame, or continues the drag of it that this list started, and moves the lifted row to the pointer. False while another drag or a release is under way.
     private func continueDrag(of item: SidebarDragItem, _ value: DragGesture.Value) -> Bool {
-        guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] else { return false }
+        guard windowModel.currentSpaceID == space.id, !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] else { return false }
         if sidebarDrag.item == nil {
+            tabReorder = SidebarReorderHover()
+            startedWithoutPins = session.folderTree.rows(in: space.id, pinned: true).isEmpty
             if case .folder(let id) = item { hiddenRowsHeight = contentsHeight(ofFolder: id, below: frame) }
             sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
@@ -214,7 +233,8 @@ struct SpaceTabsView: View {
 
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
-        guard continueDrag(of: .tab(tab.id), value) else { return }
+        guard tab.spaceID == space.id, continueDrag(of: .tab(tab.id), value) else { return }
+        guard tabReorder.canMove(at: value.location) else { return }
         let isOverList = listFrame.contains(value.location)
         let tree = session.folderTree
         // Another space's symbol, or another folder's row at any level, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
@@ -223,16 +243,23 @@ struct SpaceTabsView: View {
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4).
-        guard isOverList else { return }
+        guard isOverList, sidebarDrag.targetSpaceID == nil, sidebarDrag.targetFolderID == nil else { return }
         let tabs = tree.tabs(in: space.id, pinned: true) + tree.tabs(in: space.id, pinned: false)
-        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(value.location) == true }) {
-            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
-        } else if let pinned = listEnd(at: value.location), session.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id != tab.id {
-            // The divider or the new tab row puts the tab last in the list it ends, outside folders, so that it can leave a folder in a list with no other tab outside folders.
-            withAnimation(.easeInOut(duration: 0.15)) { session.moveTabToListEnd(tab.id, pinned: pinned) }
+        let frame: CGRect
+        let moved: Bool
+        if let pinned = listEnd(at: value.location), let endFrame = rowFrames[pinned ? Self.pinnedListEndID : Self.openListEndID] {
+            moved = withAnimation(.easeOut(duration: 0.15)) { session.moveTabToListEnd(tab.id, pinned: pinned) }
+            frame = endFrame
+        } else if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(value.location) == true }),
+                  let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
+                  SidebarReorderHover.crossedMidpoint(from: slot, into: rowFrame, at: value.location) {
+            moved = withAnimation(.easeOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
+            frame = rowFrame
         } else {
             return
         }
+        guard moved else { return }
+        tabReorder.moved(into: frame)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 

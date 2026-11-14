@@ -43,6 +43,50 @@ import Testing
 
     // MARK: Repairs
 
+    @Test func aTabReordersOnceWhileThePointerStaysOverTheDisplacedRow() {
+        let row = CGRect(x: 6, y: 100, width: 224, height: 36)
+        let point = CGPoint(x: row.midX, y: row.midY)
+        let above = row.offsetBy(dx: 0, dy: -38), below = row.offsetBy(dx: 0, dy: 38)
+        #expect(!SidebarReorderHover.crossedMidpoint(from: above, into: row, at: CGPoint(x: point.x, y: row.minY)))
+        #expect(SidebarReorderHover.crossedMidpoint(from: above, into: row, at: point))
+        #expect(!SidebarReorderHover.crossedMidpoint(from: below, into: row, at: CGPoint(x: point.x, y: row.maxY)))
+        #expect(SidebarReorderHover.crossedMidpoint(from: below, into: row, at: point))
+        var drag = SidebarReorderHover()
+        let initial = drag.canMove(at: point)
+        #expect(initial)
+        drag.moved(into: row)
+        for y in [row.midY, row.midY + 1, row.maxY, row.maxY + 1] {
+            let canRepeat = drag.canMove(at: CGPoint(x: point.x, y: y))
+            #expect(!canRepeat)
+        }
+        let left = drag.canMove(at: CGPoint(x: point.x, y: row.maxY + 12))
+        let returned = drag.canMove(at: point)
+        #expect(left && returned)
+    }
+
+    @Test func movingToAnEmptyPinnedListReportsOnlyAnActualChange() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let other = session.addPersona(named: "Other")
+        let otherSpace = try #require(session.spaces(in: other.id).first)
+        let tab = session.openTab(url: URL(string: "about:blank#pin"), in: space.id, select: false, engine: .webKit)
+        let foreign = session.openTab(url: URL(string: "about:blank#other"), in: otherSpace.id, select: false, engine: .webKit)
+        let contents = tab.webContents
+        #expect(session.folderTree.rows(in: space.id, pinned: true).isEmpty)
+        #expect(session.moveTabToListEnd(tab.id, pinned: true))
+        #expect(!session.moveTabToListEnd(tab.id, pinned: true))
+        #expect(tab.isPinned && tab.savedPage?.url == tab.url && tab.webContents === contents)
+        #expect(!session.moveTab(tab.id, to: foreign))
+        #expect(tab.spaceID == space.id && tab.personaID == space.resolvedPersonaID && !foreign.isPinned)
+        #expect(session.moveTabToListEnd(tab.id, pinned: false))
+        #expect(!session.moveTabToListEnd(tab.id, pinned: false) && !tab.isPinned && tab.savedPage == nil)
+    }
+
     @Test func repairsClearParentsTheFileCannotKeep() {
         let work = folder("Work")
         let docs = folder("Docs", in: work)

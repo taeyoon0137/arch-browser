@@ -1311,15 +1311,15 @@ final class EngineRuntime {
     }
 
     /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
-    public func moveTab(_ id: UUID, to target: Tab) {
+    @discardableResult public func moveTab(_ id: UUID, to target: Tab) -> Bool {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
-              let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
+              let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
         let tab = tabs[from]
-        if target.agentOwnerID != nil, tab.folderID != target.folderID { return }
+        if target.agentOwnerID != nil, tab.folderID != target.folderID { return false }
         let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
-        guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
+        guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return false }
         movingItemTabs {
             tab.spaceID = spaceID
             tab.isPinned = target.isPinned
@@ -1327,6 +1327,7 @@ final class EngineRuntime {
             reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
             tabs = reordered
         }
+        return true
     }
 
     /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned.
@@ -1630,8 +1631,9 @@ final class EngineRuntime {
     }
 
     /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
-    public func moveTabToListEnd(_ id: UUID, pinned: Bool) {
-        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult public func moveTabToListEnd(_ id: UUID, pinned: Bool) -> Bool {
+        guard let index = tabs.firstIndex(where: { $0.id == id }), let spaceID = tabs[index].spaceID,
+              tabsOutsideFolders(in: spaceID, pinned: pinned).last?.id != id else { return false }
         var reordered = tabs
         let tab = reordered.remove(at: index)
         movingItemTabs {
@@ -1640,6 +1642,7 @@ final class EngineRuntime {
             reordered.append(tab)
             tabs = reordered
         }
+        return true
     }
 
     // MARK: Folders

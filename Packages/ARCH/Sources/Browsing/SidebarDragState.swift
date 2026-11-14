@@ -23,6 +23,26 @@ enum SidebarDragItem: Equatable {
     }
 }
 
+/// Keep the pointer's last destination while its row moves aside. Newly reported frames at that position belong to the same move.
+struct SidebarReorderHover {
+    private var destination: CGRect?
+
+    /// A row only makes room after the pointer crosses its center in the direction of travel.
+    static func crossedMidpoint(from slot: CGRect, into row: CGRect, at point: CGPoint) -> Bool {
+        slot.midY < row.midY ? point.y >= row.midY : point.y <= row.midY
+    }
+
+    mutating func canMove(at point: CGPoint) -> Bool {
+        if let destination, destination.insetBy(dx: -2, dy: -2).contains(point) { return false }
+        destination = nil
+        return true
+    }
+
+    mutating func moved(into frame: CGRect) {
+        destination = frame
+    }
+}
+
 /// A drag in the window's sidebar: the tab row, folder row, favorite, or space symbol it lifts, its drop target, and the frames of the space symbols and the page area's panes that a dragged row's targets are found in. The window draws the lifted item above the sidebar and the page, so it can follow the pointer out of the list.
 final class SidebarDragState: ObservableObject {
     /// How long a lifted item's shadow and its slot's dimming take to appear and disappear.
