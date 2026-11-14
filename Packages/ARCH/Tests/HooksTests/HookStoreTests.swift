@@ -1,4 +1,4 @@
-// `hooks.json` and the script folders (`docs/hooks.md`, Storage): the file read back sealed; an edited file, an earlier copy put back, and a file whose key is gone set aside; a Keychain that does not give the key leaving the file as it was until Try Again; a test migration from version 0 copied at the next write; a file from a later version copied and kept, with its unknown members and hooks written back unchanged and its unknown hook listed but not run; the hook's own JSON against fixed text; and scripts checked by digest in folders of mode 0700.
+// `hooks.json` and the script folders (`docs/hooks.md`, Storage): the file read back sealed; an edited file, an earlier copy put back, and a file whose key is gone set aside; a Keychain that does not give the key leaving the file as it was until Try Again; a test migration from version 0 copied at the next write; a file from a later version copied once and kept, with its unknown members and hooks written back unchanged and its unknown hooks, also those with an unknown member inside a value, listed but not run; the hook's own JSON against fixed text; a command-line provider's destination; and scripts checked by digest in folders of mode 0700.
 import Agent
 import AgentControl
 import AI
@@ -152,32 +152,53 @@ import Testing
         defer { harness.cleanUp() }
         let store = harness.store
         _ = await store.load()
-        var known = instantHook("Known", .tabOpened)
-        known.script = try store.writeScript(Data("export default () => {}".utf8), for: known)
-        guard case .object(var knownMembers) = try AgentJSON(encoding: known) else { throw TestKeyError(message: "A hook is an object.") }
-        knownMembers["futureMember"] = 1
+        /// The hook's JSON with its script written, and `value` set at `path`.
+        func members(of hook: Hook, setting value: AgentJSON? = nil, at path: [String] = []) throws -> AgentJSON {
+            var hook = hook
+            hook.script = try store.writeScript(Data("export default () => {}".utf8), for: hook)
+            func set(_ json: AgentJSON, _ path: ArraySlice<String>) -> AgentJSON {
+                guard let name = path.first, case .object(var object) = json else { return value ?? json }
+                object[name] = set(object[name] ?? .object([:]), path.dropFirst())
+                return .object(object)
+            }
+            let json = try AgentJSON(encoding: hook)
+            return value == nil ? json : set(json, path[...])
+        }
+        let known = instantHook("Known", .tabOpened)
+        // A member this build does not know inside a value would be lost at its next write, so the hook is one it cannot read.
+        let inFilter = instantHook("In Filter", .tabOpened)
+        let grant = AgentRunGrant(tools: ["rename_tab"], maximumRecord: .none, limits: AgentRunLimits(timeout: .seconds(20), rounds: 1, toolCalls: 2))
+        let inGrant = instantHook("In Grant", .tabOpened, grant: HookGrant(permissions: [.agent], agent: grant))
+        let storedInFilter = try members(of: inFilter, setting: true, at: ["filter", "futureNarrowing"])
+        let storedInGrant = try members(of: inGrant, setting: ["pinnedOnly": true], at: ["grant", "agent", "futureNarrowing"])
         let futureID = UUID()
         let future: AgentJSON = ["id": .string(futureID.uuidString), "name": "From Later", "trigger": ["tabTeleported": [:]], "created": 816_000_000.0]
         let url = harness.folder.appendingPathComponent("hooks.json")
         let sealed = SealedSettingsFile<AgentJSON>(fileURL: url, keys: harness.keys)
         try await sealed.prepareKey()
-        try await sealed.write(["version": 2, "runsHooks": true, "futureSetting": "kept", "hooks": [.object(knownMembers), future]]).value
+        try await sealed.write(["version": 2, "runsHooks": true, "futureSetting": "kept",
+                                "hooks": [try members(of: known, setting: 1, at: ["futureMember"]), storedInFilter, storedInGrant, future]]).value
+        let original = try Data(contentsOf: url)
 
         let registry = try await harness.start()
         #expect(registry.notice == .newerVersion(2))
-        #expect(FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent("hooks-v2.json").path))
-        #expect(registry.hooks.map(\.id) == [known.id, futureID])
-        #expect(registry.hooks[1].name == "From Later")
-        #expect(registry.hooks[1].state == .paused(.needsNewerArch))
-        #expect(registry.hooks[0].state == .active)
-        // The unknown hook neither runs nor resumes nor changes.
+        let copy = harness.folder.appendingPathComponent("hooks-v2.json")
+        #expect(try Data(contentsOf: copy) == original)
+        #expect(registry.hooks.map(\.id) == [known.id, inFilter.id, inGrant.id, futureID])
+        #expect(registry.hooks[3].name == "From Later")
+        #expect(registry.hooks.map(\.state) == [.active, .paused(.needsNewerArch), .paused(.needsNewerArch), .paused(.needsNewerArch)])
+        #expect(!harness.service.features.contains { $0.id == .agentHook(inGrant.id) })
+        // The unknown hooks neither run nor resume nor change.
         registry.resume(futureID)
+        registry.resume(inFilter.id)
+        #expect(registry.hooks[3].state == .paused(.needsNewerArch))
         #expect(registry.hooks[1].state == .paused(.needsNewerArch))
-        #expect(throws: HookRegistryError.self) { try registry.update(registry.hooks[1], script: nil) }
+        #expect(throws: HookRegistryError.self) { try registry.update(registry.hooks[3], script: nil) }
         let tab = harness.tab()
         harness.host.show(tab)
         harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
         #expect(await eventually { harness.javaScript.invocations.count == 1 })
+        try? await Task.sleep(for: .milliseconds(50))
         #expect(harness.javaScript.invocations.map(\.hook.id) == [known.id])
 
         registry.pause(known.id)
@@ -189,7 +210,13 @@ import Testing
         #expect(settings["futureSetting"] == "kept")
         let hooks = try #require(settings["hooks"]?.arrayValue)
         #expect(hooks[0]["futureMember"] == .number(1))
-        #expect(hooks[1] == future)
+        #expect(Array(hooks[1...]) == [storedInFilter, storedInGrant, future])
+
+        // The file still says version 2 after this build's write, and the next launch keeps the newer Arch's copy rather than copying that write.
+        let next = RegistryHarness(folder: harness.folder, keys: harness.keys)
+        let relaunched = try await next.start()
+        #expect(relaunched.notice == .newerVersion(2))
+        #expect(try Data(contentsOf: copy) == original)
     }
 
     @Test func aHooksPartsHaveFixedJSON() throws {
@@ -220,6 +247,8 @@ import Testing
             == #"{"shell":{"digest":"sha256:cd","interpreter":{"digest":"sha256:ef","path":"/bin/sh"},"source":"/Users/me/hook.sh"}}"#)
         #expect(try text(HookState.active) == #""active""#)
         #expect(try text(HookState.paused(.ranTooOften)) == #"{"paused":"ranTooOften"}"#)
+        #expect(try text(HookState.paused(.providerErrors)) == #"{"paused":"providerErrors"}"#)
+        #expect(try roundTrip(HookState.paused(.providerErrors)))
         #expect(try roundTrip(HookState.paused(.unknownProvider)))
         #expect(try text(HookOrigin.user) == #""user""#)
         #expect(try text(HookOrigin.preset("tidyTabNames")) == #"{"preset":"tidyTabNames"}"#)
@@ -232,6 +261,29 @@ import Testing
         #expect(HookTiming(for: .pageLoaded(loads: .newAddress, includesRestoredTabs: false)).delay == .milliseconds(1_500))
         #expect(HookTiming(for: .titleChanged(sources: [.page])).delay == .seconds(1))
         #expect(HookTiming(for: .tabOpened) == HookTiming(delay: .zero, timeout: .seconds(30), runsPerDay: 500))
+    }
+
+    @Test func aCommandLineProvidersDestinationCoversWhatCanSendItsRequestsElsewhere() {
+        let tool = AICommandLineConfiguration(executable: URL(fileURLWithPath: "/usr/local/bin/claude"), agent: .claudeCode)
+        let provider = AIProviderConfiguration(name: "Claude Code", kind: .commandLine(tool))
+        let destination = HookKnownProvider(provider).destination
+        #expect(destination.hasPrefix("/usr/local/bin/claude sha256:"))
+        func edited(_ change: (inout AICommandLineConfiguration) -> Void) -> String {
+            var edited = tool
+            change(&edited)
+            var changed = provider
+            changed.kind = .commandLine(edited)
+            return HookKnownProvider(changed).destination
+        }
+        #expect(edited { $0.environment["ANTHROPIC_BASE_URL"] = "https://elsewhere.example.test" } != destination)
+        #expect(edited { $0.arguments = ["--settings", "/tmp/elsewhere.json"] } != destination)
+        #expect(edited { $0.agent = .codex } != destination)
+        #expect(edited { $0.executable = URL(fileURLWithPath: "/opt/elsewhere/claude") } != destination)
+        // What decides no destination leaves it as it was.
+        #expect(edited { $0.runsWithoutTools = true } == destination)
+        #expect(HookKnownProvider(AIProviderConfiguration(name: "API", kind: .http(AIHTTPConfiguration(format: .messages, baseURL: URL(string: "https://api.example.test/v1")!,
+                                                                                                         headers: ["anthropic-version": "1"])))).destination
+            == "https://api.example.test/v1")
     }
 
     @Test func scriptsLiveInPrivateFoldersAndRunOnlyWhileTheirDigestMatches() async throws {

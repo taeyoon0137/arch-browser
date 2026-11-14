@@ -257,8 +257,8 @@ public enum HookState: Codable, Hashable, Sendable {
 }
 
 public enum HookPauseReason: String, Codable, Hashable, Sendable {
-    /// `scriptChanged` covers a shell hook's interpreter too; `grantEnded` an outside program's hook whose grant ended; `unknownProvider` a run that would reach a provider Arch did not see the user set up (Known providers).
-    case user, failures, ranTooOften, stopAllAgents, placeDeleted, scriptChanged, shellScriptsOff, needsNewerArch, grantEnded, unknownProvider
+    /// `failures` covers three failed or timed-out runs in a row; `providerErrors` the scheduler's pause after three authentication or provider errors, which a change to the hook's tier route lifts; `scriptChanged` a shell hook's interpreter too; `grantEnded` an outside program's hook whose grant ended; `unknownProvider` a run that would reach a provider Arch did not see the user set up (Known providers).
+    case user, failures, providerErrors, ranTooOften, stopAllAgents, placeDeleted, scriptChanged, shellScriptsOff, needsNewerArch, grantEnded, unknownProvider
 }
 
 /// In JSON, `"user"`, `{"preset": "<name>"}`, or `{"outsideClient": {"key": …, "name": …}}`.

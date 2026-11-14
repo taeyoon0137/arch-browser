@@ -235,8 +235,10 @@ public final class HookRegistry: ObservableObject {
     private var lastDocuments: [UUID: URL] = [:]
     /// The `firstAfterOpen` hooks of each tab whose run has not completed: a new document or a newer load that ended it lets the tab's next load count as its first.
     private var firstLoadCarryOvers: [UUID: Set<UUID>] = [:]
-    /// Hooks the scheduler paused after consecutive authentication or provider errors, which its resume resumes.
-    private var pausedByScheduler: Set<UUID> = []
+    /// The routes in `ai.json` as last seen, to notice the tier routes the user changes.
+    private var seenRoutes: [String: AIRoute]
+    /// When each hook last logged a skip for each limit, so a hook past a limit logs one skip a minute, or a day for its daily count.
+    private var loggedSkips: [UUID: [HookRunEntry.SkipReason: Date]] = [:]
     private var isLoading = false
     private var isApplyingSettings = false
     private var isPreparingKey = false
@@ -258,11 +260,15 @@ public final class HookRegistry: ObservableObject {
         self.now = now
         log = HookRunLog(fileURL: store.directory.appendingPathComponent("hooks-activity.json"), now: now)
         seenProviders = Self.destinations(of: ai.settings.providers)
+        seenRoutes = ai.settings.routes
         subscription = bus.subscribe(.everything) { [weak self] event in self?.handle(event) }
         host.placesDidChange = { [weak self] in self?.placesDidChange() }
         // A published value reaches its subscribers before the store holds it, so each change comes with its new value.
         ai.settings.$providers.dropFirst()
             .sink { [weak self] providers in MainActor.assumeIsolated { self?.providersDidChange(providers) } }
+            .store(in: &cancellables)
+        ai.settings.$routes.dropFirst()
+            .sink { [weak self] routes in MainActor.assumeIsolated { self?.routesDidChange(routes) } }
             .store(in: &cancellables)
         scheduler.$pausedOwners
             .sink { [weak self] owners in MainActor.assumeIsolated { self?.schedulerPausesDidChange(owners) } }
@@ -360,7 +366,7 @@ public final class HookRegistry: ObservableObject {
         persist()
     }
 
-    /// Replaces the hook's settings, and its script when `script` is given; the hook keeps its origin, creation date, and, without a script, its recorded script.
+    /// Replaces the hook's settings, and its script when `script` is given; the hook keeps its origin, creation date, state, and, without a script, its recorded script. Only `pause(_:)`, `resume(_:)`, and the registry's own pauses change a hook's state.
     public func update(_ hook: Hook, script: Data?) throws {
         guard isReady else { throw HookStoreError.notReady }
         guard let index = index(of: hook.id), !store.isUnreadable(hook.id) else { throw HookRegistryError.unknownHook }
@@ -368,6 +374,7 @@ public final class HookRegistry: ObservableObject {
         var updated = try Self.checked(hook)
         updated.origin = stored.origin
         updated.created = stored.created
+        updated.state = stored.state
         updated.script = try script.map { try store.writeScript($0, for: updated) } ?? stored.script
         hooks[index] = updated
         register(updated)
@@ -385,7 +392,7 @@ public final class HookRegistry: ObservableObject {
         lastRuns[id] = nil
         dayCounts[id] = nil
         failureCounts[id] = nil
-        pausedByScheduler.remove(id)
+        loggedSkips[id] = nil
         limiter.reset(hook: id)
         for tab in firstLoadCarryOvers.keys { firstLoadCarryOvers[tab]?.remove(id) }
         persist()
@@ -412,7 +419,6 @@ public final class HookRegistry: ObservableObject {
         hooks[index].state = .active
         failureCounts[id] = nil
         limiter.reset(hook: id)
-        pausedByScheduler.remove(id)
         scheduler.resume(owner: hooks[index].owner)
         persist()
     }
@@ -553,23 +559,30 @@ public final class HookRegistry: ObservableObject {
         Dictionary(providers.map { ($0.id, HookKnownProvider($0).destination) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// The scheduler pauses an owner after consecutive authentication or provider errors and resumes it when a route of its steps changes; the hook follows, with `failures`.
+    /// The scheduler pauses an owner after consecutive authentication or provider errors; the hook follows with `providerErrors`, which `hooks.json` keeps, so that a change to its tier's route resumes it also after a relaunch, when the scheduler no longer holds the pause.
     private func schedulerPausesDidChange(_ owners: Set<String>) {
         var changed = false
-        for index in hooks.indices {
-            let id = hooks[index].id
-            if owners.contains(hooks[index].owner) {
-                guard hooks[index].state == .active else { continue }
-                hooks[index].state = .paused(.failures)
-                pausedByScheduler.insert(id)
-                changed = true
-            } else if pausedByScheduler.remove(id) != nil, hooks[index].state == .paused(.failures) {
-                hooks[index].state = .active
-                failureCounts[id] = nil
-                changed = true
-            }
+        for index in hooks.indices where owners.contains(hooks[index].owner) && hooks[index].state == .active {
+            hooks[index].state = .paused(.providerErrors)
+            changed = true
         }
         if changed { persist() }
+    }
+
+    /// Resumes each hook paused with `providerErrors` whose agent options name a tier whose route changed, as the scheduler resumes its owner.
+    private func routesDidChange(_ newRoutes: [String: AIRoute]) {
+        let changed = Set(seenRoutes.keys).union(newRoutes.keys).filter { seenRoutes[$0] != newRoutes[$0] }
+        seenRoutes = newRoutes
+        guard isReady, !changed.isEmpty else { return }
+        for hook in hooks where hook.state == .paused(.providerErrors) && !Self.routes(of: hook).isDisjoint(with: changed) {
+            resume(hook.id)
+        }
+    }
+
+    /// The tier route in `ai.json` that an agent hook's route resolves through.
+    static func routes(of hook: Hook) -> Set<String> {
+        guard hook.usesAgent, case .tier(let tier)? = hook.agent?.model else { return [] }
+        return [AIFeatureID.tier(tier).rawValue]
     }
 
     // MARK: Matching
@@ -636,9 +649,7 @@ public final class HookRegistry: ObservableObject {
     private func step(for hook: Hook, at index: Int, event: BrowserEvent, closedTab: AgentRunClosedTab?) -> AIHookStep {
         let run = HookRun(hookID: hook.id, event: event, closedTab: closedTab, isTest: false)
         let route = hook.usesAgent ? hook.agent?.model : nil
-        var routes: Set<String> = []
-        if case .tier(let tier)? = route { routes.insert(AIFeatureID.tier(tier).rawValue) }
-        return AIHookStep(owner: hook.owner, order: Self.firstOrder + index, feature: route == nil ? nil : .agentHook(hook.id), routes: routes, route: route,
+        return AIHookStep(owner: hook.owner, order: Self.firstOrder + index, feature: route == nil ? nil : .agentHook(hook.id), routes: Self.routes(of: hook), route: route,
                           delay: hook.timing.delay, timeout: hook.timing.timeout,
                           mayRun: { [weak self] in self?.mayStart(run) ?? false },
                           run: { [weak self] requestDidEnd in await self?.execute(run, requestDidEnd: requestDidEnd) },
@@ -668,7 +679,7 @@ public final class HookRegistry: ObservableObject {
         return false
     }
 
-    /// Waits for a slot, checks the script against its digest, and runs it. The scheduler's timeout covers the wait.
+    /// Waits for a slot, checks the daily count and the script against its digest, and runs it. The scheduler's timeout covers the wait.
     private func execute(_ run: HookRun, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async {
         guard let hook = hook(withID: run.hookID) else { return }
         let deadline = ContinuousClock.now + hook.timing.timeout
@@ -682,6 +693,11 @@ public final class HookRegistry: ObservableObject {
         }
         defer { slots.release(run: run.id) }
         guard !Task.isCancelled, let current = self.hook(withID: run.hookID), current.state == .active else { return }
+        // Runs that passed the check after their delay may have waited together, so the count is checked again where it grows.
+        guard dayCount(of: current.id).runs < current.timing.runsPerDay else {
+            run.declined = .dailyLimit
+            return
+        }
         run.startedAt = .now
         countRun(of: current.id)
         guard let script = store.script(for: current) else {
@@ -751,6 +767,8 @@ public final class HookRegistry: ObservableObject {
                 record(result, of: run)
             } else if run.wasDropped {
                 recordSkip(of: run, .dropped)
+            } else if run.declined == .dailyLimit {
+                recordSkip(of: run, .dailyLimit)
             }
         case .failed(let error):
             record(.failed(code: "error", message: error.localizedDescription), of: run)
@@ -791,11 +809,13 @@ public final class HookRegistry: ObservableObject {
 
     // MARK: Test
 
-    /// Runs the hook once for the tab as if its event had happened: the editor's Test and a row's Run on Current Tab. Without `applying`, actions are reported, not applied. A close hook treats the tab as closed without closing it, with the rest of the tabs it reaches as the run's tabs (`docs/hooks.md`, Closed tabs). A test runs at once, outside the scheduler, within the hook's timeout, and counts toward neither the daily count nor the failures; it is logged with `test` at the first two record levels.
+    /// Runs the hook once for the tab as if its event had happened: the editor's Test and a row's Run on Current Tab. A tab the hook's filter does not cover, such as an agent tab, is not run. Without `applying`, actions are reported, not applied. A close hook treats the tab as closed without closing it, with the rest of the tabs it reaches as the run's tabs (`docs/hooks.md`, Closed tabs). A test runs at once, outside the scheduler, within the hook's timeout, and counts toward neither the daily count nor the failures; it is logged with `test` at the first two record levels.
     public func test(_ id: UUID, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
         guard isReady, let hook = hook(withID: id), !store.isUnreadable(id) else { return .notRun("Arch cannot run this hook.") }
         guard !hook.script.isShell || allowsShellScripts else { return .notRun("Shell scripts are off.") }
         guard let tab = host.tab(tabID) else { return .notRun("The tab is no longer open.") }
+        // As for its events, a hook reaches only the tabs its filter covers, never an agent tab (hook decision 16).
+        guard Self.covers(hook.filter, tab) else { return .notRun("This hook's filter does not cover this tab.") }
         guard let event = Self.testEvent(for: hook.trigger, tab: tab) else { return .notRun("A test on a tab cannot stand in for a finished download.") }
         guard let script = store.script(for: hook) else {
             pauseHook(id, .scriptChanged)
@@ -879,10 +899,20 @@ public final class HookRegistry: ObservableObject {
         recordSkip(of: hook, event: run.event, reason)
     }
 
-    /// A skip is no run, so Keep Nothing keeps no trace of it.
+    /// A skip is no run, so Keep Nothing keeps no trace of it. A hook past a limit logs one skip of it a minute, or a day for its daily count, since a page that reloads itself would otherwise log one at each load.
     private func recordSkip(of hook: Hook, event: BrowserEvent, _ reason: HookRunEntry.SkipReason) {
         guard hook.record != .none else { return }
-        var entry = Self.entry(for: hook, event: event, outcome: .skipped, date: now(), isTest: false)
+        let date = now()
+        switch reason {
+        case .rateLimit, .budget:
+            if let last = loggedSkips[hook.id]?[reason], date.timeIntervalSince(last) < HookRateLimiter.window { return }
+        case .dailyLimit:
+            if let last = loggedSkips[hook.id]?[reason], Calendar.current.isDate(last, inSameDayAs: date) { return }
+        case .loop, .dropped:
+            break
+        }
+        loggedSkips[hook.id, default: [:]][reason] = date
+        var entry = Self.entry(for: hook, event: event, outcome: .skipped, date: date, isTest: false)
         entry.reason = reason
         note(entry, message: nil, of: hook)
     }

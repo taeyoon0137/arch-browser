@@ -1,4 +1,4 @@
-// `hooks.json` and the hooks' script folders (`docs/hooks.md`, Storage; hook decision 8). The file is sealed like `agent.json`, under its own Keychain item, and versioned: an earlier version is migrated in memory and copied to `hooks-v<version>.json` before the next write, and a later one is copied there at once, read as far as this build knows it, and written back with the members and hooks this build does not know unchanged. Each script lives in `Hooks/<hook id>/` and runs only while its bytes match the digest the sealed file holds.
+// `hooks.json` and the hooks' script folders (`docs/hooks.md`, Storage; hook decision 8). The file is sealed like `agent.json`, under its own Keychain item, and versioned: an earlier version is migrated in memory and copied to `hooks-v<version>.json` before the next write, and a later one is copied there at once unless a copy is there already, read as far as this build knows it, and written back with the members and hooks this build does not know unchanged; a later version's hook with a member this build would not write back, inside one of its values, is one this build cannot read. Each script lives in `Hooks/<hook id>/` and runs only while its bytes match the digest the sealed file holds.
 import Agent
 import AgentControl
 import AI
@@ -19,7 +19,7 @@ public struct HookSettings: Sendable {
     public init() {}
 }
 
-/// A provider the user set up while Arch ran: its identifier and destination, an HTTP provider's base address or a command-line tool's executable path.
+/// A provider the user set up while Arch ran: its identifier and destination, an HTTP provider's base address or a command-line tool's executable path with the digest of its preset, arguments, and environment (`AgentRunRequest.destination(of:)`).
 public struct HookKnownProvider: Codable, Hashable, Sendable {
     public var id: AIProviderID
     public var destination: String
@@ -31,10 +31,7 @@ public struct HookKnownProvider: Codable, Hashable, Sendable {
 
     /// The provider as `hooks.json` records it.
     public init(_ provider: AIProviderConfiguration) {
-        switch provider.kind {
-        case .http(let http): self.init(id: provider.id, destination: http.baseURL.absoluteString)
-        case .commandLine(let tool): self.init(id: provider.id, destination: tool.executable.path)
-        }
+        self.init(id: provider.id, destination: AgentRunRequest.destination(of: provider))
     }
 }
 
@@ -166,10 +163,11 @@ public final class HookStore {
             members = object
             migratedFrom = fileVersion
         } else if fileVersion > version {
-            // The copy keeps the newer Arch's file as it was, replacing an older copy.
+            // The copy keeps the newer Arch's file as it was. Once this build has written the file, it still says the later version, so a copy that is there already is kept rather than replaced with this build's write.
             let copy = copyURL(ofVersion: fileVersion)
-            try? FileManager.default.removeItem(at: copy)
-            try? FileManager.default.copyItem(at: fileURL, to: copy)
+            if !FileManager.default.fileExists(atPath: copy.path) {
+                try? FileManager.default.copyItem(at: fileURL, to: copy)
+            }
             notice = .newerVersion(fileVersion)
         }
         writtenVersion = max(fileVersion, version)
@@ -182,7 +180,9 @@ public final class HookStore {
         storedHooks = [:]
         unreadableHooks = []
         for stored in members["hooks"]?.arrayValue ?? [] {
-            let readable = try? stored.decode(as: Hook.self)
+            var readable = try? stored.decode(as: Hook.self)
+            // A later version's member inside a value, such as one that narrows a filter or a grant, would be lost at this build's next write.
+            if let decoded = readable, fileVersion > version, !Self.writesBack(stored, as: decoded) { readable = nil }
             let hook = readable ?? Self.placeholder(for: stored)
             guard storedHooks[hook.id] == nil else { continue }
             if readable == nil { unreadableHooks.insert(hook.id) }
@@ -255,6 +255,29 @@ public final class HookStore {
             members[name] = value
         }
         return .object(members)
+    }
+
+    /// Whether this build would write the hook back with every member of `stored`, at every depth.
+    private static func writesBack(_ stored: AgentJSON, as hook: Hook) -> Bool {
+        guard let encoded = try? AgentJSON(encoding: hook) else { return false }
+        return memberPaths(of: stored).isSubset(of: memberPaths(of: merge(encoded, over: stored)))
+    }
+
+    /// The paths of the value's members, such as `filter.scope.[].space`, with the elements of an array under one path and a member whose value is null left out.
+    private static func memberPaths(of value: AgentJSON, at path: String = "") -> Set<String> {
+        switch value {
+        case .object(let members):
+            return members.reduce(into: []) { paths, member in
+                guard member.value != .null else { return }
+                let memberPath = path.isEmpty ? member.key : "\(path).\(member.key)"
+                paths.insert(memberPath)
+                paths.formUnion(memberPaths(of: member.value, at: memberPath))
+            }
+        case .array(let elements):
+            return elements.reduce(into: []) { paths, element in paths.formUnion(memberPaths(of: element, at: "\(path).[]")) }
+        case .null, .bool, .number, .string:
+            return []
+        }
     }
 
     // MARK: Scripts

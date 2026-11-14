@@ -1,4 +1,4 @@
-// The hook registry (`docs/hooks.md`, Running and the sections after it): triggers and filters with the run's tabs; list order after the center's hooks in one chain of the shared scheduler; the delay and its replacement; a newer event canceling a run; a new document ending a run for the earlier one, with a `firstAfterOpen` hook so ended running once for the next load; a close hook running after its tab is gone, with the closed tab's last name and address in memory only; a close ending the tab's other runs; the concurrency caps and the dropped oldest run; loop protection; pausing after three failures, after the scheduler's pause, and Resume; Stop All Agents; a deleted place; a changed script; the daily count; the run log without content and with nothing at Keep Nothing; agent hooks' features and site exclusions; known providers; Run Hooks; and tests that report without applying. A fake runner stands in for the script runners.
+// The hook registry (`docs/hooks.md`, Running and the sections after it): triggers and filters with the run's tabs; list order after the center's hooks in one chain of the shared scheduler; the delay and its replacement; a newer event canceling a run; a new document ending a run for the earlier one, with a `firstAfterOpen` hook so ended running once for the next load; a close hook running after its tab is gone, with the closed tab's last name and address in memory only; a close ending the tab's other runs; the concurrency caps and the dropped oldest run; loop protection, with one skip logged a minute; pausing after three failures, after the scheduler's pause, also across a relaunch, and Resume; an update that keeps the state; Stop All Agents; a deleted place; a changed script; the daily count, also for runs that waited for a slot together; the run log without content, with nothing at Keep Nothing, no file without a change, and its latest entries; agent hooks' features and site exclusions; known providers; Run Hooks; and tests that report without applying and stay within the filter. A fake runner stands in for the script runners.
 import Agent
 import AgentControl
 import AI
@@ -297,27 +297,34 @@ import Testing
         #expect(runner.invocations[0].cause.hookChain == [other, hook.id])
     }
 
-    @Test func runsPastTheRateCapsAreSkippedWithoutAPause() async throws {
+    @Test func runsPastTheRateCapsAreSkippedWithoutAPauseAndLoggedOnceAMinute() async throws {
         defer { harness.cleanUp() }
         try await harness.start()
         let hook = try harness.add(instantHook("Selections", .tabSelected))
         let tab = harness.tab()
         harness.host.show(tab)
+        func skips() -> Int {
+            harness.entries(of: hook.id).filter { $0.reason == .rateLimit }.count
+        }
+        // 10 for one tab within a minute: the 2 past them are skipped, and the first of them is logged.
         for _ in 0..<12 {
             harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         }
-        #expect(await eventually { harness.entries(of: hook.id).filter { $0.reason == .rateLimit }.count == 2 })
+        #expect(await eventually { skips() == 1 })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(skips() == 1)
         #expect(registry.hooks[0].state == .active)
-        // 60 in all within a minute: 10 used for one tab, so the 51st other tab is skipped.
-        for _ in 0..<51 {
+        // A minute later, 60 in all: the 61st other tab is skipped and logged.
+        harness.clock.now += 61
+        for _ in 0..<61 {
             harness.bus.post(.tabSelected(tab: harness.tab(), windowID: UUID()))
         }
-        #expect(await eventually { harness.entries(of: hook.id).filter { $0.reason == .rateLimit }.count == 3 })
+        #expect(await eventually { skips() == 2 })
         #expect(registry.hooks[0].state == .active)
         harness.clock.now += 61
         harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         try? await Task.sleep(for: .milliseconds(50))
-        #expect(harness.entries(of: hook.id).filter { $0.reason == .rateLimit }.count == 3)
+        #expect(skips() == 2)
     }
 
     @Test func aTitleHookThatKeepsRunningForOneTabPausesUntilResumed() async throws {
@@ -368,7 +375,7 @@ import Testing
         #expect(registry.hooks[0].state == .active)
     }
 
-    @Test func theSchedulersPauseFollowsTheHookAndItsTiersRouteChangeResumesIt() async throws {
+    @Test func theSchedulersPauseFollowsTheHookAndItsTiersRouteChangeResumesItAlsoAfterARelaunch() async throws {
         defer { harness.cleanUp() }
         try await harness.start()
         let hook = try harness.add(agentHook("Agent", .tabOpened))
@@ -376,13 +383,48 @@ import Testing
         let tab = harness.tab()
         harness.host.show(tab)
         harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
-        #expect(await eventually { registry.hooks[0].state == .paused(.failures) })
-        harness.service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: harness.provider.id, model: "model-a"), AIModelRef(provider: harness.provider.id, model: "model-b")]),
-                                          for: .tier(.fast))
+        #expect(await eventually { registry.hooks[0].state == .paused(.providerErrors) })
+        let twoModels = AIRoute(isEnabled: true, models: [AIModelRef(provider: harness.provider.id, model: "model-a"), AIModelRef(provider: harness.provider.id, model: "model-b")])
+        harness.service.settings.setRoute(twoModels, for: .tier(.fast))
         #expect(await eventually { registry.hooks[0].state == .active })
-        runner.behaviors[hook.id] = .complete([])
         harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
         #expect(await eventually { runner.invocations.count == 2 })
+        #expect(await eventually { registry.hooks[0].state == .paused(.providerErrors) })
+        let url = harness.folder.appendingPathComponent("hooks.json")
+        #expect(await eventually {
+            (try? AgentJSON.decode(Data(contentsOf: url))["settings"]?["hooks"]?.arrayValue?.first?["state"]) == ["paused": "providerErrors"]
+        })
+
+        // After a relaunch the scheduler holds no pause, and a change to the tier's route still resumes the hook.
+        let next = RegistryHarness(folder: harness.folder, keys: harness.keys)
+        let relaunched = try await next.start()
+        #expect(relaunched.hooks[0].state == .paused(.providerErrors))
+        next.service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: next.provider.id, model: "model-a"), AIModelRef(provider: next.provider.id, model: "model-b")]),
+                                       for: .tier(.fast))
+        #expect(await eventually { relaunched.hooks[0].state == .active })
+        next.host.show(tab)
+        next.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+        #expect(await eventually { next.javaScript.invocations.count == 1 })
+    }
+
+    @Test func anUpdateKeepsTheHooksStateForPauseAndResumeToChange() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let hook = try harness.add(agentHook("Agent", .tabOpened))
+        registry.stopAgentHooks()
+        var edited = registry.hooks[0]
+        edited.name = "Renamed"
+        edited.state = .active
+        try registry.update(edited, script: nil)
+        #expect(registry.hooks[0].name == "Renamed")
+        #expect(registry.hooks[0].state == .paused(.stopAllAgents))
+        let tab = harness.tab()
+        harness.host.show(tab)
+        harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(runner.invocations.isEmpty)
+        registry.resume(hook.id)
+        #expect(registry.hooks[0].state == .active)
     }
 
     @Test func stopAllAgentsStopsAgentHooksRunsAndPausesThem() async throws {
@@ -468,6 +510,38 @@ import Testing
         #expect(await eventually { harness.entries(of: hook.id).last?.outcome == .completed })
     }
 
+    @Test func runsThatWaitedForASlotTogetherStayWithinTheDailyCount() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let opened = try harness.add(instantHook("Opened", .tabOpened))
+        let selected = try harness.add(instantHook("Selected", .tabSelected))
+        let daily = try harness.add(instantHook("Daily", .pageLoaded(loads: .every, includesRestoredTabs: false), runsPerDay: 1))
+        runner.behaviors[opened.id] = .hold
+        runner.behaviors[selected.id] = .hold
+        // The other hooks' runs hold every slot.
+        for index in 0..<2 {
+            let tab = harness.tab("/held\(index)")
+            harness.host.show(tab)
+            harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+            harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
+        }
+        #expect(await eventually { runner.heldCount == HookRegistry.maximumRunning })
+        // Each load passes the daily count after its delay, before any of them has run, and waits for a slot.
+        for index in 0..<3 {
+            harness.load(harness.tab("/load\(index)"))
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.invocations(of: daily.id).isEmpty)
+        runner.releaseAll()
+        #expect(await eventually { harness.entries(of: daily.id).count == 2 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.invocations(of: daily.id).count == 1)
+        #expect(registry.dayCounts[daily.id]?.runs == 1)
+        let entries = harness.entries(of: daily.id)
+        #expect(entries.filter { $0.outcome == .completed }.count == 1)
+        #expect(entries.filter { $0.reason == .dailyLimit }.count == 1)
+    }
+
     // MARK: The run log
 
     @Test func theRunLogKeepsNoContentAndKeepNothingKeepsNoEntry() async throws {
@@ -496,6 +570,45 @@ import Testing
         for content in ["Secret", "account", "token", "abc", nothing.id.uuidString] {
             #expect(!file.contains(content))
         }
+    }
+
+    @Test func aRegistryWithoutHooksWritesNothing() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let tab = harness.tab()
+        harness.host.show(tab)
+        harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+        harness.load(tab)
+        harness.close(tab)
+        harness.service.settings.providers.append(AIProviderConfiguration(name: "Added", kind: .http(AIHTTPConfiguration(format: .chatCompletions, baseURL: URL(string: "https://added.example.test/v1")!))))
+        harness.host.places[0].spaces.removeAll { $0.id == HookIDs.home }
+        harness.host.placesDidChange?()
+        try? await Task.sleep(for: .milliseconds(100))
+        // What the log does at quit.
+        registry.log.saveNow()
+        registry.log.clear()
+        for name in [HookStore.fileName, "hooks-activity.json", HookStore.scriptsFolderName] {
+            #expect(!FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent(name).path))
+        }
+    }
+
+    @Test func theRunLogKeepsItsLatestEntries() async throws {
+        let url = harness.folder.appendingPathComponent("hooks-activity.json")
+        defer { harness.cleanUp() }
+        let log = HookRunLog(fileURL: url, now: Date.init, keptEntries: 10)
+        let entries = (0..<15).map { _ in
+            HookRunEntry(date: Date(), hook: UUID(), event: .tabOpened, subject: "open", site: nil, persona: HookIDs.persona, outcome: .completed)
+        }
+        entries.forEach(log.record)
+        #expect(log.entries.map(\.id) == entries.suffix(10).map(\.id))
+        log.saveNow()
+        let reread = HookRunLog(fileURL: url, now: Date.init, keptEntries: 10)
+        #expect(reread.entries.map(\.id) == log.entries.map(\.id))
+        // Reading the file changes nothing, so it is not written again.
+        let written = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        try? await Task.sleep(for: .milliseconds(20))
+        reread.saveNow()
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == written)
     }
 
     // MARK: Agent hooks
@@ -625,6 +738,28 @@ import Testing
             Issue.record("A test on a tab that is gone ran.")
             return
         }
+    }
+
+    @Test func aTestRunsOnlyOnATabTheHooksFilterCovers() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let hook = try harness.add(instantHook("Work", .tabClosed(reasons: []), filter: BrowserEventFilter(scope: .places([.space(HookIDs.work)]))))
+        let agent = harness.tab("/agent", kind: .agent)
+        let home = harness.tab("/home", space: HookIDs.home)
+        let work = harness.tab("/work")
+        [agent, home, work].forEach(harness.host.show)
+        for tab in [agent, home] {
+            guard case .notRun = await registry.test(hook.id, onTab: tab.id, applying: false) else {
+                Issue.record("A test ran on a tab outside the hook's filter.")
+                continue
+            }
+        }
+        #expect(runner.invocations.isEmpty)
+        guard case .finished = await registry.test(hook.id, onTab: work.id, applying: false) else {
+            Issue.record("A test on a covered tab did not run.")
+            return
+        }
+        #expect(runner.invocations.count == 1)
     }
 
     // MARK: Helpers

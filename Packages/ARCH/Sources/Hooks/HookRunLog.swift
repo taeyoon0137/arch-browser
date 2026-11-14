@@ -1,4 +1,4 @@
-// `hooks-activity.json` (`docs/hooks.md`, Run log): the hooks' runs for 30 days, without content. An entry names the hook, the event's kind, the subject's kind, the page's site at most, the Persona, the outcome, the duration, the actions by kind, and an agent run's model and token counts: never page text, a title, a name a hook gave, a prompt, a reply, a script's output, or an address's path or query. Hooks at Keep Nothing log no entry.
+// `hooks-activity.json` (`docs/hooks.md`, Run log): the hooks' runs for 30 days, at most the latest 10,000, without content. An entry names the hook, the event's kind, the subject's kind, the page's site at most, the Persona, the outcome, the duration, the actions by kind, and an agent run's model and token counts: never page text, a title, a name a hook gave, a prompt, a reply, a script's output, or an address's path or query. Hooks at Keep Nothing log no entry.
 import AI
 import Agent
 import Events
@@ -87,6 +87,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
 
 @MainActor public final class HookRunLog: ObservableObject {
     public static let keptDays = 30
+    public static let keptEntries = 10_000
 
     private struct File: Codable {
         var version = 1
@@ -97,11 +98,20 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
     @Published public private(set) var entries: [HookRunEntry] = []
     public let fileURL: URL
     private let now: () -> Date
+    private let entryLimit: Int
     private var pendingSave: DispatchWorkItem?
+    /// Whether the entries changed since the file was last written. Only a change writes the file, so a launch without runs leaves none.
+    private var hasChanges = false
 
-    public init(fileURL: URL, now: @escaping () -> Date = Date.init) {
+    public convenience init(fileURL: URL, now: @escaping () -> Date = Date.init) {
+        self.init(fileURL: fileURL, now: now, keptEntries: Self.keptEntries)
+    }
+
+    /// Tests give a smaller `keptEntries`.
+    init(fileURL: URL, now: @escaping () -> Date, keptEntries: Int) {
         self.fileURL = fileURL
         self.now = now
+        entryLimit = keptEntries
         // The Hooks module does not link AppKit, so it names the notification; an entry made just before quitting still reaches the file.
         NotificationCenter.default.addObserver(forName: Notification.Name("NSApplicationWillTerminateNotification"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveNow() }
@@ -110,6 +120,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
         if let file = try? Self.decoder.decode(File.self, from: data) {
             entries = file.entries
             dropOldEntries()
+            dropOverflowingEntries()
         } else {
             // As in the other stores, a file that does not decode is set aside, so that the first save does not overwrite it.
             let unreadable = fileURL.appendingPathExtension("unreadable")
@@ -121,18 +132,27 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
     func record(_ entry: HookRunEntry) {
         entries.append(entry)
         dropOldEntries()
+        dropOverflowingEntries()
+        hasChanges = true
         scheduleSave()
     }
 
-    /// Settings' Clear Activity.
+    /// Settings' Clear Activity. Without a file there is nothing to clear, so none is made.
     public func clear() {
+        guard !entries.isEmpty || FileManager.default.fileExists(atPath: fileURL.path) else { return }
         entries = []
+        hasChanges = true
         saveNow()
     }
 
     private func dropOldEntries() {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -Self.keptDays, to: now()), entries.contains(where: { $0.date < cutoff }) else { return }
         entries.removeAll { $0.date < cutoff }
+    }
+
+    private func dropOverflowingEntries() {
+        guard entries.count > entryLimit else { return }
+        entries.removeFirst(entries.count - entryLimit)
     }
 
     /// Combines rapid changes into one file write, like the agents' activity log.
@@ -145,12 +165,13 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Writes the entries if they changed since the last write, as at quit.
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil
-        guard let data = try? Self.encoder.encode(File(entries: entries)) else { return }
+        guard hasChanges, let data = try? Self.encoder.encode(File(entries: entries)) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
+        if (try? data.write(to: fileURL, options: .atomic)) != nil { hasChanges = false }
     }
 
     private static let encoder: JSONEncoder = {
