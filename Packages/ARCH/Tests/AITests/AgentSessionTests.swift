@@ -543,6 +543,37 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(await processGroupEnds(process, within: .seconds(4)))
     }
 
+    @Test(arguments: [false, true])
+    func retryAfterCLIExitSendsTheInterruptedTaskOnce(hasEarlierTurn: Bool) async throws {
+        let replies = try claudeTurns("claude-session")
+        let cli = try FakeCLI.claude(turns: (hasEarlierTurn ? [replies[0]] : []) + [longTurnStart, replies[3]])
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        if hasEarlierTurn {
+            try session.send("Establish earlier conversation.")
+            try await log.wait { $0.contains("finished:completed") }
+        }
+        let interrupted = "Review only the pending fixture."
+        let initialContext = "<arch-session>Fixture tab context.</arch-session>"
+        try session.send(hasEarlierTurn ? interrupted : initialContext + "\n" + interrupted)
+        try await log.wait { $0.contains("text:1\n2\n") }
+        session.toolCallDidStart()
+        // The fixture CLI exits while Arch is still waiting for the user to resolve a tool call.
+        let child = try #require(session.processID)
+        try #require(kill(child, SIGTERM) == 0)
+        try await log.wait { $0.contains { $0.hasPrefix("failed:") } }
+        session.toolCallDidEnd()
+        try #require(session.processID == nil && !session.hasEnded)
+        try session.retry(interrupted)
+        try await log.wait { $0.filter { $0 == "finished:completed" }.count == (hasEarlierTurn ? 2 : 1) }
+        let retriedInput = try #require(cli.text("stdin.log").split(separator: "\n").last)
+        #expect(retriedInput.contains("Establish earlier conversation.") == hasEarlierTurn)
+        #expect(retriedInput.contains(initialContext) == !hasEarlierTurn)
+        #expect(retriedInput.components(separatedBy: interrupted).count == 2)
+        await session.end()
+    }
+
     @Test func stopEndsTheProcessGroupWhenTheTurnDoesNotEnd() async throws {
         let cli = try FakeCLI.claude(turns: [longTurnStart, try claudeTurns("claude-session")[3]])
         let fixture = try AgentFixture(cli: cli)

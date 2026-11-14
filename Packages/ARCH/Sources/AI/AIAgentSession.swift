@@ -224,6 +224,15 @@ public final class AIAgentSession {
         startNextTurn()
     }
 
+    /// A failed turn ends with its user message in Arch's transcript. Reuse it, including the first turn's session preamble,
+    /// so restarting the CLI sends it once and keeps the earlier conversation in order.
+    public func retry(_ message: String) throws {
+        guard !hasEnded, !isTurnRunning else { return }
+        guard let last = transcript.last, last.role == .user else { return try send(message) }
+        try checkMessage(last.text)
+        startTurn(last.text, isRetry: true)
+    }
+
     /// Throws what `send(_:)` would throw for the message, without sending it, so that a caller that queues messages itself can keep a refused one in its composer.
     public func checkMessage(_ message: String) throws {
         if request.ephemeral && (isTurnRunning || hasEnded) {
@@ -350,13 +359,16 @@ public final class AIAgentSession {
 
     private func startNextTurn() {
         guard !isTurnRunning, !hasEnded, !queuedMessages.isEmpty else { return }
-        let message = queuedMessages.removeFirst()
+        startTurn(queuedMessages.removeFirst())
+    }
+
+    private func startTurn(_ message: String, isRetry: Bool = false) {
         isTurnRunning = true
-        turnTask = Task { await run(message) }
+        turnTask = Task { await run(message, isRetry: isRetry) }
     }
 
     /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error. A turn of an automatic feature is one of its automatic requests: it fails with `budgetReached` at the daily limit for automatic requests or the monthly spending limit before any model, and otherwise counts once toward the daily limit, whichever models it tries.
-    private func run(_ message: String) async {
+    private func run(_ message: String, isRetry: Bool) async {
         if Task.isCancelled || hasEnded {
             continuation.yield(.turnFinished(.stopped))
             if request.ephemeral { await end() }
@@ -364,7 +376,7 @@ public final class AIAgentSession {
             startNextTurn()
             return
         }
-        transcript.append((.user, message))
+        if !isRetry { transcript.append((.user, message)) }
         var outcome: TurnOutcome = .failed(.notConfigured(.noUsableModel))
         var reply = ""
         let budget = feature.trigger == .automatic ? service.reachedBudget(for: feature) : nil
