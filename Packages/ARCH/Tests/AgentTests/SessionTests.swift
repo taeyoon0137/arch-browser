@@ -233,6 +233,142 @@ import Testing
         #expect(stopped == false)
     }
 
+    private func connectQuestionClient(_ session: AgentSession, _ runner: FakeRunner, _ harness: Harness) async throws -> TestClient {
+        spawnCLI(runner, harness)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "local"), model: "fixture")))
+        try await waitUntil { harness.socketExists && session.state == .running }
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
+        return client
+    }
+
+    @Test func cancellingOrDisconnectingOneQuestionPreservesTheOthers() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (session, runner) = try start(service, harness, mode: .readOnly)
+        let client = try await connectQuestionClient(session, runner, harness)
+        var departing: TestClient? = try TestClient(harness.location)
+        _ = try await departing?.hello(ticket: session.ticket?.text)
+        func ask(_ label: String, id: Int, on client: TestClient) throws {
+            let call = AgentToolCall(name: "ask_user", arguments: ["question": .string(label)])
+            try client.connection.send(.request(id: .number(id), method: AgentControlMethod.toolsCall, params: call.params))
+        }
+        func result(_ id: Int) async throws -> AgentToolResult {
+            while true {
+                if case .result(.number(id), let payload) = try await client.receive() {
+                    return try payload.decode(as: AgentToolResult.self)
+                }
+            }
+        }
+        try ask("Cancelled", id: 41, on: client)
+        try ask("Survivor", id: 42, on: client)
+        try ask("Disconnected", id: 42, on: #require(departing))
+        try await waitUntil { service.approvals.pending.count == 3 }
+        let cancelled = try #require(service.approvals.pending.first { $0.agentSays == "Cancelled" })
+        let survivor = try #require(service.approvals.pending.first { $0.agentSays == "Survivor" })
+        let disconnected = try #require(service.approvals.pending.first { $0.agentSays == "Disconnected" })
+        #expect(service.approvals.pending.allSatisfy { $0.ownerID == session.id })
+        #expect(survivor.deadline.timeIntervalSince(survivor.createdAt) == 600)
+        #expect(session.state == .waitingForUser && service.spacesWaitingForUser == [session.spaceID])
+        #expect(harness.host.shownPanels.isEmpty)
+
+        try client.connection.send(.notification(method: AgentControlMethod.toolsCancelNotification, params: AgentToolCancel(call: 41).params))
+        #expect(try await result(41).code == "cancelled")
+        // Releasing the other connection closes its socket with call 42 still outstanding.
+        departing = nil
+        try await waitUntil { service.approvals.pending.map(\.id) == [survivor.id] && runner.activeToolCalls == 1 }
+        #expect(session.state == .waitingForUser)
+        #expect(await !service.approvals.answer(cancelled.id, with: .answer("late")))
+        #expect(await !service.approvals.answer(disconnected.id, with: .answer("late")))
+        let answer = "Only this CLI call gets the fixture answer."
+        var reported: [String] = []
+        session.taskEvent = { _, text in reported.append(text) }
+        #expect(await service.approvals.answer(survivor.id, with: .answer(answer)))
+        let response = try await result(42)
+        #expect(response.status == .ok && response.structured == ["answer": .string(answer)])
+        #expect(session.state == .running && service.spacesWaitingForUser.isEmpty)
+        #expect(!reported.joined().contains(answer))
+        let steps = session.items.compactMap { item -> AgentStep? in
+            if case .step(let step) = item.kind { return step }
+            return nil
+        }
+        #expect(steps.map(\.sentence) == ["Asked you a question"])
+        let entries = service.activity.entries.filter { $0.sessionID == session.id && $0.tool == "ask_user" }
+        #expect(entries.map(\.decision) == [.approved])
+        #expect(!String(decoding: try JSONEncoder().encode(entries), as: UTF8.self).contains(answer))
+
+        // A disconnect before the call reaches its card must also release the CLI's idle timer.
+        session.takeOver()
+        var gated: TestClient? = try TestClient(harness.location)
+        _ = try await gated?.hello(ticket: session.ticket?.text)
+        let ask = AgentToolCall(name: "ask_user", arguments: ["question": "From a departed connection"])
+        try gated?.connection.send(.request(id: .string("waiting"), method: AgentControlMethod.toolsCall, params: ask.params))
+        try await waitUntil { runner.activeToolCalls == 1 }
+        gated = nil
+        try await waitUntil { runner.activeToolCalls == 0 }
+        session.handBack()
+        #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
+    }
+
+    enum QuestionEnd: CaseIterable { case stop, takeOver, completed, failed, processExit, delete, quit }
+
+    @Test(arguments: QuestionEnd.allCases) func endingAQuestionRejectsItsLateAnswer(_ end: QuestionEnd) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (session, runner) = try start(service, harness)
+        let client = try await connectQuestionClient(session, runner, harness)
+        let question = Task { try await client.callTool("ask_user", ["question": "First question"]) }
+        try await waitUntil { service.approvals.pending.count == 1 }
+        let old = try #require(service.approvals.pending.first)
+        switch end {
+        case .stop: session.stop()
+        case .takeOver: session.takeOver()
+        case .completed: runner.emit(.turnFinished(.completed))
+        case .failed: runner.emit(.turnFailed(.invalidRequest("Fixture failure")))
+        case .processExit: runner.fail(.invalidRequest("Fixture process ended"))
+        case .delete: await service.deleteSession(session.id)
+        case .quit: await service.endSessionsForQuit()
+        }
+        try await waitUntil { service.approvals.pending.isEmpty && runner.activeToolCalls == 0 }
+        #expect(!service.spacesWaitingForUser.contains(session.spaceID))
+        #expect(await !service.approvals.answer(old.id, with: .answer("obsolete")))
+        // Deleting the session closes the socket before a reply can arrive.
+        if end == .delete { return }
+        let result = try await question.value
+        #expect(result.status != .ok && !result.text.contains("obsolete"))
+
+        if end == .completed || end == .failed {
+            let idle = try await client.callTool("ask_user", ["question": "After the turn ended"])
+            #expect(idle.status == .refused && service.approvals.pending.isEmpty)
+            try session.send("Next question")
+        } else if end == .takeOver {
+            session.handBack()
+        } else { return }
+        let nextCall = Task { try await client.callTool("ask_user", ["question": "New question"]) }
+        try await waitUntil { service.approvals.pending.count == 1 }
+        let next = try #require(service.approvals.pending.first)
+        #expect(await !service.approvals.answer(old.id, with: .answer("obsolete")))
+        #expect(service.approvals.isPending(next.id))
+        #expect(await service.approvals.answer(next.id, with: .answer("current")))
+        #expect(try await nextCall.value.structured == ["answer": "current"])
+    }
+
+    @Test func anUnansweredQuestionExpiresAndReleasesTheCLICall() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (session, runner) = try start(service, harness)
+        let client = try await connectQuestionClient(session, runner, harness)
+        harness.now = Date()
+        service.sessionQuestionWindow = 0.2
+        let result = try await client.callTool("ask_user", ["question": "Waiting for a choice"])
+        #expect(result.status == .timeout && result.code == "notAnswered")
+        #expect(service.approvals.pending.isEmpty && session.state == .running && runner.activeToolCalls == 0)
+        #expect(service.activity.entries.last?.decision == .timedOut)
+    }
+
     @Test func aTicketBindsOnlyFromTheSessionsProcessTree() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -927,6 +1063,9 @@ import Testing
         #expect(session.personaID == FakeHost.workPersona.id)
         #expect(session.siteScope.isEmpty)
         #expect(session.origin == .outsideClient(grantID: try #require(service.grants.first).id, clientName: "agent in Agent", deniesApprovals: true))
+        let bound = try await connectQuestionClient(session, #require(harness.runners.last), harness)
+        let denied = try await bound.callTool("ask_user", ["question": "Show a question despite the task setting"])
+        #expect(denied.status == .denied && service.approvals.pending.isEmpty)
         // A space of another Persona is not the grant's.
         await #expect(throws: AgentClientError.self) { try await client.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: AgentTaskStart(task: "Read", space: "Home"))) }
         // The client lists and stops only its own sessions.
