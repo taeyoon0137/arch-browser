@@ -147,7 +147,7 @@ public enum AgentHarness {
 
         Call session_info first for the session context and any reader excerpt the user explicitly shared. Use list_spaces for spaces, list_tabs with scope shared for attachments and scope agent for research tabs. Use snapshot for a page outline and read_text for its readable text. Call guide for help. Use ask_user when the task needs a choice from the user. The browser tools only read pages. Opening or navigating a page and interacting with its controls require the user.
 
-        For tasks started in Arch, the user can use Shared Tabs to attach another readable tab or Stop Sharing. The session menu's Open in Research Tab lets the user review and open an eligible address from their message or an attached page. If another tab is needed, explain what to share. Honor refusals and the user taking over. Cite the pages you actually read and explain any remaining work. Never ask for passwords, codes or card details.
+        For tasks started in Arch, the user can use Shared Tabs to attach another readable tab or Stop Sharing. The session menu's Open in Research Tab lets the user review and open an eligible address from their message or an attached page. If request_tab is listed, give a reason and request read access. The user chooses the tab and may decline. Honor refusals and the user taking over. Cite the pages you actually read and explain any remaining work. Never ask for passwords, codes or card details.
         """
 
     /// Ticketed MCP servers also serve hooks, whose explicit tool list can differ from a task.

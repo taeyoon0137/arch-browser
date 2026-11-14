@@ -136,6 +136,8 @@ extension AgentAPISession: AgentSessionRunning {
     var modeDidChange: (() -> Void)?
     /// Dismiss this session's question cards when the user or runner ends their turn.
     var dismissQuestions: (() -> Void)?
+    /// Withdraw outstanding tab requests that display a tab whose sharing has changed.
+    var attachmentDidChange: ((UUID) -> Void)?
     private(set) var acceptsQuestions = false
 
     func setWaitingForAnswer(_ waiting: Bool) {
@@ -464,6 +466,7 @@ extension AgentAPISession: AgentSessionRunning {
         if !handles.sharedTabIDs.contains(tabID) {
             objectWillChange.send()
             handles.sharedTabIDs.append(tabID)
+            attachmentDidChange?(tabID)
         }
         if let url { scope.add(url) }
         return handles.tabs.handle(for: tabID)
@@ -474,6 +477,7 @@ extension AgentAPISession: AgentSessionRunning {
         objectWillChange.send()
         snapshots.remove(tabID)
         handles.sharedTabIDs.removeAll { $0 == tabID }
+        attachmentDidChange?(tabID)
         handles.actingSharedTabIDs.remove(tabID)
         handles.tabs.remove(tabID)
         if readerExcerpt?.tabID == tabID { readerExcerpt = nil }

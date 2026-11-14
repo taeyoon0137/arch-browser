@@ -119,6 +119,7 @@ enum AgentStepText {
         let done: String
         switch call.name {
         case "ask_user": done = "Asked you a question"
+        case "request_tab": done = "Asked you to share a tab"
         case "read_text": done = "Read the page text"
         case "snapshot": done = "Read the page outline"
         case "session_info": done = "Read the session\u{2019}s details"
