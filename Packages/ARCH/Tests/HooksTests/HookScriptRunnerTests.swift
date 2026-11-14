@@ -168,6 +168,74 @@ extension PluginValue {
                               documents: documents ?? [tab.id: tab.url!], closedTab: nil, knownProviders: [:], requestDidEnd: { _ in })
     }
 
+    @Test func aJavaScriptAgentCallUsesTheSavedRouteAndTheInvocationsAuthority() async throws {
+        defer { harness.cleanUp() }
+        let tab = harness.tab("/article", id: Probe.covered)
+        let grant = AgentRunGrant(tools: ["rename_tab"], maximumRecord: .none, returnsReply: false)
+        let options = AgentRunOptions(prompt: "Suggest a name", model: .tier(.fast), tools: ["rename_tab"])
+        let hook = instantHook("Name this tab", pageLoads, grant: HookGrant(permissions: [.agent], agent: grant), agent: options)
+        let script = """
+        arch.events.on("pageLoaded", async (event) => {
+          const options = { prompt: "Name the tab", model: { tier: "fast" } };
+          const wrong = await arch.agent.run({...options, model: {tier: "deep"}});
+          const closed = await arch.agent.run({...options, closedTab: event.tab.id});
+          const broad = await arch.agent.run({...options, tabAccess: "page"});
+          if ([wrong, closed, broad].some(result => result.code !== "notGranted")) throw Error("unexpected grant");
+          const result = await arch.agent.run(options);
+          if (result.status !== "completed" || result.reply !== undefined) throw Error("unexpected reply");
+        });
+        """
+        var requests: [AgentRunRequest] = []
+        let runner = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { request, _ in
+            requests.append(request)
+            return AgentRunResult(status: .completed, actions: [.renamedTab(tab: tab.id, name: "Article")], reply: "private reply",
+                                  model: AIModelRef(provider: AIProviderID(rawValue: "fixture"), model: "model"),
+                                  usage: AIUsage(inputTokens: 4, outputTokens: 2))
+        }
+        var run = invocation(of: hook, script: script, loading: tab, applying: false)
+        run.isTest = true
+        let result = await runner.run(run)
+        guard case .completed(let actions, let use) = result else { Issue.record("Script failed: \(result.failure ?? "unknown")"); return }
+        #expect(actions == [.renamedTab(tab: tab.id, name: "Article")])
+        #expect(use?.usage == AIUsage(inputTokens: 4, outputTokens: 2))
+        try #require(requests.count == 1)
+        let request = requests[0]
+        #expect(request.tabs == [tab.id] && request.allowedTabs == run.tabs && request.documents == run.documents)
+        #expect(request.origin == .test(hook: hook.id) && request.promptSource == .user && request.feature == .agentHook(hook.id))
+        #expect(request.options.dryRun && request.options.tools == ["rename_tab"] && request.options.tabAccess == .title)
+        #expect(request.knownProviders == run.knownProviders && request.grant == grant)
+    }
+
+    @Test func anAgentCallEndsWithTheScriptAndCannotAttachToTheNextInvocation() async throws {
+        defer { harness.cleanUp() }
+        let tab = harness.tab("/article", id: Probe.covered)
+        let options = AgentRunOptions(prompt: "Inspect", model: .tier(.fast), tools: [])
+        let grant = AgentRunGrant(tools: [])
+        let hook = instantHook("Inspect", pageLoads, grant: HookGrant(permissions: [.agent], agent: grant), agent: options)
+        let script = """
+        arch.events.on("pageLoaded", async (event) => {
+          void arch.agent.run(event.hook.agent).catch(() => {});
+          await arch.tabs.list();
+        });
+        """
+        var calls = 0
+        var cancelled = 0
+        let runner = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { _, _ in
+            calls += 1
+            do { try await Task.sleep(for: .seconds(20)) } catch { cancelled += 1 }
+            return AgentRunResult(status: .cancelled)
+        }
+        let outcome = await runner.run(invocation(of: hook, script: script, loading: tab))
+        #expect(outcome.actions == [])
+        #expect(await eventually { cancelled == 1 })
+        #expect(calls == 1 && runner.keptInstanceCount == 0)
+        var denied = hook
+        denied.grant.permissions = []
+        let check = #"arch.events.on("pageLoaded", async () => { if (arch.agent !== undefined) throw Error("agent available"); });"#
+        #expect(await runner.run(invocation(of: denied, script: check, loading: tab)).actions == [])
+        #expect(calls == 1)
+    }
+
     // MARK: Events and tabs
 
     @Test func aScriptInTheSandboxReceivesItsEventAndWithoutTabsNoTitlesOrAddresses() async throws {

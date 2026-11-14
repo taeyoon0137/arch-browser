@@ -702,6 +702,30 @@ import Testing
         #expect(registry.hooks[0].state == .active)
     }
 
+    @Test func approvingAChangedProviderRequiresItsCurrentlyDisplayedDestination() async throws {
+        defer { harness.cleanUp() }
+        let url = harness.folder.appendingPathComponent("hooks.json")
+        try await harness.start()
+        var hook = agentHook("Review model", .tabOpened, tier: .fast)
+        hook.state = .paused(.unknownProvider)
+        try harness.add(hook)
+        #expect(await eventually { FileManager.default.fileExists(atPath: url.path) })
+        let next = RegistryHarness(folder: harness.folder, keys: harness.keys)
+        var changed = harness.provider
+        changed.kind = .http(AIHTTPConfiguration(format: .chatCompletions, baseURL: URL(string: "https://changed.example.test/v1")!))
+        next.service.settings.providers = [changed]
+        next.service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: changed.id, model: "model-a")]), for: .tier(.fast))
+        let registry = try await next.start()
+        let candidates = registry.providersForReview(of: hook.id)
+        #expect(candidates == [HookKnownProvider(changed)])
+        registry.resume(hook.id)
+        registry.approveProviders([HookKnownProvider(harness.provider)], for: hook.id)
+        #expect(registry.hooks.first?.state == .paused(.unknownProvider))
+        registry.approveProviders(candidates, for: hook.id)
+        #expect(registry.hooks.first?.state == .active)
+        #expect(registry.providersForReview(of: hook.id).isEmpty)
+    }
+
     @Test func knownProvidersAreTheOnesTheUserSetUpWhileArchRan() async throws {
         defer { harness.cleanUp() }
         try await harness.start()
@@ -734,6 +758,24 @@ import Testing
     }
 
     // MARK: Run Hooks and tests
+
+    @Test func changingAnAgentHookGrantCancelsAnEditorTestAlreadyInFlight() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        var hook = try harness.add(agentHook("Test", .tabOpened, tier: .fast))
+        let tab = harness.tab()
+        harness.host.show(tab)
+        runner.behaviors[hook.id] = .hold
+        let id = hook.id
+        let test = Task { await registry.test(id, onTab: tab.id, applying: false) }
+        #expect(await eventually { runner.invocations.count == 1 })
+        hook.grant.permissions.remove(.agent)
+        hook.grant.agent = nil
+        hook.agent = nil
+        try registry.update(hook, script: nil)
+        guard case .finished(.cancelled) = await test.value else { Issue.record("The editor test kept its old grant."); return }
+        #expect(runner.cancelled == [runner.invocations[0].run])
+    }
 
     @Test func runHooksOffKeepsEveryEventFromTheHooks() async throws {
         defer { harness.cleanUp() }

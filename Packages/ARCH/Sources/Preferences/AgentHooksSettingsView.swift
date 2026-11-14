@@ -15,6 +15,13 @@ struct AgentHooksPage: View {
     @State private var opened: Set<UUID> = []
     @State private var message: String?
 
+    private struct ProviderReview {
+        let hook: UUID
+        let providers: [HookKnownProvider]
+        let description: String
+    }
+    @State private var providerReview: ProviderReview?
+
     var body: some View {
         Section {
             Toggle("Run Hooks", isOn: $registry.runsHooks)
@@ -52,6 +59,12 @@ struct AgentHooksPage: View {
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft) { sheet = nil }
+        }
+        .confirmationDialog("Allow this hook’s provider destinations?", isPresented: Binding(get: { providerReview != nil }, set: { if !$0 { providerReview = nil } }),
+                            titleVisibility: .visible, presenting: providerReview) { review in
+            Button("Allow") { registry.approveProviders(review.providers, for: review.hook) }
+        } message: { review in
+            Text(review.description)
         }
         .confirmationDialog("Delete \u{201C}\(deleting?.name ?? "")\u{201D}?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { hook in
@@ -99,8 +112,18 @@ struct AgentHooksPage: View {
             case .scriptChanged:
                 Button("Review") { edit(hook, reviewing: true) }
                     .disabled(hook.script.isShell)
-            case .user, .needsNewerArch, .unknownProvider:
-                // An unknown provider's Review, which names the provider and records it, comes with the agent run API (VII.27), which is what pauses a hook for one.
+            case .unknownProvider:
+                Button("Review") {
+                    let providers = registry.providersForReview(of: hook.id)
+                    guard !providers.isEmpty else { return registry.resume(hook.id) }
+                    let settings = AIService.shared.settings
+                    let destinations = providers.map { item in
+                        let name = settings.providers.first { $0.id == item.id }?.name ?? item.id.rawValue
+                        return "\(name) — \(item.destination)"
+                    }
+                    providerReview = ProviderReview(hook: hook.id, providers: providers, description: destinations.joined(separator: "\n"))
+                }
+            case .user, .needsNewerArch:
                 EmptyView()
             default:
                 Button("Resume") { registry.resume(hook.id) }

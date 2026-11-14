@@ -14,6 +14,30 @@ import Testing
         [HookPersonaPlaces(id: persona, name: "Personal", spaces: [HookSpace(id: work, name: "Work")])]
     }
 
+    @Test func theScriptEditorsAgentGrantStaysOffUntilItHasAnExplicitModel() throws {
+        var draft = ScriptHookDraft(new: places)
+        var hook = Hook(name: "Titles", trigger: .tabOpened)
+        try draft.configureAgent(in: &hook)
+        #expect(!hook.usesAgent && hook.agent == nil)
+        draft.enablesAgent = true
+        #expect(throws: HookRegistryError.self) { try draft.configureAgent(in: &hook) }
+        draft.agentModel = .models([AIModelRef(provider: AIProviderID(rawValue: "test"), model: "chosen")])
+        draft.agentPrompt = "Suggest a short title."
+        try draft.configureAgent(in: &hook)
+        #expect(hook.agent?.model == draft.agentModel)
+        #expect(hook.grant.agent?.tools.isEmpty == true && hook.agent?.tabAccess == .title)
+        draft.agentRenamesTabs = true
+        draft.readsPageText = true
+        try draft.configureAgent(in: &hook)
+        #expect(hook.agent?.tools == ["read_text", "rename_tab"] && hook.agent?.tabAccess == .page)
+        draft.readsPageText = false
+        try draft.configureAgent(in: &hook)
+        #expect(hook.grant.agent?.tools == ["rename_tab"] && hook.grant.agent?.tabAccess == .title)
+        draft.enablesAgent = false
+        try draft.configureAgent(in: &hook)
+        #expect(!hook.usesAgent && hook.grant.agent == nil && hook.agent == nil)
+    }
+
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
         let filter = BrowserEventFilter(scope: .places([.persona(persona), .space(work), .space(UUID())]), sites: [AISitePattern("example.org")])
         let hook = Hook(name: "Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false), filter: filter)
