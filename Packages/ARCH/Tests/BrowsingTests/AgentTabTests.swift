@@ -239,7 +239,15 @@ import Testing
         var ended: [UUID: [UUID]] = [:]
         host.userDocumentDidEnd = { tab, document in ended[tab, default: []].append(document) }
 
+        var addresses: [UUID] = []
+        host.userTabAddressDidChange = { addresses.append($0) }
+        let page = try #require(source.webContents as? PageDouble)
         let initial = source.documentID
+        let changed = address.appendingPathComponent("next")
+        page.load(changed, in: source)
+        source.webContentsDidChangeURL(page)
+        page.load(address, in: source)
+        #expect(addresses == [source.id, source.id] && source.documentID == initial && ended.isEmpty)
         source.webContents(source.webContents, didCommitDocumentAt: address)
         let reloaded = source.documentID
         #expect(reloaded != initial && ended[source.id] == [initial])
@@ -438,6 +446,7 @@ private final class MonitorDouble: AgentTabMonitor {
     }
 
     func userDocumentDidEnd(in tabID: UUID, document: UUID) {}
+    func userTabAddressDidChange(_ tabID: UUID) {}
 
     func agentTabDidClose(_ tab: Tab, owner: UUID) {}
 }

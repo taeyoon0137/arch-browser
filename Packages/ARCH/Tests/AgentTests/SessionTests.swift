@@ -581,6 +581,17 @@ import UserNotifications
         let list = try #require(session.items.last).pagesRead
         try #require(list.map(\.handle) == ["t1", "t2"])
         #expect(list.compactMap { service.currentReadPage($0, in: session)?.id } == [one.id, two.id])
+        var refreshes = 0
+        let observer = session.objectWillChange.sink { refreshes += 1 }
+        defer { observer.cancel() }
+        host.userTabAddressDidChange?(unrelated.id)
+        #expect(refreshes == 0)
+        host.tabs[0].url = URL(string: "https://fixture.example/first#chapter")
+        host.userTabAddressDidChange?(one.id)
+        #expect(refreshes == 1 && service.currentReadPage(list[0], in: session) == nil)
+        host.tabs[0].url = one.url
+        host.userTabAddressDidChange?(one.id)
+        #expect(refreshes == 2 && service.currentReadPage(list[0], in: session)?.id == one.id)
         try session.send("Continue without reading.")
         runner.emit(.text("t1 and t2"))
         runner.emit(.turnFinished(.completed))

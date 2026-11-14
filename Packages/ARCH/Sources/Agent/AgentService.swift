@@ -173,6 +173,12 @@ import Foundation
                 session.objectWillChange.send()
             }
         }
+        host.userTabAddressDidChange = { [weak self] tabID in
+            guard let self else { return }
+            for session in self.sessions where session.origin == .app && !session.hasEnded && session.handles.sharedTabIDs.contains(tabID) {
+                session.objectWillChange.send()
+            }
+        }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
         host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }

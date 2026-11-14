@@ -284,6 +284,7 @@ import LiveFolders
 /// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
 protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
+    func userTabAddressDidChange(_ tabID: UUID)
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
     func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
     /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).
@@ -302,7 +303,9 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2), with an empty title: the tab's title is still the previous page's, and the new page's first title fills it.
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
+        let previous = url
         url = webContents.url?.withoutCredentials
+        if agentOwnerID == nil, url != previous { agentMonitor?.userTabAddressDidChange(id) }
         if let originalEngineState, let url, originalEngineState.url != url { self.originalEngineState = nil }
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
