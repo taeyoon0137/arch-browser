@@ -50,6 +50,10 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
         self.engine = engine
         self.agentOwnerID = agentOwnerID
     }
+
+    func showsSameDocument(as other: Self) -> Bool {
+        id == other.id && documentID == other.documentID && url == other.url
+    }
 }
 
 /// Whose agent tabs these are: an outside client's grant, and in-app sessions with plan task VII.17.1 (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.

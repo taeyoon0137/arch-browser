@@ -160,7 +160,10 @@ public struct AgentComposer: View {
                     .lineLimit(3...10)
                     .onSubmit(start)
                 if let tab = attachableTab, attachesTab, !usesAgentsPersona {
-                    AgentTabChip(tab: tab) { attachesTab = false }
+                    AgentTabChip(tab: tab) {
+                        attachesTab = false
+                        sharesExcerpt = false
+                    }
                     if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
                         Toggle("Share reader excerpt", isOn: $sharesExcerpt)
                             .toggleStyle(.checkbox)
@@ -179,6 +182,18 @@ public struct AgentComposer: View {
                             }.frame(maxHeight: 120)
                         }.font(.system(size: 12))
                     }
+                } else if !attachesTab, !usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
+                    HStack {
+                        Button("Reattach Reviewed Tab") {
+                            guard service.canReattach(tab, in: context.personaID) else {
+                                problem = "The reviewed page changed or is no longer available."
+                                return
+                            }
+                            attachesTab = true
+                        }
+                        AgentAttachmentLabel(tab: tab)
+                    }
+                    .controlSize(.small)
                 }
                 Divider()
                 options
