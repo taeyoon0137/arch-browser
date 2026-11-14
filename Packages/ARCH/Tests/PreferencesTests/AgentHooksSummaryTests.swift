@@ -38,6 +38,38 @@ import Testing
         #expect(!hook.usesAgent && hook.grant.agent == nil && hook.agent == nil)
     }
 
+    @Test func theGuidedEditorProducesOnlyItsTypedGrantAndKeepsEditedScript() throws {
+        var draft = ScriptHookDraft(new: places, guided: true)
+        #expect(throws: HookRegistryError.self) { try draft.makeHook() }
+        draft.kind = .tabClosed
+        draft.closeReasons = [.user]
+        draft.agentPrompt = "Name the remaining tab."
+        draft.agentModel = .tier(.deep)
+        draft.agentRenamesTabs = true
+        draft.seconds = 10
+        draft.rounds = 1
+        draft.toolCalls = 2
+        draft.agentRecord = .activity
+        draft.dailyLimit = 11
+        let (hook, bytes) = try draft.makeHook()
+        #expect(hook.trigger == .tabClosed(reasons: [.user]))
+        #expect(hook.grant.permissions == [.agent] && hook.agent?.model == .tier(.deep))
+        #expect(hook.grant.agent?.tools == ["rename_tab"] && hook.grant.agent?.tabAccess == .title)
+        #expect(hook.grant.agent?.minimumRecord == .activity && hook.grant.agent?.maximumRecord == .activity)
+        #expect(hook.agent?.limits == hook.grant.agent?.limits && hook.agent?.limits.rounds == 1)
+        #expect(hook.timing.runsPerDay == 11 && hook.grant.agent?.runsPerDay == 11)
+        #expect(bytes == Data(AgentHookTemplate.script(for: .tabClosed).utf8))
+        draft.editGeneratedScript()
+        draft.script = "const mine = true;"
+        draft.kind = .tabSelected
+        draft.readsTabs = true
+        let custom = try draft.makeHook()
+        #expect(custom.script == Data(draft.script.utf8) && custom.hook.grant.permissions == [.tabs, .agent])
+        draft.generated = true
+        let restored = try draft.makeHook()
+        #expect(restored.script == Data(AgentHookTemplate.script(for: .tabSelected).utf8) && restored.hook.grant.permissions == [.agent])
+    }
+
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
         let filter = BrowserEventFilter(scope: .places([.persona(persona), .space(work), .space(UUID())]), sites: [AISitePattern("example.org")])
         let hook = Hook(name: "Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false), filter: filter)

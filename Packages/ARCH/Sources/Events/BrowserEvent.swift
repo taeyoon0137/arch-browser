@@ -68,7 +68,7 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
     }
 }
 
-public enum BrowserTabCloseReason: String, Codable, Hashable, Sendable {
+public enum BrowserTabCloseReason: String, CaseIterable, Codable, Hashable, Sendable {
     /// `TabCloseReason`'s cases, then closes by code and with a deleted space or Persona.
     case user, page, crash, archive, download, webExtension, plugin, hook, agent, spaceDeleted
 }

@@ -100,6 +100,8 @@ public enum HookRunOutcome: Sendable {
 public struct HookAgentUse: Equatable, Sendable {
     public var model: AIModelRef?
     public var usage: AIUsage
+    /// Shown only in the editor for its own explicit test.
+    public var reply: String? = nil
 
     public init(model: AIModelRef?, usage: AIUsage) {
         self.model = model
@@ -249,6 +251,8 @@ public final class HookRegistry: ObservableObject {
     private var limiter = BrowserEventRateLimiter()
     private let slots = HookRunSlots(total: HookRegistry.maximumRunning, perHook: HookRegistry.maximumRunningPerHook, waiting: HookRegistry.maximumWaiting)
     private var failureCounts: [UUID: Int] = [:]
+    /// The edited hook for each draft test, so changing its grant also ends its preview.
+    private var draftOwner: [UUID: UUID] = [:]
     /// Scripts that must stop immediately when their grant changes, including tests outside the scheduler.
     private var activeRuns: [UUID: HookRun] = [:]
     /// Each tab's last loaded document, which `newAddress` compares.
@@ -438,7 +442,7 @@ public final class HookRegistry: ObservableObject {
 
     /// The scheduler owns event runs. The registry owns the editor’s test runs.
     private func cancelRuns(of hook: Hook) {
-        for run in activeRuns.values where run.hookID == hook.id { run.cancelScript() }
+        for run in activeRuns.values where run.hookID == hook.id || draftOwner[run.hookID] == hook.id { run.cancelScript() }
         scheduler.cancel(owner: hook.owner)
     }
 
@@ -479,6 +483,9 @@ public final class HookRegistry: ObservableObject {
 
     /// Stop All Agents: stops the running runs of every hook with `agent` and pauses each active one until the user resumes it.
     public func stopAgentHooks() {
+        for run in activeRuns.values {
+            if let owner = draftOwner[run.hookID], hook(withID: owner)?.usesAgent != true { run.cancelScript() }
+        }
         var changed = false
         for index in hooks.indices where hooks[index].usesAgent {
             cancelRuns(of: hooks[index])
@@ -878,18 +885,44 @@ public final class HookRegistry: ObservableObject {
     public func test(_ id: UUID, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
         guard isReady, let hook = hook(withID: id), !store.isUnreadable(id) else { return .notRun("Arch cannot run this hook.") }
         guard !hook.script.isShell || allowsShellScripts else { return .notRun("Shell scripts are off.") }
-        guard let tab = host.tab(tabID) else { return .notRun("The tab is no longer open.") }
-        // As for its events, a hook reaches only the tabs its filter covers, never an agent tab (hook decision 16).
-        guard Self.covers(hook.filter, tab) else { return .notRun("This hook's filter does not cover this tab.") }
-        guard let event = Self.testEvent(for: hook.trigger, tab: tab) else { return .notRun("A test on a tab cannot stand in for a finished download.") }
         guard let script = store.script(for: hook) else {
             pauseHook(id, .scriptChanged)
             return .notRun("Its script changed outside Arch.")
         }
+        return await test(hook, script: script, onTab: tabID, applying: applying)
+    }
+
+    /// Runs the editor's checked bytes in memory. A separate ID gives the draft its own AI scope while a saved hook remains active.
+    public func testDraft(_ draft: Hook, script: Data, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
+        guard isReady, case .javaScript = draft.script, draft.usesAgent, draft.agent != nil else { return .notRun("Choose an agent model first.") }
+        if case .outsideClient = draft.origin { return .notRun("This editor tests only your own hooks.") }
+        var preview = draft
+        if hook(withID: preview.id) != nil { preview.id = UUID() }
+        guard draftOwner[preview.id] == nil else { return .notRun("This draft is already running a test.") }
+        preview.script = preview.script.withDigest(HookStore.digest(of: script))
+        do { preview = try Self.checked(preview) } catch { return .notRun(error.localizedDescription) }
+        register(preview)
+        draftOwner[preview.id] = draft.id
+        defer {
+            draftOwner[preview.id] = nil
+            if let saved = hook(withID: preview.id) { register(saved) } else { ai.unregister(.agentHook(preview.id)) }
+        }
+        return await test(preview, script: script, onTab: tabID, applying: applying)
+    }
+
+    private func test(_ hook: Hook, script: Data, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
+        let id = hook.id
+        guard let tab = host.tab(tabID) else { return .notRun("The tab is no longer open.") }
+        // As for its events, a hook reaches only the tabs its filter covers, never an agent tab (hook decision 16).
+        guard Self.covers(hook.filter, tab) else { return .notRun("This hook's filter does not cover this tab.") }
+        guard let event = Self.testEvent(for: hook.trigger, tab: tab) else { return .notRun("A test on a tab cannot stand in for a finished download.") }
         let run = HookRun(hookID: id, event: event, closedTab: hook.trigger.kind == .tabClosed ? host.closingTab(tabID) : nil, isTest: true)
         let deadline = ContinuousClock.now + hook.timing.timeout
-        guard let invocation = invocation(for: hook, run: run, script: script, deadline: deadline, applying: applying, requestDidEnd: { _ in }) else {
+        guard var invocation = invocation(for: hook, run: run, script: script, deadline: deadline, applying: applying, requestDidEnd: { _ in }) else {
             return .notRun("This hook gets no events from this site, since the site is excluded from AI.")
+        }
+        if draftOwner[id] != nil, !store.hasFile {
+            invocation.knownProviders = Dictionary(ai.settings.providers.map { ($0.id, HookKnownProvider($0).destination) }, uniquingKeysWith: { first, _ in first })
         }
         let runner = runner(for: hook)
         run.startedAt = .now
