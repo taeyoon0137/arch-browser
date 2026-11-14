@@ -28,6 +28,7 @@ final class UnloadedWebContents: EngineWebContents {
     var canGoForward: Bool { false }
     var isAudible: Bool { false }
     var isCapturingMedia: Bool { false }
+    var isInPictureInPicture: Bool { false }
     var closingStopsDownloads: Bool { false }
     var devTools: (any EngineDevTools)? { nil }
 

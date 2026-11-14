@@ -1650,6 +1650,7 @@ extension BrowserSession {
         let page = tab.webContents
         var exclusions: Set<UnloadExclusion> = []
         if tab.isAudible || page.mediaSession.playbackState == .playing { exclusions.insert(.media) }
+        if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
         if tab.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }
         if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
@@ -1664,7 +1665,7 @@ extension BrowserSession {
         return UnloadCandidate(id: tab.id, kind: kind, lastActivatedAt: tab.lastActivatedAt, exclusions: exclusions)
     }
 
-    /// Asks the tab's page to leave as closing does, but answers a Chromium page's leave-page question with Stay without a sheet, and unloads the tab in place once the page agrees; a page that stays keeps its tab loaded until the next try. WebKit agrees at once, so there its typed text exclusion keeps a draft. A close the user asks for meanwhile takes over the question (`whenPageAgreesToLeave`), and the page's answer then reaches only that close.
+    /// Asks the tab's page to leave as closing does, but answers a Chromium page's leave-page question with Stay without a sheet, and unloads the tab in place once the page agrees; a page that stays keeps its tab loaded until the next try. WebKit agrees at once, so there its typed text exclusion keeps a draft. A close the user asks for meanwhile takes over the question (`whenPageAgreesToLeave`), and the page's answer then reaches only that close. A Chromium tab that a window starts to show meanwhile still unloads once its page agrees, since CEF is already closing the browser, and loads again at once without its page state (`docs/bookmarks.md`, risk 9).
     private func unloadAutomatically(_ tab: Tab) {
         let page = tab.webContents
         tab.answersBeforeUnloadWithStay = true

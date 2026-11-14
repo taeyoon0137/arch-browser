@@ -338,6 +338,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var isAudible = false
     /// Follows CEF's reports of the page's video and audio sources, which cover the camera and the microphone.
     public private(set) var isCapturingMedia = false
+    /// From the engine's start of picture in picture until AVKit has finished stopping it.
+    public var isInPictureInPicture: Bool { pictureInPicture != nil }
     /// Whether the page is in the fullscreen that it entered through the Fullscreen API.
     private var isFullscreen = false
     public var mediaSession: any EngineMediaSession { chromiumMediaSession }

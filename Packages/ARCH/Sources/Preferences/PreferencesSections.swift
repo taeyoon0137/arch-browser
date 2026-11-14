@@ -123,7 +123,7 @@ struct SidebarSection: View {
                 if unloadAfterHours == 0 {
                     aiFootnote("Tabs keep their pages until you close them, also when the Mac runs low on memory.")
                 } else {
-                    aiFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")
+                    aiFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video with sound, show a video in picture in picture, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")
                 }
             }
         }

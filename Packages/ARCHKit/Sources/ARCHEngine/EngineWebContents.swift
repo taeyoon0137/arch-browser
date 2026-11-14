@@ -63,6 +63,8 @@ public protocol EngineWebContents: AnyObject {
     var isAudible: Bool { get }
     /// Whether the page uses the camera or the microphone, also while the page has muted it. `webContentsDidChangeMediaCapture` reports each change.
     var isCapturingMedia: Bool { get }
+    /// Whether a video of the page plays in the system's picture-in-picture window, whose window closes with the page, also while the video is paused or muted. Read when needed; no delegate call reports changes.
+    var isInPictureInPicture: Bool { get }
     var zoomFactor: Double { get set }
 
     var navigationController: any EngineNavigationController { get }

@@ -114,7 +114,7 @@ import Testing
         let tab = restoredTab(record)
         let page = tab.webContents
         #expect(tab.engineKind == .webKit)
-        #expect(!page.isLoading && !page.canGoBack && !page.canGoForward && !page.isAudible)
+        #expect(!page.isLoading && !page.canGoBack && !page.canGoForward && !page.isAudible && !page.isInPictureInPicture)
         #expect(page.devTools == nil)
         #expect(page.mediaSession.playbackState == .none)
         #expect(page.navigationController.backForwardList.backList.isEmpty)
@@ -170,6 +170,7 @@ final class PageStub: EngineWebContents {
     let canGoBack = false
     let canGoForward = false
     let isAudible = false
+    let isInPictureInPicture = false
     var zoomFactor = 1.0
     lazy var view = NSView()
     private let navigation = NavigationStub()

@@ -246,6 +246,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     private var dismissPendingDialog: (() -> Void)?
     /// The documents, in any frame, whose media elements play sound.
     var audibleDocuments: Set<String> = []
+    /// The documents, in any frame, with a video in picture in picture.
+    var pictureInPictureDocuments: Set<String> = []
     /// The frame of each document that reports media, where its media actions run.
     var mediaFrames: [String: WKFrameInfo] = [:]
     lazy var webKitMediaSession = ScriptMediaSession { [weak self] document, action in self?.performMediaAction(action, inDocument: document) }
@@ -348,6 +350,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var isAudible: Bool { !audibleDocuments.isEmpty }
     /// WebKit reports the camera and the microphone as active or muted while the page holds them; it has no public state for screen sharing.
     public var isCapturingMedia: Bool { webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none }
+    /// WebKit has no public state for picture in picture, so the media script reports each document's (`WebKitAudibleScript`).
+    public var isInPictureInPicture: Bool { !pictureInPictureDocuments.isEmpty }
     public var zoomFactor: Double {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }

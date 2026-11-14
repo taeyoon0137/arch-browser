@@ -37,6 +37,8 @@ enum UnloadPressure {
 enum UnloadExclusion: CaseIterable {
     /// The page plays sound through an audio or video element in its document, or its media session reports playing. Both engines learn this from a media script that watches the document's elements (`WebKitAudibleScript`, the bridge's `kAudibleScript`), so sound from Web Audio or from an element outside the document keeps no tab loaded.
     case media
+    /// A video of the page plays in the system's picture-in-picture window, also paused or muted, which unloading would close (`EngineWebContents.isInPictureInPicture`).
+    case pictureInPicture
     /// The page uses the camera or the microphone (`EngineWebContents.isCapturingMedia`).
     case capture
     /// The user typed into the page since it loaded (`Tab.hasTypedInput`).
