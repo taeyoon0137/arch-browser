@@ -63,6 +63,35 @@ import Testing
         #expect(session.runtime(for: .chromium, in: persona.id).kind == .chromium)
     }
 
+    @Test func aClosedPinReopensAlongsideItsReinstatedSyncRecordWithDistinctIDs() async throws {
+        try await temporarySession { session, _ in
+            let space = try #require(session.spaces.first)
+            let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { session.windowWillClose(window) }
+            let saved = SavedPage(url: URL(string: "https://reader.example/saved")!, title: "Saved")
+            let localURL = URL(string: "https://reader.example/chapter")!
+            let tab = session.adopt(PageStub(engine: .webKit, url: localURL), spaceID: space.id, personaID: space.resolvedPersonaID, pinned: true, select: false)
+            tab.savedPage = saved
+            let before = session.sidebarSyncState
+            let removed = SidebarSyncState(personas: before.personas, spaces: before.spaces, folders: before.folders, favorites: before.favorites, pinnedTabs: [])
+            var deletions = SidebarSyncDeletions()
+            deletions.tabs.insert(tab.id)
+            session.applySidebarSync(removed, deletions: deletions)
+            #expect(session.hasClosedTabs)
+            session.applySidebarSync(before, deletions: .init())
+            let reinstated = try #require(session.tabs.first)
+            #expect(reinstated.id == tab.id && !reinstated.isLoaded)
+
+            session.reopenLastClosedTab()
+            let recovered = try #require(window.selectedTab)
+            #expect(Set(session.tabs.map(\.id)).count == session.tabs.count)
+            #expect(recovered !== reinstated && recovered.id != reinstated.id)
+            #expect(recovered.url == localURL && recovered.savedPage == saved && recovered.personaID == tab.personaID)
+            #expect(reinstated.id == tab.id && reinstated.savedPage == saved && !reinstated.isLoaded)
+            #expect(!session.hasClosedTabs)
+        }
+    }
+
     @Test func aNewPinStaysUnloadedWhileAnExistingPageKeepsItsCurrentAddressAndReplayClosesOnlyOnce() async throws {
         try await temporarySession { session, directory in
             let current = session.sidebarSyncState

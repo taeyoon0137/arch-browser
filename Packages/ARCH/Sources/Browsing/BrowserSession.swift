@@ -1250,7 +1250,7 @@ final class EngineRuntime {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab under its own ID in its original space and folder, with its saved page when it was pinned, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
+    /// Reopens the newest closed tab in its original space and folder, keeping its ID when available and its saved page when pinned, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
@@ -1262,7 +1262,10 @@ final class EngineRuntime {
             sidebarTarget().currentSpaceID
         }
         let personaID = personaID(ofSpace: spaceID)
-        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true, preferredEngine: record.engine ?? defaultEngine)
+        // Sync can reinstate a pin while its local closed record still waits. Open tabs keep their IDs, as they do when loading a snapshot.
+        let id = record.id ?? UUID()
+        let idInUse = allTabs.contains { $0.id == id } || savedFavoriteTabs.values.contains { $0.id == id }
+        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: idInUse ? UUID() : id, spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true, preferredEngine: record.engine ?? defaultEngine)
         // Nothing else enters a live folder (live folder rule 4).
         let folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
         tab.reopen(record, folderID: folderTree.isLive(folderID) ? nil : folderID)
