@@ -526,6 +526,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseWheel(at:deltaX:deltaY:modifiers:));
 /// `keyCode` is the macOS virtual key code, and the characters are AppKit's, one UTF-16 unit each; CEF builds an AppKit key event from them. A character event alone types its character as an input method's text does, with a keypress.
 - (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendKeyEvent(_:keyCode:character:unmodifiedCharacter:modifiers:));
+/// Adds `word` to the profile's custom dictionary and to the system's spelling dictionary, which clears its marks in the page (`CefBrowserHost::AddWordToDictionary`).
+- (void)addWordToDictionary:(NSString *)word NS_SWIFT_NAME(addWordToDictionary(_:));
 @end
 
 NS_ASSUME_NONNULL_END

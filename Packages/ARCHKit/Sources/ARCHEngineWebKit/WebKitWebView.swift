@@ -38,7 +38,8 @@ final class WebKitWebView: WKWebView {
         super.willOpenMenu(menu, with: event)
         let element = pendingElement ?? EngineContextMenuElement()
         pendingElement = nil
-        contents?.prepareContextMenu(menu, for: element)
+        guard let contents else { return }
+        contents.prepareContextMenu(menu, for: element, at: contents.view.convert(event.locationInWindow, from: nil))
     }
 
     /// Select All gets its own action, because WebKit's editable menu has none on macOS.
