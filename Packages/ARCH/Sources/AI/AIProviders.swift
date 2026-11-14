@@ -67,6 +67,12 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         }
     }
 
+    /// The subscription tool this provider uses for sessions, if it is a CLI preset.
+    public var commandLineAgent: AIAgentKind? {
+        guard case .commandLine(let configuration) = kind else { return nil }
+        return configuration.agent
+    }
+
     /// The model's capabilities. `agent` is derived and no override adds or removes it (agent decision 14): a model of a Claude Code or Codex preset has it, and an HTTP model has it while it has `tools`.
     public func capabilities(of model: AIModelConfiguration) -> Set<AIModelCapability> {
         var capabilities = (model.capabilities ?? defaultCapabilities).subtracting([.agent])

@@ -304,7 +304,13 @@ private struct AgentTranscriptRow: View {
         if let usage {
             parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
         }
-        parts.append("Included in your subscription")
+        if let model, let provider = settings.providers.first(where: { $0.id == model.provider }) {
+            if provider.commandLineAgent != nil {
+                parts.append("Included in your subscription")
+            } else if let usage, let cost = settings.estimatedCost(of: usage, on: model) {
+                parts.append("about \(cost.amount.formatted(.currency(code: cost.currency).precision(.fractionLength(2...4))))")
+            }
+        }
         return parts.joined(separator: " \u{00B7} ")
     }
 }

@@ -42,19 +42,19 @@ import Testing
         runner.startProcess(Self.cliProcess)
         // This process is outside the CLI's tree.
         await #expect(throws: AgentClientError.refused(AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))) {
-            try await TestClient(harness.location).hello(ticket: session.ticket.text)
+            try await TestClient(harness.location).hello(ticket: session.ticket?.text)
         }
         #expect(session.items.contains { $0.kind == .notice("Another program tried to use this session\u{2019}s access.") })
         #expect(service.activity.entries.last?.event == .refusedPeer && service.activity.entries.last?.sessionID == session.id)
         // A process that reused the CLI's process ID after it ended is not the CLI.
         harness.addProcess(getpid(), parent: Self.cliProcess)
         harness.addProcess(Self.cliProcess, parent: 1, start: AgentProcessStart(seconds: 1_700_000_100, microseconds: 0))
-        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket.text) }
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket?.text) }
         // Inside the tree, the connection is the session's, with outside access off, but only for `arch-mcp`.
         harness.addProcess(Self.cliProcess, parent: 1, start: Self.cliStart)
-        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket.text, client: .cli) }
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket?.text, client: .cli) }
         let bound = try TestClient(harness.location)
-        #expect(try await bound.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await bound.hello(ticket: session.ticket?.text).status == .bound)
         #expect(try await bound.call(AgentControlMethod.grantShow) == AgentJSON.object(["protocol": 1, "version": "9.9.9", "status": "bound"]))
         // Another ticket, even one of the same length, binds nothing.
         await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: AgentSessionTicket.make().text) }
@@ -67,7 +67,7 @@ import Testing
         let service = try await harness.makeOpenService()
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
-        let ticket = session.ticket.text
+        let ticket = session.ticket?.text
         let bound = try TestClient(harness.location)
         #expect(try await bound.hello(ticket: ticket).status == .bound)
         await service.deleteSession(session.id)
@@ -124,7 +124,7 @@ import Testing
         let request = try #require(harness.requests.last)
         #expect(request.instructions == AgentHarness.instructions)
         #expect(request.toolServer.arguments == ["--session"])
-        #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: session.ticket.text])
+        #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: try #require(session.ticket).text])
         #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "read_text", "guide"])
         #expect(request.skills?.plugin == "arch")
         #expect(request.skills?.names == AgentHarness.sessionSkills.map(\.name))
@@ -168,7 +168,7 @@ import Testing
 
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        _ = try await client.hello(ticket: session.ticket.text)
+        _ = try await client.hello(ticket: try #require(session.ticket).text)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         let info = try await client.callTool("session_info")
@@ -235,7 +235,7 @@ import Testing
         let (session, runner) = try start(service, harness, mode: .readOnly)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "read_text", "guide"]])
         // Before `ready`, a call waits and is then refused, so no page data flows before the start check passed.
         let early = try await client.callTool("list_tabs")
@@ -286,7 +286,7 @@ import Testing
         #expect(session.handles.sharedTabIDs == [tab.id])
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
         let result = try await client.callTool("read_text", ["tab": "t1", "max_chars": 5])
         #expect(result.status == .ok)
@@ -322,7 +322,7 @@ import Testing
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         #expect(try await client.callTool("list_spaces").status == .ok)
@@ -342,7 +342,7 @@ import Testing
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         session.takeOver()
@@ -444,6 +444,9 @@ import Testing
     @Test func aTaskFromAnOutsideClientIsCappedAndAddsNoScope() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
+        let apiModel = AIModelRef(provider: AIProviderID(rawValue: "http"), model: "api-model")
+        harness.agentModels.append(apiModel)
+        harness.sessionRoute = { _ in .http(pinnedModel: apiModel) }
         let service = try await harness.makeOpenService()
         harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.workPersona.id), level: .actInAgentTabs, scopes: AgentGrantScopes(startTasks: true))]
         let client = try TestClient(harness.location)
@@ -454,6 +457,9 @@ import Testing
         #expect(answer.mode == .askBeforeActing)
         #expect(answer.place == "Work / Office")
         let session = try #require(service.session(withID: answer.id))
+        #expect(session.commandLineRunner != nil)
+        #expect(session.ticket != nil)
+        await #expect(throws: AgentClientError.self) { try await client.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: AgentTaskStart(task: "Read", model: apiModel.model))) }
         #expect(session.personaID == FakeHost.workPersona.id)
         #expect(session.siteScope.isEmpty)
         #expect(session.origin == .outsideClient(grantID: try #require(service.grants.first).id, clientName: "agent in Agent", deniesApprovals: true))

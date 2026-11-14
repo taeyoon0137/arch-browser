@@ -1,4 +1,4 @@
-// The composer that starts an in-app session (docs/agents.md, In the browser ▸ Starting a session; Model choice and fallbacks): the task, the selected tab attached as a removable chip unless its site is excluded, the place as "Persona / Space" with Use the Agents Persona, the mode from Settings, the model menu with the `agent` route's first model, and the effort menu where the tool takes one. Without a model that can run a session, it says how to add Claude Code or Codex. A task that starts with `/` in a Claude Code session with Arch's skills is refused and stays in the field.
+// The composer that starts an in-app session (docs/agents.md, In the browser ▸ Starting a session; Model choice and fallbacks): the task, the selected tab attached as a removable chip unless its site is excluded, the place as "Persona / Space" with Use the Agents Persona, the mode from Settings, the model menu with the `agent` route's first model, and the effort menu where the tool takes one. Without a model that can run a session, it says how to connect an API-key model, Claude Code, or Codex. A task that starts with `/` in a Claude Code session with Arch's skills is refused and stays in the field.
 import AgentControl
 import AI
 import SwiftUI
@@ -128,9 +128,9 @@ public struct AgentComposer: View {
     public var body: some View {
         if models.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Add Claude Code or Codex in Settings \u{25B8} AI")
+                Text("Connect an agent model in Settings \u{25B8} AI")
                     .font(.system(size: 13, weight: .medium))
-                Text("Agent tasks run on your own Claude or ChatGPT subscription through its command-line tool, signed in in Arch\u{2019}s terminal.")
+                Text("Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch\u{2019}s terminal.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Button("Open AI Settings", action: actions.openAISettings)

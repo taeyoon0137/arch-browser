@@ -801,7 +801,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(throws: AIError.self) { try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer)) }
     }
 
-    @Test func aSessionWithoutAChosenModelStartsOnTheRoutesPresetsOrElseOnTheComposersFirstModel() throws {
+    @Test func sessionsUseTheFirstEligibleModelFromTheirRouteAndOfferOtherModelsInTheComposer() throws {
         let directory = temporaryDirectory()
         let keys = InMemoryKeys()
         let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
@@ -822,26 +822,27 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
             try service.agentSessionCandidates(named: ref, for: agentFeature).map(\.ref)
         }
 
-        // Agent Tasks without models falls back to the default route, which has no preset model: the session starts on the composer's first model.
         settings.setRoute(AIRoute(isEnabled: true, models: []), for: .agent)
         settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .defaultRoute)
+        #expect(try candidates() == [apiModel])
+        #expect(service.agentSessionModels().first == apiModel)
+        #expect(try service.agentSessionRoute(for: nil) == .http(pinnedModel: nil))
+        settings.setRoute(AIRoute(isEnabled: false, models: []), for: .defaultRoute)
         #expect(try candidates() == [haiku])
-        #expect(service.agentSessionModels().first == haiku)
-        settings.setRoute(AIRoute(isEnabled: true, models: []), for: .defaultRoute)
-        #expect(try candidates() == [haiku])
-        settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .agent)
-        #expect(try candidates() == [haiku])
-        // A route with preset models keeps their order, as the composer's menu does, and its fallbacks.
+        #expect(try service.agentSessionRoute(for: nil) == .commandLine)
         settings.setRoute(AIRoute(isEnabled: true, models: [apiModel, luna, sonnet]), for: .agent)
-        #expect(try candidates() == [luna, sonnet])
-        #expect(Array(service.agentSessionModels().prefix(2)) == [luna, sonnet])
-        // A model the user picks serves alone; an API model cannot.
-        #expect(try candidates(named: haiku) == [haiku])
-        #expect(throws: AIError.self) { try candidates(named: apiModel) }
-        // Without a preset, nothing can run a session, and the palette and the reader offer none.
+        #expect(try candidates() == [apiModel, luna, sonnet])
+        #expect(Array(service.agentSessionModels().prefix(3)) == [apiModel, luna, sonnet])
+        #expect(try service.agentSessionCandidates(named: nil, for: agentFeature, commandLineOnly: true).map(\.ref) == [luna, sonnet])
+        #expect(try service.agentSessionRoute(for: apiModel) == .http(pinnedModel: apiModel))
+        #expect(try service.agentSessionRoute(for: haiku) == .commandLine)
         settings.providers = [api]
-        #expect(throws: AIError.self) { try candidates() }
+        #expect(try candidates() == [apiModel])
+        settings.setRoute(AIRoute(isEnabled: true), for: .agent)
+        #expect(try service.agentSessionRoute(for: nil) == .http(pinnedModel: apiModel))
+        settings.setRoute(AIRoute(isEnabled: false, models: [apiModel]), for: .agent)
         #expect(service.agentSessionModels().isEmpty)
+        #expect(throws: AIError.self) { try service.agentSessionRoute(for: apiModel) }
     }
 
     @Test func aPresetsOrdinaryRequestGetsPageDataAndRunsWithoutTools() async throws {
