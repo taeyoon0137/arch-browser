@@ -116,6 +116,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
     static func describe(_ event: AIAgentEvent) -> String {
         switch event {
         case .ready(let model): return "ready:\(model.model)"
+        case .modelChanged(let ref): return "model:\(ref.model)"
         case .processReady: return "processReady"
         case .text(let text): return "text:\(text)"
         case .thinking: return "thinking"

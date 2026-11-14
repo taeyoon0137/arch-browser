@@ -90,6 +90,8 @@ public enum AIAgentEvent: Sendable {
     case ready(AIModelRef)
     /// The first output of a later CLI process, after its own start check passed, as `ready` is the first process's: a new Claude Code process after one that stopped, or each Codex turn after the first. The `Agent` module holds a session's calls again from each process start until it.
     case processReady
+    /// The model the CLI subsequently reports for a reply on the same provider.
+    case modelChanged(AIModelRef)
     case text(String)
     case thinking(String)
     /// A turn's tokens, also recorded under the session's feature and model. For Codex, what the turn added to the thread's running total.
@@ -106,6 +108,7 @@ enum AIAgentStreamEvent {
     case started(threadID: String?)
     /// The model's output: Claude Code's `message_start`, or a Codex item other than an error.
     case output
+    case reportedModel(String)
     case text(String)
     case thinking(String)
     case notice(String)
@@ -330,6 +333,8 @@ public final class AIAgentSession {
         var usage: AIUsage?
         var isStopping = false
         var didStartProcess = false
+        var hasOutput = false
+        var reportedModel: String?
 
         init(candidate: AIRouteModel) {
             self.candidate = candidate
@@ -429,7 +434,9 @@ public final class AIAgentSession {
         // Only a turn that reached the tool counts, as for other requests.
         if turn.didStartProcess {
             let isError = if case .finished = outcome { false } else { true }
-            service.usage.record(feature: feature, provider: candidate.provider, model: candidate.model, usage: turn.usage, isError: isError)
+            var usageModel = candidate.model
+            if let reported = turn.reportedModel { usageModel.name = reported }
+            service.usage.record(feature: feature, provider: candidate.provider, model: usageModel, usage: turn.usage, isError: isError)
         }
         await limiter.release(after: release)
         return (outcome, turn.reply)
@@ -642,16 +649,21 @@ public final class AIAgentSession {
             if thread != threadID { threadUsage = nil }
             threadID = thread
         case .output:
-            guard !processHasOutput else { return }
-            processHasOutput = true
-            guard model == nil else {
-                continuation.yield(.processReady)
-                return
+            turn.hasOutput = true
+            let serving = AIModelRef(provider: turn.candidate.ref.provider, model: turn.reportedModel ?? turn.candidate.ref.model)
+            if model == nil {
+                // Keep the configured route for later CLI invocations, including a model alias or the tool's default.
+                candidates = [turn.candidate]
+                model = serving
+                continuation.yield(.ready(serving))
+            } else {
+                updateReportedModel(serving)
+                if !processHasOutput { continuation.yield(.processReady) }
             }
-            // The model replied, so the conversation stays on it from here on.
-            model = turn.candidate.ref
-            candidates = [turn.candidate]
-            continuation.yield(.ready(turn.candidate.ref))
+            processHasOutput = true
+        case .reportedModel(let name):
+            turn.reportedModel = name
+            if turn.hasOutput { updateReportedModel(AIModelRef(provider: turn.candidate.ref.provider, model: name)) }
         case .text(let text):
             turn.reply += text
             continuation.yield(.text(text))
@@ -684,6 +696,12 @@ public final class AIAgentSession {
         case .turnFailed(let error):
             complete(.failed(error))
         }
+    }
+
+    private func updateReportedModel(_ ref: AIModelRef) {
+        guard model != ref else { return }
+        model = ref
+        continuation.yield(.modelChanged(ref))
     }
 
     private func processEnded(_ termination: CommandLineTermination, errorLine: String?, executable: URL, run: Int) {

@@ -231,7 +231,7 @@ struct AgentReplyDecoder: CommandLineReplyDecoder {
                 return .usage(usage)
             case .turnFailed(let error):
                 throw error
-            case .started, .output, .thinking, .notice, .turnEnded:
+            case .started, .output, .reportedModel, .thinking, .notice, .turnEnded:
                 return nil
             }
         }

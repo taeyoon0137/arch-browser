@@ -244,6 +244,8 @@ extension AgentAPISession: AgentSessionRunning {
             model = ref
             ready.open()
             if state == .starting { state = .running }
+        case .modelChanged(let ref):
+            model = ref
         case .processReady:
             ready.open()
         case .text(let text):
