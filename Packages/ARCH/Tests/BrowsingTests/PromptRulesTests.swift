@@ -1,4 +1,4 @@
-// The rules a prompt card follows apart from its views: which buttons Return and Escape press, when the buttons that grant something arm, how wide a card is in its pane and when it is compact, and where a page's long text ends.
+// The rules a prompt card follows apart from its views: which buttons Return and Escape press, when Escape waits, when the buttons that grant something arm, how wide a card is in its pane and when it is compact, and where a page's long text ends.
 import Foundation
 import Testing
 @testable import Browsing
@@ -25,6 +25,15 @@ import Testing
         let content = Self.content([PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "delete", title: "Delete", isDestructive: true)], defaultID: "delete", cancelID: "cancel")
         #expect(PromptKeys.returnButton(in: content) == nil)
         #expect(PromptKeys.escapeButton(in: content) == "cancel")
+    }
+
+    @Test func escapeWaitsWithTheButtonsThatGrantSomething() {
+        let permission = [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)]
+        #expect(PromptKeys.escapeWaits(for: permission, isArmed: false))
+        #expect(!PromptKeys.escapeWaits(for: permission, isArmed: true))
+        // A card that grants nothing, as a page's confirm, takes Escape at once.
+        let confirm = [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "ok", title: "OK")]
+        #expect(!PromptKeys.escapeWaits(for: confirm, isArmed: false))
     }
 
     @Test func clearSiteDataGivesBothKeysToCancel() {

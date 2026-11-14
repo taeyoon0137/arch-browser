@@ -88,6 +88,8 @@ public final class BrowserWindowModel: ObservableObject {
     @Published var focusedPromptTabID: UUID?
     /// Counts the requests for the selected tab's card to take the focus, as `focusPage()` makes while the card shows.
     @Published private(set) var promptFocusRequests = 0
+    /// The fields over the selected tab's page that have the keyboard focus, as they report it (`PageField`), which a card over that page counts as the page's.
+    @Published private(set) var focusedPageFields: Set<PageField> = []
 
     /// Tab identifiers in the order the tabs were last selected, most recent first. Tabs not selected since launch are missing.
     private var activationOrder: [UUID] = []
@@ -568,7 +570,7 @@ public final class BrowserWindowModel: ObservableObject {
             .first
     }
 
-    /// Moves keyboard focus to the selected tab's page from another pane of the split view on screen, which stays in the window and would keep the keys. Checks after the event that changed the selection, so a pane that a click selected has taken focus itself by then and keeps the element focused in it.
+    /// Moves keyboard focus to the selected tab's page, or its card, from another pane of the split view on screen, whose page or card stays in the window and would keep the keys. Checks after the event that changed the selection, so a pane that a click selected has taken focus itself by then and keeps the element focused in it.
     private func focusSelectedPane() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -576,8 +578,15 @@ public final class BrowserWindowModel: ObservableObject {
                 let view = pane.webContents.view
                 return pane.id != self.selectedTabID && (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
             }
-            if isFocusInOtherPane { self.focusPage() }
+            let isFocusOnOtherCard = self.focusedPromptTabID.map { $0 != self.selectedTabID } ?? false
+            if isFocusInOtherPane || isFocusOnOtherCard { self.focusPage() }
         }
+    }
+
+    /// Records whether a field over the selected tab's page has the keyboard focus (`PageField`).
+    func pageField(_ field: PageField, isFocused: Bool) {
+        guard focusedPageFields.contains(field) != isFocused else { return }
+        if isFocused { focusedPageFields.insert(field) } else { focusedPageFields.remove(field) }
     }
 
     // MARK: Plugins

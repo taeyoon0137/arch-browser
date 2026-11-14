@@ -1,4 +1,4 @@
-// A scroll view as tall as its content up to a limit, so that a prompt's short text takes only its own height and a long one scrolls. A plain scroll view would take all the height it is offered.
+// A scroll view as tall as its content up to a limit, so that a prompt's short text takes only its own height and a long one scrolls. A plain scroll view would take all the height it is offered. Its ideal height is that height, which a card measures itself by (`PromptHeightLimit`), and its content's height stays inside it, so an area inside another one, as the page's words in a card's middle, does not stretch the outer one.
 import SwiftUI
 
 struct PromptScrollArea<Content: View>: View {
@@ -15,13 +15,18 @@ struct PromptScrollArea<Content: View>: View {
                 })
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(maxHeight: min(contentHeight, maxHeight ?? .infinity))
+        .frame(idealHeight: height, maxHeight: height)
         .onPreferenceChange(PromptContentHeightKey.self) { height in
             // Measuring is no change the user sees, so it takes no animation.
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { contentHeight = height }
         }
+        .transformPreference(PromptContentHeightKey.self) { $0 = 0 }
+    }
+
+    private var height: CGFloat {
+        min(contentHeight, maxHeight ?? .infinity)
     }
 }
 

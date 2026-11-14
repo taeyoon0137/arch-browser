@@ -33,13 +33,11 @@ final class TabPromptQueue: ObservableObject {
         completions[id] != nil
     }
 
-    /// Ends the prompt a card shows with the user's answer. The prompt leaves the queue before its completion runs, so a prompt the completion asks for comes after the tab's others. A prompt that has ended, or one that is not first for its tab, is left alone.
+    /// Ends the prompt a card shows with the user's answer. The prompt leaves the queue before its completion runs, so a prompt the completion asks for comes after the tab's others. A prompt that has ended, or one that is not first for its tab, is left alone. The queue lets go of an ended prompt, and the card that showed it clears its fields once it has gone (`PanePromptLayer`).
     func answer(_ id: PromptState.ID, with answer: PromptAnswer) {
         guard let (tabID, queue) = waiting.first(where: { $0.value.first?.id == id }) else { return }
-        let state = queue[0]
         waiting[tabID] = queue.count > 1 ? Array(queue.dropFirst()) : nil
         let completion = completions.removeValue(forKey: id)
-        state.fieldValues = [:]
         completion?(.answered(answer))
     }
 
@@ -51,6 +49,13 @@ final class TabPromptQueue: ObservableObject {
         let kept = pageDialogsOnly ? queue.filter { !$0.content.kind.isPageDialog } : []
         waiting[tabID] = kept.isEmpty ? nil : kept
         finish(ending)
+    }
+
+    /// Readies the tab for a close the user asked for, and says whether the close goes on: while the tab's leave-page card shows, that card is the question, so nothing changes and the close stops; otherwise the tab's prompts end, so that a page that waits on its own dialog can answer its `beforeunload` check.
+    func endForClose(tabID: UUID) -> Bool {
+        guard current(for: tabID)?.content.kind != .leavePage else { return false }
+        dismiss(tabID: tabID)
+        return true
     }
 
     /// Quitting: ends every tab's prompts without the user, each tab's oldest first, and the ones asked for until `reopen()`. Their cards go at once, without their motion.
@@ -69,10 +74,7 @@ final class TabPromptQueue: ObservableObject {
     }
 
     private func finish(_ states: [PromptState]) {
-        let handlers = states.map { state in (state, completions.removeValue(forKey: state.id)) }
-        for (state, completion) in handlers {
-            state.fieldValues = [:]
-            completion?(.dismissed)
-        }
+        let handlers = states.map { completions.removeValue(forKey: $0.id) }
+        handlers.forEach { $0?(.dismissed) }
     }
 }

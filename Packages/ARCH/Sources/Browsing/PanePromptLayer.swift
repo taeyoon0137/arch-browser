@@ -13,10 +13,12 @@ struct PanePromptLayer: View {
     let isOnScreen: Bool
     /// Whether the pane is the window's focused pane, whose card alone takes the keys.
     let isFocusedPane: Bool
-    /// Whether an internal page covers the pane, when the card waits.
+    /// Whether something covers the pane's page, an internal page or the preview panel, when the card waits.
     let isCovered: Bool
     /// The page frame's radius, or 0 while the page fills the window.
     let cornerRadius: CGFloat
+    /// The room the card leaves at the pane's leading edge for the pane's close control, or 0 without one.
+    let leadingClearance: CGFloat
     /// Selects the pane's tab, as a click on its page does.
     let selectPane: () -> Void
 
@@ -26,18 +28,18 @@ struct PanePromptLayer: View {
     @State private var takesFocusOnShow = false
     @State private var focusRequests = 0
     @State private var hasFocus = false
-    @State private var cardFrame = CGRect.zero
-    /// The view that covers the pane, which focus checks measure against.
-    @State private var paneView: NSView?
     /// The next card, which arrives once the one before it has left.
     @State private var pendingShow: DispatchWorkItem?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let space = "PanePromptLayer"
-
     /// The prompt the pane should show now.
     private var target: PromptState? {
-        PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCoveredByInternalPage: isCovered)
+        PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCovered: isCovered)
+    }
+
+    /// Whether the find bar's or the question popover's field over the pane's page has the focus while the card does not. Only the focused pane has those fields.
+    private var isPageFieldFocused: Bool {
+        isFocusedPane && !hasFocus && !windowModel.focusedPageFields.isEmpty
     }
 
     var body: some View {
@@ -53,14 +55,12 @@ struct PanePromptLayer: View {
                 .padding(.top, Self.edgeOverlap)
                 .animation(PromptMotion.scrim(reduceMotion: reduceMotion), value: isDimmed)
                 if let displayed {
-                    PromptCard(state: displayed, width: PromptLayout.cardWidth(inPaneWidth: proxy.size.width),
+                    PromptCard(state: displayed, width: PromptLayout.cardWidth(inPaneWidth: proxy.size.width - leadingClearance),
                                maxHeight: PromptLayout.maximumHeight(inPaneHeight: proxy.size.height), isFocusedPane: isFocusedPane,
                                isArriving: isArriving, takesFocusOnAppear: takesFocusOnShow, focusRequests: focusRequests,
                                onFocusChange: focusDidChange, onAnswer: { prompts.answer(displayed.id, with: $0) })
+                        .padding(.leading, leadingClearance)
                         .simultaneousGesture(TapGesture().onEnded { if !isFocusedPane { activate() } })
-                        .background(GeometryReader { card in
-                            Color.clear.preference(key: PromptCardFrameKey.self, value: card.frame(in: .named(Self.space)))
-                        })
                         .id(displayed.id)
                         .transition(PromptMotion.transition(reduceMotion: reduceMotion))
                         .zIndex(1)
@@ -71,9 +71,8 @@ struct PanePromptLayer: View {
             .clipped()
             .offset(y: -Self.edgeOverlap)
         }
-        .coordinateSpace(name: Self.space)
-        .background(PromptFocusGuard(isEngaged: displayed != nil, cardFrame: cardFrame, requestCardFocus: requestFocus) { paneView = $0 }.allowsHitTesting(false))
-        .onPreferenceChange(PromptCardFrameKey.self) { cardFrame = $0 }
+        .background(PromptFocusGuard(isEngaged: displayed != nil, pageView: tab.webContents.view, isPageFieldFocused: isPageFieldFocused,
+                                     requestCardFocus: requestFocus).allowsHitTesting(false))
         .onAppear(perform: sync)
         .onChange(of: target?.id) { sync() }
         .onChange(of: isFocusedPane) { _, isFocused in
@@ -95,19 +94,23 @@ struct PanePromptLayer: View {
 
     // MARK: Showing and leaving
 
-    /// Follows the queue: the card that should show arrives, and one that was answered leaves first. A card that only hides, as under an internal page, goes at once, and quitting takes every card at once.
+    /// Follows the queue: the card that should show arrives, and one that was answered leaves first. A card that only hides, as under an internal page, goes at once, and quitting takes every card at once. A card that waits for the one before it to leave waits no more once the pane should show another prompt or none, as when its page is covered meanwhile. The fields of a prompt that ended keep their text until its card has gone, and then let it go, so a password does not stay in memory.
     private func sync() {
         let next = target
-        guard next?.id != displayed?.id else { return }
         pendingShow?.cancel()
         pendingShow = nil
+        guard next?.id != displayed?.id else { return }
         guard let current = displayed else { return show(next, afterFocusedCard: false) }
         let hadFocus = hasFocus
-        guard prompts.isAccepting, !prompts.contains(current.id) else {
+        let hasEnded = !prompts.contains(current.id)
+        guard prompts.isAccepting, hasEnded else {
             withoutAnimation { displayed = nil }
+            if hasEnded { current.fieldValues = [:] }
             return show(next, afterFocusedCard: false)
         }
         withAnimation(PromptMotion.departure(reduceMotion: reduceMotion)) { displayed = nil }
+        let departure = PromptMotion.departureDuration(reduceMotion: reduceMotion)
+        DispatchQueue.main.asyncAfter(deadline: .now() + departure) { current.fieldValues = [:] }
         guard let next else {
             // The tab has no more prompts, so the keys return to its page.
             if hadFocus { windowModel.focusPage() }
@@ -118,7 +121,7 @@ struct PanePromptLayer: View {
             show(next, afterFocusedCard: hadFocus)
         }
         pendingShow = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + PromptMotion.departureDuration(reduceMotion: reduceMotion), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + departure, execute: work)
     }
 
     /// Shows a card: the first time with its motion, after its page leaves fullscreen and the pane's region capture ends, and later at once. The buttons that grant something arm again each time. The card takes the focus as the focus rules allow, or after the tab's card that had it, and VoiceOver announces one that shows without it.
@@ -141,10 +144,12 @@ struct PanePromptLayer: View {
         if isFirst, !takesFocus { announce(state) }
     }
 
-    /// The focus rules for a card that shows (`PromptPresentation.takesFocus`). Before the pane's view is known, as when the pane first shows with its tab's card, the focused pane's card takes it, as selecting a tab gives it.
+    /// The focus rules for a card that shows (`PromptPresentation.takesFocus`). While the palette is open, its field keeps the keys, and closing it gives them to the card (`BrowserWindowModel.focusPage()`). Before the window is known, as when the window first shows with its tab's card, the focused pane's card takes it, as selecting a tab gives it.
     private func canTakeFocus() -> Bool {
-        guard let paneView, let window = windowModel.nsWindow else { return isFocusedPane }
-        return PromptPresentation.takesFocus(firstResponder: window.firstResponder, pane: paneView, window: window, isFocusedPane: isFocusedPane)
+        guard windowModel.commandPaletteMode == nil else { return false }
+        guard let window = windowModel.nsWindow else { return isFocusedPane }
+        return PromptPresentation.takesFocus(firstResponder: window.firstResponder, pageView: tab.webContents.view, window: window,
+                                             isFocusedPane: isFocusedPane, isPageFieldFocused: isPageFieldFocused)
     }
 
     private func announce(_ state: PromptState) {
@@ -179,14 +184,5 @@ struct PanePromptLayer: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction, change)
-    }
-}
-
-/// The card's frame in its layer, which the focus guard lets keep the focus.
-private struct PromptCardFrameKey: PreferenceKey {
-    static let defaultValue = CGRect.zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
     }
 }

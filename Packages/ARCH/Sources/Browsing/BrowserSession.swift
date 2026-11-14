@@ -882,10 +882,8 @@ public final class BrowserSession: ObservableObject {
         scheduleSave()
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite. While the tab's leave-page card shows, that card is the question, so nothing more happens. Otherwise the tab's prompts end first, so that a page that waits on its own dialog can answer its `beforeunload` check.
+    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
     public func requestCloseTab(_ tab: Tab) {
-        guard prompts.current(for: tab.id)?.content.kind != .leavePage else { return }
-        prompts.dismiss(tabID: tab.id)
         let isUndoable = tab.spaceID != nil
         closeWhenPageAgrees(tab) { [weak self] in
             // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
@@ -893,8 +891,12 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab once its page agrees to close, then runs `didClose` if this close removed it.
+    /// Closes a tab the user asked to close, from its row, its favorite, or a menu, once its page agrees to close, then runs `didClose` if this close removed it. While the tab's leave-page card shows, that card is the question, so the tab only comes forward to show it; otherwise the tab's prompts end first (`TabPromptQueue.endForClose`).
     private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
+        guard prompts.endForClose(tabID: tab.id) else {
+            tab.requestSelection?()
+            return
+        }
         // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
         guard !tab.webContents.closingStopsDownloads else {
             if closeTab(tab) { didClose() }

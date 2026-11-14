@@ -19,11 +19,11 @@ enum TabPromptContent {
                       buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "cancel")
     }
 
-    /// A page's `prompt`: a field that starts with the page's default text, selected, which OK returns.
+    /// A page's `prompt`: a field that starts with the page's default text, which OK returns. The text is selected as the field takes the focus.
     static func textInput(message: String, defaultText: String?, identity: PromptIdentity) -> PromptContent {
         var content = confirm(message: message, identity: identity)
         content.kind = .pageTextInput
-        content.fields = [PromptField(id: "text", kind: .text, label: "Answer", initialValue: defaultText ?? "", selectsAll: true)]
+        content.fields = [PromptField(id: "text", kind: .text, label: "Answer", initialValue: defaultText ?? "")]
         content.focusedFieldID = "text"
         return content
     }
@@ -51,7 +51,7 @@ enum TabPromptContent {
 
     // MARK: Logins
 
-    /// HTTP authentication for a site or a proxy: the server's realm as its own words, a user name that starts with the proposed one, a password field, and notes for a failed attempt and an unencrypted connection. Focus starts in the user name while it is empty, else in the password. After a failed attempt the card shakes as it shows.
+    /// HTTP authentication for a site or a proxy: the server's realm as its own words, a user name that starts with the proposed one, a password field, and notes for a failed attempt and an unencrypted connection. Focus starts in the user name while it is empty, else in the password. For a server other than the tab's site, which `identity` names with where it is, as for an image from another site, focus starts on the card itself, so that keys the user meant for the page never reach a field whose text goes to that server. After a failed attempt the card shakes as it shows.
     static func signIn(_ space: URLProtectionSpace, proposedUser: String?, failed: Bool, identity: PromptIdentity) -> PromptContent {
         let isProxy = space.isProxy()
         let user = proposedUser ?? ""
@@ -67,7 +67,7 @@ enum TabPromptContent {
                              pageText: space.realm.flatMap { $0.isEmpty ? nil : PageAuthoredText(caption: isProxy ? "The proxy says" : "The site says", text: $0) },
                              fields: [PromptField(id: "user", kind: .userName, label: "User Name", initialValue: user),
                                       PromptField(id: "password", kind: .password, label: "Password", initialValue: "")],
-                             focusedFieldID: user.isEmpty ? "user" : "password", notes: notes,
+                             focusedFieldID: identity.context != nil ? nil : user.isEmpty ? "user" : "password", notes: notes,
                              buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "logIn", title: "Log In")],
                              defaultButtonID: "logIn", cancelButtonID: "cancel", shakesOnArrival: failed)
     }

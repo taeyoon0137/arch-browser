@@ -6,7 +6,7 @@ final class PromptState: ObservableObject, Identifiable {
     let id = UUID()
     let tabID: UUID
     let content: PromptContent
-    /// What the fields hold, by field. The queue clears it once the prompt is answered or dismissed, so a password does not stay in memory.
+    /// What the fields hold, by field. Once the prompt has ended, the card that showed it clears it after the card has gone, and a prompt that no card showed goes with the queue's last reference to it, so a password does not stay in memory.
     @Published var fieldValues: [String: String]
     @Published var arming: PromptArming
     /// Set once a card has shown the prompt. A card that shows it again, as after the user comes back to its tab, shows at once with its page.

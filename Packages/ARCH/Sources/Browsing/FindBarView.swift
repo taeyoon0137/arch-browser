@@ -19,6 +19,7 @@ struct FindBarView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($isFocused)
+                .reportsFocus(of: .find, isFocused: isFocused)
                 .onSubmit {
                     if NSEvent.modifierFlags.contains(.shift) { windowModel.findPrevious() } else { windowModel.findNext() }
                 }

@@ -1,4 +1,4 @@
-// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, and closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first.
+// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first, and let go of them, and a close the user asks for ends the tab's prompts unless its leave-page card is the question.
 import Foundation
 import Testing
 @testable import Browsing
@@ -32,14 +32,16 @@ import Testing
     @Test func anAnswerReachesItsPromptOnceAfterThePromptLeftTheQueue() throws {
         let queue = TabPromptQueue()
         var responses: [PromptResponse] = []
-        var wasWaitingDuringCompletion = true
+        var firstID: PromptState.ID?
+        var queueDuringCompletion: (containsFirst: Bool, current: PromptState?)?
         queue.enqueue(Self.content(.pageAlert), for: tab) { response in
             responses.append(response)
-            wasWaitingDuringCompletion = queue.hasPrompt(for: self.tab)
+            queueDuringCompletion = (firstID.map(queue.contains) ?? true, queue.current(for: self.tab))
         }
         queue.enqueue(Self.content(.pageAlert), for: tab) { _ in }
         let first = try #require(queue.current(for: tab))
         let second = try #require(queue.waiting[tab]?.last)
+        firstID = first.id
 
         // Only the prompt a card shows can be answered.
         queue.answer(second.id, with: PromptAnswer(buttonID: "ok"))
@@ -50,8 +52,10 @@ import Testing
         queue.answer(first.id, with: PromptAnswer(buttonID: "ok"))
         #expect(responses == [.answered(PromptAnswer(buttonID: "ok", fieldValues: ["text": "a"]))])
         #expect(!queue.contains(first.id) && queue.contains(second.id))
-        // The second prompt waited, so the tab still had one.
-        #expect(wasWaitingDuringCompletion)
+        // The first prompt had left the queue when its completion ran, and the second was the tab's current one.
+        let during = try #require(queueDuringCompletion)
+        #expect(!during.containsFirst)
+        #expect(during.current === second)
     }
 
     @Test func aPromptAskedForInACompletionComesAfterTheTabsOthers() throws {
@@ -64,7 +68,7 @@ import Testing
         #expect(queue.waiting[tab]?.map(\.content.kind) == [.sitePermission, .leavePage])
     }
 
-    @Test func dismissingATabEndsItsPromptsOldestFirstAndClearsTheirFields() throws {
+    @Test func dismissingATabEndsItsPromptsOldestFirstAndLetsGoOfThem() throws {
         let queue = TabPromptQueue()
         var log: [String] = []
         var waitingDuringCompletions: [Bool] = []
@@ -77,14 +81,40 @@ import Testing
             waitingDuringCompletions.append(queue.hasPrompt(for: self.tab))
         }
         queue.enqueue(Self.content(.notice), for: otherTab) { _ in log.append("other") }
-        let first = try #require(queue.current(for: tab))
-        first.fieldValues = ["password": "secret"]
+        weak var first: PromptState?
+        do {
+            let state = try #require(queue.current(for: tab))
+            state.fieldValues = ["password": "secret"]
+            first = state
+        }
 
         queue.dismiss(tabID: tab)
         #expect(log == ["first true", "second true"])
         #expect(waitingDuringCompletions == [false, false])
-        #expect(first.fieldValues.isEmpty)
+        // No card showed it, so the prompt and its password went with the queue's reference.
+        #expect(first == nil)
         #expect(queue.hasPrompt(for: otherTab))
+    }
+
+    @Test func aCloseEndsTheTabsPromptsUnlessItsLeavePageCardIsTheQuestion() throws {
+        let queue = TabPromptQueue()
+        var ended: [PromptKind] = []
+        // A favorite's tab or a space's tab alike: its page's alert ends, so the page can answer its leave-page check.
+        queue.enqueue(Self.content(.pageAlert), for: tab) { _ in ended.append(.pageAlert) }
+        queue.enqueue(Self.content(.sitePermission), for: tab) { _ in ended.append(.sitePermission) }
+        #expect(queue.endForClose(tabID: tab))
+        #expect(ended == [.pageAlert, .sitePermission])
+        #expect(!queue.hasPrompt(for: tab))
+
+        // While the tab's leave-page card shows, a second close changes nothing.
+        queue.enqueue(Self.content(.leavePage), for: tab) { _ in ended.append(.leavePage) }
+        queue.enqueue(Self.content(.pageAlert), for: tab) { _ in ended.append(.pageAlert) }
+        #expect(!queue.endForClose(tabID: tab))
+        #expect(queue.waiting[tab]?.map(\.content.kind) == [.leavePage, .pageAlert])
+        #expect(ended == [.pageAlert, .sitePermission])
+
+        // A tab without prompts closes.
+        #expect(queue.endForClose(tabID: otherTab))
     }
 
     @Test func aCancellationOfPageDialogsLeavesTheTabsOtherPrompts() {

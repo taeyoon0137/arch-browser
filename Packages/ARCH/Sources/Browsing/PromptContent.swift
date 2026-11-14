@@ -95,9 +95,8 @@ struct PromptField: Equatable, Identifiable {
     var kind: Kind
     /// The placeholder and the name VoiceOver reads.
     var label: String
+    /// The text the field starts with, which AppKit selects as the field takes the focus, so that typing replaces it.
     var initialValue: String
-    /// Whether the field selects its text when it takes focus, so that typing replaces it.
-    var selectsAll = false
 }
 
 struct PromptButton: Equatable, Identifiable {
@@ -126,7 +125,7 @@ struct PromptContent: Equatable {
     var pageText: PageAuthoredText?
     var items: [String] = []
     var fields: [PromptField] = []
-    /// The field that takes focus when the card does, or nil for the card itself.
+    /// The field that takes focus when the card does, or nil for the card itself, from which the user clicks or tabs into a field.
     var focusedFieldID: String?
     var notes: [PromptNote] = []
     var buttons: [PromptButton]

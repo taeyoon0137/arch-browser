@@ -30,19 +30,20 @@ struct PromptCard: View {
     private var isActive: Bool { isFocusedPane && focus != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PromptIdentityRow(identity: content.identity, isHeader: content.title == nil)
-                .modifier(VoiceOverHeading(isHeading: content.title == nil, focus: $isVoiceOverOnHeading))
-            PromptScrollArea {
-                middle
+        PromptHeightLimit(maxHeight: maxHeight) {
+            VStack(alignment: .leading, spacing: 0) {
+                PromptIdentityRow(identity: content.identity, isHeader: content.title == nil)
+                    .modifier(VoiceOverHeading(isHeading: content.title == nil, focus: $isVoiceOverOnHeading))
+                PromptScrollArea {
+                    middle
+                }
+                PromptButtonRow(buttons: content.buttons, defaultID: PromptKeys.returnButton(in: content), cancelID: PromptKeys.escapeButton(in: content),
+                                isActive: isActive, isArmed: isArmed, layout: layout, focus: $focus, answer: press)
+                    .padding(.top, layout.spacing(18))
             }
-            PromptButtonRow(buttons: content.buttons, defaultID: PromptKeys.returnButton(in: content), cancelID: PromptKeys.escapeButton(in: content),
-                            isActive: isActive, isArmed: isArmed, layout: layout, focus: $focus, answer: press)
-                .padding(.top, layout.spacing(18))
+            .padding(layout == .compact ? EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12) : EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
+            .frame(width: width, alignment: .leading)
         }
-        .padding(layout == .compact ? EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12) : EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .frame(width: width, alignment: .leading)
-        .frame(maxHeight: maxHeight, alignment: .top)
         .contentShape(Self.shape)
         .modifier(PromptSurface(shape: Self.shape))
         .focusable(interactions: .edit)
@@ -53,7 +54,7 @@ struct PromptCard: View {
             press(PromptKeys.returnButton(in: content))
             return .handled
         }
-        .onExitCommand { press(PromptKeys.escapeButton(in: content)) }
+        .onExitCommand(perform: pressEscape)
         .modifier(PromptShake(animatableData: shakes))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(content.kind.accessibilityName), \(content.identity.name)")
@@ -88,7 +89,7 @@ struct PromptCard: View {
             }
             if !content.fields.isEmpty {
                 PromptFieldStack(fields: content.fields, values: $state.fieldValues, focus: $focus, onSubmit: { press(PromptKeys.returnButton(in: content)) })
-                    .onExitCommand { press(PromptKeys.escapeButton(in: content)) }
+                    .onExitCommand(perform: pressEscape)
                     .padding(.top, layout.spacing(12))
             }
             if !content.notes.isEmpty {
@@ -186,6 +187,12 @@ struct PromptCard: View {
         guard let id, !hasAnswered, let button = content.buttons.first(where: { $0.id == id }), !button.needsArming || isArmed else { return }
         hasAnswered = true
         onAnswer(PromptAnswer(buttonID: id, fieldValues: state.fieldValues))
+    }
+
+    /// Escape and ⌘. press the cancel button, unless they wait for the card to arm (`PromptKeys.escapeWaits`).
+    private func pressEscape() {
+        guard !PromptKeys.escapeWaits(for: content.buttons, isArmed: isArmed) else { return }
+        press(PromptKeys.escapeButton(in: content))
     }
 
     /// Dims the buttons that grant something until `PromptArming.delay` after the card last showed.

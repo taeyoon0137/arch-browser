@@ -19,17 +19,17 @@ enum PromptSiteIdentity {
         return PromptIdentity(icon: .symbol("globe"), name: host, isSecure: isSecure, context: "in \(tabHost)")
     }
 
-    /// The server that asks for a login: a proxy with its own symbol and tag, or the site as `make` names it. The lock shows when the server receives the password securely.
+    /// The server that asks for a login: a proxy with its own symbol and tag, or the site as `make` names it. The lock shows only for a site reached over https; a method that keeps the password from the wire, such as Digest, encrypts nothing else, and the protection space does not say whether the connection to a proxy is encrypted.
     static func signIn(_ space: URLProtectionSpace, tabURL: URL?, favicon: NSImage?) -> PromptIdentity {
         if space.isProxy() {
-            return PromptIdentity(icon: .symbol("network"), name: space.host, isSecure: space.receivesCredentialSecurely, tag: "Proxy")
+            return PromptIdentity(icon: .symbol("network"), name: space.host, isSecure: false, tag: "Proxy")
         }
         var components = URLComponents()
         components.scheme = space.protocol ?? "https"
         components.host = space.host
         var identity = make(for: components.url, tabURL: tabURL, favicon: favicon)
         identity.name = space.host
-        identity.isSecure = space.receivesCredentialSecurely
+        identity.isSecure = space.protocol?.lowercased() == "https"
         return identity
     }
 }

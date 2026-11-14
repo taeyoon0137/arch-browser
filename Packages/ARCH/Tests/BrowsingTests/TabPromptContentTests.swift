@@ -28,7 +28,7 @@ import Testing
 
         let input = TabPromptContent.textInput(message: "Name?", defaultText: "Ada", identity: Self.site)
         #expect(input.kind == .pageTextInput)
-        #expect(input.fields == [PromptField(id: "text", kind: .text, label: "Answer", initialValue: "Ada", selectsAll: true)])
+        #expect(input.fields == [PromptField(id: "text", kind: .text, label: "Answer", initialValue: "Ada")])
         #expect(input.focusedFieldID == "text")
         #expect(TabPromptContent.textInputResult(Self.answered("ok", ["text": "Grace"])) == "Grace")
         #expect(TabPromptContent.textInputResult(Self.answered("cancel", ["text": "Grace"])) == nil)
@@ -66,6 +66,13 @@ import Testing
         let proxy = URLProtectionSpace(proxyHost: "proxy.example", port: 8080, type: NSURLProtectionSpaceHTTPSProxy, realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPDigest)
         let proxyContent = TabPromptContent.signIn(proxy, proposedUser: nil, failed: false, identity: Self.site)
         #expect(proxyContent.title == "Log In to This Proxy" && proxyContent.pageText == nil)
+        #expect(proxyContent.focusedFieldID == "user")
+
+        // A server other than the tab's site, as for an image from another site, gets no keys meant for the page: the card itself takes the focus.
+        var otherSite = Self.site
+        otherSite.context = "in example.com"
+        #expect(TabPromptContent.signIn(space, proposedUser: nil, failed: false, identity: otherSite).focusedFieldID == nil)
+        #expect(TabPromptContent.signIn(space, proposedUser: "ada", failed: false, identity: otherSite).focusedFieldID == nil)
 
         let credential = try #require(TabPromptContent.signInCredential(Self.answered("logIn", ["user": "ada", "password": "pw"])))
         #expect(credential.user == "ada" && credential.password == "pw" && credential.persistence == .forSession)

@@ -1,4 +1,4 @@
-// Which buttons of a prompt Return and Escape press. The card binds them only while it has the window's focus (`PromptCard`).
+// Which buttons of a prompt Return and Escape press, and when Escape waits. The card binds them only while it has the window's focus (`PromptCard`).
 import Foundation
 
 enum PromptKeys {
@@ -13,5 +13,10 @@ enum PromptKeys {
     static func escapeButton(in content: PromptContent) -> PromptButton.ID? {
         if let id = content.cancelButtonID, content.buttons.contains(where: { $0.id == id }) { return id }
         return content.buttons.count == 1 ? content.buttons.first?.id : nil
+    }
+
+    /// Whether Escape waits, as on a card with a button that grants something until the card arms: its cancel answer is remembered too, as a permission's Don't Allow or Cancel for another app is, so a key meant for the page answers neither way. A click on the cancel button still answers.
+    static func escapeWaits(for buttons: [PromptButton], isArmed: Bool) -> Bool {
+        !isArmed && buttons.contains(where: \.needsArming)
     }
 }

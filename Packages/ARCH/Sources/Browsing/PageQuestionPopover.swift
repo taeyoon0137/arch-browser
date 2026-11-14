@@ -69,6 +69,7 @@ private struct PageQuestionPopover: View {
             TextField(question.selection == nil ? "Ask a question about this page" : "Ask a question about the selection", text: $draft)
                 .textFieldStyle(.roundedBorder)
                 .focused($isFieldFocused)
+                .reportsFocus(of: .question, isFocused: isFieldFocused)
                 .onSubmit(send)
                 .onExitCommand(perform: windowModel.dismissPageQuestion)
             if conversation.isAnswering {

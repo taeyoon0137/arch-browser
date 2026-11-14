@@ -1,4 +1,4 @@
-// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a page without a host, the lock for https and for a login received securely, and a proxy with its tag.
+// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock.
 import AppKit
 import Foundation
 import Testing
@@ -25,14 +25,21 @@ import Testing
         #expect(PromptSiteIdentity.make(for: nil, tabURL: Self.tabURL, favicon: nil).name == "This page")
     }
 
-    @Test func aLoginShowsTheLockOnlyWhenThePasswordGoesSecurely() {
+    @Test func aLoginShowsTheLockOnlyForASiteOverHTTPS() {
         let plain = URLProtectionSpace(host: "example.com", port: 80, protocol: "http", realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
         let site = PromptSiteIdentity.signIn(plain, tabURL: Self.tabURL, favicon: nil)
         #expect(site.name == "example.com" && !site.isSecure && site.tag == nil && site.context == nil)
         let secure = URLProtectionSpace(host: "example.com", port: 443, protocol: "https", realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
         #expect(PromptSiteIdentity.signIn(secure, tabURL: Self.tabURL, favicon: nil).isSecure)
+        // Digest keeps the password from the wire but encrypts nothing else, so plain http gets no lock.
+        let digest = URLProtectionSpace(host: "intranet.local", port: 80, protocol: "http", realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPDigest)
+        #expect(digest.receivesCredentialSecurely)
+        #expect(!PromptSiteIdentity.signIn(digest, tabURL: Self.tabURL, favicon: nil).isSecure)
 
         let proxy = URLProtectionSpace(proxyHost: "proxy.example", port: 8080, type: NSURLProtectionSpaceHTTPProxy, realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
         #expect(PromptSiteIdentity.signIn(proxy, tabURL: Self.tabURL, favicon: nil) == PromptIdentity(icon: .symbol("network"), name: "proxy.example", isSecure: false, tag: "Proxy"))
+        // The space does not say whether the connection to a proxy is encrypted.
+        let digestProxy = URLProtectionSpace(proxyHost: "proxy.example", port: 8080, type: NSURLProtectionSpaceHTTPSProxy, realm: nil, authenticationMethod: NSURLAuthenticationMethodHTTPDigest)
+        #expect(!PromptSiteIdentity.signIn(digestProxy, tabURL: Self.tabURL, favicon: nil).isSecure)
     }
 }
