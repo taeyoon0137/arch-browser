@@ -26,6 +26,11 @@ public struct AIMoney: Codable, Sendable, Equatable {
         self.currency = currency
         self.amount = amount
     }
+
+    /// A currency code as costs are counted under it: trimmed and in uppercase, so that a price in `usd` counts toward a limit in `USD`.
+    public static func normalizedCurrency(_ code: String) -> String {
+        code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
 }
 
 public struct AIPrice: Codable, Sendable, Equatable {
@@ -193,7 +198,7 @@ public final class AIUsageStore: ObservableObject {
         if let usage {
             totals[index].usage = totals[index].usage + usage
             if let price = model.price {
-                totals[index].costs[price.currency, default: 0] += price.cost(of: usage)
+                totals[index].costs[AIMoney.normalizedCurrency(price.currency), default: 0] += price.cost(of: usage)
             }
         }
         months[monthIndex].totals = totals
@@ -215,11 +220,14 @@ public final class AIUsageStore: ObservableObject {
         scheduleSave()
     }
 
-    /// The current month's estimated cost in `currency`.
+    /// The current month's estimated cost in `currency`, whatever the case of the codes the costs were counted under.
     func estimatedCost(in currency: String) -> Decimal {
         let key = Self.monthKey(now())
+        let currency = AIMoney.normalizedCurrency(currency)
         guard let month = months.first(where: { $0.month == key }) else { return 0 }
-        return month.totals.reduce(0) { $0 + ($1.costs[currency] ?? 0) }
+        return month.totals.reduce(0) { sum, total in
+            total.costs.reduce(sum) { $0 + (AIMoney.normalizedCurrency($1.key) == currency ? $1.value : 0) }
+        }
     }
 
     /// Combines rapid changes into one file write, like the session store.

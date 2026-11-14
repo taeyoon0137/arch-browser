@@ -89,6 +89,21 @@ import Testing
         #expect(settings.route(for: userFeature.id).models.count == 1)
         #expect(try await keys.key(for: first.id) == "secret")
     }
+
+    /// Refresh in Settings sends the saved key only to the base URL it was saved for: at an edited base URL that is not saved yet, the key has to be entered again.
+    @Test func listingModelsAtAnUnsavedBaseURLNeedsTheKeyAgain() async throws {
+        let first = provider("First", models: [AIModelConfiguration(name: "model-a")])
+        let service = scriptedService(providers: [first], script: [:])
+        try await service.settings.setKey("secret", for: first.id)
+        var edited = try #require(service.settings.providers.first)
+        #expect(try await service.listModels(of: edited) == ["model-a"])
+        if case .http(var http) = edited.kind {
+            http.baseURL = URL(string: "https://other.example.test/v1")!
+            edited.kind = .http(http)
+        }
+        await #expect(throws: AIError.self) { try await service.listModels(of: edited) }
+        #expect(try await service.listModels(of: edited, key: "typed key") == ["model-a"])
+    }
 }
 
 @MainActor
@@ -219,6 +234,22 @@ import Testing
         #expect(sent.instructions == "\(AIPartText.untrustedContentNote)\n\nSummarize.")
     }
 
+    /// An address a page or a download came from can carry a user name and password, which never reach the provider.
+    @Test func stripsTheUserNameAndPassword() async throws {
+        let log = ProviderLog()
+        let service = service(log: log)
+        let page = AIPageContent(url: URL(string: "https://admin:s3cret@nas.example.org/files?id=7")!, title: "Files", text: "Text")
+        let selection = AISelection(pageURL: page.url, pageTitle: "Files", text: "x")
+        _ = await collect(service.stream(AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.page(page), .selection(selection)])])))
+        let parts = try #require(log.requests.first?.messages.first?.parts)
+        guard case .page(let sentPage) = parts.first, case .selection(let sentSelection) = parts.last else {
+            Issue.record("Expected a page and a selection")
+            return
+        }
+        #expect(sentPage.url.absoluteString == "https://nas.example.org/files")
+        #expect(sentSelection.pageURL.absoluteString == "https://nas.example.org/files")
+    }
+
     @Test func blocksUndeclaredKindsAndExcludedSites() async {
         let log = ProviderLog()
         let service = service(log: log)
@@ -332,6 +363,31 @@ import Testing
         #expect(service.usage.totals(monthsAgo: 0).first?.costs["USD"] == 3)
     }
 
+    /// A provider that the user moves to another base URL while a request waits has the new server's key under its ID by then. That key never goes to the old address: the waiting request ends without reaching a provider.
+    @Test func aProviderMovedToAnotherBaseURLDuringTheWaitSendsNoKeyToTheOldOne() async throws {
+        let log = ProviderLog()
+        let service = service(log: log)
+        var first = try #require(service.settings.providers.first)
+        try await service.settings.setKey("old server's key", for: first.id)
+        first = try #require(service.settings.providers.first)
+        let running = Task { await collect(service.stream(textRequest(userFeature))) }
+        try #require(await eventually { log.requests.count == 1 })
+        let waiting = try await waitingRequest(textRequest(userFeature), on: service)
+        if case .http(var http) = first.kind {
+            http.baseURL = URL(string: "https://other.example.test/v1")!
+            first.kind = .http(http)
+        }
+        service.settings.save(first)
+        try await service.settings.setKey("new server's key", for: first.id)
+        guard case .providerUnavailable(_, let detail) = await waiting.value else {
+            Issue.record("Expected providerUnavailable")
+            return
+        }
+        #expect(detail == "The provider's settings changed while the request waited.")
+        #expect(await running.value.error == nil)
+        #expect(log.requests.count == 1)
+    }
+
     /// A key the Keychain does not give makes the provider unavailable with the Keychain's reason, and the request that never went out counts toward no usage.
     @Test func aKeyThatCannotBeReadMakesTheProviderUnavailable() async throws {
         let log = ProviderLog()
@@ -375,6 +431,21 @@ import Testing
         service.settings.limits.monthlySpendingLimit = AIMoney(currency: "USD", amount: 3)
         #expect(await collect(service.stream(textRequest(userFeature))).error == nil)
         #expect(service.usage.totals(monthsAgo: 0).first?.costs["USD"] == 3)
+        guard case .budgetReached(.monthlySpending) = await collect(service.stream(textRequest(userFeature))).error else {
+            Issue.record("Expected the spending limit")
+            return
+        }
+    }
+
+    /// A price whose currency was typed in lowercase counts toward a limit in the same currency.
+    @Test func aPriceInLowercaseCountsTowardTheLimit() async {
+        let price = AIPrice(currency: " usd", inputPerMillion: 1_000_000, outputPerMillion: 1_000_000)
+        let first = provider("First", models: [AIModelConfiguration(name: "model-a", price: price)])
+        let service = scriptedService(providers: [first], script: ["model-a": [.event(.text("x")), .event(.usage(AIUsage(inputTokens: 2, outputTokens: 1))), .event(.finished(.completed))]])
+        service.register(userFeature)
+        service.settings.limits.monthlySpendingLimit = AIMoney(currency: "USD", amount: 3)
+        #expect(await collect(service.stream(textRequest(userFeature))).error == nil)
+        #expect(service.usage.estimatedCost(in: "usd") == 3)
         guard case .budgetReached(.monthlySpending) = await collect(service.stream(textRequest(userFeature))).error else {
             Issue.record("Expected the spending limit")
             return
