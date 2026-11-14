@@ -24,7 +24,7 @@ struct AgentPanelColumn: View {
                 .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
                 .transition(.move(edge: .trailing))
         } else if let content = windowModel.agentPanel, let agents = session.agents {
-            AgentPanelFrame(agents: agents, permissions: session.sitePermissions, content: content, actions: actions)
+            AgentPanelFrame(agents: agents, permissions: session.sitePermissions, content: content, actions: actions, keepTabs: windowModel.panelKeepTabsAction)
                 .frame(width: PageReaderColumn.width)
                 // The page's own margin separates it from the panel.
                 .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
@@ -51,6 +51,7 @@ private struct AgentPanelFrame: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let content: AgentPanelContent
     let actions: AgentPanelActions
+    let keepTabs: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,7 +81,7 @@ private struct AgentPanelFrame: View {
                 EmptyView()
             case .session(let id):
                 if let session = agents.session(withID: id) {
-                    AgentSessionPanel(service: agents, session: session, actions: actions)
+                    AgentSessionPanel(service: agents, session: session, actions: actions, keepTabs: keepTabs)
                         .id(id)
                 } else {
                     Text("This session was deleted.")

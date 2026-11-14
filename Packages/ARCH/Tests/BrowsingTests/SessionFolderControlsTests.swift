@@ -275,6 +275,49 @@ import Testing
         #expect(browser.tabs.contains { $0.id == kept.id })
     }
 
+    @Test func panelKeepsOnlyTheReviewedFolderOfTheConversationStillShowing() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, host, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let selected = browser.openTab(url: URL(string: "about:blank#selected"), in: home.id, select: false)
+        window.selectTab(selected.id)
+        func start(_ name: String) throws -> AgentSession {
+            try service.startSession(.init(task: name, personaID: home.resolvedPersonaID, spaceID: home.id, attachedTabIDs: [],
+                                           mode: .readOnly, model: QuestionClient.model, effort: nil))
+        }
+        let researchURL = try #require(URL(string: "https://fixture.invalid/research"))
+        func open(for owner: AgentSession) throws -> AgentTabInfo {
+            try #require(host.openAgentTab(at: researchURL, engine: .webKit,
+                                           for: .init(id: owner.id, spaceID: owner.spaceID, folderName: owner.title)))
+        }
+        let first = try start("First"), other = try start("Other")
+        window.showAgentSession(first.id)
+        #expect(window.panelKeepTabsAction == nil)
+        let original = try open(for: first), unrelated = try open(for: other)
+        let oldAction = try #require(window.panelKeepTabsAction)
+        window.showAgentSession(other.id)
+        oldAction()
+        #expect(host.agentTabs(of: first.id).contains { $0.id == original.id })
+        #expect(host.agentTabs(of: other.id).contains { $0.id == unrelated.id })
+
+        window.showAgentSession(first.id)
+        let keepOriginal = try #require(window.panelKeepTabsAction)
+        keepOriginal()
+        #expect(window.panelKeepTabsAction == nil && window.selectedTab === selected && window.agentPanel == .session(first.id))
+        let replacement = try open(for: first)
+        oldAction()
+        #expect(host.agentTabs(of: first.id).contains { $0.id == replacement.id })
+        let fresh = try #require(window.panelKeepTabsAction)
+        fresh()
+        #expect(host.agentTabs(of: first.id).isEmpty && host.agentTabs(of: other.id).contains { $0.id == unrelated.id })
+        #expect(browser.tabs.contains { $0.id == replacement.id && $0.agentOwnerID == nil })
+        #expect(window.panelKeepTabsAction == nil && window.selectedTab === selected && window.agentPanel == .session(first.id))
+        await service.endSessionsForQuit()
+    }
+
     @Test func spaceDotsTrackUnansweredCardsAcrossWindowsAndPersonas() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchSpaceDots-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }

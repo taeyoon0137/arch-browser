@@ -9,6 +9,7 @@ public struct AgentSessionPanel: View {
     @ObservedObject private var approvals: AgentApprovals
     @ObservedObject private var settings = AIService.shared.settings
     let actions: AgentPanelActions
+    private let keepTabs: (() -> Void)?
     @State private var problem: String?
     @State private var showsResearchPages = false
     @State private var researchChoice: AgentResearchPage?
@@ -17,11 +18,12 @@ public struct AgentSessionPanel: View {
     @State private var raisingTo: AgentAccessLevel?
     @State private var deleting: AgentSession?
 
-    public init(service: AgentService, session: AgentSession, actions: AgentPanelActions) {
+    public init(service: AgentService, session: AgentSession, actions: AgentPanelActions, keepTabs: (() -> Void)? = nil) {
         self.service = service
         self.session = session
         approvals = service.approvals
         self.actions = actions
+        self.keepTabs = keepTabs
     }
 
     public var body: some View {
@@ -83,6 +85,7 @@ public struct AgentSessionPanel: View {
                         }
                             .disabled(session.isTakenOver)
                     }
+                    if let keepTabs { Button("Keep Tabs", action: keepTabs) }
                     Divider()
                     Button("Delete Session…", role: .destructive) { deleting = session }
                 } label: {

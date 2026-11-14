@@ -864,6 +864,16 @@ public enum BrowserWindowKind {
         }
     }
 
+    /// The panel's menu keeps only the folder it displayed in this window's conversation.
+    var panelKeepTabsAction: (() -> Void)? {
+        guard case .session(let id) = agentPanel, let folder = session.folders.first(where: { $0.agentSessionID == id }),
+              let owner = agentSession(of: folder) else { return nil }
+        return { [weak self] in
+            guard let self, self.agentPanel == .session(owner.id), self.agentSession(of: folder) === owner else { return }
+            self.session.keepTabs(ofFolder: folder.id)
+        }
+    }
+
     /// Shows a session in the panel, as a row or the indicator's menu does.
     public func showAgentSession(_ id: UUID) {
         showAgentPanel(.session(id))
