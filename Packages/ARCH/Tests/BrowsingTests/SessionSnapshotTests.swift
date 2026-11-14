@@ -469,36 +469,41 @@ import Testing
         var snapshot = try #require(store.load())
         snapshot.tabs[0].isPinned.toggle()
         let pin = snapshot.tabs[0].isPinned
-        let clock = ContinuousClock()
-        let timeout = clock.now + .seconds(7)
+        let start = DispatchTime.now()
+        var work: (deadline: DispatchTime, item: DispatchWorkItem)?
         var revision = 0
         var captured: [Int] = []
-        func edit() {
+        func edit(at time: DispatchTime) {
             revision += 1
             let scheduled = revision
             snapshot.tabs[1].title = "Update \(scheduled)"
-            store.scheduleSave {
+            store.scheduleSave(at: time, enqueue: { work = ($0, $1) }) {
                 #expect(scheduled == revision)
                 captured.append(scheduled)
                 return snapshot
             }
         }
 
-        while captured.isEmpty && clock.now < timeout {
-            edit()
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        try #require(captured.count == 1)
-        #expect(captured[0] > 1)
+        // Edits arrive every 50 ms. The five-second callback can already be due and still waiting for main.
+        for tick in 0...101 { edit(at: start + .milliseconds(tick * 50)) }
+        let due = try #require(work)
+        #expect(due.deadline == start + .seconds(5))
+        #expect(!due.item.isCancelled)
+        due.item.perform()
+        #expect(captured == [102])
 
-        edit()
+        let finalEdit = start + .milliseconds(5100)
+        edit(at: finalEdit)
+        let quiet = try #require(work)
+        #expect(quiet.deadline == finalEdit + .milliseconds(500))
         let last = revision
-        // Taking the snapshot runs on main. The file becomes readable at its new revision after the serial writer finishes.
         var wroteLast = false
         store.didWrite = { wroteLast = $0.tabs[1].title == "Update \(last)" }
+        quiet.item.perform()
+        let clock = ContinuousClock()
         let writeDeadline = clock.now + .seconds(5)
         while !wroteLast && clock.now < writeDeadline {
-            try await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: .milliseconds(20))
         }
         try #require(wroteLast)
         #expect(captured == [last - 1, last])

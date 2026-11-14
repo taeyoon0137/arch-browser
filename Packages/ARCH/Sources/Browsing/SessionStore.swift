@@ -319,9 +319,10 @@ final class SessionStore {
     }
 
     /// Capture on the main queue after half a quiet second, or after five seconds of continuous changes. The file is written on the serial writer.
-    func scheduleSave(_ snapshot: @escaping () -> SessionSnapshot?) {
+    func scheduleSave(at now: DispatchTime = .now(),
+                      enqueue: (DispatchTime, DispatchWorkItem) -> Void = { DispatchQueue.main.asyncAfter(deadline: $0, execute: $1) },
+                      _ snapshot: @escaping () -> SessionSnapshot?) {
         latestSnapshot = snapshot
-        let now = DispatchTime.now()
         let limit = pendingSave?.limit ?? now + 5
         // A due capture or one already scheduled at the limit keeps its place on the main queue and uses the newest closure.
         if let pendingSave, pendingSave.deadline <= now || pendingSave.deadline == limit { return }
@@ -339,7 +340,7 @@ final class SessionStore {
             }
         }
         pendingSave = (work, deadline, limit)
-        DispatchQueue.main.asyncAfter(deadline: deadline, execute: work)
+        enqueue(deadline, work)
     }
 
     /// Saves in place of a scheduled write and waits for all earlier writes. Quitting checks the result.
