@@ -123,7 +123,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
                         "developer_instructions=\"You are a browser agent in Arch.\\nUse only Arch's tools; say \\\"done\\\" when finished.\""]
         let options = ["--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"] + settings.flatMap { ["-c", $0] } + disabled.flatMap { ["--disable", $0] }
         let model = ["-m", "gpt-6-luna", "-c", "model_reasoning_effort=\"low\""]
-        let turns = cli.calls().filter { $0.contains("exec") }
+        let turns = cli.calls().filter { $0.contains("exec") && !$0.contains("--help") }
         #expect(turns.count == 2)
         #expect(turns.first == ["--no-daemon", "exec", "--json"] + options + model + ["-C", fixture.folder.path, "-"])
         #expect(turns.last == ["--no-daemon", "exec", "resume", "00000000-0000-4000-8000-000000000136", "--json"] + options + model + ["-"])
@@ -391,7 +391,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(result.disabledFeatures.count == 132)
         #expect(result.effortLevels["gpt-6-luna"] == ["low", "medium", "high", "xhigh", "max"])
         let homes = cli.text("codex-home.log").split(separator: "\n").map(String.init)
-        #expect(homes.count == 3)
+        #expect(homes.count == 4)
+        #expect(result.supportsRunOption)
         #expect(homes.allSatisfy { $0.contains("/Arch-Codex-Probe-") && !FileManager.default.fileExists(atPath: $0) })
         let probe = try #require(cli.calls().first { $0.contains("--strict-config") })
         #expect(probe.prefix(2) == ["--no-daemon", "--strict-config"])
@@ -588,6 +589,72 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(delete == [["--no-daemon", "delete", "--force", "00000000-0000-4000-8000-000000000136"]])
         let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
         #expect(total.requests == 1)
+    }
+
+    @Test func anImmediateStopNeverSendsTheOneTimePrompt() async throws {
+        let cli = try FakeCLI.codex()
+        let session = try AgentFixture(cli: cli, kind: .codex).start(ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        session.stop()
+        try await log.waitForEnd()
+        #expect(log.events == ["finished:stopped"])
+        #expect(cli.calls().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: session.folder.path))
+    }
+
+    @Test func aOneTimeCodexRunHasNoThreadToResumeOrDelete() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex)
+        let session = try fixture.start(maxTurns: 1, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        #expect(throws: AIError.self) { try session.send("Second message") }
+        try await log.waitForEnd()
+        #expect(log.events.contains("finished:completed"))
+        #expect(session.threadID == nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+        #expect(throws: AIError.self) { try session.send("Another message") }
+        await session.end()
+        let exec = cli.calls().filter { $0.contains("exec") && !$0.contains("--help") }
+        #expect(exec.count == 1)
+        #expect(exec.first?.contains("--ephemeral") == true)
+        #expect(!cli.calls().contains { $0.contains("delete") })
+    }
+
+    @Test func aOneTimeClaudeRunClosesAtItsRequestedTurnLimit() async throws {
+        let turn = try #require(claudeTurns("claude-session").first)
+        let limited = turn.replacingOccurrences(of: #""subtype":"success""#, with: #""subtype":"error_max_turns""#)
+        let cli = try FakeCLI.claude(turns: [limited])
+        let fixture = try AgentFixture(cli: cli)
+        #expect(throws: AIError.self) { try fixture.start(maxTurns: 0, ephemeral: true) }
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+        let session = try fixture.start(maxTurns: 2, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        try await log.waitForEnd()
+        #expect(log.events.contains("finished:completed"))
+        let args = try #require(cli.calls().first { $0.contains("--input-format") })
+        let i = try #require(args.firstIndex(of: "--max-turns"))
+        #expect(args[i + 1] == "2")
+        #expect(args.contains("--no-session-persistence"))
+        #expect(session.processID == nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+    }
+
+    @Test(arguments: [AIAgentKind.claudeCode, .codex])
+    func anUnsupportedRunOptionStopsBeforeThePromptReachesTheCLI(_ kind: AIAgentKind) async throws {
+        let cli = try kind == .codex ? FakeCLI.codex(acceptsEphemeral: false) : FakeCLI.claude(turns: [], acceptsTurnLimit: false)
+        let session = try AgentFixture(cli: cli, kind: kind).start(maxTurns: 1, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        try await log.waitForEnd()
+        guard case .providerUnavailable? = log.error else {
+            Issue.record("Expected a provider capability error.")
+            return
+        }
+        #expect(!cli.calls().contains { $0.contains("--input-format") || $0.contains("-C") })
+        #expect(!FileManager.default.fileExists(atPath: session.folder.path))
     }
 
     @Test func aResumedCodexTurnCountsOnlyWhatItAdded() async throws {
@@ -877,7 +944,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let result = await collect(fixture.service.stream(textRequest(userFeature)))
         #expect(result.error == nil)
         #expect(result.events == ["started:gpt-6-luna", "text:ready (VII9-C8632520)", "usage:1208/13/6912", "finished:completed"])
-        let call = try #require(cli.calls().last { $0.contains("--ephemeral") })
+        let call = try #require(cli.calls().last { $0.contains("--ephemeral") && !$0.contains("--help") })
         #expect(call.suffix(5) == ["--disable", "code_mode_host", "-m", "gpt-6-luna", "-"])
     }
 
@@ -940,7 +1007,7 @@ private struct FakeCLI {
     private static let logCall = #"{ printf '<<CALL>>'; printf '%s\0' "$@"; printf '\n'; } >> "$DIR/calls.log""#
 
     static func claude(turns: [String], interrupt: String? = nil, ordinary: String? = nil, signedIn: Bool = true,
-                       help: String? = nil) throws -> FakeCLI {
+                       help: String? = nil, acceptsTurnLimit: Bool = true) throws -> FakeCLI {
         let cli = try FakeCLI(kind: .claudeCode)
         try cli.write("help.txt", help ?? ClaudeCodeAgent.requiredFlags.map { "  \($0) <value>  Something" }.joined(separator: "\n") + "\n")
         for (index, turn) in turns.enumerated() { try cli.write("turn-\(index + 1).jsonl", turn) }
@@ -951,6 +1018,7 @@ private struct FakeCLI {
           "--version") echo "2.1.323 (Claude Code)"; exit 0;;
           "auth status --json") echo '{"loggedIn":\(signedIn),"email":"someone@example.org"}'; exit 0;;
           "--help") cat "$DIR/help.txt"; exit 0;;
+          "--max-turns") echo "\(acceptsTurnLimit ? "option '--max-turns <turns>' argument missing" : "unknown option '--max-turns'")" >&2; exit 1;;
         esac
         case "$*" in
           *"--input-format"*) ;;
@@ -971,7 +1039,7 @@ private struct FakeCLI {
         return cli
     }
 
-    static func codex(first: String? = nil, firstSleeps: Bool = false, refusedSetting: String? = nil) throws -> FakeCLI {
+    static func codex(first: String? = nil, firstSleeps: Bool = false, refusedSetting: String? = nil, acceptsEphemeral: Bool = true) throws -> FakeCLI {
         let cli = try FakeCLI(kind: .codex)
         try cli.write("features.txt", String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8))
         try cli.write("models.json", #"{"models":[{"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}]}"#)
@@ -982,6 +1050,7 @@ private struct FakeCLI {
         try cli.writeScript("""
         case "$*" in
           "--version") echo "codex-cli 0.164.0"; exit 0;;
+          "--no-daemon exec --ephemeral --help") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; echo "exec --ephemeral"; exit \(acceptsEphemeral ? 0 : 2);;
           "--no-daemon login status") echo "Logged in"; exit 0;;
           "--no-daemon features list") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/features.txt"; exit 0;;
           "--no-daemon debug models --bundled") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/models.json"; exit 0;;
@@ -998,6 +1067,7 @@ private struct FakeCLI {
           exit 0
         fi
         case "$*" in
+          *"mcp_servers.arch.command="*) case "$*" in *"exec resume"*) turn=resume;; *) turn=first;; esac;;
           *"--ephemeral"*) turn=ordinary;;
           *"exec resume"*) turn=resume;;
           *) turn=first;;
@@ -1096,10 +1166,10 @@ private struct AgentFixture {
     /// The first provider's model as a route, which a `perRequest` feature's session needs.
     var firstModelRoute: AIRouteChoice { .models([AIModelRef(provider: provider.id, model: provider.models[0].name)]) }
 
-    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil) throws -> AIAgentSession {
+    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil, maxTurns: Int? = nil, ephemeral: Bool = false) throws -> AIAgentSession {
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
         return try service.startAgentSession(AIAgentSessionRequest(feature: feature.id, route: route, instructions: harness, toolServer: ticketServer, folder: folder,
-                                                                   effort: effort, skills: skills))
+                                                                   effort: effort, skills: skills, maxTurns: maxTurns, ephemeral: ephemeral))
     }
 }
 

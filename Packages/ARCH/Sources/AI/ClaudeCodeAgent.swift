@@ -2,7 +2,7 @@
 import Foundation
 
 enum ClaudeCodeAgent {
-    /// The listed flags Arch passes, which `claude --help` must list; `--max-turns` is not in `--help`, so a version without it fails before reading a message.
+    /// The listed flags Arch passes, which `claude --help` must list; `--max-turns` is not in `--help`, so its missing-value diagnostic checks support for a bounded run.
     static let requiredFlags = ["--print", "--verbose", "--input-format", "--output-format", "--include-partial-messages", "--no-session-persistence",
                                 "--session-id", "--restricted", "--tools", "--strict-mcp-config", "--mcp-config", "--allowedTools", "--permission-mode",
                                 "--permission-prompts", "--disable-slash-commands", "--append-system-prompt", "--model", "--effort", "--plugin-dir",
@@ -18,7 +18,7 @@ enum ClaudeCodeAgent {
     // MARK: Arguments
 
     /// One long-lived session process (agent decision 11). With `skills`, the skill tool, the session's skill folder, and `skillSettings` replace `--disable-slash-commands` (agent decision 16).
-    static func sessionArguments(sessionID: UUID, configuration: URL, instructions: String, model: String, effort: String?, skills: AIAgentSkills?) -> [String] {
+    static func sessionArguments(sessionID: UUID, configuration: URL, instructions: String, model: String, effort: String?, skills: AIAgentSkills?, maxTurns: Int? = nil) -> [String] {
         var arguments = ["-p", "--verbose",
                          "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages",
                          "--no-session-persistence", "--session-id", sessionID.uuidString.lowercased(),
@@ -31,7 +31,7 @@ enum ClaudeCodeAgent {
         } else {
             arguments.append("--disable-slash-commands")
         }
-        arguments += ["--append-system-prompt", instructions, "--max-turns", String(maxTurns)]
+        arguments += ["--append-system-prompt", instructions, "--max-turns", String(maxTurns ?? Self.maxTurns)]
         if !model.isEmpty { arguments += ["--model", model] }
         if let effort, effortLevels.contains(effort) { arguments += ["--effort", effort] }
         return arguments
@@ -103,7 +103,10 @@ enum ClaudeCodeAgent {
         if !missing.isEmpty {
             throw AIAgentToolError(detail: "Claude Code\(version.map { " \($0)" } ?? "") does not accept \(missing.joined(separator: ", ")). Update Claude Code in the terminal.")
         }
-        return AIAgentProbeResult(version: version)
+        // The option is hidden from help. With no value, its parser reports a missing argument before it can start a model.
+        let limit = try await AIAgentCommand.run(executable, ["--max-turns"], environment: environment)
+        let acceptsLimit = !limit.succeeded && limit.errorLine?.contains("--max-turns") == true && limit.errorLine?.contains("argument missing") == true
+        return AIAgentProbeResult(version: version, supportsRunOption: acceptsLimit)
     }
 
     static func missingFlags(inHelp help: String) -> [String] {

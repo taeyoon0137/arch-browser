@@ -54,9 +54,13 @@ public struct AIAgentSessionRequest: Sendable {
     /// An effort level the model takes: Claude Code's `--effort`, or one that Codex's catalog lists for the model (`AIService.agentEffortLevels(for:)`). Others are left out.
     public var effort: String?
     public var skills: AIAgentSkills?
+    /// Claude Code's model requests per message. Codex relies on the tool host's call and time limits.
+    public var maxTurns: Int?
+    /// A single message with no persistent CLI thread. The session closes after the turn.
+    public var ephemeral: Bool
 
     public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, route: AIRouteChoice? = nil, instructions: String, toolServer: AIAgentToolServer,
-                id: UUID = UUID(), folder: URL? = nil, effort: String? = nil, skills: AIAgentSkills? = nil) {
+                id: UUID = UUID(), folder: URL? = nil, effort: String? = nil, skills: AIAgentSkills? = nil, maxTurns: Int? = nil, ephemeral: Bool = false) {
         self.feature = feature
         self.model = model
         self.route = route
@@ -66,6 +70,8 @@ public struct AIAgentSessionRequest: Sendable {
         self.folder = folder ?? AIAgentSession.folder(for: id)
         self.effort = effort
         self.skills = skills
+        self.maxTurns = maxTurns
+        self.ephemeral = ephemeral
     }
 }
 
@@ -207,7 +213,7 @@ public final class AIAgentSession {
 
     /// Sends the user's message. The first carries the user's words and the preamble with tab handles (agent decision 12). A message sent while a turn runs waits for it. Throws `blockedByPolicy(.agentMessageIsCommand)` for a message that starts with `/`, after any white space, while Claude Code can hold a session with skills, since Claude Code runs it as one of its own commands without the model.
     public func send(_ message: String) throws {
-        guard !hasEnded else { return }
+        if hasEnded && !request.ephemeral { return }
         try checkMessage(message)
         queuedMessages.append(message)
         startNextTurn()
@@ -215,6 +221,9 @@ public final class AIAgentSession {
 
     /// Throws what `send(_:)` would throw for the message, without sending it, so that a caller that queues messages itself can keep a refused one in its composer.
     public func checkMessage(_ message: String) throws {
+        if request.ephemeral && (isTurnRunning || hasEnded) {
+            throw AIError.invalidRequest("A one-time agent run takes one message.")
+        }
         if request.skills != nil, message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
            candidates.contains(where: { candidate in
                guard case .commandLine(let tool) = candidate.provider.kind else { return false }
@@ -227,7 +236,11 @@ public final class AIAgentSession {
     /// Stops the running turn and drops queued messages. Claude Code gets the interrupt and keeps its process unless the turn has not ended 3 seconds later; Codex's process group ends.
     public func stop() {
         queuedMessages.removeAll()
-        guard let turn, turn.outcome == nil, turn.pendingEnd == nil, !turn.isStopping else { return }
+        guard let turn else {
+            turnTask?.cancel()
+            return
+        }
+        guard turn.outcome == nil, turn.pendingEnd == nil, !turn.isStopping else { return }
         turn.isStopping = true
         // Before the message reached the tool, the turn ends at once, also while it waits for a slot of the provider's limiter.
         guard let process, turn.didStartProcess else {
@@ -261,7 +274,7 @@ public final class AIAgentSession {
         }
         guard !isClosed else { return }
         isClosed = true
-        if !keepingThread, let holder = candidates.first { await deleteThread(of: holder) }
+        if !request.ephemeral, !keepingThread, let holder = candidates.first { await deleteThread(of: holder) }
         try? FileManager.default.removeItem(at: folder)
         folderLock = nil
     }
@@ -337,6 +350,13 @@ public final class AIAgentSession {
 
     /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error. A turn of an automatic feature is one of its automatic requests: it fails with `budgetReached` at the daily limit for automatic requests or the monthly spending limit before any model, and otherwise counts once toward the daily limit, whichever models it tries.
     private func run(_ message: String) async {
+        if Task.isCancelled || hasEnded {
+            continuation.yield(.turnFinished(.stopped))
+            if request.ephemeral { await end() }
+            isTurnRunning = false
+            startNextTurn()
+            return
+        }
         transcript.append((.user, message))
         var outcome: TurnOutcome = .failed(.notConfigured(.noUsableModel))
         var reply = ""
@@ -353,16 +373,21 @@ public final class AIAgentSession {
             endProcess()
             await deleteThread(of: candidate)
             candidates.removeFirst()
+            if Task.isCancelled {
+                outcome = .finished(.stopped)
+                break
+            }
         }
         switch outcome {
         case .finished(let end):
             if !reply.isEmpty { transcript.append((.assistant, reply)) }
-            continuation.yield(.turnFinished(end))
+            continuation.yield(.turnFinished(request.ephemeral && end == .turnLimit ? .completed : end))
         case .failed(let error) where model != nil:
             continuation.yield(.turnFailed(error))
         case .failed(let error), .refused(let error):
             fail(error)
         }
+        if request.ephemeral { await end() }
         isTurnRunning = false
         startNextTurn()
     }
@@ -430,9 +455,15 @@ public final class AIAgentSession {
         do {
             switch kind {
             case .claudeCode:
+                if request.maxTurns != nil && !probe.supportsRunOption {
+                    return .failed(.providerUnavailable(provider, detail: "Claude Code could not confirm its turn limit. Update Claude Code in the terminal."))
+                }
                 if process == nil || processKind != .claudeCode { try startClaudeCode(on: candidate, tool: tool, environment: environment) }
                 process?.write(ClaudeCodeAgent.userMessage(messageWithEarlierConversation(message)))
             case .codex:
+                if request.ephemeral && !probe.supportsRunOption {
+                    return .failed(.providerUnavailable(provider, detail: "Codex could not confirm support for one-time runs. Update Codex in the terminal."))
+                }
                 try startCodexTurn(message, on: candidate, tool: tool, environment: environment, probe: probe)
             }
         } catch let error as AIError {
@@ -501,7 +532,7 @@ public final class AIAgentSession {
         // The tool's conversation ended with the previous process, so the new one starts from Arch's transcript.
         needsEarlierConversation = transcript.count > 1
         let arguments = ClaudeCodeAgent.sessionArguments(sessionID: UUID(), configuration: configuration, instructions: request.instructions,
-                                                         model: candidate.model.name, effort: request.effort, skills: request.skills)
+                                                         model: candidate.model.name, effort: request.effort, skills: request.skills, maxTurns: request.maxTurns)
         try startProcess(kind: .claudeCode, executable: tool.executable, arguments: arguments,
                          environment: ClaudeCodeAgent.sessionEnvironment(environment, skills: request.skills), input: Data(), keepsInputOpen: true)
     }
@@ -514,7 +545,7 @@ public final class AIAgentSession {
                                                    model: candidate.model.name, effort: request.effort, levels: probe.effortLevels)
         } else {
             arguments = CodexAgent.firstTurnArguments(server: server, instructions: request.instructions, disabled: probe.disabledFeatures,
-                                                      model: candidate.model.name, effort: request.effort, levels: probe.effortLevels, folder: folder)
+                                                      model: candidate.model.name, effort: request.effort, levels: probe.effortLevels, folder: folder, ephemeral: request.ephemeral)
         }
         claude = nil
         codex = CodexStreamDecoder(isSession: true, provider: candidate.provider.id)
@@ -598,7 +629,7 @@ public final class AIAgentSession {
         guard let turn else { return }
         switch event {
         case .started(let thread):
-            guard let thread else { return }
+            guard let thread, !request.ephemeral else { return }
             if thread != threadID { threadUsage = nil }
             threadID = thread
         case .output:
@@ -705,6 +736,9 @@ extension AIService {
 
     /// Starts a CLI runner. A task authorized to use the user's subscription falls back only to another CLI preset.
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
+        if let limit = request.maxTurns, !(1...ClaudeCodeAgent.maxTurns).contains(limit) {
+            throw AIError.invalidRequest("The agent turn limit must be between 1 and \(ClaudeCodeAgent.maxTurns).")
+        }
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
         let candidates = try agentSessionCandidates(named: request.model, route: request.route, for: feature, commandLineOnly: true)
         do {
