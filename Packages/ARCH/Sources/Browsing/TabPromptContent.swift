@@ -7,21 +7,21 @@ import Foundation
 enum TabPromptContent {
     // MARK: Page dialogs
 
-    /// A page's `alert`: its words under the page's site, with OK.
-    static func alert(message: String, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message),
+    /// A page's `alert`: its words under the page's site, with OK. Words from a frame on another host, `embeddedHost`, are captioned with that host (`pageText(_:embeddedHost:)`).
+    static func alert(message: String, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message, embeddedHost: embeddedHost),
                       buttons: [PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "ok")
     }
 
     /// A page's `confirm`: OK answers true, anything else false.
-    static func confirm(message: String, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message),
+    static func confirm(message: String, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message, embeddedHost: embeddedHost),
                       buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "cancel")
     }
 
     /// A page's `prompt`: a field that starts with the page's default text, which OK returns. The text is selected as the field takes the focus.
-    static func textInput(message: String, defaultText: String?, identity: PromptIdentity) -> PromptContent {
-        var content = confirm(message: message, identity: identity)
+    static func textInput(message: String, defaultText: String?, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
+        var content = confirm(message: message, embeddedHost: embeddedHost, identity: identity)
         content.kind = .pageTextInput
         content.fields = [PromptField(id: "text", kind: .text, label: "Answer", initialValue: defaultText ?? "")]
         content.focusedFieldID = "text"
@@ -135,6 +135,19 @@ enum TabPromptContent {
         response.buttonID == "allow"
     }
 
+    // MARK: File choosers
+
+    /// A page's file chooser, which Arch's open or save panel answers (`FileChooserPanel`) once the tab's prompts before it have ended. No card shows it.
+    static func fileChooser(identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .fileChooser, identity: identity,
+                      buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "choose", title: "Choose")], defaultButtonID: "choose", cancelButtonID: "cancel")
+    }
+
+    /// Only a choice in the panel gives the page files; Cancel and a chooser that ended without the user, as when the tab left the screen, give it none.
+    static func fileChooserResult(_ response: PromptResponse) -> Bool {
+        response.buttonID == "choose"
+    }
+
     // MARK: Notices
 
     /// Arch's notice about the tab's page, such as a capture that failed. A detail that is a file path truncates in the middle and shows whole in its tooltip.
@@ -174,8 +187,10 @@ enum TabPromptContent {
 
     // MARK: Helpers
 
-    /// A page's words, or nothing for an empty message.
-    private static func pageText(_ message: String) -> PageAuthoredText? {
-        message.isEmpty ? nil : PageAuthoredText(text: message)
+    /// A page's words, or nothing for an empty message. Words from a frame on another host than the page's say so in their caption, "An embedded page on “example.com” says", and VoiceOver names that host as their author.
+    private static func pageText(_ message: String, embeddedHost: String? = nil) -> PageAuthoredText? {
+        guard !message.isEmpty else { return nil }
+        guard let embeddedHost else { return PageAuthoredText(text: message) }
+        return PageAuthoredText(caption: "An embedded page on \u{201C}\(embeddedHost)\u{201D} says", text: message, author: embeddedHost)
     }
 }

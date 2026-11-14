@@ -43,6 +43,15 @@ public struct TabFolder: Identifiable, Codable, Hashable {
     public var isPinned: Bool
     /// A collapsed folder hides its tabs in the sidebar.
     public var isCollapsed = false
+    /// The agent session or outside client's grant whose tabs the folder holds, or nil for a folder of the user's (docs/agents.md, In the browser ▸ Agent folders). It is never encoded, and `session.json` leaves an agent folder out with its tabs (agent decision 10); Keep Tabs clears it, which makes the folder and its tabs the user's.
+    public var agentSessionID: UUID?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, spaceID, name, isPinned, isCollapsed
+    }
+
+    /// Whether the folder holds an agent's tabs.
+    public var isAgentFolder: Bool { agentSessionID != nil }
 }
 
 public struct Favorite: Identifiable, Codable, Hashable {

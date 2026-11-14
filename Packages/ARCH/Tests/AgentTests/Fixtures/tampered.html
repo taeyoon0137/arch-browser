@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- A page that replaces the DOM built-ins the agents' page script calls, after which the script, in WebKit's world of its own, still sees the page as it is and still hides the password. On Chromium the same page could mislead it (docs/agents.md, Risks 2). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tampered</title>
+</head>
+<body>
+<button>Real button</button>
+<label>Password <input type="password" name="password" value="secret-value"></label>
+<script>
+  Element.prototype.getAttribute = function () { return "text"; };
+  Element.prototype.getClientRects = function () { return []; };
+  Document.prototype.querySelector = function () { return null; };
+  Object.defineProperty(Node.prototype, "childNodes", { get() { return []; } });
+  Object.defineProperty(HTMLInputElement.prototype, "type", { get() { return "text"; } });
+  window.getComputedStyle = function () { return { display: "none", visibility: "hidden" }; };
+  JSON.stringify = function () { return "{\"url\":\"https://attacker.example/\",\"title\":\"Fake\",\"nodes\":[]}"; };
+</script>
+</body>
+</html>

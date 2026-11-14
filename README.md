@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -92,7 +92,7 @@ git config core.hooksPath .githooks
 - [`docs/windows-personas.md`](./docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
 - [`docs/plugins.md`](./docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
-- [`docs/agents.md`](./docs/agents.md): the agents design (not built): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
+- [`docs/agents.md`](./docs/agents.md): the agents design (its control channel library, the endpoint with grants and sealed settings, agent tabs with the reading, navigating, snapshot, screenshot, and action tools, approvals in a first agent panel, the runner of sessions on the CLIs, in-app sessions with their composer and panel, `arch-cli`'s commands, and `arch-mcp` are built; its harness and skill text is written): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 - [`docs/web-store.md`](./docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
 - [`docs/password-managers.md`](./docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
@@ -110,7 +110,7 @@ git config core.hooksPath .githooks
 | Command | Description |
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
-| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition, and signs it. It runs `scripts/opaque_icon.swift` to prepare the icon. With a provisioning profile that suits the signing identity, it embeds the profile and gives the app the iCloud and push entitlements the profile grants. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, `arch-cli` with its `arch-mcp` link, the app icon, and the scripting definition, and signs it. It runs `scripts/opaque_icon.swift` to prepare the icon. With a provisioning profile that suits the signing identity, it embeds the profile and gives the app the iCloud and push entitlements the profile grants. |
 | `./scripts/provision_app.sh` | Gets the development and Developer ID provisioning profiles for `xyz.taeyoon.arch` through Xcode's automatic signing of a stand-in project in a temporary folder, signed in with the Xcode account or an App Store Connect API key (`ARCH_ASC_KEY_ID`, `ARCH_ASC_ISSUER_ID`, `ARCH_ASC_KEY_PATH`), and reports each profile without the team. `--dry-run` prints the steps and the installed profiles. |
 | `./scripts/install_app.sh` | Copies the signed `build/Arch.app` into `/Applications` as a real bundle for native apps, such as 1Password, that accept only browsers there. It refuses a bundle signed ad hoc or unsigned and replaces only an earlier Arch or a link. `ARCH_APP_SOURCE` and `ARCH_INSTALL_DIR` change the source and the destination folder. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
@@ -124,9 +124,9 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
-│   ├── ARCHApp/Sources/            # App target and CEF helper executable
+│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
+│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCHApp/Sources/            # App target, CEF helper executable, and arch-cli
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers
 │   │   ├── ARCHEngineChromium/     # Chromium adapter using CEF

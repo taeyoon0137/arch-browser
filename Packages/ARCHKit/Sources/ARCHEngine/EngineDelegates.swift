@@ -74,7 +74,7 @@ public struct EngineContextMenuElement: Sendable {
     }
 }
 
-/// Decides whether a navigation goes ahead. The WebKit engine asks about every navigation; the Chromium engine asks only about links the user clicked with Shift (`newWindow`).
+/// Decides whether a navigation goes ahead. Both engines ask about every main frame navigation, again at each server redirect with the redirect's address, and about each link the user clicked with Shift (`newWindow`); a frame inside the page asks about nothing else.
 public protocol EngineWebContentsNavigationDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy
 }
@@ -101,13 +101,16 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents)
     /// The page left the fullscreen that `webContentsDidRequestEnterFullscreen` reported. Only Chromium sends this.
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void)
+    /// The page's `alert`, `confirm`, and `prompt`, with the origin of the frame that shows it, as an address without a path, or nil when the engine names none or the origin is opaque, so that the app can tell a dialog of another site's frame from the page's own.
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void)
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void)
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void)
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void)
     /// The page's open dialogs no longer apply, as after a navigation.
     func webContentsDidCancelDialogs(_ webContents: any EngineWebContents)
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void)
+    /// The page asks the user to choose files, a folder, or a place to save a file, as a file input's click does. Call `completion` once with file addresses, or with nil to cancel; the engine keeps only what `request.answer(from:)` keeps, so a page asking for one item gets the first. Neither engine shows a panel of its own.
+    func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void)
     /// Asks whether a download that `url` starts may proceed. `hasPage` is false when the web contents never showed a page, as when a tab opens straight onto a file.
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool
     /// Builds the page's context menu. On entry `menu` holds only the spelling and editing items the engine runs itself, marked with `EngineContextMenuItem` identifiers, and they carry their enabled state. The delegate may retitle, reorder, or remove them, except that a spelling suggestion keeps its title, and sets `isEnabled` on every item it adds. The engine shows the menu after this returns, unless it is empty, as a context menu for the page, so that AppKit adds its own items, such as AutoFill and Services, which never appear in `menu`.
@@ -118,7 +121,7 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsProcessDidTerminate(_ webContents: any EngineWebContents)
 }
 
-// Default implementations let feature code override only the callbacks it handles. Dialogs and permissions default to the safe answer, and a link for another app stays unopened.
+// Default implementations let feature code override only the callbacks it handles. Dialogs, file choosers, and permissions default to the safe answer, and a link for another app stays unopened.
 public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeURL(_ webContents: any EngineWebContents) {}
@@ -133,12 +136,13 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) {}
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) { completion() }
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) { completion(false) }
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) { completion(nil) }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void) { completion() }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) { completion(nil) }
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) { completion(true) }
     func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) { completion(nil) }
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool { true }
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {}
     func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {}

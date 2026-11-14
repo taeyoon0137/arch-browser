@@ -19,6 +19,13 @@ enum PromptSiteIdentity {
         return PromptIdentity(icon: .symbol("globe"), name: host, isSecure: isSecure, context: "in \(tabHost)")
     }
 
+    /// The host of the frame that shows a page's `alert`, `confirm`, or `prompt`, when the frame is on another host than the tab's page, as an embedded page of another site is, and nil for the page's own frame or a frame whose origin the engine does not name, as for an opaque origin. The card names that host above the frame's words.
+    static func embeddedHost(of frameOrigin: URL?, tabURL: URL?) -> String? {
+        guard let host = frameOrigin?.host, !host.isEmpty else { return nil }
+        guard let tabHost = tabURL?.host, !tabHost.isEmpty, tabHost.lowercased() == host.lowercased() else { return host }
+        return nil
+    }
+
     /// The server that asks for a login: a proxy with its own symbol and tag, or the site as `make` names it. The lock shows only for a site reached over https; a method that keeps the password from the wire, such as Digest, encrypts nothing else, and the protection space does not say whether the connection to a proxy is encrypted.
     static func signIn(_ space: URLProtectionSpace, tabURL: URL?, favicon: NSImage?) -> PromptIdentity {
         if space.isProxy() {

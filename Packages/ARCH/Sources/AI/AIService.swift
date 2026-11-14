@@ -90,8 +90,11 @@ public final class AIService: ObservableObject, AIClient {
         return try await makeProvider(configuration, resolvedKey).listModels()
     }
 
-    /// Sends a short request to the provider's first model and returns the reply, for the Check button in Settings ▸ AI. The configuration may be unsaved. The request belongs to no feature, so it waits for no rate limiter and counts toward no usage.
+    /// Sends a short request to the provider's first model and returns the reply, for the Check button in Settings ▸ AI. The configuration may be unsaved. The request belongs to no feature, so it waits for no rate limiter and counts toward no usage. A Claude Code or Codex preset runs its status command and probes instead, never a model.
     public func check(_ configuration: AIProviderConfiguration) async throws -> String {
+        if case .commandLine(let tool) = configuration.kind, let kind = tool.agent {
+            return try await checkAgentTool(tool, kind: kind)
+        }
         guard let model = configuration.models.first else { throw AIError.notConfigured(.noModel) }
         let request = AIProviderRequest(model: model.name, instructions: nil, messages: [AIMessage(role: .user, parts: [.text("Reply with one short sentence.")])],
                                         tools: [], output: .text, maxOutputTokens: 256)
@@ -126,10 +129,10 @@ public final class AIService: ObservableObject, AIClient {
         }
     }
 
-    /// Runs the request on its route's models in order. It moves to the next model only when the current one fails before any text or tool call reached the caller, so a reply is never repeated or mixed.
+    /// Runs the request on its route's models in order, or on its pinned model alone. It moves to the next model only when the current one fails before any text or tool call reached the caller, so a reply is never repeated or mixed.
     private func serve(_ request: AIRequest, entry: inout AIActivityEntry, continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws -> AIFinishReason {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
-        let models = try settings.routeModels(for: feature, carryingPageData: AIPartText.carriesData(request.messages))
+        let models = try models(for: request, feature: feature)
         if let budget = reachedBudget(for: feature) { throw AIError.budgetReached(budget) }
         if feature.trigger == .automatic { usage.countAutomaticRequest(for: feature.id) }
         var attempt = AIAttempt(continuation: continuation)
@@ -152,6 +155,30 @@ public final class AIService: ObservableObject, AIClient {
             }
         }
         throw lastError
+    }
+
+    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:carryingPageData:)` does when none is left.
+    private func models(for request: AIRequest, feature: AIFeature) throws -> [AIRouteModel] {
+        let carriesPageData = AIPartText.carriesData(request.messages)
+        var models: [AIRouteModel]
+        if let ref = request.pinnedModel {
+            guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
+            guard let provider = settings.providers.first(where: { $0.id == ref.provider }),
+                  let model = provider.models.first(where: { $0.name == ref.model }),
+                  feature.requirements.isSubset(of: provider.capabilities(of: model)) else { throw AIError.notConfigured(.noUsableModel) }
+            if carriesPageData, !provider.acceptsPageData { throw AIError.blockedByPolicy(.commandLineToolWithPageData) }
+            models = [AIRouteModel(ref: ref, provider: provider, model: model)]
+        } else {
+            models = try settings.routeModels(for: feature, carryingPageData: carriesPageData)
+        }
+        if !request.tools.isEmpty {
+            models = models.filter { candidate in
+                guard case .http = candidate.provider.kind else { return false }
+                return candidate.provider.capabilities(of: candidate.model).contains(.tools)
+            }
+            guard !models.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
+        }
+        return models
     }
 
     /// One attempt on one model: rate limiting, page access checks for the model's limit, the provider's stream, and usage.
@@ -226,10 +253,11 @@ public final class AIService: ObservableObject, AIClient {
         return try outcome.get()
     }
 
-    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit. The activity entry shows its parts and content.
+    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts and content.
     private func prepare(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, entry: inout AIActivityEntry) throws -> AIProviderRequest {
         let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
-        let messages = try policy.prepare(request.messages)
+        let checked = Self.checkedToolResults(in: request.messages, policy: policy, imageNote: Self.imageNote(for: candidate))
+        let messages = try policy.prepare(AIToolHistory.fitted(checked, characterLimit: policy.inputCharacterLimit))
         let providerRequest = AIProviderRequest(model: candidate.model.name,
                                                 instructions: AIPartText.instructions(request.instructions, for: messages),
                                                 messages: messages, tools: request.tools, output: request.output,
@@ -237,6 +265,51 @@ public final class AIService: ObservableObject, AIClient {
         entry.parts = Self.partSummary(messages)
         entry.content = AIPartText.transcript(of: providerRequest)
         return providerRequest
+    }
+
+    static let imageNotTakenNote = "An image was left out: this model does not take images."
+    static let imageNotInToolResultsNote = "An image was left out: this provider's format sends tool results as text."
+
+    /// The note sent in place of each image in a tool result, or nil when the model takes them there: one with `images` on the `messages` format. The `chatCompletions` format sends a tool result as text.
+    private static func imageNote(for candidate: AIRouteModel) -> String? {
+        guard candidate.provider.capabilities(of: candidate.model).contains(.images) else { return imageNotTakenNote }
+        if case .http(let http) = candidate.provider.kind, http.format == .messages { return nil }
+        return imageNotInToolResultsNote
+    }
+
+    /// The messages with each tool result as this attempt sends it. A result that the part checks refuse, as one carrying a page or an image on an excluded site or a kind the feature does not declare, becomes an error result that says why without naming the site, so that a tool loop goes on without its data, also for a site excluded after the result arrived. With an `imageNote`, the note replaces each image.
+    private static func checkedToolResults(in messages: [AIMessage], policy: AIPartPolicy, imageNote: String?) -> [AIMessage] {
+        // The probe only checks; the length limit applies to the whole request afterward.
+        var probe = policy
+        probe.inputCharacterLimit = .max
+        return messages.map { message in
+            var message = message
+            message.parts = message.parts.map { part in
+                guard case .toolResult(var result) = part else { return part }
+                if let imageNote {
+                    result.parts = result.parts.map { part in
+                        if case .file(let file) = part, AIPartText.isImage(file) { return .text(imageNote) }
+                        return part
+                    }
+                }
+                do {
+                    _ = try probe.prepare([AIMessage(role: message.role, parts: [.toolResult(result)])])
+                } catch AIError.blockedByPolicy(let reason) {
+                    return .toolResult(AIToolResult(callID: result.callID, parts: [.text(refusal(reason))], isError: true))
+                } catch {}
+                return .toolResult(result)
+            }
+            return message
+        }
+    }
+
+    /// What the model reads in place of a refused tool result.
+    static func refusal(_ reason: AIPolicyReason) -> String {
+        switch reason {
+        case .siteExcluded: return "Arch did not send this result: it holds data from a site where AI is off."
+        case .dataNotDeclared(let kind): return "Arch did not send this result: this feature does not send \(kind.rawValue) data."
+        default: return "Arch did not send this result."
+        }
     }
 
     /// The budget that keeps the feature from starting a request now: an automatic feature's daily request limit, or the monthly spending limit.
@@ -253,7 +326,7 @@ public final class AIService: ObservableObject, AIClient {
         return usage.estimatedCost(in: limit.currency) >= limit.amount
     }
 
-    private func limiter(for provider: AIProviderID) -> AIRateLimiter {
+    func limiter(for provider: AIProviderID) -> AIRateLimiter {
         if let limiter = limiters[provider] { return limiter }
         let limiter = AIRateLimiter(provider: provider, limits: .http)
         limiters[provider] = limiter

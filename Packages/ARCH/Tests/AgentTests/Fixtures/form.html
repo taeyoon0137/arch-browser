@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- The checkout page the agents' page script tests run on in WebKit, and regression check 70 serves over HTTP: fields of each class, a submit control that asks, frames of the same origin, another site, and an extension, hidden elements, an open shadow root, a covered control, a framework-style controlled input, a search form with a hidden input, a comment form whose button posts to another site, the user activation the page's handlers see, and the download, camera, and confirm controls that check 70 uses. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checkout – Example</title>
+<style>
+  body { font: 14px -apple-system, sans-serif; margin: 0; padding: 8px; }
+  .gone { display: none; }
+  .stack { position: relative; height: 48px; }
+  .stack > * { position: absolute; left: 0; top: 0; }
+  #banner { width: 320px; height: 48px; background: #eee; }
+  iframe { width: 300px; height: 60px; border: 0; }
+</style>
+</head>
+<body>
+<header>
+  <a href="https://fixture.example/">Home</a>
+  <input type="search" aria-label="Search" value="">
+</header>
+<nav aria-label="Steps"><a href="/cart?session=secret#top">Cart</a></nav>
+<main>
+  <h1>Your order</h1>
+  <form id="checkout" action="https://pay.other.example/charge" method="post">
+    <label>Email <input type="email" name="email" autocomplete="email" value="me@example.org"></label>
+    <label>Phone <input type="tel" name="phone" value="010-1234-5678"></label>
+    <label>Name <input name="fullname" value="Alex Kim"></label>
+    <label>Password <input type="password" name="password" value="hunter2"></label>
+    <label>Card number <input name="card" autocomplete="cc-number" value="4111111111111111"></label>
+    <label>Verification code <input name="code" value="123456"></label>
+    <label>비밀번호 확인 <input name="confirmPassword" value="hunter3"></label>
+    <input type="hidden" name="csrf" value="token-secret">
+    <label>Shipping <select name="shipping"><option value="std">Standard</option><option value="fast">Express</option></select></label>
+    <label><input type="checkbox" name="gift"> Gift wrap</label>
+    <label>Note <textarea name="note">Leave at the door</textarea></label>
+    <div contenteditable="true" aria-label="Message">Hi</div>
+    <label>Receipt <input type="file" name="receipt"></label>
+    <label><input type="checkbox" name="robot"> I'm not a robot</label>
+    <button type="submit">Place order</button>
+  </form>
+  <div aria-hidden="true"><button>Hidden by ARIA</button></div>
+  <div class="gone"><button>Hidden by style</button></div>
+  <button disabled>Disabled</button>
+  <div id="host"></div>
+  <iframe title="Coupon" srcdoc="<label>Coupon <input name=coupon value=SAVE10></label> <label>Coupon PIN <input name=pin value=9999></label> <button>Apply</button>"></iframe>
+  <iframe title="Payments" src="data:text/html,%3Cinput%20name%3Dcard%20value%3D4111%3E"></iframe>
+  <iframe title="Saved logins" src="chrome-extension://abcdefghijklmnopabcdefghijklmnop/menu.html"></iframe>
+  <p>Questions? <a href="mailto:help@example.org">Write to us</a>.</p>
+  <div class="stack">
+    <button id="under">Covered</button>
+    <div id="banner" role="dialog" aria-label="Cookie banner">We use cookies. <button>Accept</button></div>
+  </div>
+  <label>Nickname <input id="controlled" name="nickname"></label>
+  <form id="find" action="/search"><input type="hidden" name="source" value="header"><input name="q" aria-label="Find"></form>
+  <p><a href="files/report.pdf" download>Download the report</a> <button id="camera">Use camera</button> <button id="ask">Remove item</button></p>
+  <form id="comment" action="/comments"><input name="comment" aria-label="Comment"> <button formaction="https://post.other.example/comments">Post comment</button></form>
+</main>
+<script>
+  // An open shadow root, which the walk follows.
+  document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<button>Shadow button</button>";
+  // Submissions stay on the page and are recorded for the tests.
+  document.getElementById("checkout").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.checkout = "submitted"; });
+  document.getElementById("find").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.found = new FormData(event.target).get("q"); });
+  document.getElementById("comment").addEventListener("submit", (event) => { event.preventDefault(); document.body.dataset.posted = event.submitter ? event.submitter.textContent : "without its button"; });
+  // Whether the page's handlers run with the user's activation, which the agents' events must never give.
+  document.addEventListener("click", () => { document.body.dataset.clickActivation = String(navigator.userActivation.isActive); }, true);
+  document.addEventListener("mouseover", () => { document.body.dataset.hoverActivation = String(navigator.userActivation.isActive); }, true);
+  document.querySelector("select").addEventListener("change", (event) => { document.body.dataset.shipping = event.target.value; });
+  document.getElementById("under").addEventListener("click", () => { document.body.dataset.covered = "clicked"; });
+  document.getElementById("camera").addEventListener("click", () => navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {}));
+  document.getElementById("ask").addEventListener("click", () => { document.body.dataset.confirmed = String(confirm("Remove this item?")); });
+  // A field that a framework controls: the element keeps a value tracker of its own, as React does, so that only the prototype's setter followed by an input event changes the state, which the next render writes back.
+  const field = document.getElementById("controlled");
+  const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  let tracked = "", state = "";
+  Object.defineProperty(field, "value", { configurable: true, get() { return native.get.call(this); }, set(value) { tracked = String(value); native.set.call(this, value); } });
+  field.addEventListener("input", () => {
+    const current = native.get.call(field);
+    if (current !== tracked) { tracked = current; state = current; }
+    native.set.call(field, state);
+    document.body.dataset.controlled = state;
+  });
+</script>
+</body>
+</html>

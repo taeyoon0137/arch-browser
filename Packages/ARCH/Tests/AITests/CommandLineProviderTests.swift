@@ -303,16 +303,59 @@ import Testing
 }
 
 @Suite struct LoginShellTests {
-    @Test func takesTheLineAfterTheMarker() {
-        let output = "Welcome back\nnoise\(LoginShell.marker)\n/opt/tools/bin:/usr/bin\nbye\n"
-        #expect(LoginShell.path(inOutput: output) == "/opt/tools/bin:/usr/bin")
-        #expect(LoginShell.path(inOutput: "\(LoginShell.marker)\n/opt/tools/bi") == nil)
-        #expect(LoginShell.path(inOutput: "no marker\n") == nil)
+    @Test func takesTheNamedVariablesBetweenTheMarkers() {
+        // Another variable, an empty one, and a value with a line break that spells the end marker stay out.
+        let entries = "TOKEN=secret\0PATH=/opt/tools/bin:/usr/bin\0HOME=/Users/me\0CLAUDE_CONFIG_DIR=/Users/me/claude config\0CODEX_HOME=\0NOTE=a\n\(LoginShell.endMarker)\nb\0"
+        let output = "Welcome back\nnoise\(LoginShell.marker)\n\(entries)\(LoginShell.endMarker)\nbye\n"
+        #expect(LoginShell.environment(inOutput: output) == ["PATH": "/opt/tools/bin:/usr/bin", "HOME": "/Users/me", "CLAUDE_CONFIG_DIR": "/Users/me/claude config"])
+        // Not before the end marker's line is complete, and not without PATH.
+        #expect(LoginShell.environment(inOutput: "\(LoginShell.marker)\nPATH=/usr/bin\0\(LoginShell.endMarker)") == nil)
+        #expect(LoginShell.environment(inOutput: "\(LoginShell.marker)\nPATH=/usr/bin\0") == nil)
+        #expect(LoginShell.environment(inOutput: "\(LoginShell.marker)\nHOME=/Users/me\0PATH=\0\(LoginShell.endMarker)\n") == nil)
+        #expect(LoginShell.environment(inOutput: "no marker\n") == nil)
     }
 
-    @Test func readsThePathOfALoginShell() async {
-        let path = await LoginShell.readPath(shell: URL(fileURLWithPath: "/bin/sh"))
-        #expect(path?.split(separator: ":").contains("/usr/bin") == true)
+    @Test func readsTheEnvironmentOfALoginShell() async {
+        let environment = await LoginShell.readEnvironment(shell: URL(fileURLWithPath: "/bin/sh"))
+        #expect(environment?["PATH"]?.split(separator: ":").contains("/usr/bin") == true)
+        #expect(environment?["HOME"] == NSHomeDirectory())
+    }
+
+    @Test func readsOnlyExportedVariablesAndStopsAtTheEndMarker() async throws {
+        // A stand-in login shell whose profile prints text, exports one variable and sets another without exporting it, and starts a background process holding the output open; it runs the command it was given and then waits for that process, so only the end marker ends the read in under eight seconds.
+        let shell = try toolScript("""
+            echo 'Welcome back'
+            export CLAUDE_CONFIG_DIR=/opt/claude-config
+            CODEX_HOME=/opt/unexported
+            sleep 8 &
+            /bin/sh -c "$4"
+            wait
+            """)
+        let clock = ContinuousClock()
+        let started = clock.now
+        let environment = await LoginShell.readEnvironment(shell: shell, environment: LoginShell.readingEnvironment(inherited: [:]))
+        #expect(clock.now - started < .seconds(6))
+        #expect(environment?["CLAUDE_CONFIG_DIR"] == "/opt/claude-config")
+        #expect(environment?["CODEX_HOME"] == nil)
+        #expect(environment?["PATH"] != nil)
+    }
+
+    @Test func startsTheShellWithTheFolderVariablesThisAppHasForAProfileToChange() async throws {
+        // As `launchctl setenv` gives them to every app; other variables of the app stay out.
+        let start = LoginShell.readingEnvironment(inherited: ["CLAUDE_CONFIG_DIR": "/opt/app-claude", "CODEX_HOME": "/opt/app-codex", "TOKEN": "secret", "HOME": "/opt/elsewhere"])
+        #expect(start["CLAUDE_CONFIG_DIR"] == "/opt/app-claude")
+        #expect(start["CODEX_HOME"] == "/opt/app-codex")
+        #expect(start["TOKEN"] == nil)
+        #expect(start["HOME"] == NSHomeDirectory())
+        #expect(LoginShell.readingEnvironment(inherited: [:]) == LoginShell.baseEnvironment)
+        // A profile that exports its own value wins; the other comes through from the app.
+        let shell = try toolScript("""
+            export CODEX_HOME=/opt/profile-codex
+            exec /bin/sh -c "$4"
+            """)
+        let environment = await LoginShell.readEnvironment(shell: shell, environment: start)
+        #expect(environment?["CLAUDE_CONFIG_DIR"] == "/opt/app-claude")
+        #expect(environment?["CODEX_HOME"] == "/opt/profile-codex")
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {

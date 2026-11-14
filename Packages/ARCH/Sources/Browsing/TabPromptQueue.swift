@@ -1,6 +1,6 @@
-// The prompts that tabs ask for: a page's own dialogs, permission questions, logins, leave-page checks, links for other apps, extensions' questions, and the app's notices about a page. Each tab's prompts wait in order, and a window shows a tab's oldest one as a card over the tab's pane while the tab is on its screen (`PanePromptLayer`), so a prompt never covers another tab's page and a background tab's prompt waits until the tab shows.
+// The prompts that tabs ask for: a page's own dialogs, permission questions, logins, leave-page checks, links for other apps, extensions' questions, file choosers, and the app's notices about a page. Each tab's prompts wait in order, and a window shows a tab's oldest one as a card over the tab's pane while the tab is on its screen (`PanePromptLayer`), or a file chooser's panel as a sheet on the window, so a prompt never covers another tab's page and a background tab's prompt waits until the tab shows.
+import AppKit
 import Combine
-import Foundation
 import SwiftUI
 
 final class TabPromptQueue: ObservableObject {
@@ -11,10 +11,10 @@ final class TabPromptQueue: ObservableObject {
     /// False while Arch quits, when every new prompt ends at once.
     private(set) var isAccepting = true
 
-    /// Adds a prompt after the tab's others. While Arch quits, it ends at once with `.dismissed`.
-    func enqueue(_ content: PromptContent, for tabID: UUID, completion: @escaping (PromptResponse) -> Void) {
+    /// Adds a prompt after the tab's others, with the panel that answers it for a file chooser. While Arch quits, it ends at once with `.dismissed`.
+    func enqueue(_ content: PromptContent, panel: NSSavePanel? = nil, for tabID: UUID, completion: @escaping (PromptResponse) -> Void) {
         guard isAccepting else { return completion(.dismissed) }
-        let state = PromptState(tabID: tabID, content: content)
+        let state = PromptState(tabID: tabID, content: content, panel: panel)
         completions[state.id] = completion
         waiting[tabID, default: []].append(state)
     }

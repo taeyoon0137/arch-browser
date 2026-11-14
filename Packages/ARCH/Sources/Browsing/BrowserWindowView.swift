@@ -56,7 +56,11 @@ public struct BrowserWindowView: View {
                 }
                 PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
                 if !windowModel.isPageFullscreen {
-                    PageReaderColumn(session: session)
+                    if windowModel.agentPanel != nil {
+                        AgentPanelColumn(session: session)
+                    } else {
+                        PageReaderColumn(session: session)
+                    }
                 }
             }
             if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {

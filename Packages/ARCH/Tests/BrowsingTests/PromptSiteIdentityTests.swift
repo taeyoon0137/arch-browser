@@ -1,4 +1,4 @@
-// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock.
+// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock; and the host of a page dialog's frame when it is not the page's.
 import AppKit
 import Foundation
 import Testing
@@ -17,6 +17,15 @@ import Testing
     @Test func anotherSiteSaysWhereItIs() {
         let identity = PromptSiteIdentity.make(for: URL(string: "http://ads.example.net/frame"), tabURL: Self.tabURL, favicon: NSImage())
         #expect(identity == PromptIdentity(icon: .symbol("globe"), name: "ads.example.net", isSecure: false, context: "in example.com"))
+    }
+
+    /// A dialog's frame on another host than the page's is named; the page's own frame, in any case, and a frame whose origin the engine does not name are not.
+    @Test func aDialogsFrameOnAnotherHostIsNamed() {
+        #expect(PromptSiteIdentity.embeddedHost(of: URL(string: "https://widget.example"), tabURL: Self.tabURL) == "widget.example")
+        #expect(PromptSiteIdentity.embeddedHost(of: URL(string: "https://mail.example.com"), tabURL: Self.tabURL) == "mail.example.com")
+        #expect(PromptSiteIdentity.embeddedHost(of: URL(string: "http://Example.COM:8080"), tabURL: Self.tabURL) == nil)
+        #expect(PromptSiteIdentity.embeddedHost(of: nil, tabURL: Self.tabURL) == nil)
+        #expect(PromptSiteIdentity.embeddedHost(of: URL(string: "https://widget.example"), tabURL: URL(fileURLWithPath: "/tmp/page.html")) == "widget.example")
     }
 
     @Test func aPageWithoutAHostIsThisPage() {

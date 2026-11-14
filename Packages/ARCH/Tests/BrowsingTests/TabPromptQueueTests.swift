@@ -1,5 +1,5 @@
-// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first, and let go of them, and a close the user asks for ends the tab's prompts unless its leave-page card is the question.
-import Foundation
+// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first, and let go of them, and a close the user asks for ends the tab's prompts unless its leave-page card is the question. A page's file chooser waits among them with the panel that answers it.
+import AppKit
 import Testing
 @testable import Browsing
 
@@ -130,6 +130,30 @@ import Testing
         // Nothing to cancel changes nothing.
         queue.dismiss(tabID: tab, pageDialogsOnly: true)
         #expect(queue.waiting[tab]?.count == 2)
+    }
+
+    /// A file chooser waits after the tab's earlier prompts with its panel, is no page dialog, so a navigation's cancellation leaves it, and only Choose gives the page files.
+    @Test func aFileChooserWaitsInOrderWithThePanelThatAnswersIt() throws {
+        let queue = TabPromptQueue()
+        let panel = NSSavePanel()
+        var chosen: [Bool] = []
+        queue.enqueue(Self.content(.pageAlert), for: tab) { _ in }
+        queue.enqueue(TabPromptContent.fileChooser(identity: PromptIdentity(icon: .symbol("globe"), name: "example.com", isSecure: true)), panel: panel, for: tab) {
+            chosen.append(TabPromptContent.fileChooserResult($0))
+        }
+        #expect(queue.current(for: tab)?.panel == nil)
+        queue.dismiss(tabID: tab, pageDialogsOnly: true)
+        let chooser = try #require(queue.current(for: tab))
+        #expect(chooser.content.kind == .fileChooser && chooser.panel === panel)
+        queue.answer(chooser.id, with: PromptAnswer(buttonID: "choose"))
+        #expect(chosen == [true] && !queue.hasPrompt(for: tab))
+
+        for ending in ["cancel", nil] {
+            queue.enqueue(TabPromptContent.fileChooser(identity: chooser.content.identity), panel: NSSavePanel(), for: tab) { chosen.append(TabPromptContent.fileChooserResult($0)) }
+            let next = try #require(queue.current(for: tab))
+            if let ending { queue.answer(next.id, with: PromptAnswer(buttonID: ending)) } else { queue.dismiss(tabID: tab) }
+        }
+        #expect(chosen == [true, false, false])
     }
 
     @Test func closingEndsEveryPromptAndRefusesNewOnesUntilItReopens() {

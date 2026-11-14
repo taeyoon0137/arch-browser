@@ -1,7 +1,7 @@
 // A folder's row in a space's tab list, above the folder's indented tabs. `SpaceTabsView` places the row and reports its frame, so a dragged tab can find it.
 import SwiftUI
 
-/// Clicking the row collapses or expands the folder, and Rename Folder in its context menu edits the name in place. The row lights up while a dragged tab is over it, as a space's symbol does.
+/// Clicking the row collapses or expands the folder, and Rename Folder in its context menu edits the name in place; an agent folder's menu also has Keep Tabs. The row lights up while a dragged tab is over it, as a space's symbol does.
 struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -51,6 +51,8 @@ struct TabFolderRowView: View {
         .onTapGesture(perform: toggleCollapsed)
         .onHover { isHovering = $0 }
         .contextMenu {
+            // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
+            if folder.isAgentFolder { Button("Keep Tabs") { session.keepTabs(ofFolder: folder.id) } }
             Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
             Button("Delete Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
         }

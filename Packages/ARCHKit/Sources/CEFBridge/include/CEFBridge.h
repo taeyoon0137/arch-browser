@@ -225,12 +225,38 @@ typedef NS_ENUM(NSInteger, ARCHCEFDialogKind) {
     ARCHCEFDialogKindPrompt,
 };
 
+/// What a file chooser asks the user to pick, as CEF's file dialog modes name it.
+typedef NS_ENUM(NSInteger, ARCHCEFFileChooserMode) {
+    ARCHCEFFileChooserModeOpen,
+    ARCHCEFFileChooserModeOpenMultiple,
+    /// A folder, whose files the page receives.
+    ARCHCEFFileChooserModeOpenFolder,
+    /// A new or existing file to write.
+    ARCHCEFFileChooserModeSave,
+};
+
 /// Edit commands a page allows in a context menu. One value may combine several.
 typedef NS_OPTIONS(NSUInteger, ARCHCEFEditCommand) {
     ARCHCEFEditCommandCut = 1 << 0,
     ARCHCEFEditCommandCopy = 1 << 1,
     ARCHCEFEditCommandPaste = 1 << 2,
     ARCHCEFEditCommandSelectAll = 1 << 3,
+};
+
+/// Modifier keys held during input that the bridge sends to a page.
+typedef NS_OPTIONS(NSUInteger, ARCHCEFInputModifiers) {
+    ARCHCEFInputModifierShift = 1 << 0,
+    ARCHCEFInputModifierControl = 1 << 1,
+    ARCHCEFInputModifierOption = 1 << 2,
+    ARCHCEFInputModifierCommand = 1 << 3,
+};
+
+/// The parts of a key press that the bridge sends to a page.
+typedef NS_ENUM(NSInteger, ARCHCEFKeyEventKind) {
+    ARCHCEFKeyEventKindDown,
+    /// The character that a press types, which the page receives as a keypress and as text.
+    ARCHCEFKeyEventKindCharacter,
+    ARCHCEFKeyEventKindUp,
 };
 
 /// Where a page asked a popup to open, from Chromium's window open disposition.
@@ -311,6 +337,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidOpenPopup:(ARCHCEFBrowser *)popup targetURL:(NSString *)targetURL disposition:(ARCHCEFPopupDisposition)disposition;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
+/// Asks whether a main frame navigation to `url` may go ahead: each one that does not belong to another app, and again before the request of each server redirect, with `isRedirect` set and the redirect's address. Return NO to stop it before its request. `userGesture` is true when the user clicked a link.
+- (BOOL)cefBrowserShouldBrowseToURL:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
 /// Asks whether a link the user clicked with Shift, which Chromium opens in a new window, may open. Return NO to stop it; with YES it opens as an Alloy style browser opens it: in this browser or, for a link to a new browsing context, as a popup.
 - (BOOL)cefBrowserShouldOpenNewWindowWithURL:(NSString *)url;
 /// Reports that the browser closed, or that its page closed itself with `window.close()` while one of its downloads needs the browser. The browser then stays open, so the download goes on, until `close` or `tryCloseWithCompletion:`.
@@ -326,8 +354,9 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidRequestPermissions:(ARCHCEFPermission)permissions
                              fromOrigin:(NSString *)origin
                                decision:(void (^)(BOOL allow))decision;
-/// Asks the app to show a page's `alert`, `confirm`, or `prompt`. Call `completion` once with whether the user accepted and, for a prompt, the text.
+/// Asks the app to show a page's `alert`, `confirm`, or `prompt`. `origin` is the origin of the frame that shows it, as CEF gives it, or empty. Call `completion` once with whether the user accepted and, for a prompt, the text.
 - (void)cefBrowserRunDialog:(ARCHCEFDialogKind)kind
+                     origin:(NSString *)origin
                     message:(NSString *)message
                 defaultText:(NSString *)defaultText
                  completion:(void (^)(BOOL accepted, NSString *_Nullable text))completion;
@@ -335,6 +364,12 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
 /// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
 - (void)cefBrowserDidResetDialogs;
+/// Asks the app to show its own panel for a file chooser that CEF gives this browser: its page's file input, or another chooser, such as a download's Save As. CEF shows none of its own. CEF names no frame, and it also gives a browser the choosers of views without a browser of their own, such as an extension's popup or docked DevTools, from the same window or the focused browser. `acceptedTypes` are the lowercase MIME types and dotted extensions the page accepts, empty for any file; `defaultPath` is the suggested path, often only a file name, or empty; `pageURL` is the address the main frame committed, not one it is still loading. Call `completion` once with the chosen paths, or with nil or an empty array to cancel; CEF cancels the chooser if the block is released unanswered.
+- (void)cefBrowserRunFileChooser:(ARCHCEFFileChooserMode)mode
+                      defaultPath:(NSString *)defaultPath
+                    acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                          pageURL:(NSString *)pageURL
+                       completion:(void (^)(NSArray<NSString *> *_Nullable paths))completion;
 /// Asks the app to show the page's context menu. The bridge calls this after CEF's current work returns, so CEF keeps running while the menu tracks. Call `completion` once after the menu closes; the bridge calls it itself if the browser closes first.
 - (void)cefBrowserRunContextMenu:(ARCHCEFContextMenuParams *)params completion:(void (^)(void))completion;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
@@ -466,6 +501,14 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
 /// Replaces the selected misspelled word with `word`.
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
+/// Input that reaches the page as the user's own, through `CefBrowserHost`'s input calls, which hand it to Chromium's input pipeline as AppKit's events go: points are in the browser view, in points from its top-left corner. Each method returns NO and sends nothing before CEF has created the browser or after it has closed. A key that the page leaves unhandled goes no further: unlike the user's keys, it never reaches the app's menus.
+- (BOOL)sendMouseMoveTo:(NSPoint)point modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseMove(to:modifiers:));
+/// A press, with the primary button down, or a release of that button. `clickCount` counts the presses of a double or triple click from 1.
+- (BOOL)sendMouseClickAt:(NSPoint)point mouseUp:(BOOL)mouseUp clickCount:(NSInteger)clickCount modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseClick(at:mouseUp:clickCount:modifiers:));
+/// `deltaX` and `deltaY` are in points, signed as DOM's `WheelEvent`: positive values scroll right and down. CEF takes each as an `int`, so callers keep them within its range, as `EngineWheelTurn` does.
+- (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendMouseWheel(at:deltaX:deltaY:modifiers:));
+/// `keyCode` is the macOS virtual key code, and the characters are AppKit's, one UTF-16 unit each; CEF builds an AppKit key event from them. A character event alone types its character as an input method's text does, with a keypress.
+- (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers NS_SWIFT_NAME(sendKeyEvent(_:keyCode:character:unmodifiedCharacter:modifiers:));
 @end
 
 NS_ASSUME_NONNULL_END

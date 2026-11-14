@@ -1,4 +1,4 @@
-// A tab asks its prompts through the session's card callback: a page's own dialogs under the page's site with the answer the card gives, a login under its server with a credential for the session, a link for another app whose Cancel the site keeps and whose dismissal it does not, and the safe answer when no card can show. The tab's page is a stand-in, so no engine starts, and no test answers Open, so no app opens.
+// A tab asks its prompts through the session's card callback: a page's own dialogs under the page's site with the answer the card gives, and a frame's on another host captioned with that host, a login under its server with a credential for the session, a link for another app whose Cancel the site keeps and whose dismissal it does not, and the safe answer when no card can show. The tab's page is a stand-in, so no engine starts, and no test answers Open, so no app opens.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -34,10 +34,12 @@ import Testing
         prompts.attach(to: tab)
         var log: [String] = []
 
-        tab.webContents(tab.webContents, runJavaScriptAlert: "Saved") { log.append("alert") }
-        tab.webContents(tab.webContents, runJavaScriptConfirm: "Delete?") { log.append("confirm \($0)") }
-        tab.webContents(tab.webContents, runJavaScriptPrompt: "Name?", defaultText: "Ada") { log.append("prompt \($0 ?? "nil")") }
+        let page = URL(string: "https://example.com")
+        tab.webContents(tab.webContents, runJavaScriptAlert: "Saved", frameOrigin: page) { log.append("alert") }
+        tab.webContents(tab.webContents, runJavaScriptConfirm: "Delete?", frameOrigin: nil) { log.append("confirm \($0)") }
+        tab.webContents(tab.webContents, runJavaScriptPrompt: "Name?", defaultText: "Ada", frameOrigin: URL(string: "https://EXAMPLE.com")) { log.append("prompt \($0 ?? "nil")") }
         #expect(prompts.contents.map(\.kind) == [.pageAlert, .pageConfirm, .pageTextInput])
+        #expect(prompts.contents.allSatisfy { $0.pageText?.caption == nil && $0.pageText?.author == nil })
         #expect(prompts.contents.allSatisfy { $0.identity.name == "example.com" && $0.identity.isSecure && $0.title == nil })
         #expect(prompts.contents.map { $0.pageText?.text } == ["Saved", "Delete?", "Name?"])
         #expect(prompts.contents.last?.fields.first?.initialValue == "Ada")
@@ -46,6 +48,21 @@ import Testing
         prompts.respond(.dismissed)
         prompts.respond(.answered(PromptAnswer(buttonID: "ok", fieldValues: ["text": "Grace"])))
         #expect(log == ["alert", "confirm false", "prompt Grace"])
+    }
+
+    /// Words from a frame on another host carry that host above them, so an embedded page cannot pass them off as the page's; the card still names the page's site.
+    @Test func aFrameOfAnotherHostIsNamedAboveItsWords() {
+        let tab = Self.tab()
+        let prompts = PromptRecorder()
+        prompts.attach(to: tab)
+        let widget = URL(string: "https://widget.example")
+        tab.webContents(tab.webContents, runJavaScriptAlert: "You won", frameOrigin: widget) {}
+        tab.webContents(tab.webContents, runJavaScriptConfirm: "Pay now?", frameOrigin: URL(string: "https://shop.example.com")) { _ in }
+        tab.webContents(tab.webContents, runJavaScriptPrompt: "Card number?", defaultText: nil, frameOrigin: widget) { _ in }
+        #expect(prompts.contents.allSatisfy { $0.identity.name == "example.com" })
+        #expect(prompts.contents.map { $0.pageText?.caption } == ["An embedded page on \u{201C}widget.example\u{201D} says", "An embedded page on \u{201C}shop.example.com\u{201D} says",
+                                                                  "An embedded page on \u{201C}widget.example\u{201D} says"])
+        #expect(prompts.contents.map { $0.pageText?.author } == ["widget.example", "shop.example.com", "widget.example"])
     }
 
     @Test func aLeavePageCheckLeavesUnlessTheUserStays() {
@@ -68,8 +85,8 @@ import Testing
     @Test func withoutACardAPageGetsTheSafeAnswer() {
         let tab = Self.tab()
         var log: [String] = []
-        tab.webContents(tab.webContents, runJavaScriptConfirm: "Delete?") { log.append("confirm \($0)") }
-        tab.webContents(tab.webContents, runJavaScriptPrompt: "Name?", defaultText: nil) { log.append("prompt \($0 ?? "nil")") }
+        tab.webContents(tab.webContents, runJavaScriptConfirm: "Delete?", frameOrigin: nil) { log.append("confirm \($0)") }
+        tab.webContents(tab.webContents, runJavaScriptPrompt: "Name?", defaultText: nil, frameOrigin: nil) { log.append("prompt \($0 ?? "nil")") }
         tab.webContents(tab.webContents, runBeforeUnloadPanel: "") { log.append("leave \($0)") }
         #expect(log == ["confirm false", "prompt nil", "leave true"])
     }

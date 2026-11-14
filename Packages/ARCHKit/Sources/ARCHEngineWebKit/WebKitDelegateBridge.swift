@@ -16,6 +16,8 @@ extension WebKitWebContents {
 final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     unowned let owner: WebKitWebContents
     private var observations: [NSKeyValueObservation] = []
+    /// The address the main frame last committed, by which a file chooser's request names the page (`runOpenPanelWith`). WebKit gives `url` that address when it reports the commit; before a navigation commits, `url` already gives the navigation's address, and from the start of a back or forward navigation, also one the page starts with `history.back()`, the back-forward list's current item is the target's.
+    private var committedURL: URL?
 
     init(owner: WebKitWebContents) {
         self.owner = owner
@@ -58,9 +60,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Downloads a link marked for download instead of navigating, if the page policy allows it.
         let allowed: WKNavigationActionPolicy = navigationAction.shouldPerformDownload ? (mayDownload(navigationAction.request.url, in: webView) ? .download : .cancel) : .allow
         var policy = allowed
-        if let url = navigationAction.request.url, let delegate = owner.navigationDelegate {
-            let action = EngineNavigationAction(url: url, disposition: Self.disposition(of: navigationAction),
-                                                isUserInitiated: navigationAction.navigationType == .linkActivated)
+        // The delegate hears of main frame navigations, each server redirect of one included, of navigations to a new web view, and of links clicked with Shift, as on Chromium; a frame inside the page loads without asking.
+        let disposition = Self.disposition(of: navigationAction)
+        if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
+           navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow {
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated)
             if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
         }
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
@@ -87,7 +91,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// The origin of the frame that started a navigation, as an address with an empty path, or nil when the origin is opaque or unknown, which leaves its protocol empty.
     private static func sourceOrigin(of navigationAction: WKNavigationAction) -> URL? {
-        let origin = navigationAction.sourceFrame.securityOrigin
+        address(of: navigationAction.sourceFrame.securityOrigin)
+    }
+
+    /// A security origin as an address with an empty path, or nil when the origin is opaque or unknown, which leaves its protocol empty.
+    private static func address(of origin: WKSecurityOrigin) -> URL? {
         guard !origin.protocol.isEmpty else { return nil }
         let port = origin.port == 0 ? "" : ":\(origin.port)"
         return URL(string: "\(origin.protocol)://\(origin.host)\(port)/")
@@ -117,6 +125,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        committedURL = webView.url
         owner.uiDelegate?.webContents(owner, didCommitDocumentAt: webView.url)
     }
 
@@ -174,17 +183,37 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler() }
         let answer = owner.trackDialog(safeAnswer: ()) { completionHandler() }
-        delegate.webContents(owner, runJavaScriptAlert: message) { answer(()) }
+        delegate.webContents(owner, runJavaScriptAlert: message, frameOrigin: Self.origin(of: frame)) { answer(()) }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(false) }
-        delegate.webContents(owner, runJavaScriptConfirm: message, completion: owner.trackDialog(safeAnswer: false, completion: completionHandler))
+        delegate.webContents(owner, runJavaScriptConfirm: message, frameOrigin: Self.origin(of: frame), completion: owner.trackDialog(safeAnswer: false, completion: completionHandler))
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(nil) }
-        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
+        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, frameOrigin: Self.origin(of: frame), completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
+    }
+
+    /// The frame's security origin as an address without a path, or nil for an opaque origin, which has no host.
+    static func origin(of frame: WKFrameInfo) -> URL? {
+        let origin = frame.securityOrigin
+        guard !origin.protocol.isEmpty, !origin.host.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = origin.protocol
+        components.host = origin.host
+        if origin.port != 0 { components.port = origin.port }
+        return components.url
+    }
+
+    /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`). The request names the frame that asks and the page: the web view's address and its current back-forward item can be those of a navigation the page started and has not committed, so the page's origin is the main frame's own, or for a frame inside the page that of the address the main frame last committed.
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        guard let delegate = owner.uiDelegate else { return completionHandler(nil) }
+        let origin = Self.address(of: frame.securityOrigin)
+        let request = WebKitFileChooserAPI.request(for: parameters, origin: origin, pageOrigin: frame.isMainFrame ? origin : committedURL)
+        let answer = WebKitFileChooserAnswer(completionHandler)
+        delegate.webContents(owner, runFileChooser: request) { answer.send(request.answer(from: $0)) }
     }
 
     /// The UI delegate decides for the site; granting access also requires the system's camera or microphone permission for this app, which is requested before the page gets access. Without a UI delegate the request gets the safe answer, a denial, rather than a prompt of WebKit's own. WebKit handles geolocation through the app's location authorization.
