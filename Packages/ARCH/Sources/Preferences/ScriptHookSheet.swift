@@ -47,6 +47,7 @@ struct ScriptHookDraft: Identifiable {
     var guided = false
     var generated = false
     var origin: HookOrigin = .user
+    var startsEnabled = true
     var agentRecord: AgentRunRecord = .none
     var seconds = 30
     var rounds = 2
@@ -70,9 +71,10 @@ struct ScriptHookDraft: Identifiable {
         if guided { name = "New Agent Hook" }
     }
 
-    init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool) {
+    init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool, isNew: Bool = false) {
         id = hook.id
-        stored = hook
+        stored = isNew ? nil : hook
+        startsEnabled = hook.state == .active
         isReview = reviewing
         self.places = places
         name = hook.name
@@ -141,7 +143,7 @@ struct ScriptHookDraft: Identifiable {
         guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid("Choose where the hook runs.") }
         guard kind != .titleChanged || !titleSources.isEmpty else { throw invalid("Choose which title changes start the hook.") }
         guard tabKinds.isEmpty || !tabKinds.isDisjoint(with: Self.offeredTabKinds) else { throw invalid("Choose its tab kinds.") }
-        var hook = stored ?? Hook(id: id, name: name, trigger: trigger, origin: origin)
+        var hook = stored ?? Hook(id: id, name: name, trigger: trigger, state: startsEnabled ? .active : .paused(.user), origin: origin)
         hook.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !hook.name.isEmpty else { throw invalid("Name the hook.") }
         if hook.trigger.kind != kind { hook.timing = HookTiming(for: trigger) }
@@ -297,6 +299,8 @@ struct ScriptHookSheet: View {
                 }
                 Section {
                     TextField("Name", text: $draft.name)
+                    if draft.stored == nil, case .preset = draft.origin { Toggle("Enable this hook when saved", isOn: $draft.startsEnabled) }
+                    if draft.guided { TabNamesWarning(settings: aiSettings, renames: draft.agentRenamesTabs, kind: draft.kind) }
                 }
                 whenSection
                 whereSection

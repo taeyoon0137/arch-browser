@@ -39,6 +39,14 @@ struct AgentHooksPage: View {
             HStack {
                 Spacer()
                 if aiSettings.providers.contains(where: { provider in provider.models.contains { provider.capabilities(of: $0).contains(.agent) } }) {
+                    Menu("Presets") {
+                        Button("Tidy Tab Names") {
+                            let hook = HookPresets.tidyTabNames
+                            sheet = ScriptHookDraft(editing: hook, script: AgentHookTemplate.script(for: hook.trigger.kind),
+                                                    places: registry.places, reviewing: false, isNew: true)
+                        }
+                    }
+                    .disabled(!registry.isReady)
                     Button("New Agent Hook…") { sheet = ScriptHookDraft(new: registry.places, guided: true) }
                         .disabled(!registry.isReady)
                 }
@@ -99,6 +107,10 @@ struct AgentHooksPage: View {
                     Text(hook.name).fontWeight(.medium)
                     ForEach(HookSummary.lines(for: hook, places: registry.places, lastRun: registry.lastRuns[hook.id]?.last), id: \.self) { line in
                         Text(line).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if hook.state == .active {
+                        TabNamesWarning(settings: aiSettings, renames: hook.grant.permissions.contains(.tabsRename) || hook.grant.agent?.tools.contains("rename_tab") == true,
+                                        kind: hook.trigger.kind)
                     }
                     if let reason = hook.state.pauseReason {
                         pauseRow(for: hook, reason: reason)
@@ -194,6 +206,29 @@ struct AgentHooksPage: View {
             try registry.add(copy.hook, script: copy.script)
         } catch {
             message = error.localizedDescription
+        }
+    }
+}
+
+/// Both features can name the same new tab. Turning off Tab Names keeps its saved route.
+struct TabNamesWarning: View {
+    @ObservedObject var settings: AISettingsStore
+    let renames: Bool
+    let kind: BrowserEventKind
+
+    static func applies(renames: Bool, kind: BrowserEventKind, tabNames: AIRoute) -> Bool {
+        renames && (kind == .tabOpened || kind == .pageLoaded) && tabNames.isEnabled
+    }
+
+    var body: some View {
+        let route = settings.route(for: .tabNameHook)
+        if Self.applies(renames: renames, kind: kind, tabNames: route) {
+            Text("Tab Names also names tabs. Turn on one of them.").font(.caption)
+            Button("Turn Off Tab Names") {
+                var updated = route
+                updated.isEnabled = false
+                settings.setRoute(updated, for: .tabNameHook)
+            }
         }
     }
 }
