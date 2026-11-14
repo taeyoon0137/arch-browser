@@ -92,12 +92,16 @@ import Testing
                                     spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID, pinned: true, select: false, folderID: oldFolder.id)
             let open = session.adopt(PageStub(engine: .webKit, url: nil), spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID,
                                      pinned: false, select: false, folderID: oldFolder.id)
+            let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Local", personaID: oldSpace.resolvedPersonaID)
+            session.addFavorites([favorite], in: oldSpace.resolvedPersonaID)
+            let favoriteTab = session.openTab(for: favorite)
+            let remoteFavorite = Favorite(url: favorite.url, title: "Remote", personaID: oldSpace.resolvedPersonaID)
             let newSpace = Space(name: oldSpace.name, personaID: oldSpace.resolvedPersonaID)
             let newFolder = SidebarSyncState.Folder(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
                                                      parentID: nil, name: oldFolder.name, live: nil)
             let newPin = SidebarSyncState.PinnedTab(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
                                                      folderID: newFolder.id, savedPage: pin.savedPage, customTitle: nil, engine: .webKit)
-            let state = SidebarSyncState(personas: original.personas, spaces: [newSpace], folders: [newFolder], favorites: [], pinnedTabs: [newPin])
+            let state = SidebarSyncState(personas: original.personas, spaces: [newSpace], folders: [newFolder], favorites: [remoteFavorite], pinnedTabs: [newPin])
             let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: oldSpace.id, selectedTabID: nil, isSidebarVisible: true)
             let window = session.makeWindow(from: record, kind: .main)
             defer { session.windowWillClose(window) }
@@ -106,15 +110,18 @@ import Testing
             replacements.spaces[oldSpace.id] = newSpace.id
             replacements.folders[oldFolder.id] = newFolder.id
             replacements.tabs[pin.id] = newPin.id
+            replacements.favorites[favorite.id] = remoteFavorite.id
             for _ in 0..<2 { session.applyFirstSidebarSync(state, replacements: replacements) }
             #expect(session.sidebarSyncState == state)
             #expect(window.currentSpaceID == newSpace.id && window.selectedTabID == newPin.id)
             #expect(open.spaceID == newSpace.id && open.folderID == newFolder.id)
+            #expect(session.openTab(for: remoteFavorite) === favoriteTab)
             #expect(!session.hasClosedTabs && session.undoableCloseCount == 0)
             try session.saveNow().get()
             let stored = try #require(SessionStore(directory: directory, seal: SessionStateSeal { nil }).load())
             #expect(stored.windows?.first?.selectedTabID == newPin.id)
             #expect(stored.spaces.map(\.id) == [newSpace.id])
+            #expect(stored.favoriteTabs?.first?.favoriteID == remoteFavorite.id)
         }
     }
 

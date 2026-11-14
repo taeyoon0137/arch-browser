@@ -117,6 +117,8 @@ public enum SyncEvent: Equatable, Sendable {
     /// The engine's state changed, such as its change token or its pending changes. `sync.json` keeps the serialization (`SyncMirror.engineState`) for the engine's next start on the same database.
     case stateUpdate(Data)
     case accountChange(SyncAccountChange)
+    /// A fetch began, including one CloudKit scheduled automatically.
+    case fetchStarted
     /// One page of a fetch.
     case fetchedChanges(SyncFetchedChanges)
     /// A fetch found this zone deleted. It can be another zone than `ArchSync1`, which the controller ignores.
@@ -137,6 +139,12 @@ public protocol SyncEngineDelegate: AnyObject {
 
     /// The record to send for the pending save of `recordName`, built on the mirror's copy, or on the server's record of a refused save, with the pending save's fields (`SyncCloudKitRecords.ckRecord(from:base:)`). Nil when nothing is left to save, and the engine then drops the pending save.
     func record(toSave recordName: String) -> CKRecord?
+    /// A controller holds record batches until a fetch has been applied and its session saved.
+    var canSendRecords: Bool { get }
+}
+
+extension SyncEngineDelegate {
+    public var canSendRecords: Bool { true }
 }
 
 /// The sync engine on one database (`SyncDatabase`) and the zone `ArchSync1`. It starts when it is created (`SyncEngineFactory`) and then syncs on its own: it fetches at its start and when CloudKit reports changes, and it sends pending changes in batches, each saved atomically, retrying network failures, rate limits, and unavailable service itself.

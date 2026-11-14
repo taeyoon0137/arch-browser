@@ -174,11 +174,11 @@ import Testing
         let fetched = SyncFetchedChanges(records: [record("tab-1")], deletions: [SyncFetchedChanges.Deletion(recordID: SyncCloudKitRecords.recordID(named: "tab-2"), recordType: "Tab")])
         engine.fetchScript = [.fetchedChanges(fetched), .zoneDeleted(SyncCloudKitRecords.zoneID, .purged)]
         try await engine.fetchChanges()
-        #expect(delegate.events == [.fetchedChanges(fetched), .zoneDeleted(SyncCloudKitRecords.zoneID, .purged), .stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
+        #expect(delegate.events == [.fetchStarted, .fetchedChanges(fetched), .zoneDeleted(SyncCloudKitRecords.zoneID, .purged), .stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
 
         delegate.events = []
         try await engine.fetchChanges()
-        #expect(delegate.events == [.stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
+        #expect(delegate.events == [.fetchStarted, .stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
         #expect(engine.fetchCount == 2)
     }
 
@@ -194,12 +194,12 @@ import Testing
         } catch let error as CKError {
             #expect(error.code == .networkFailure)
         }
-        #expect(delegate.events == [.fetchedChanges(fetched), .stateUpdate(engine.stateSerialization), .fetchEnded(failure: .networkFailure)])
+        #expect(delegate.events == [.fetchStarted, .fetchedChanges(fetched), .stateUpdate(engine.stateSerialization), .fetchEnded(failure: .networkFailure)])
 
         // The failure came only once.
         delegate.events = []
         try await engine.fetchChanges()
-        #expect(delegate.events == [.stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
+        #expect(delegate.events == [.fetchStarted, .stateUpdate(engine.stateSerialization), .fetchEnded(failure: nil)])
     }
 
     @Test func anEngineStartedFromAStateUpdateHasItsPendingChanges() {
