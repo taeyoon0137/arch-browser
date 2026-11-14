@@ -243,7 +243,7 @@ Run from the bundle launched through `open`, on a test Persona or a fresh Applic
 
 ## Open decisions
 
-2. The Open System Settings link, `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`, is undocumented, as is any anchor check 1 finds for Chrome's setting. It is a URL opened by `NSWorkspace`, not a framework API, so it is not listed under Private APIs. If the anchor stops working, System Settings opens at Privacy & Security. Confirm that it needs no flag.
-3. Safari's own export of browsing data, which could bring history without Full Disk Access. Its format was not checked.
-4. Dia's actual layout, once it can be checked.
+1. The Open System Settings link, `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`, is undocumented, as is any anchor check 1 finds for Chrome's setting. It is a URL opened by `NSWorkspace`, not a framework API, so it is not listed under Private APIs. If the anchor stops working, System Settings opens at Privacy & Security. Confirm that it needs no flag.
+2. Safari's own export of browsing data, which could bring history without Full Disk Access. Its format was not checked.
+3. Dia's actual layout, once it can be checked.
 5. Zoom levels and site permissions, which Chromium keeps in `Preferences` per profile, could come later.
