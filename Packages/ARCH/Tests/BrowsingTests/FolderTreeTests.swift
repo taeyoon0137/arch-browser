@@ -64,6 +64,24 @@ import Testing
         #expect(left && returned)
     }
 
+    @Test func aCoalescedReleaseOutsideTheViewportClearsTheDividerHover() {
+        let list = CGRect(x: 0, y: 40, width: 230, height: 320)
+        let divider = CGRect(x: 6, y: 110, width: 218, height: 26)
+        let favorite = CGRect(x: 6, y: 40, width: 218, height: 22)
+        let midpoint = CGPoint(x: divider.midX, y: divider.midY)
+        var hover = SidebarReorderHover()
+        hover.moved(into: divider)
+        let repeatsInPlace = hover.canMove(at: midpoint)
+        let acceptsOutside = hover.acceptsRow(at: CGPoint(x: midpoint.x, y: 37), in: list, excluding: favorite)
+        let acceptsReturn = hover.acceptsRow(at: midpoint, in: list, excluding: favorite)
+        let canMoveOnReturn = hover.canMove(at: midpoint)
+        #expect(!repeatsInPlace && !acceptsOutside && acceptsReturn && canMoveOnReturn)
+        hover.moved(into: divider)
+        let acceptsFavorite = hover.acceptsRow(at: CGPoint(x: favorite.midX, y: favorite.midY), in: list, excluding: favorite)
+        let canMoveAfterFavorite = hover.canMove(at: midpoint)
+        #expect(!acceptsFavorite && canMoveAfterFavorite)
+    }
+
     @Test func eachFavoriteRowUsesItsOwnCapacityAndLaterRowsUseTheDefault() {
         let sizes = FavoriteTileLayout.rowSizes(from: FavoriteTileLayout.encode(rowSizes: [3, 2]))
         #expect(sizes == [3, 2])

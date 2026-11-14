@@ -27,6 +27,16 @@ enum SidebarDragItem: Equatable {
 struct SidebarReorderHover {
     private var destination: CGRect?
 
+    /// A row preview belongs to the list under the pointer. Reset its hysteresis when
+    /// leaving so a direct return to the same divider can preview another drop.
+    mutating func acceptsRow(at point: CGPoint, in list: CGRect, excluding favorites: CGRect?) -> Bool {
+        guard list.contains(point), favorites?.contains(point) != true else {
+            destination = nil
+            return false
+        }
+        return true
+    }
+
     /// A row only makes room after the pointer crosses its center in the direction of travel.
     static func crossedMidpoint(from slot: CGRect, into row: CGRect, at point: CGPoint) -> Bool {
         slot.midY < row.midY ? point.y >= row.midY : point.y <= row.midY
