@@ -879,6 +879,13 @@ The Shared Tabs button in an app-started session lists its attached tabs. Share 
 
 ## Checks from the bundle
 
+**Offline results for checks 77 and 78 (November 14, 2026).** A stock signed bundle on arm64 macOS passed the following checks with Claude Code 2.1.325 and Codex CLI 0.164.0. Both clients used disposable home and configuration directories. Network connections were denied throughout.
+
+- For each `arch-cli setup` command, declining with N exited 3 and preserved the fixture configuration. Accepting with y ran exactly the previewed native add command. Claude's `mcp get arch` and `mcp list` reported the bundled helper connected. Codex's `mcp get arch` and `mcp list` found that helper as an enabled stdio server. `mcp-config` printed the three formats, including the 120-second tool timeout in the Codex table.
+- The signed `arch-mcp` negotiated MCP initialization and answered a ping over stdio. The helper launched through the disposable PATH link also negotiated initialization. Link install and remove covered both tool names and preserved a foreign file.
+- Both entry-skill targets installed matching copies and appeared in `arch-cli skills list`. Codex's local app-server `skills/list` found the installed skill at its expected path. Removing unmodified copies succeeded. Installing or removing a foreign skill, or removing a modified Arch skill, exited 4 and preserved its contents.
+- The built-in terminal and Settings controls, App Translocation, model-driven tab access, approval waiting and dismissal, and Claude’s own skill picker still need interactive checks. These runs did not make a model request or obtain an app grant.
+
 Each task that needs the app adds its check at the end of the regression checklist in `docs/plan.md`, under the next free number there, which this list and the queue use: checks 74 to 86. Run them on both engines with a fresh Application Support folder.
 
 Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePattern.defaultExclusions`), so P16 refuses fixtures served from `file:` or the Mac itself. Checks 75, 76, 81, and 84 serve `Packages/ARCH/Tests/AgentTests/Fixtures` with a small HTTP server written for the check and kept out of the commit, on `127.0.0.1`, with one path that answers 302 to the same server under `localhost`, a different site, and a log of the requests it receives. Each check first removes `local-network` in Settings ▸ AI's excluded sites and puts it back afterward.
