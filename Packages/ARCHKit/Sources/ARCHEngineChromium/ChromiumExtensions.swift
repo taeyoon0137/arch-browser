@@ -4,7 +4,7 @@ import ARCHEngine
 import CEFBridge
 import Foundation
 
-/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so once the app says so (`stopUnloadedExtensions()`), after its first pass of loads or as the profile starts while it loads none, the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
+/// One profile's extensions. Chromium keeps the extensions it loaded in the profile and starts them with it at later launches, so once the app says so (`stopUnloadedExtensions()`), after its first pass of loads, as the profile starts while it loads none, or before Arch's links let more extensions reach a native app, the adapter switches off, as soon as Chromium lists it, every extension that the app has not loaded in this run; the app loads its enabled ones again each run. Chromium switches an extension off only once the profile's extensions have loaded, after the call that asked for it returned, so `waitForUnloads()` reads Chromium's list until it shows what the app stopped as off. Everything runs on the main thread, CEF's UI thread: the asynchronous calls move there first.
 final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable {
     weak var delegate: (any EngineExtensionsDelegate)?
     private unowned let context: ChromiumBrowserContext
@@ -17,6 +17,8 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     private var loadedInRun: Set<String> = []
     /// Set at the app's first `stopUnloadedExtensions()`, from which on the adapter switches off what the app has not loaded.
     private var stopsUnloaded = false
+    /// The extensions that `unload(_:)` switched off, until Chromium lists them as off or the app loads them again, which `waitForUnloads()` waits for.
+    private var stopping: Set<String> = []
     /// The extensions' names, from Chromium's last list, for actions without a title.
     private var names: [String: String] = [:]
     private var windows: [UUID: ChromiumExtensionWindow] = [:]
@@ -56,6 +58,7 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
         let id = `extension`.id
         let path = `extension`.packageURL.resolvingSymlinksInPath().path
         loading.insert(id)
+        stopping.remove(id)
         requestContext.extensions { [weak self] installed in
             guard let self else { return completion(.failure(ChromiumExtensionError.notLoaded)) }
             let copy = installed.first { $0.identifier == id }.map { (path: $0.path, version: $0.version) }
@@ -122,7 +125,34 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     func unload(_ id: String) {
         loaded[id] = nil
         actionCache.removeAll()
+        stopping.insert(id)
         requestContext.setExtension(id, enabled: false)
+    }
+
+    /// Reads Chromium's list, which it gives once the profile's extensions have loaded, every 20 milliseconds until it shows as running none of the extensions that `unload(_:)` switched off and, from the first `stopUnloadedExtensions()` on, none that the app has not loaded or is not loading. Chromium applies a switch-off soon after its first answer, also one that waits for a reload without file access; one that it has not applied within five seconds of that answer, as for an extension that a policy keeps on, it does not apply, and the wait ends without it.
+    func waitForUnloads() async {
+        var firstAnswer: ContinuousClock.Instant?
+        while await !unloadsApplied() {
+            let now = ContinuousClock.now
+            if let firstAnswer, now - firstAnswer >= .seconds(5) { return }
+            firstAnswer = firstAnswer ?? now
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Whether Chromium's list shows as running none of what the app asked to stop (`waitForUnloads()`). The extensions that it lists as off, or does not list, leave `stopping`.
+    private func unloadsApplied() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.main.async {
+                self.requestContext.extensions { [weak self] installed in
+                    guard let self else { return continuation.resume(returning: true) }
+                    let running = Set(installed.filter(\.isEnabled).map(\.identifier))
+                    self.stopping.formIntersection(running)
+                    let runsUnloaded = self.stopsUnloaded && running.contains { self.loaded[$0] == nil && !self.loading.contains($0) }
+                    continuation.resume(returning: self.stopping.isEmpty && !runsUnloaded)
+                }
+            }
+        }
     }
 
     /// Uninstalls the extension from the profile, which deletes its storage.

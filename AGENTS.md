@@ -14,7 +14,7 @@ Arch is a sidebar-first macOS browser with its own implementation. It runs on Ch
 
 - The repository contains the engine abstraction, the WebKit adapter, and the Chromium adapter built on CEF. It also contains the feature modules in `Packages/ARCH/Sources` (`Agent`, `AgentControl`, `AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`) and the `Arch` app shell. `docs/plan.md` lists what each part supports.
 - For implementation decisions, read `docs/plan.md` first. It covers the goals, approach, current state, working rules, and next steps.
-- Do not name other browser products in code or documents. One exception is the opening of the README, which credits the project's inspiration by name. The other is browser import: it names the browsers it reads only in the `Import` module's source definitions (display names, bundle identifiers, and data locations), the import interface, and the feature's documents (`docs/import-browsers.md` and its rows in `docs/plan.md` and `docs/features.md`).
+- Do not name other browser products in code or documents. One exception is the opening of the README, which credits the project's inspiration by name. Another is browser import: it names the browsers it reads only in the `Import` module's source definitions (display names, bundle identifiers, and data locations), the import interface, and the feature's documents (`docs/import-browsers.md` and its rows in `docs/plan.md` and `docs/features.md`). The last is the Web Store: its page hosts, whose names contain another browser product, appear only as constants in `Packages/ARCH/Sources/Extensions/WebStore.swift`, which its tests use, and in `docs/web-store.md`.
 
 ## Instruction priority
 

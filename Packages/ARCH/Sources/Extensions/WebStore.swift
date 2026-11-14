@@ -4,8 +4,8 @@ import Foundation
 public enum WebStore {
     /// The update endpoint, which Chromium's extension updater asks about extensions by identifier (`docs/web-store.md`, Facts).
     static let updateEndpoint = URL(string: "https://clients2.google.com/service/update2/crx")!
-    /// The hosts of store pages, the current one first, from which the tests build their addresses. Both host names name another browser product, which `AGENTS.md` allows here only once the user's step IV.27 adds the exception, so until then the list is empty and no address is a store page.
-    static let pageHosts: [String] = []
+    /// The hosts of store pages, the current one first, from which the tests also build their addresses. Both host names name another browser product, which `AGENTS.md` allows only here, in the tests, and in `docs/web-store.md`.
+    static let pageHosts = ["chromewebstore.google.com", "chrome.google.com"]
     /// The path to an extension's page on each of `pageHosts`, in the same order, before the optional slug and the identifier: `/detail/` on the current host, and `/webstore/detail/` on the older one, which redirects there.
     static let pagePaths: [[String]] = [["detail"], ["webstore", "detail"]]
 
