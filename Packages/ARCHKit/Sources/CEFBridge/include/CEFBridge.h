@@ -76,7 +76,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 @property (nonatomic, weak, nullable) id<ARCHCEFRequestContextDelegate> delegate;
 /// The global context, whose profile is `Default` under the root cache path. Ready once the runtime initializes.
 @property (class, nonatomic, readonly) ARCHCEFRequestContext *globalContext;
-/// A context whose profile lives at `cachePath`, which must be a direct child of the root cache path. Nil for any other path or before the runtime initializes. Browsers can use it at once; cookie, storage, and permission calls wait, in order, until Chromium reports the context and its cookie store initialized.
+/// A context whose profile lives at `cachePath`, which must name a direct child of the root cache directory, with no traversal or symlink at the child itself. Nil for any other path or before the runtime initializes. Browsers can use it at once; cookie, storage, and permission calls wait, in order, until Chromium reports the context and its cookie store initialized.
 - (nullable instancetype)initWithCachePath:(NSString *)cachePath;
 - (instancetype)init NS_UNAVAILABLE;
 /// Calls `completion` once on the main thread with every stored cookie, or with none when the store cannot be read.

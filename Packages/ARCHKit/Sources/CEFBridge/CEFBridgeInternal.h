@@ -13,8 +13,10 @@ namespace cef_bridge {
 extern bool gInitialized;
 // Whether browsers build their accessibility trees.
 extern bool gAccessibilityEnabled;
-// The root cache path the runtime initialized with, standardized. Every request context's profile is a direct child of it.
+// The root cache path the runtime passes to CEF after resolving symlinks. Every request context's profile is a direct child of it.
 extern NSString *gRootCachePath;
+// The POSIX path CEF uses for an existing cache directory.
+NSString *CanonicalCacheDirectory(NSString *path);
 // Every browser, so that accessibility changes reach the open ones.
 extern NSHashTable *gBrowsers;
 // Every request context object, so that shutdown releases their references to CEF.

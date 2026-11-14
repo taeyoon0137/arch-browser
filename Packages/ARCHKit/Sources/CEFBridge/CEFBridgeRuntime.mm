@@ -4,6 +4,9 @@
 #include <crt_externs.h>
 #include <dispatch/dispatch.h>
 
+#include <cstdlib>
+#include <cstring>
+
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_client.h"
@@ -207,6 +210,16 @@ NSHashTable *gBrowsers = [NSHashTable weakObjectsHashTable];
 NSHashTable *gRequestContexts = [NSHashTable weakObjectsHashTable];
 int gUnshownBrowsers = 0;
 
+NSString *CanonicalCacheDirectory(NSString *path) {
+    char *resolved = realpath(path.fileSystemRepresentation, nullptr);
+    if (!resolved) {
+        return nil;
+    }
+    NSString *directory = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:resolved length:strlen(resolved)];
+    free(resolved);
+    return directory;
+}
+
 }  // namespace cef_bridge
 
 #pragma mark - Runtime
@@ -235,8 +248,13 @@ int gUnshownBrowsers = 0;
     settings.log_severity = LOGSEVERITY_DISABLE;
     [[NSFileManager defaultManager] removeItemAtPath:[cachePath stringByAppendingPathComponent:@"chrome_debug.log"] error:nil];
     CefString(&settings.framework_dir_path) = frameworkPath.UTF8String;
-    CefString(&settings.root_cache_path) = cachePath.UTF8String;
-    CefString(&settings.cache_path) = cachePath.UTF8String;
+    // CEF compares its root to each request context's path. Use one spelling when the profile lives behind a symlink.
+    NSString *root = CanonicalCacheDirectory(cachePath);
+    if (!root) {
+        return NO;
+    }
+    CefString(&settings.root_cache_path) = root.UTF8String;
+    CefString(&settings.cache_path) = root.UTF8String;
     if (helperPath.length > 0) {
         CefString(&settings.browser_subprocess_path) = helperPath.UTF8String;
     }
@@ -245,7 +263,7 @@ int gUnshownBrowsers = 0;
         return NO;
     }
     gInitialized = true;
-    gRootCachePath = cachePath.stringByStandardizingPath;
+    gRootCachePath = root;
     [ARCHCEFRequestContext.globalContext attachContext:CefRequestContext::GetGlobalContext()];
     // CEF shuts down only once AppKit has decided to quit, so a quit that does not happen leaves the engine running.
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification

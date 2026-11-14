@@ -2,8 +2,10 @@
 #import "CEFBridgeInternal.h"
 
 #include <dispatch/dispatch.h>
+#include <sys/stat.h>
 
 #include <atomic>
+#include <cerrno>
 
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
@@ -344,7 +346,20 @@ class ContextReadiness : public TabRequestHandler, public CefCompletionCallback 
 }
 
 - (instancetype)initWithCachePath:(NSString *)cachePath {
-    if (!gInitialized || ![cachePath.stringByStandardizingPath.stringByDeletingLastPathComponent isEqualToString:gRootCachePath]) {
+    // The Persona directory may not exist yet. Resolve its existing parent, which can have several macOS path spellings.
+    if (!gInitialized || !cachePath.isAbsolutePath || [cachePath.pathComponents containsObject:@".."] ||
+        [cachePath.pathComponents containsObject:@"."] ||
+        ![CanonicalCacheDirectory(cachePath.stringByDeletingLastPathComponent) isEqualToString:gRootCachePath]) {
+        return nil;
+    }
+    NSString *profile = [gRootCachePath stringByAppendingPathComponent:cachePath.lastPathComponent];
+    struct stat info;
+    if (lstat(profile.fileSystemRepresentation, &info) == 0) {
+        // An existing profile must be the directory itself. Do not follow a link to another profile.
+        if (!S_ISDIR(info.st_mode)) {
+            return nil;
+        }
+    } else if (errno != ENOENT) {
         return nil;
     }
     self = [self initWithoutContext];
@@ -354,7 +369,7 @@ class ContextReadiness : public TabRequestHandler, public CefCompletionCallback 
     _waitingCalls = [NSMutableArray array];
     // The other settings stay empty, as the runtime leaves its own.
     CefRequestContextSettings settings;
-    CefString(&settings.cache_path) = cachePath.UTF8String;
+    CefString(&settings.cache_path) = profile.UTF8String;
     CefRefPtr<ContextReadiness> readiness = new ContextReadiness(self);
     _context = CefRequestContext::CreateContext(settings, readiness);
     if (!_context) {

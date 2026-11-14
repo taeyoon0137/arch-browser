@@ -102,6 +102,8 @@ def main():
         for subdir in ["temp", "profile", "home/Library/Application Support", "home/Library/Caches",
                        "home/Library/Preferences", "home/Library/WebKit"]:
             (root / subdir).mkdir(parents=True)
+        # The first launch creates a named Chromium profile through the alias; the third opens that existing profile.
+        (root / "profile-alias").symlink_to(root / "profile", target_is_directory=True)
         (root / "session-key").write_bytes(os.urandom(32))
         (root / "fixture.html").write_text(FIXTURE, encoding="utf-8")
         bundle_id = "xyz.taeyoon.arch.engine-restore-check." + uuid.uuid4().hex

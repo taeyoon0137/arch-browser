@@ -1,7 +1,7 @@
 // Run by run.py in three separate processes, sharing one disposable browser profile.
 import AppKit
 import ARCHEngine
-import ARCHEngineChromium
+@testable import ARCHEngineChromium
 import ARCHEngineWebKit
 @testable import Browsing
 import CEFBridge
@@ -14,6 +14,7 @@ private struct CheckFailure: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
+private let personaName = "Restore fixture"
 private let committedTitle = "Pinned tab renamed during fallback"
 
 @MainActor private final class RestoreCheck: NSObject, NSApplicationDelegate {
@@ -55,16 +56,22 @@ private let committedTitle = "Pinned tab renamed during fallback"
             }
             registry.register(chromium)
         }
-        let profile = root.appendingPathComponent("profile", isDirectory: true)
+        let profile = root.appendingPathComponent("profile-alias", isDirectory: true)
         let keyData = try Data(contentsOf: root.appendingPathComponent("session-key"))
         guard keyData.count == 32 else { throw CheckFailure("Missing disposable session key.") }
         let session = try BrowserSession(registry: registry, userDataDirectory: profile, builtInPlugins: [], cefVersion: nil,
                                          sessionSeal: SessionStateSeal { SymmetricKey(data: keyData) },
                                          liveFolderAddresses: InMemoryLiveFolderKeychain())
+        let configuration = EngineApplicationConfiguration(userDataDirectory: profile, cacheDirectory: profile.appendingPathComponent("Cache"))
         let firstID = root.appendingPathComponent("first-id")
         let tab: Tab
         if phase == 1 {
-            guard let space = session.spaces.first else { throw CheckFailure("The fresh profile has no space.") }
+            let persona = session.addPersona(named: personaName)
+            guard let space = session.spaces.first(where: { $0.resolvedPersonaID == persona.id }) else { throw CheckFailure("The new Persona has no space.") }
+            guard !FileManager.default.fileExists(atPath: configuration.chromiumProfile(forStorage: persona.id).path) else {
+                throw CheckFailure("The first launch needs a fresh Chromium Persona directory.")
+            }
+            try checkInvalidProfilePaths(in: configuration.chromiumRootCache)
             tab = session.openTab(url: fixture, in: space.id, pinned: true, select: false, engine: .chromium)
             try tab.id.uuidString.write(to: firstID, atomically: true, encoding: .utf8)
         } else {
@@ -75,10 +82,16 @@ private let committedTitle = "Pinned tab renamed during fallback"
             if interrupt, saved.customTitle != (phase == 3 ? committedTitle : nil) {
                 throw CheckFailure("The restored tab did not have the expected title before loading.")
             }
+            guard FileManager.default.fileExists(atPath: configuration.chromiumProfile(forStorage: saved.personaID).path) else {
+                throw CheckFailure("The original Chromium Persona directory is missing.")
+            }
             tab = saved
             session.loadPage(of: tab)
         }
 
+        guard session.personas.first(where: { $0.name == personaName && !$0.isDefault })?.id == tab.personaID else {
+            throw CheckFailure("The pinned tab lost its non-default Persona.")
+        }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
                               styleMask: .borderless, backing: .buffered, defer: true)
         window.contentView = tab.webContents.view
@@ -87,6 +100,16 @@ private let committedTitle = "Pinned tab renamed during fallback"
         let correctRenderer = expected == .chromium ? tab.webContents is ChromiumWebContents : tab.webContents is WebKitWebContents
         guard correctRenderer, tab.engineKind == expected, tab.preferredEngine == .chromium else {
             throw CheckFailure("Phase \(phase) used \(tab.engineKind.rawValue) and preferred \(tab.preferredEngine.rawValue).")
+        }
+
+        if expected == .chromium {
+            let script = phase == 1
+                ? "() => { localStorage.setItem('arch-restore-id', '\(tab.id)'); return localStorage.getItem('arch-restore-id'); }"
+                : "() => localStorage.getItem('arch-restore-id')"
+            let marker: String? = try await withCheckedThrowingContinuation { continuation in
+                tab.webContents.executeJavaScript(script, inWorld: "ArchRestoreCheck") { continuation.resume(with: $0) }
+            }
+            guard marker == tab.id.uuidString else { throw CheckFailure("The named Chromium profile did not keep its fixture's local storage.") }
         }
 
         let checkpoint = interrupt && phase == 2
@@ -130,6 +153,16 @@ private let committedTitle = "Pinned tab renamed during fallback"
         try JSONEncoder().encode(result).write(to: resultURL)
         print("Phase \(phase) · \(tab.id) · \(type(of: tab.webContents)) · persisted chromium")
         fflush(stdout)
+    }
+
+    private func checkInvalidProfilePaths(in cache: URL) throws {
+        let manager = FileManager.default
+        let link = cache.appendingPathComponent("LinkedProfile")
+        try manager.createSymbolicLink(at: link, withDestinationURL: root)
+        let invalid = [root.appendingPathComponent("NotAProfile").path, cache.path + "/Default/../Escapes", link.path]
+        guard invalid.allSatisfy({ ARCHCEFRequestContext(cachePath: $0) == nil }) else {
+            throw CheckFailure("A path outside the cache root, a traversal, or a linked profile was accepted.")
+        }
     }
 
     private func checkIsolation() throws {
