@@ -29,10 +29,10 @@ struct SpacePagesView: View {
                             .modifier(FavoriteDropArea(spaceID: space.id))
                             .padding(.horizontal, SidebarView.inset)
                     }
-                    if isCurrent {
-                        PluginSidebarItemsView(plugins: windowModel.plugins)
-                        if let agents = session.agents { ConnectedAgentRows(agents: agents) }
+                    if let plugins = isCurrent ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
+                        PluginSidebarItemsView(plugins: plugins)
                     }
+                    if let agents = session.agents { ConnectedAgentRows(agents: agents) }
                     SpaceTabsView(session: session, space: space)
                 }
                 .frame(width: width, alignment: .topLeading)

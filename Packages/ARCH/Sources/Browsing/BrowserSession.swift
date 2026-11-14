@@ -1425,6 +1425,11 @@ final class EngineRuntime {
     /// Hosts each Persona's web extensions in the windows and tabs.
     private let webExtensionHost = SessionWebExtensionHost()
 
+    /// A sidebar page can continue displaying its existing plugin rows while it slides offscreen.
+    func loadedPlugins(in personaID: Persona.ID) -> PluginManager? {
+        personaEngines[personaID]?.plugins
+    }
+
     /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `nativeMessagingHosts` name, under the proof gate that staging and the review also follow.
     public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
