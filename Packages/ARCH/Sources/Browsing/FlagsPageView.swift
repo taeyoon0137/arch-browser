@@ -11,6 +11,13 @@ public enum InternalPage {
         }
     }
 
+    /// The page's name, which its heading and the window's title show.
+    var title: String {
+        switch self {
+        case .flags: return "Flags"
+        }
+    }
+
     /// Accepts the address with or without its slashes.
     init?(address: String) {
         let text = address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -43,7 +50,7 @@ struct FlagsPageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Flags")
+                    Text(InternalPage.flags.title)
                         .font(.system(size: 26, weight: .bold))
                     Spacer()
                     Button("Close", action: windowModel.closeInternalPage)

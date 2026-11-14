@@ -30,8 +30,8 @@ struct FindBarView: View {
                 .lineLimit(1)
                 // A narrow pane shortens the field, not the count.
                 .fixedSize()
-            SidebarIconButton(symbol: "chevron.up", label: "Previous Match", action: windowModel.findPrevious)
-            SidebarIconButton(symbol: "chevron.down", label: "Next Match", action: windowModel.findNext)
+            SidebarIconButton(symbol: "chevron.up", label: "Previous Match", shortcut: windowModel.session.menuShortcut("findPrevious"), action: windowModel.findPrevious)
+            SidebarIconButton(symbol: "chevron.down", label: "Next Match", shortcut: windowModel.session.menuShortcut("findNext"), action: windowModel.findNext)
             SidebarIconButton(symbol: "xmark", label: "Close Find Bar", action: windowModel.hideFindBar)
         }
         .padding(.horizontal, 12)

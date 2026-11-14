@@ -49,7 +49,7 @@ import Testing
         #expect(home.pinnedItems.map(\.sourceID) == ["one", "four", "five"])
         #expect(home.pinnedItems.map(\.title) == ["One", "Four", "Five"])
         #expect(home.pinnedItems.map(\.customTitle) == ["My One", nil, nil])
-        #expect(home.folders.map(\.name) == ["Work", "Work / Docs"])
+        #expect(home.folders.map(\.name) == ["Work", "Work \u{25B8} Docs"])
         #expect(home.folders.map(\.sourceID) == ["work", "docs"])
         #expect(home.folders.map { $0.items.map(\.title) } == [["Two"], ["Three"]])
         #expect(profiles[0].favorites.map(\.title) == ["Named", "Untitled Page"])

@@ -508,7 +508,7 @@ struct PaletteTabRow: View {
     var body: some View {
         HStack(spacing: 14) {
             // Square, as every other list draws a tab's icon, and centered in the rows' symbol column.
-            TabIconView(tab: tab)
+            TabIconView(tab: tab, symbolSize: 15)
                 .frame(width: 18, height: 18)
                 .frame(width: 20)
             Text(tab.displayTitle)

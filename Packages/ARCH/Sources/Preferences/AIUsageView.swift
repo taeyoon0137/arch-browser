@@ -109,7 +109,7 @@ struct AIActivityPage: View {
                         Text(Self.result(of: entry)).foregroundStyle(Self.isFailure(entry) ? .red : .secondary)
                     }
                     if case .failed(let error) = entry.result {
-                        Text(error.localizedDescription).font(.callout).foregroundStyle(.red)
+                        Text(settings.message(for: error)).font(.callout).foregroundStyle(.red)
                     }
                     // A form row's subtitle size. The link takes it too, so that it is not the row's smallest text.
                     Text(details(of: entry)).font(.subheadline).foregroundStyle(.secondary)

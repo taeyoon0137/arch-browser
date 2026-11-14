@@ -801,7 +801,15 @@ public final class BrowserWindowModel: ObservableObject {
         guard internalPage == nil else { return }
         selectedTab?.webContents.navigationController.reload()
     }
-    public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
+    public func stopLoading() {
+        if let preview { return preview.webContents.navigationController.stop() }
+        selectedTab?.webContents.navigationController.stop()
+    }
+    /// Whether the commands above have a page to act on, the preview's while the panel shows, for the menu bar.
+    public var canGoBack: Bool { preview?.webContents.canGoBack ?? (selectedTab?.canGoBack == true) }
+    public var canGoForward: Bool { preview?.webContents.canGoForward ?? (selectedTab?.canGoForward == true) }
+    public var canReload: Bool { preview != nil || (internalPage == nil && selectedTab != nil) }
+    public var isLoadingPage: Bool { preview?.isLoading ?? (selectedTab?.isLoading == true) }
 
     // MARK: Developer tools
 

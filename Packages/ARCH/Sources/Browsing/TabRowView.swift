@@ -68,7 +68,7 @@ struct TabRowView: View {
                 windowModel.renamingTabID = tab.id
             }
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
-            Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+            Button("Add to Favorites") { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
             Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
             Divider()
             Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
@@ -254,6 +254,8 @@ struct TabCloseButton: View {
 
 struct TabIconView: View {
     @ObservedObject var tab: Tab
+    /// The globe's size for a page without an icon, as large as the symbols in the rows around it.
+    var symbolSize: CGFloat = 13
 
     var body: some View {
         if tab.isLoading {
@@ -267,7 +269,7 @@ struct TabIconView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         } else {
             Image(systemName: "globe")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(.secondary)
         }
     }

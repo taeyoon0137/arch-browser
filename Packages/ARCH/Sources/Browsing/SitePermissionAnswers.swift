@@ -92,9 +92,9 @@ final class SitePermissionAnswers {
         return alert
     }
 
-    /// The request's types as one phrase each, in the order they arrive. The camera and the microphone together, as a video call asks for them, share one verb.
+    /// The request's types as one phrase each, in the order they arrive. The camera and the microphone alone, as a video call asks for them, share one verb; with a third type, each keeps its own, so that the list has one "and".
     private static func description(of types: [EnginePermissionType]) -> String {
-        let both = types.contains(.camera) && types.contains(.microphone)
+        let both = Set(types) == [.camera, .microphone]
         let phrases = types.compactMap { type -> String? in
             switch type {
             case .camera: return both ? "use the camera and microphone" : "use the camera"

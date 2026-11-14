@@ -116,7 +116,7 @@ struct SidebarItemDragLayer: View {
     }
 }
 
-/// Opens links, addresses, and files that other apps drop here in new tabs of the window's current space, in the default engine. A ring aligned with the tab rows shows while a drop can land.
+/// Opens links, addresses, and files that other apps drop here in new tabs of the window's current space, in the default engine. A ring aligned with the tab rows shows while a drop can land, in the color a folder row lights up in for a dragged tab.
 struct SidebarDropTarget: ViewModifier {
     /// Links and files, and text that may be an address.
     static let types: [UTType] = [.url, .plainText]
@@ -124,15 +124,17 @@ struct SidebarDropTarget: ViewModifier {
     private static let schemes: Set<String> = ["http", "https", "file"]
 
     @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.spaceTheme) private var theme
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
         content
             .overlay {
                 if isTargeted {
+                    let color = theme.symbolColor(for: windowModel.currentSpace.tint)
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2))
+                        .fill(color.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.6), lineWidth: 2))
                         .padding(.horizontal, SidebarView.inset)
                         .allowsHitTesting(false)
                 }

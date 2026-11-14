@@ -34,7 +34,7 @@ private struct PageReaderPanel: View {
                 Text("Page Reader")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close Page Reader", action: windowModel.togglePageReader)
+                SidebarIconButton(symbol: "xmark", label: "Hide Page Reader", action: windowModel.togglePageReader)
             }
             .padding(.leading, 14)
             .padding(.trailing, 6)
@@ -105,7 +105,7 @@ private struct PageReaderTabView: View {
 
     private var questionField: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            TextField("Ask about this page", text: $draft, axis: .vertical)
+            TextField("Ask a question about this page", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1...5)

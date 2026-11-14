@@ -104,7 +104,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     private func updateTitle() {
         guard let window else { return }
         let space = model.currentSpace
-        let title = Self.title(tabTitle: model.internalPage?.windowTitle ?? model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
+        let title = Self.title(tabTitle: model.internalPage?.title ?? model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
         if window.title != title { window.title = title }
     }
 
@@ -168,15 +168,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         isInFullScreen = false
         window?.toolbar?.isVisible = true
         recordFrame()
-    }
-}
-
-private extension InternalPage {
-    /// The page's name, as its heading shows it, which the window's title takes while the page is open.
-    var windowTitle: String {
-        switch self {
-        case .flags: return "Flags"
-        }
     }
 }
 

@@ -265,16 +265,16 @@ struct SidebarTopRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", action: windowModel.toggleSidebar)
+            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", shortcut: shortcut("toggleSidebar"), action: windowModel.toggleSidebar)
             Spacer()
             // The navigation buttons touch and end 4 points in, as the address pill's buttons below do, so the two rows' buttons line up.
             HStack(spacing: 0) {
-                SidebarIconButton(symbol: "chevron.left", label: "Back", action: windowModel.goBack).disabled(tab?.canGoBack != true)
-                SidebarIconButton(symbol: "chevron.right", label: "Forward", action: windowModel.goForward).disabled(tab?.canGoForward != true)
+                SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: shortcut("goBack"), action: windowModel.goBack).disabled(tab?.canGoBack != true)
+                SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: shortcut("goForward"), action: windowModel.goForward).disabled(tab?.canGoForward != true)
                 if tab?.isLoading == true {
-                    SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: windowModel.stopLoading)
+                    SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: shortcut("stopLoading"), action: windowModel.stopLoading)
                 } else {
-                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: windowModel.reload).disabled(tab == nil)
+                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: shortcut("reload"), action: windowModel.reload).disabled(tab == nil)
                 }
             }
         }
@@ -284,6 +284,8 @@ struct SidebarTopRow: View {
         .padding(.trailing, 4)
         .padding(.top, Self.topPadding(below: windowButtons))
     }
+
+    private func shortcut(_ action: String) -> String? { windowModel.session.menuShortcut(action) }
 }
 
 /// A borderless symbol button that shows a soft highlight under the pointer. `label` names it in its tooltip, after which comes its `shortcut` when it has one, and for VoiceOver.

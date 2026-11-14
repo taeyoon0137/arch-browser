@@ -266,8 +266,10 @@ extension SidebarDragState {
 }
 
 /// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes.
+/// In the current space's tint, as the focused pane's ring over the same pages.
 struct SplitDropIndicator: View {
     @ObservedObject var sidebarDrag: SidebarDragState
+    @Environment(\.spaceTheme) private var theme
 
     /// How far the indicator sits inside the half of the pane. Its corners are the pane's, less this, so they stay concentric with the pane's.
     static let inset: CGFloat = 4
@@ -276,8 +278,8 @@ struct SplitDropIndicator: View {
         if let frame = sidebarDrag.splitDrop?.frame {
             let shape = RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius - Self.inset, style: .continuous)
             shape
-                .fill(Color.accentColor.opacity(0.15))
-                .overlay(shape.strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2))
+                .fill(theme.tint.opacity(0.15))
+                .overlay(shape.strokeBorder(theme.tint.opacity(0.6), lineWidth: 2))
                 .frame(width: frame.width, height: frame.height)
                 .offset(x: frame.minX, y: frame.minY)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

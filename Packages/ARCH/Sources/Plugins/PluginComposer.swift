@@ -6,7 +6,7 @@ import JavaScriptCore
 extension AIFeature {
     /// The composer's feature, which Settings registers.
     public static let pluginComposer = AIFeature(id: .pluginComposer, name: "Plugin Writer",
-                                                 summary: "Writes a plugin for the feature you describe in Settings \u{25B8} Plugins, which you review before it runs. It sends your description and Arch\u{2019}s plugin reference, never page data.",
+                                                 summary: "Writes a plugin, which you review before it runs, from the feature you describe in Settings \u{25B8} Plugins and Arch\u{2019}s plugin reference.",
                                                  trigger: .user, data: .textOnly, requirements: [.jsonOutput])
 }
 

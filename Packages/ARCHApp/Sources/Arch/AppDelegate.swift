@@ -79,9 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.windowsMenu = windowMenu
         NSApp.servicesMenu = servicesMenu
         NSApp.helpMenu = helpMenu
-        // The small window's button names the shortcut, which Settings ▸ Shortcuts can change.
-        session.moveToMainWindowShortcut = { [weak self] in
-            self?.windowMenu?.items.first { $0.action == #selector(AppDelegate.moveToMainWindow) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
+        // The sidebar's and the small window's buttons name their command's shortcut, which Settings ▸ Shortcuts can change, in their tooltips.
+        session.menuShortcut = { name in
+            NSApp.mainMenu.flatMap { Self.visibleItem(withAction: name, in: $0) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
         }
         session.restoreWindows()
         if !pendingURLs.isEmpty {
@@ -121,6 +121,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// The first item of `menu` or its submenus, in menu bar order, whose action has the name, leaving out hidden twins such as the second Zoom In.
+    private static func visibleItem(withAction name: String, in menu: NSMenu) -> NSMenuItem? {
+        for item in menu.items where !item.isHidden {
+            if let action = item.action, NSStringFromSelector(action) == name { return item }
+            if let submenu = item.submenu, let found = visibleItem(withAction: name, in: submenu) { return found }
+        }
+        return nil
+    }
 
     /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms first in one alert that names both, with the terminal brought forward while a program runs there, as closing the terminal's window asks. `ArchApplication` asks before it answers the windows' sheets, so that Cancel leaves them showing. Closing the last main window quits through the same path.
     func confirmsQuit() -> Bool {
@@ -254,6 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         viewMenu.addItem(.separator())
         // Targeted, so that a focused web view, which answers `reload:` itself, cannot take it past the window's rules.
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r").target = self
+        // Without a shortcut of its own: ⌘. stays the terminal's and the sheets' cancel key. Settings ▸ Shortcuts can give it one.
+        viewMenu.addItem(withTitle: "Stop Loading", action: #selector(stopLoading), keyEquivalent: "").target = self
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
@@ -414,6 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     @objc private func reload() { session.activeWindow?.reload() }
+    @objc private func stopLoading() { session.activeWindow?.stopLoading() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
     @objc private func resetZoom() { session.activeWindow?.resetZoom() }
@@ -575,6 +587,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if item.action == #selector(goHome) {
             return activeWindow?.canGoHome == true
         }
+        // As the sidebar's buttons, Back, Forward, Reload Page, and Stop Loading need a page to act on, the preview's while the panel shows.
+        if item.action == #selector(addFavorite) { return activeWindow?.selectedTab.map(session.canAddFavorite) == true }
+        if item.action == #selector(goBack) { return activeWindow?.canGoBack == true }
+        if item.action == #selector(goForward) { return activeWindow?.canGoForward == true }
+        if item.action == #selector(reload) { return activeWindow?.canReload == true }
+        if item.action == #selector(stopLoading) { return activeWindow?.isLoadingPage == true }
         // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list. Pin Tab names what it will do, as the tab row's context menu does.
         if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) {

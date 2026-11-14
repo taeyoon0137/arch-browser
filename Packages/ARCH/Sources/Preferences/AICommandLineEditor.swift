@@ -302,7 +302,7 @@ struct AICommandLineEditor: View {
             } catch AIError.cancelled {
                 checkResult = nil
             } catch {
-                checkResult = error.localizedDescription
+                checkResult = settings.message(for: error)
                 checkFailed = true
             }
             checkTask = nil
@@ -322,7 +322,7 @@ struct AICommandLineEditor: View {
             try await settings.removeProvider(draft.id)
             dismiss()
         } catch {
-            message = error.localizedDescription
+            message = settings.message(for: error)
         }
     }
 }

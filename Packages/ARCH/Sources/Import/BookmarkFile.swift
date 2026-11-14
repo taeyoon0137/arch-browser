@@ -69,7 +69,7 @@ struct BookmarkTree: Equatable {
         roots.flatMap(\.allItems)
     }
 
-    /// The bars' own items in bar order, and every other folder that directly holds items, in tree order with each folder before the ones below it. A folder's name is its path joined with " / ", such as "Work / Docs" below a bar and "Other Bookmarks / Recipes" below another root, so that folders of different roots stay apart. Empty folders are left out.
+    /// The bars' own items in bar order, and every other folder that directly holds items, in tree order with each folder before the ones below it. A folder's name is its path joined with " \u{25B8} ", as Arch writes a path, such as "Work \u{25B8} Docs" below a bar and "Other Bookmarks \u{25B8} Recipes" below another root, so that folders of different roots stay apart; " / " would read as a Persona and a space. Empty folders are left out.
     func split() -> (barItems: [SidebarImport.Item], folders: [SidebarImport.Folder]) {
         var barItems: [SidebarImport.Item] = []
         var folders: [SidebarImport.Folder] = []
@@ -88,7 +88,7 @@ struct BookmarkTree: Equatable {
             if folder.kind == .bar {
                 barItems += items
             } else if !items.isEmpty {
-                folders.append(SidebarImport.Folder(sourceID: folder.sourceID, name: path.joined(separator: " / "), items: items))
+                folders.append(SidebarImport.Folder(sourceID: folder.sourceID, name: path.joined(separator: " \u{25B8} "), items: items))
             }
             for case .folder(let child) in folder.children {
                 visit(child, below: path)

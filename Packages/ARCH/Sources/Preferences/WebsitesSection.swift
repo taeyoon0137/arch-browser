@@ -3,10 +3,13 @@ import ARCHEngine
 import Browsing
 import SwiftUI
 
-/// One group per website with its remembered answers, each with a menu to change it and a button to remove it. A website asks again for a permission whose answer is removed.
+/// One group per website with its remembered answers, each with a menu to change it and a button to remove it. A website asks again for a permission whose answer is removed. With several Personas, the footer says that an answer holds in all of them, as the permission sheet does (Persona rules 6 and 7).
 struct WebsitesSection: View {
     /// The session's remembered answers.
     @ObservedObject var store: SitePermissionStore
+    let session: BrowserSession
+    /// Whether the session has more than one Persona. The section follows only that, not every change of the session.
+    @State private var hasSeveralPersonas = false
 
     var body: some View {
         let origins = store.decisions.keys.sorted { Self.siteTitle(for: $0).localizedStandardCompare(Self.siteTitle(for: $1)) == .orderedAscending }
@@ -34,6 +37,7 @@ struct WebsitesSection: View {
         .formStyle(.grouped)
         // A fixed height keeps the window still while answers come and go; the list scrolls instead.
         .frame(width: sectionWidth, height: 360)
+        .onReceive(session.$personas) { hasSeveralPersonas = $0.count > 1 }
     }
 
     private func row(for type: EnginePermissionType, origin: String) -> some View {
@@ -62,7 +66,7 @@ struct WebsitesSection: View {
 
     private var footer: some View {
         // Chromium's page banners do not show until the engine change VI.7 in `docs/plan.md`, and WebKit refuses a page's request without asking the app.
-        formFootnote("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites\u{2019} notifications don\u{2019}t show as banners yet, and websites can\u{2019}t show notifications in WebKit tabs.")
+        formFootnote("Arch remembers your answer\(hasSeveralPersonas ? " in every Persona" : "") when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites\u{2019} notifications don\u{2019}t show as banners yet, and websites can\u{2019}t show notifications in WebKit tabs.")
     }
 
     /// The origin's permission types in the order of their titles.

@@ -52,7 +52,7 @@ struct WebStoreInstallSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if start.update == nil {
-                TextField("Web Store address or extension ID", text: $text)
+                TextField("Web Store address or extension identifier", text: $text)
                     .textFieldStyle(.roundedBorder)
                     .disabled(install != nil)
                     .onSubmit(begin)

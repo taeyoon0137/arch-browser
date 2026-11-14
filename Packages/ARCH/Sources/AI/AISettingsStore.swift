@@ -74,8 +74,9 @@ public final class AISettingsStore: ObservableObject {
         return route
     }
 
-    /// The interface's sentence for the error. An error about one provider names it as the user named it, in place of "The provider", so that after a route has moved through several models the user can tell whose key or service to look at; a provider no longer listed stays "The provider".
-    public func message(for error: AIError) -> String {
+    /// The interface's sentence for the error, which every view that shows an AI request's failure uses. An error about one provider names it as the user named it, in place of "The provider", so that after a route has moved through several models the user can tell whose key or service to look at; a provider no longer listed stays "The provider". Another error, such as the Keychain's, keeps its own description.
+    public func message(for error: any Error) -> String {
+        guard let error = error as? AIError else { return error.localizedDescription }
         func name(of id: AIProviderID) -> String {
             providers.first { $0.id == id }.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "The provider"
         }

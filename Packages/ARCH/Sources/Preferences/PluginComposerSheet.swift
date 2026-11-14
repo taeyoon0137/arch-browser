@@ -63,7 +63,7 @@ struct PluginComposerSheet: View {
                     Text("Writing the plugin\u{2026}").foregroundStyle(.secondary)
                 }
             } else if let failure {
-                Text(failure.localizedDescription)
+                Text(AIService.shared.settings.message(for: failure))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 if Self.isFixedInSettings(failure) {

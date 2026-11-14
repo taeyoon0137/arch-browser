@@ -303,7 +303,7 @@ extension Tab: EngineWebContentsUIDelegate {
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
            let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
-            sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
+            sections.append([ActionMenuItem("Ask About Selection\u{2026}") { askAboutSelection(selection) }])
         }
         sections.removeAll { $0.isEmpty }
         if sections.isEmpty {

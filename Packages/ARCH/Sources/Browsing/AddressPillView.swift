@@ -165,7 +165,7 @@ struct SiteSettingsView: View {
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
-                SiteSettingsSection(title: "Site data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
+                SiteSettingsSection(title: "Site Data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
                     Button("Clear Site Data\u{2026}") {
                         close()
                         windowModel.confirmClearSiteData()
@@ -174,8 +174,8 @@ struct SiteSettingsView: View {
                 }
                 PageAISiteSection(tab: tab)
             }
-            SiteSettingsSection(title: "New tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
-                Picker("New tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+            SiteSettingsSection(title: "New Tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
+                Picker("New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
                     ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                 }
             }
@@ -197,8 +197,8 @@ struct TabEngineSection: View {
     }
 
     var body: some View {
-        SiteSettingsSection(title: "This tab", note: note) {
-            Picker("This tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+        SiteSettingsSection(title: "This Tab", note: note) {
+            Picker("This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
                 ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
             }
         }

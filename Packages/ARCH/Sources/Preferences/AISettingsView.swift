@@ -107,9 +107,9 @@ private struct AIFeaturesPage: View {
 
     /// An automatic feature's hooks can also stop before a request, as for a budget or a timeout, so its last error comes from the hook center.
     private func lastError(of feature: AIFeature) -> String? {
-        if feature.trigger == .automatic { return hooks.lastErrors[feature.id]?.localizedDescription }
+        if feature.trigger == .automatic { return hooks.lastErrors[feature.id].map(settings.message(for:)) }
         guard case .failed(let error) = service.activity.last(where: { $0.feature == feature.id })?.result else { return nil }
-        return error.localizedDescription
+        return settings.message(for: error)
     }
 
     /// What the feature sends, in words.
@@ -235,7 +235,7 @@ private struct AITestPromptRows: View {
             } catch AIError.cancelled {
                 status = "Stopped."
             } catch {
-                status = error.localizedDescription
+                status = settings.message(for: error)
                 isError = true
             }
             task = nil

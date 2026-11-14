@@ -94,6 +94,8 @@ struct LibraryButton: View {
         }
     }
 
+    private var label: String { windowModel.isLibraryVisible ? "Hide Library" : "Show Library" }
+
     private var accessibilityValue: String {
         if downloads.isDownloading { return "Downloading" }
         let count = session.unseenDownloadIDs.count
@@ -134,8 +136,8 @@ struct LibraryButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(windowModel.isLibraryVisible ? .primary : .secondary)
         .onHover { isHovering = $0 }
-        .help(windowModel.isLibraryVisible ? "Hide Library" : "Show Library")
-        .accessibilityLabel(windowModel.isLibraryVisible ? "Hide Library" : "Show Library")
+        .help(session.menuShortcut("toggleDownloads").map { "\(label) (\($0))" } ?? label)
+        .accessibilityLabel(label)
         .accessibilityValue(accessibilityValue)
     }
 }

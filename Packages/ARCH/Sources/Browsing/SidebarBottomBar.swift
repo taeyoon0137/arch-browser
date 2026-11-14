@@ -63,7 +63,7 @@ struct SidebarBottomBar: View {
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
                 .id(space.id)
             }
-            NewSpaceButton(scale: scale(at: session.spaces.count), action: windowModel.addSpace)
+            NewSpaceButton(scale: scale(at: session.spaces.count), shortcut: session.menuShortcut("newSpace"), action: windowModel.addSpace)
                 .modifier(EdgeShrink(isActive: shrinksAtEdges, stripWidth: groupWidth, coordinateSpace: Self.stripSpace))
         }
         .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
@@ -150,6 +150,8 @@ private struct PersonaDivider: View {
 /// A small plus in the symbols' gray, brightening under the pointer as they do, makes the new space button look like part of the symbols row rather than a toolbar button.
 private struct NewSpaceButton: View {
     let scale: CGFloat
+    /// Named in the tooltip, as `SidebarIconButton` names its shortcut.
+    let shortcut: String?
     let action: () -> Void
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     @State private var isHovering = false
@@ -166,7 +168,7 @@ private struct NewSpaceButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("New Space")
+        .help(shortcut.map { "New Space (\($0))" } ?? "New Space")
         .accessibilityLabel("New Space")
     }
 }

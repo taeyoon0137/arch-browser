@@ -37,7 +37,7 @@ struct DownloadsSectionView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
             if session.downloads.isEmpty {
-                Text("No downloads")
+                Text("No Downloads")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)

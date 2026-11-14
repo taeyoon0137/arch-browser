@@ -80,7 +80,7 @@ struct PageExchangeView: View {
     /// One sentence and one action, as the AI interface shows every error. A page that could not be read offers Retry.
     private func failure(_ error: Error) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text((error as? AIError)?.localizedDescription ?? "Arch could not read this page.")
+            Text(error is AIError ? settings.message(for: error) : "Arch could not read this page.")
                 .font(.system(size: 12))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)

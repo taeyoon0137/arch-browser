@@ -44,7 +44,7 @@ enum ChromiumPackageCheck {
         }
         if let action = fields["action"] as? [String: Any] {
             for icon in icons(in: action["default_icon"]) {
-                try requireFile(icon, in: root, for: "the action's icon")
+                try requireFile(icon, in: root, for: "the action\u{2019}s icon")
             }
         }
         if let locale = fields["default_locale"] as? String {

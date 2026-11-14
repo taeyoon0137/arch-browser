@@ -84,18 +84,18 @@ private struct SmallWindowTopRow: View {
             .help(windowModel.internalPage?.address ?? tab.url?.absoluteString ?? "")
             .accessibilityLabel(siteName)
             Spacer(minLength: 8)
-            SidebarIconButton(symbol: "chevron.left", label: "Back", action: windowModel.goBack).disabled(!tab.canGoBack)
-            SidebarIconButton(symbol: "chevron.right", label: "Forward", action: windowModel.goForward).disabled(!tab.canGoForward)
+            SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: session.menuShortcut("goBack"), action: windowModel.goBack).disabled(!tab.canGoBack)
+            SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: session.menuShortcut("goForward"), action: windowModel.goForward).disabled(!tab.canGoForward)
             if tab.isLoading {
-                SidebarIconButton(symbol: "xmark", label: "Stop Loading", action: windowModel.stopLoading)
+                SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: session.menuShortcut("stopLoading"), action: windowModel.stopLoading)
             } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", action: windowModel.reload)
+                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: session.menuShortcut("reload"), action: windowModel.reload)
             }
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
-            SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Move to Main Window", shortcut: session.moveToMainWindowShortcut()) {
+            SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Move to Main Window", shortcut: session.menuShortcut("moveToMainWindow")) {
                 session.moveToMainWindow(windowModel)
             }
         }

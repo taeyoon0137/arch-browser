@@ -35,7 +35,7 @@ private struct PageQuestionPopover: View {
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close", action: windowModel.dismissPageQuestion)
+                SidebarIconButton(symbol: "xmark", label: "Close Question", action: windowModel.dismissPageQuestion)
             }
             if let selection = question.selection {
                 SelectionQuote(text: selection.text)

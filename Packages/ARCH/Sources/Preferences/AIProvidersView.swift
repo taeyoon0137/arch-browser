@@ -272,7 +272,7 @@ private struct AIProviderEditor: View {
             draft.models += added.map { AIModelConfiguration(name: $0) }
             refreshResult = added.isEmpty ? "No new models." : "Added \(added.count) of \(names.count) models."
         } catch {
-            refreshResult = error.localizedDescription
+            refreshResult = settings.message(for: error)
             refreshFailed = true
         }
     }
@@ -297,7 +297,7 @@ private struct AIProviderEditor: View {
             }
             dismiss()
         } catch {
-            message = error.localizedDescription
+            message = settings.message(for: error)
         }
     }
 
@@ -310,7 +310,7 @@ private struct AIProviderEditor: View {
             try await settings.removeProvider(draft.id)
             dismiss()
         } catch {
-            message = error.localizedDescription
+            message = settings.message(for: error)
         }
     }
 
