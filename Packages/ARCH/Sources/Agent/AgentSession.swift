@@ -96,6 +96,7 @@ extension AgentAPISession: AgentSessionRunning {
         didSet { siteScope = scope.sites }
     }
     var handles = AgentGrantHandles()
+    var researchPages: [UUID: AgentResearchPage] = [:]
     var snapshots = AgentSnapshotStore()
     let ready = AgentGate(isOpen: false)
     let handedBack = AgentGate(isOpen: true)

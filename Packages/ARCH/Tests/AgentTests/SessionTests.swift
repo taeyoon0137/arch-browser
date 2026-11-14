@@ -26,6 +26,103 @@ import Testing
         runner.startProcess(Self.cliProcess)
     }
 
+    @Test func researchPagesOpenOnlyTheReviewedAddressAndRefuseEverySubsequentNavigation() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let address = URL(string: "https://research.example/doc?q=one")!
+        let other = URL(string: "https://notes.example/ref")!
+        let (session, runner) = try start(service, harness, task: "Read \(address.absoluteString) and \(other.absoluteString).", mode: .readOnly)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
+        let choices = service.researchChoices(for: session)
+        #expect(Set(choices.map(\.url)) == [address, other])
+        let choice = try #require(choices.first { $0.url == address })
+        let forged = AgentResearchPage(url: URL(string: "https://research.example/other")!, source: choice.source)
+        #expect(!service.openResearchPage(forged, in: session))
+        host.redirects[address] = other
+        #expect(service.openResearchPage(choice, in: session))
+        let tab = try #require(host.agentTabs(of: session.id).first)
+        try await waitUntil { host.tabs.first { $0.id == tab.id }?.isLoading == false }
+        #expect(host.tabs.first { $0.id == tab.id }?.url == nil)
+        let check = try #require(host.researchLoads[tab.id])
+        #expect(!check(address) && !check(other) && !check(forged.url))
+        #expect(host.shownTabIDs.isEmpty)
+        host.redirects.removeAll()
+        #expect(service.openResearchPage(choice, in: session))
+        let pending = try #require(host.agentTabs(of: session.id).last)
+        session.takeOver()
+        session.handBack()
+        #expect(host.researchLoads[pending.id]?(address) == false)
+        #expect(service.openResearchPage(choice, in: session))
+        let excluded = try #require(host.agentTabs(of: session.id).last)
+        harness.excludedHosts.value.insert("research.example")
+        #expect(host.researchLoads[excluded.id]?(address) == false)
+        #expect(!service.openResearchPage(choice, in: session))
+        harness.excludedHosts.value.remove("research.example")
+        #expect(service.openResearchPage(choice, in: session))
+        let stopped = try #require(host.agentTabs(of: session.id).last)
+        session.stop()
+        #expect(host.researchLoads[stopped.id]?(address) == false)
+        #expect(!session.reportedTools.contains("open_tab"))
+    }
+
+    @Test func researchCopiesRequireTheSameAttachmentDocumentAndSharingOnBothSidesOfARead() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let address = URL(string: "https://notes.example/ref?exact=1")!
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Notes", url: address, isLoading: false, engine: .webKit)
+        host.tabs = [tab]
+        host.userTabIDs = [tab.id]
+        host.pages[address] = (title: "PrivateTitle", text: "PrivateText")
+        let (session, runner) = try start(service, harness, task: "Read the notes", attaching: [tab.id])
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
+        let page = try #require(service.researchChoices(for: session).first)
+        #expect(service.openResearchPage(page, in: session))
+        let copy = try #require(host.agentTabs(of: session.id).first)
+        try await waitUntil { host.tabs.first { $0.id == copy.id }?.url == address }
+        #expect(try await client.callTool("list_tabs", [:]).text.contains("PrivateTitle"))
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).text.contains("PrivateText"))
+        host.beforeReturningContent = { host.tabs[0].documentID = UUID() }
+        let answer = try await client.callTool("read_text", ["tab": "t2"])
+        #expect(answer.status != .ok && !answer.text.contains("PrivateText"))
+        #expect(try await !client.callTool("list_tabs", [:]).text.contains("PrivateTitle"))
+        #expect(!service.openResearchPage(page, in: session))
+        host.tabs[0] = tab
+        service.stopSharing(tab.id, with: session)
+        #expect(host.closedTabIDs.contains(copy.id))
+        #expect(service.share(tab, with: session))
+        #expect(!service.openResearchPage(page, in: session))
+        #expect(service.researchChoices(for: session).first?.source != page.source)
+    }
+
+    @Test func researchChoicesRequireAnEligibleHTTPAddressInTheCurrentPersona() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let addresses = ["https://127.0.0.1/doc", "http://router.local", "http://router", "https://docs.internal/doc",
+                         "http://user:password@research.example/doc", "https://research.example:8000/private", "file:///tmp/doc"]
+        let tabs = addresses.map {
+            AgentTabInfo(id: UUID(), spaceID: space.id, title: "", url: URL(string: $0), isLoading: false, engine: .webKit)
+        }
+        host.tabs = tabs
+        host.userTabIDs = Set(tabs.map(\.id))
+        let (session, _) = try start(service, harness, task: "Open https://notes.example/ref", attaching: tabs.map(\.id))
+        let only = try #require(service.researchChoices(for: session).first)
+        #expect(service.researchChoices(for: session).map(\.url.absoluteString) == ["https://notes.example/ref"])
+        host.spacesByPersona[session.personaID] = []
+        #expect(service.researchChoices(for: session).isEmpty)
+        #expect(!service.openResearchPage(only, in: session))
+    }
+
     // MARK: Tickets
 
     @Test func cancellingOneGatedCallReleasesOnlyItsWaitAndCannotRunItAfterHandBack() async throws {

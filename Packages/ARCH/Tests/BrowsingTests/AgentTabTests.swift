@@ -24,6 +24,29 @@ import Testing
         return (tab, page)
     }
 
+    @Test func reviewedResearchTabsBlockPopupsAndDownloadsUntilTheUserKeepsThem() {
+        let folders = Folders()
+        let folder = TabFolder(spaceID: space.id, name: "Research", isPinned: false, agentSessionID: owner)
+        folders.folders = [folder]
+        let address = URL(string: "https://research.example/doc")!
+        let (tab, page) = tab(in: folder, folders: folders, url: address)
+        tab.researchLoad = { $0 == address }
+        var activations = 0
+        tab.requestActivation = { activations += 1 }
+        tab.webContentsDidRequestActivation(page)
+        #expect(activations == 0)
+        #expect(!tab.webContentsMayCreatePopup(page))
+        #expect(!tab.webContents(page, shouldDownload: address, hasPage: true))
+        #expect(tab.webContents(page, decidePolicyFor: .init(url: address, disposition: .newForegroundTab, isUserInitiated: true)) == .cancel)
+        #expect(tab.webContents(page, decidePolicyFor: .init(url: address, disposition: .newWindow, isUserInitiated: false)) == .cancel)
+        #expect(tab.webContents(page, decidePolicyFor: .init(url: address, disposition: .currentTab, isUserInitiated: false)) == .allow)
+        tab.folderID = nil
+        tab.webContentsDidRequestActivation(page)
+        #expect(activations == 1)
+        #expect(tab.webContentsMayCreatePopup(page))
+        #expect(tab.webContents(page, shouldDownload: address, hasPage: true))
+    }
+
     @Test func agentFoldersAndTheirTabsStayOutOfSessionJSONAndAreGoneAfterARelaunch() throws {
         let folders = Folders()
         let agentFolder = TabFolder(spaceID: space.id, name: "claude \u{00B7} Terminal", isPinned: false, agentSessionID: owner)

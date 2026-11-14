@@ -10,6 +10,9 @@ public struct AgentSessionPanel: View {
     let actions: AgentPanelActions
     @State private var draft = ""
     @State private var problem: String?
+    @State private var showsResearchPages = false
+    @State private var researchChoice: AgentResearchPage?
+    @State private var researchProblem: String?
     @State private var showsSharedTabs = false
     @State private var sharingProblem: String?
     @State private var raisingTo: AgentAccessLevel?
@@ -69,6 +72,13 @@ public struct AgentSessionPanel: View {
                         Button("Take Over") { service.takeOver(session, showTab: actions.showTab) }
                             .disabled(session.hasEnded)
                     }
+                    if service.canEditAttachments(of: session) {
+                        Button("Open in Research Tab…") {
+                            researchChoice = nil
+                            researchProblem = nil
+                            showsResearchPages = true
+                        }.disabled(session.isTakenOver)
+                    }
                     Divider()
                     Button("Delete Session", role: .destructive) { Task { await service.deleteSession(session.id) } }
                 } label: {
@@ -77,6 +87,7 @@ public struct AgentSessionPanel: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .sheet(isPresented: $showsResearchPages) { researchPages }
                 .help("Session")
                 .accessibilityLabel("Session actions")
             }
@@ -103,6 +114,40 @@ public struct AgentSessionPanel: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private var researchPages: some View {
+        let choices = service.researchChoices(for: session)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Open in Research Tab").font(.headline)
+            if choices.isEmpty {
+                Text("Write an eligible web address in a message or share a tab to open it here.")
+            } else {
+                Picker("Address", selection: $researchChoice) {
+                    Text("Choose an address").tag(nil as AgentResearchPage?)
+                    ForEach(choices, id: \.self) { page in
+                        Text(verbatim: page.url.absoluteString).tag(Optional(page))
+                    }
+                }
+            }
+            if let researchChoice {
+                ScrollView {
+                    Text(verbatim: researchChoice.url.absoluteString)
+                        .font(.body.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 100)
+            }
+            if let researchProblem { Text(researchProblem).foregroundStyle(.secondary) }
+            HStack {
+                Spacer()
+                Button("Cancel") { showsResearchPages = false }.keyboardShortcut(.cancelAction)
+                Button("Open in Research Tab") {
+                    guard let researchChoice else { return }
+                    if service.openResearchPage(researchChoice, in: session) { showsResearchPages = false }
+                    else { researchProblem = "The address is unavailable or the session has reached its tab limit." }
+                }
+                .disabled(researchChoice.map(choices.contains) != true)
+            }
+        }.padding(16).frame(width: 420)
     }
 
     private var sharedTabs: some View {

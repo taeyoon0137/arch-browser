@@ -658,7 +658,35 @@ import Foundation
     /// Removal works even after the tab closes or becomes ineligible for reading.
     func stopSharing(_ tabID: UUID, with session: AgentSession) {
         guard canEditAttachments(of: session) else { return }
+        let copies = session.researchPages.filter { $0.value.source.attachmentID == tabID }.keys
         session.unshare(tabID: tabID)
+        let owned = Set(host.agentTabs(of: session.id).map(\.id))
+        for id in copies where owned.contains(id) {
+            host.closeAgentTab(id)
+            session.researchPages.removeValue(forKey: id)
+            session.snapshots.remove(id)
+        }
+    }
+
+    func researchChoices(for session: AgentSession) -> [AgentResearchPage] {
+        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
+        return session.researchChoices(host: host, allowsAI: dependencies.allowsAI)
+    }
+
+    @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
+        guard researchChoices(for: session).contains(choice), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return false }
+        let owner = AgentTabOwner(id: session.id, spaceID: session.spaceID, folderName: session.title)
+        let epoch = session.callEpoch
+        let takeover = session.takeoverGeneration
+        var mayStart = true
+        guard let tab = host.openResearchTab(at: choice.url, for: owner, mayLoad: { [weak self, weak session] url in
+            guard mayStart, let self, let session, self.canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == takeover, session.callEpoch == epoch,
+                  choice.matches(url), session.permits(choice, host: self.host, allowsAI: self.dependencies.allowsAI) else { return false }
+            mayStart = false
+            return true
+        }) else { return false }
+        session.researchPages[tab.id] = choice
+        return true
     }
 
     /// The panel pauses its session and shows a tab it can still reach. An ended or detached session cannot change the visible tab.
@@ -1327,6 +1355,7 @@ import Foundation
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
+        if report == .closed || report == .takenOver { session(withID: ownerID)?.researchPages.removeValue(forKey: tabID) }
         let client = grants.first { $0.id == ownerID }?.client.displayName ?? ""
         toolHost().tab(tabID, of: ownerID, didReport: report, state: states[ownerID], client: client)
     }

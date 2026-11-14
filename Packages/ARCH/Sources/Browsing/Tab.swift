@@ -230,6 +230,9 @@ public final class Tab: ObservableObject, Identifiable {
         pageDownloads.userDidNavigate()
     }
 
+    /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
+    var researchLoad: ((URL) -> Bool)?
+
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
         folderID.flatMap { agentOwnerOfFolder?($0) }
@@ -272,7 +275,9 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
     public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
-    public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) { requestActivation?() }
+    public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
+        if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
+    }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
@@ -310,6 +315,10 @@ extension Tab: EngineWebContentsUIDelegate {
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
 
+    public func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {
+        agentOwnerID == nil || researchLoad == nil
+    }
+
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents, targetURL)
     }
@@ -330,6 +339,7 @@ extension Tab: EngineWebContentsUIDelegate {
     /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
+            guard researchLoad == nil else { return false }
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
                 reportToAgent(.downloadAsked(url))
                 return false
@@ -592,6 +602,9 @@ extension Tab: EnginePageScriptDelegate {
 extension Tab: EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
+        if agentOwnerID != nil, let researchLoad {
+            return action.disposition == .currentTab && researchLoad(action.url) ? .allow : .cancel
+        }
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
