@@ -111,7 +111,7 @@ let package = Package(
         // `Fixtures` holds the pages the snapshot and action scripts run on in WebKit.
         .testTarget(name: "AgentTests", dependencies: ["Agent", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/AgentTests", resources: [.copy("Fixtures")]),
         // Reads store pages from hosts that stand in for the Web Store's through `Extensions`.
-        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
+        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "Import", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
         .testTarget(name: "EventsTests", dependencies: ["Events"], path: "Packages/ARCH/Tests/EventsTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),

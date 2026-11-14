@@ -415,7 +415,7 @@ private final class MonitorDouble: AgentTabMonitor {
 }
 
 /// An engine's page whose address and loading state the test sets, reporting to the tab as an engine does.
-private final class PageDouble: EngineWebContents {
+final class PageDouble: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
     private(set) var isLoading = false
