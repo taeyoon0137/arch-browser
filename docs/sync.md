@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the check whether this Mac can sync, and the sync engine. Queue tasks V.9.7 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the availability check, the sync engine, and the first-sync merge plan. Queue tasks V.9.8 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, it creates no sync engine and sends or fetches no records. Only in a build whose own entitlements name a container does it create that container's `CKContainer`, to ask for the account's status (`accountStatus()`) and hear of account changes, so that Settings ▸ Sync can say whether sync can run (Accounts and removed data). Whether that question reaches Apple's servers is Not verified 6.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -174,6 +174,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 ## First sync on a Mac
 
 - Turning sync on fetches the zone before sending anything.
+- `FirstSyncMerge.plan(local:server:samePage:)` takes the complete local and fetched record sets. It reserves identical record names first. Different IDs can match only once. Among otherwise identical choices it uses sidebar order keys and then record names. It walks folders from their roots so children use the matched parent’s ID. Ordinary and live folders with the same name stay separate, as do live folders with different configurations. The result lists the server records to apply, typed local-to-server replacements, and local uploads with their new space and folder references. A duplicate name within either input or a name shared across record types fails the plan before anything is applied.
 - An empty zone receives every syncable item from this Mac, with every listed setting that has a saved value.
 - Otherwise the server's records apply as incoming changes, and local items without a match upload. A local item matches a server record with the same record name. It takes the server's values wherever the server has any, and its own values fill only the fields or merge units that the server lacks (`SyncMerge`'s first-sync base, decision 4). Other matches follow decision 4:
   - A local space matches a server space with the same name in the same Persona. The local space's tabs and folders move to the server space, and the local space is removed.
@@ -271,7 +272,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Sync/SyncAvailability.swift` | Entitlement and account checks | Built |
 | `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | Built |
 | `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | Built |
-| `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | V.9.7 |
+| `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | Built |
 | `Browsing/SidebarSync.swift` | The sidebar's syncable state and the methods that apply incoming changes | V.9.8, V.9.9 |
 | `Sync/SidebarRecords.swift` | Converts syncable state to records and fetched records to session changes and orphan repairs | V.9.8, V.9.9 |
 | `Sync/SyncController.swift` | The toggle, engine lifetime, and events | V.9.10, V.9.11 |
