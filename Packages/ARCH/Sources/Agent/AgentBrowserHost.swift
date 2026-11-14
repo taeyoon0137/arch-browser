@@ -25,6 +25,8 @@ public struct AgentSpaceInfo: Identifiable, Equatable, Sendable {
 
 public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     public var id: UUID
+    /// Changes when a different document commits, including a reload of the same address.
+    public var documentID: UUID
     public var spaceID: UUID?
     /// The title the sidebar shows.
     public var title: String
@@ -36,8 +38,9 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for a tab of the user's.
     public var agentOwnerID: UUID?
 
-    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil) {
+    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil, documentID: UUID = UUID()) {
         self.id = id
+        self.documentID = documentID
         self.spaceID = spaceID
         self.title = title
         self.url = url

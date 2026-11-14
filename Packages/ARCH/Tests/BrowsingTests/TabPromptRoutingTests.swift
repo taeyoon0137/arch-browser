@@ -28,6 +28,17 @@ import Testing
         }
     }
 
+    @Test func committedDocumentsGetDistinctIdentitiesEvenAtTheSameAddress() {
+        let tab = Self.tab()
+        let page = URL(string: "https://example.com/form")
+        tab.webContents(tab.webContents, didCommitDocumentAt: page)
+        let first = BrowserAgentHost.info(of: tab)
+        tab.webContentsDidChangeTitle(tab.webContents)
+        #expect(BrowserAgentHost.info(of: tab).documentID == first.documentID)
+        tab.webContents(tab.webContents, didCommitDocumentAt: page)
+        #expect(BrowserAgentHost.info(of: tab).documentID != first.documentID)
+    }
+
     @Test func aPagesDialogsAskUnderThePagesSiteAndTakeTheCardsAnswer() {
         let tab = Self.tab()
         let prompts = PromptRecorder()

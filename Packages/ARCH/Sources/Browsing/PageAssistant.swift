@@ -17,6 +17,7 @@ extension AIFeature {
 struct PageQuestion: Identifiable {
     let id = UUID()
     let tabID: UUID
+    let documentID: UUID
     /// The selected text the question is about, from the page's context menu; nil for a question about the whole page.
     let selection: AISelection?
     /// The popover's question and reply. Each question starts it over, so the popover shows one reply.
@@ -95,7 +96,7 @@ public final class PageAssistant: ObservableObject {
 
     func readerConversation(for tab: Tab) -> PageConversation {
         if let conversation = readerConversations[tab.id] { return conversation }
-        let conversation = PageConversation(feature: .pageReader, tabID: tab.id, instructions: Self.readerInstructions, pages: pages, client: AIService.shared)
+        let conversation = PageConversation(feature: .pageReader, tabID: tab.id, instructions: Self.readerInstructions, pages: pages, client: AIService.shared, documentID: { [weak tab] in tab?.documentID })
         readerConversations[tab.id] = conversation
         return conversation
     }
@@ -112,8 +113,8 @@ public final class PageAssistant: ObservableObject {
     // MARK: Question popover
 
     /// The conversation of one question about the tab's page, for a window's popover.
-    func makeQuestionConversation(forTab id: UUID) -> PageConversation {
-        PageConversation(feature: .pageQuestion, tabID: id, instructions: Self.questionInstructions, pages: pages, client: AIService.shared)
+    func makeQuestionConversation(for tab: Tab) -> PageConversation {
+        PageConversation(feature: .pageQuestion, tabID: tab.id, instructions: Self.questionInstructions, pages: pages, client: AIService.shared, documentID: { [weak tab] in tab?.documentID })
     }
 
     // MARK: Links in replies
@@ -141,9 +142,10 @@ public final class PageAssistant: ObservableObject {
         for tab in tabs where tabObservers[tab.id] == nil {
             // The page's context menu opens in the window that shows the tab, which need not be the active one.
             tab.askAboutSelection = { [weak self, weak tab] text, sourceURL in
+                let sourceDocument = tab?.documentID
                 Task { @MainActor [weak self, weak tab] in
                     guard let self, let tab, tab.url == sourceURL, let selection = try? await self.pages.selection(ofTab: tab.id),
-                          selection.pageURL == sourceURL, Self.matchesMenuSelection(selection.text, text) else { return }
+                          tab.documentID == sourceDocument, selection.pageURL == sourceURL, Self.matchesMenuSelection(selection.text, text) else { return }
                     self.session?.window(showing: tab)?.askAboutSelection(selection, in: tab)
                 }
             }

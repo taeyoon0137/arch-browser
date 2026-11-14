@@ -37,6 +37,20 @@ import Testing
         #expect(client.requestCount == 0)
     }
 
+    @Test func aReloadAtTheSameAddressWhileReadingKeepsThePageOutOfTheRequest() async throws {
+        let pages = HeldPageSource()
+        let client = RecordingClient()
+        var document = UUID()
+        let conversation = PageConversation(feature: .pageReader, tabID: UUID(), instructions: "", pages: pages, client: client, documentID: { document })
+        conversation.ask("Summarize")
+        try await pages.waitForRead()
+        document = UUID()
+        pages.finishRead(returning: AIPageContent(url: selection.pageURL, title: selection.pageTitle, text: "A draft from the old document"))
+        try await Self.waitUntilAnswered(conversation)
+        #expect(Self.isStopped(conversation.exchanges.first))
+        #expect(client.requestCount == 0)
+    }
+
     @Test func aConversationTooLongForTheModelStartsOverWithTheFailedQuestionAlone() async throws {
         let client = ShortContextClient()
         let conversation = PageConversation(feature: .pageReader, tabID: UUID(), instructions: "", pages: FixedPageSource(), client: client)

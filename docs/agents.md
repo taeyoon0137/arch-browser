@@ -678,6 +678,8 @@ There is no command for signing in, settings, grants other than releasing one's 
 
 Settings ▸ AI ▸ Providers gains the presets, and Settings ▸ AI ▸ Features the Agent Tasks row (`agent`).
 
+Reader excerpts and pending page reads follow the current main document. Reloading the same address, replacing the engine, or navigating away invalidates the old excerpt and any read still pending.
+
 ## Permissions, approvals, and injection defenses
 
 ### Modes

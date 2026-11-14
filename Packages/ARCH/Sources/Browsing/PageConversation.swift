@@ -40,6 +40,8 @@ final class PageConversation: ObservableObject {
         var selection: AISelection?
         /// Set only when all page and selection context behind this answer came from this address.
         var replySourceURL: URL?
+        var replyDocumentID: UUID?
+        var selectionDocumentID: UUID?
         /// Whether earlier questions and replies went out with the question.
         var followsEarlierQuestions = false
         var reply = ""
@@ -64,15 +66,19 @@ final class PageConversation: ObservableObject {
     /// The value of `pageChanges` when the page text in `messages` was read; nil while they carry none.
     private var pageInMessages: Int?
     private var replySourceURL: URL?
+    private var replyDocumentID: UUID?
+    private var lastPageDocumentID: UUID?
+    private let documentID: () -> UUID?
     private var task: Task<Void, Never>?
     private var answeringID: Exchange.ID?
 
-    init(feature: AIFeatureID, tabID: UUID, instructions: String, pages: any AIPageSource, client: any AIClient) {
+    init(feature: AIFeatureID, tabID: UUID, instructions: String, pages: any AIPageSource, client: any AIClient, documentID: @escaping () -> UUID? = { nil }) {
         self.feature = feature
         self.tabID = tabID
         self.instructions = instructions
         self.pages = pages
         self.client = client
+        self.documentID = documentID
     }
 
     /// Asks `prompt`, shown as `title`, and streams the reply. A question still being answered stops first.
@@ -108,6 +114,8 @@ final class PageConversation: ObservableObject {
         messages = []
         pageInMessages = nil
         replySourceURL = nil
+        replyDocumentID = nil
+        lastPageDocumentID = nil
     }
 
     /// Clears the conversation and asks a question that ended without a whole reply again, on its own, as for a conversation that grew past what the model takes.
@@ -124,9 +132,17 @@ final class PageConversation: ObservableObject {
 
     private func answer(_ exchange: Exchange) async {
         let id = exchange.id
+        defer {
+            if answeringID == id {
+                task = nil
+                answeringID = nil
+                isAnswering = false
+            }
+        }
         do {
             let pageRead = pageChanges
-            let carriesPage = pageInMessages != pageRead
+            let document = documentID()
+            let carriesPage = pageInMessages != pageRead || lastPageDocumentID != document
             // The page read before goes, so the model answers from the page now open, and the service, which cuts page text from the last page part first, never cuts the new page for the old one.
             let history = carriesPage ? messages.map(Self.withoutPage) : messages
             update(id) { $0.followsEarlierQuestions = !history.isEmpty }
@@ -141,9 +157,16 @@ final class PageConversation: ObservableObject {
             let selected = try await selection(for: exchange.selectionSource)
             // An engine finishes a read it has started, so a question stopped during the read takes nothing from it.
             try Task.checkCancellation()
+            guard document == documentID() else {
+                update(id) { $0.state = .stopped }
+                return
+            }
             if let selected {
                 if selected.pageURL != sourceURL { sourceURL = nil }
-                update(id) { $0.selection = selected }
+                update(id) {
+                    $0.selection = selected
+                    $0.selectionDocumentID = document
+                }
                 parts.append(.selection(selected))
             }
             parts.append(.text(exchange.prompt))
@@ -175,18 +198,22 @@ final class PageConversation: ObservableObject {
             try Task.checkCancellation()
             messages = history + [question, AIMessage(role: .assistant, parts: [.text(reply)])]
             replySourceURL = sourceURL
-            update(id) { $0.replySourceURL = sourceURL }
-            if carriesPage { pageInMessages = pageRead }
+            let fromOneDocument = (history.isEmpty || replyDocumentID == document) && document == documentID()
+            replyDocumentID = fromOneDocument ? document : nil
+            update(id) {
+                $0.replySourceURL = sourceURL
+                $0.replyDocumentID = replyDocumentID
+            }
+            if carriesPage {
+                pageInMessages = pageRead
+                lastPageDocumentID = document
+            }
         } catch where Task.isCancelled {
             // `cancel()` marked the question stopped, which an error from a read that ends later does not undo.
         } catch {
             update(id) { $0.state = Self.isCancellation(error) ? .stopped : .failed(error) }
         }
-        if answeringID == id {
-            task = nil
-            answeringID = nil
-            isAnswering = false
-        }
+
     }
 
     private func selection(for source: QuestionSelection) async throws -> AISelection? {

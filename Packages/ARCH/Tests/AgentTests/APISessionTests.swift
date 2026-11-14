@@ -262,7 +262,7 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         let selection = "Reviewed selection."
         let previousReply = "Reader's earlier answer."
         if choosesModel {
-            start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, url: address, selection: selection, reply: previousReply))
+            start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, documentID: tab.documentID, url: address, selection: selection, reply: previousReply))
         }
         let session = try service.startSession(start)
         session.takeOver()

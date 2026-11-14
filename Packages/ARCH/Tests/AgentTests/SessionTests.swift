@@ -159,7 +159,7 @@ import Testing
         let answer = "The previous answer mentioned other.example."
         var start = AgentService.SessionStart(task: "Check last year's terms", personaID: persona, spaceID: space.id, attachedTabIDs: [tab.id],
                                               mode: .readOnly, model: nil, effort: nil)
-        start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, url: url, selection: selected, reply: answer))
+        start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, documentID: tab.documentID, url: url, selection: selected, reply: answer))
         let session = try service.startSession(start)
         let runner = try #require(harness.runners.last)
         let first = try #require(runner.sent.first)
@@ -186,6 +186,9 @@ import Testing
         harness.excludedHosts.value.insert("docs.example")
         #expect(!(try await client.callTool("session_info")).text.contains(selected))
         harness.excludedHosts.value = []
+        harness.host.tabs[0].documentID = UUID()
+        #expect(!(try await client.callTool("session_info")).text.contains(selected))
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         harness.host.tabs[0].url = url.appendingPathComponent("other")
         #expect(!(try await client.callTool("session_info")).text.contains(answer))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
@@ -199,12 +202,12 @@ import Testing
     @Test func readerExcerptsHaveABoundedUnicodePreview() throws {
         let text = String(repeating: "界", count: 1500)
         let page = try #require(URL(string: "https://site.example/"))
-        let excerpt = try #require(AgentReaderExcerpt(tabID: UUID(), url: page, selection: text, reply: nil))
+        let excerpt = try #require(AgentReaderExcerpt(tabID: UUID(), documentID: UUID(), url: page, selection: text, reply: nil))
         let clipped = try #require(excerpt.selection)
         #expect(clipped.utf8.count <= 4096)
         #expect(clipped.hasSuffix("…") && text.hasPrefix(clipped.dropLast()))
-        #expect(AgentReaderExcerpt(tabID: UUID(), url: URL(fileURLWithPath: "/tmp/document"), selection: text, reply: nil) == nil)
-        #expect(AgentReaderExcerpt(tabID: UUID(), url: page, selection: "", reply: nil) == nil)
+        #expect(AgentReaderExcerpt(tabID: UUID(), documentID: UUID(), url: URL(fileURLWithPath: "/tmp/document"), selection: text, reply: nil) == nil)
+        #expect(AgentReaderExcerpt(tabID: UUID(), documentID: UUID(), url: page, selection: "", reply: nil) == nil)
     }
 
     @Test func aMessageThatStartsWithASlashStaysInTheComposer() async throws {
@@ -306,7 +309,9 @@ import Testing
             host.userTabIDs = [tab.id]
         }
         try await checkRead(after: { host.userTabIDs.remove(tab.id) }, code: "P17")
+        try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://excluded.example/private") }, code: "P16")
+        try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://example.org/another") }, code: "pageChanged")
         try await checkRead(after: { host.tabs.removeAll() }, code: "tabNotFound")
         try await checkRead(after: { session.takeOver() }, code: "stopped")

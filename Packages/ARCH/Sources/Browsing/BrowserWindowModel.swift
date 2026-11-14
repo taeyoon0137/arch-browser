@@ -874,7 +874,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     @MainActor private func openPageQuestion(in tab: Tab, selection: AISelection?) {
         pageQuestion?.conversation.cancel()
-        pageQuestion = PageQuestion(tabID: tab.id, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(forTab: tab.id))
+        pageQuestion = PageQuestion(tabID: tab.id, documentID: tab.documentID, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(for: tab))
     }
 
     @MainActor private func closePageQuestion() {
