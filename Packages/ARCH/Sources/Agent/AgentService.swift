@@ -1082,6 +1082,68 @@ import Foundation
             return service.listedTools(for: session).compactMap(AgentToolCatalog.tool(named:))
         }
 
+        func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)? {
+            guard let service, let session else { return nil }
+            let host = service.host
+            let generation = session.takeoverGeneration
+            let tabs: [AgentTabInfo]
+            switch call.name {
+            case "read_text", "snapshot":
+                tabs = call.arguments["tab"]?.stringValue.flatMap(session.handles.tabs.id(for:)).map { host.tabs(withIDs: [$0]) } ?? []
+            case "session_info":
+                tabs = session.readerExcerpt.map { host.tabs(withIDs: [$0.tabID]) } ?? []
+            case "list_tabs":
+                let shared = Set(session.handles.sharedTabIDs)
+                tabs = call.arguments["scope"]?.stringValue == "shared" ? host.userTabs(in: session.personaID).filter { shared.contains($0.id) } : host.agentTabs(of: session.id)
+            default: return nil
+            }
+            // Handles are never reused, including when the user shares the same tab again.
+            let sources = Dictionary(uniqueKeysWithValues: tabs.map { (session.handles.tabs.handle(for: $0.id), $0) })
+            return { [weak service, weak session] result in
+                @MainActor func permits(_ handle: String) -> Bool {
+                    guard let service, let session, !session.hasEnded, !session.isTakenOver, session.takeoverGeneration == generation,
+                          let source = sources[handle], session.handles.tabs.id(for: handle) == source.id,
+                          let current = service.host.tabs(withIDs: [source.id]).first, current.documentID == source.documentID,
+                          current.url == source.url, current.agentOwnerID == source.agentOwnerID,
+                          AgentPolicy.showsTitle(of: current.url, allowsAI: service.dependencies.allowsAI) else { return false }
+                    if current.agentOwnerID == session.id {
+                        return service.host.agentTabs(of: session.id).contains { $0.id == current.id }
+                            && session.permitsResearchTab(current, host: service.host, allowsAI: service.dependencies.allowsAI)
+                    }
+                    return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(current.id)
+                        && service.host.userTabs(in: session.personaID).contains { $0.id == current.id }
+                }
+                if call.name == "list_tabs" {
+                    return Self.checkedList(result, permits: permits)
+                }
+                if let handle = sources.keys.first, permits(handle) { return result }
+                return Self.withheld(result)
+            }
+        }
+
+        private static func withheld(_ result: AIToolResult) -> AIToolResult {
+            AIToolResult(callID: result.callID, parts: [.text("Arch withheld this earlier result because access to its page changed.")], isError: true)
+        }
+
+        /// The host emits one marked title per visible row, with its handle immediately before it
+        /// and its host or address immediately after it. Keep these together when a grant changes.
+        private static func checkedList(_ result: AIToolResult, permits: (String) -> Bool) -> AIToolResult {
+            var copy = result
+            var changed = false
+            for index in result.parts.indices {
+                guard case .page = result.parts[index] else { continue }
+                guard index > 0, index + 1 < result.parts.count, case .text(let prefix) = result.parts[index - 1],
+                      case .text(let suffix) = result.parts[index + 1],
+                      let handle = prefix.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespaces) else { return withheld(result) }
+                if !permits(handle) {
+                    copy.parts[index] = .text("(page access changed)")
+                    copy.parts[index + 1] = .text(suffix.firstIndex(of: "\n").map { String(suffix[$0...]) } ?? "")
+                    changed = true
+                }
+            }
+            return changed ? copy : result
+        }
+
         func run(_ call: AgentToolCall) async -> AgentToolResult {
             guard let service, let session, !session.hasEnded else { return AgentToolResult(status: .refused, code: "stopped", text: "The session ended.") }
             let result = await service.sessionResult(of: call, in: session, arrivedAt: session.callEpoch)

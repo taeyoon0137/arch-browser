@@ -300,6 +300,106 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(session.hasEnded && session.isCleanedUp)
     }
 
+    enum HistoryAccessChange: CaseIterable { case stopSharing, shareAgain, reload, takeOver }
+
+    @Test(arguments: HistoryAccessChange.allCases)
+    func retainedReadResultsFollowDocumentAccess(change: HistoryAccessChange) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            if round == 0 {
+                return roundSteps([toolCall("read1", "read_text", #"{"tab":"t1"}"#),
+                                   toolCall("read2", "read_text", #"{"tab":"t2"}"#),
+                                   toolCall("excerpt", "session_info"),
+                                   toolCall("list", "list_tabs", #"{"scope":"shared"}"#)])
+            }
+            return roundSteps(text: "My earlier reply quotes the first page.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let address = try #require(URL(string: "https://example.org/article"))
+        // Equal addresses must not make these different documents share a grant.
+        let first = AgentTabInfo(id: UUID(), spaceID: space.id, title: "First private title", url: address, isLoading: false, engine: .webKit)
+        let second = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Still shared title", url: address, isLoading: false, engine: .webKit)
+        harness.host.tabs = [first, second]
+        harness.host.userTabIDs = [first.id, second.id]
+        harness.host.pages[address] = ("Article", "Synthetic body.")
+        var start = AgentService.SessionStart(task: "Read both tabs.", personaID: persona, spaceID: space.id, attachedTabIDs: [first.id, second.id], mode: .readOnly, model: model, effort: nil)
+        start.readerExcerpt = AgentReaderExcerpt(tabID: first.id, documentID: first.documentID, url: address, selection: "Private selection", reply: "Private reader reply")
+        let session = try service.startSession(start)
+        try await waitUntil { session.state == .done }
+        func pages(in request: AIRequest, from id: String) -> [String] {
+            request.messages.flatMap { toolResults(in: $0) }.filter { $0.callID == id }.flatMap(\.parts).compactMap {
+                if case .page(let page) = $0 { return page.text }
+                return nil
+            }
+        }
+        let before = try #require(client.requests.last)
+        #expect(pages(in: before, from: "read1") == ["Synthetic body."])
+        #expect(pages(in: before, from: "excerpt") == ["Private selection", "Private reader reply"])
+        switch change {
+        case .stopSharing, .shareAgain:
+            service.stopSharing(first.id, with: session)
+            if change == .shareAgain { #expect(service.share(first, with: session)) }
+        case .reload:
+            harness.host.tabs[0].documentID = UUID()
+        case .takeOver:
+            session.takeOver()
+            session.handBack()
+        }
+        try session.send("Continue from the second tab.")
+        try await waitUntil { client.requests.count == 3 && session.state == .done }
+        let after = client.requests[2]
+        #expect(pages(in: after, from: "read1").isEmpty)
+        #expect(pages(in: after, from: "excerpt").isEmpty)
+        #expect(pages(in: after, from: "read2") == (change == .takeOver ? [] : ["Synthetic body."]))
+        #expect(pages(in: after, from: "list") == (change == .takeOver ? [] : [second.title]))
+        #expect(after.messages.contains { $0.role == .assistant && $0.parts.contains { if case .text("My earlier reply quotes the first page.") = $0 { return true }; return false } })
+        await service.deleteSession(session.id)
+    }
+
+    @Test func aResearchTabResultIsWithheldAfterItsOwnerChanges() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            if round == 1 {
+                return roundSteps([toolCall("list", "list_tabs"), toolCall("copy", "read_text", #"{"tab":"t1"}"#)])
+            }
+            return roundSteps(text: "Continue.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let url = try #require(URL(string: "https://research.example/report"))
+        harness.host.pages[url] = ("Private report", "Private research body")
+        let session = try service.startSession(.init(task: "Review https://research.example/report", personaID: persona, spaceID: space.id,
+                                                     attachedTabIDs: [], mode: .readOnly, model: model, effort: nil))
+        try await waitUntil { session.state == .done }
+        let choice = try #require(service.researchChoices(for: session).first)
+        #expect(service.openResearchPage(choice, in: session))
+        let copy = try #require(harness.host.agentTabs(of: session.id).first)
+        try await waitUntil { harness.host.tabs.first { $0.id == copy.id }?.url == url }
+        try session.send("Read the research tab.")
+        try await waitUntil { client.requests.count == 3 && session.state == .done }
+        #expect(client.requests[2].messages.description.contains("Private research body"))
+        // Keep in Sidebar clears the owner. The document remains open in the user's Persona.
+        let index = try #require(harness.host.tabs.firstIndex { $0.id == copy.id })
+        harness.host.tabs[index].agentOwnerID = nil
+        harness.host.userTabIDs.insert(copy.id)
+        try session.send("Continue.")
+        try await waitUntil { client.requests.count == 4 && session.state == .done }
+        let history = client.requests[3].messages.flatMap { toolResults(in: $0) }
+        #expect(history.contains { $0.callID == "copy" && $0.isError })
+        #expect(!history.description.contains("Private research body"))
+        #expect(!history.description.contains("Private report"))
+        await service.deleteSession(session.id)
+    }
+
     @Test func aMessageRunsItsCallsThroughTheSessionsToolsOnThePinnedModel() async throws {
         let client = ScriptedClient { number in
             switch number {

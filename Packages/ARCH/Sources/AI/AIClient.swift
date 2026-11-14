@@ -272,6 +272,9 @@ public struct AIToolResult: Sendable {
     public var isError: Bool
     /// One line sent in place of the result once it is more than `AIToolHistory.wholeRounds` rounds old, or older rounds do not fit the model's input limit, such as "Earlier read_text on t2: ok, 12,000 characters of page text." It must hold no page data. nil uses a line that names the tool.
     public var note: String?
+    /// Rechecks a retained agent result against live tab grants before each HTTP attempt.
+    /// The returned copy can drop individual rows or replace the result with a refusal.
+    public var checkingAccess: (@MainActor @Sendable (AIToolResult) -> AIToolResult)?
 
     public init(callID: String, parts: [AIPart], isError: Bool = false, note: String? = nil) {
         self.callID = callID
@@ -326,7 +329,7 @@ extension AIClient {
         request.tools = tools.map(\.tool)
         var callCount = 0
         for round in 1...max(maxRounds, 1) {
-            request.messages = AIToolHistory.prepared(request.messages)
+            request.messages = await AIToolHistory.checkingAccess(in: AIToolHistory.prepared(request.messages))
             var text = ""
             var calls: [AIToolCall] = []
             var finishReason = AIFinishReason.completed
@@ -392,6 +395,18 @@ extension AIClient {
 enum AIToolHistory {
     /// The rounds of tool results, counted back from the newest, that go whole.
     static let wholeRounds = 8
+
+    @MainActor static func checkingAccess(in messages: [AIMessage]) -> [AIMessage] {
+        messages.map { message in
+            var message = message
+            message.parts = message.parts.map { part in
+                guard case .toolResult(let result) = part, let check = result.checkingAccess else { return part }
+                return .toolResult(check(result))
+            }
+            return message
+        }
+    }
+
     static let imageNote = "An image was here and is left out now; call the tool again to see it."
 
     /// The conversation as the next round sends it. A user message with tool results counts as one round. Each result more than `wholeRounds` rounds back becomes its note, and each image in a result becomes `imageNote` once an assistant message follows the result's message, which means a request that carried the image was answered; a round that failed or was stopped leaves its image for the next request. Applying it again changes nothing.

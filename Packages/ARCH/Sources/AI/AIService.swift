@@ -276,7 +276,7 @@ public final class AIService: ObservableObject, AIClient {
     /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts, and its content unless the request records none.
     private func prepare(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, entry: inout AIActivityEntry) throws -> AIProviderRequest {
         let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
-        let checked = Self.checkedToolResults(in: request.messages, policy: policy, imageNote: Self.imageNote(for: candidate))
+        let checked = Self.checkedToolResults(in: AIToolHistory.checkingAccess(in: request.messages), policy: policy, imageNote: Self.imageNote(for: candidate))
         let messages = try policy.prepare(AIToolHistory.fitted(checked, characterLimit: policy.inputCharacterLimit))
         let providerRequest = AIProviderRequest(model: candidate.model.name,
                                                 instructions: AIPartText.instructions(request.instructions, for: messages),

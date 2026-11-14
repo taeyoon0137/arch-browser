@@ -327,6 +327,28 @@ import Testing
         return task
     }
 
+    @Test func aRevokedToolResultIsRecheckedAfterWaitingForTheProvider() async throws {
+        @MainActor final class Grant { var shared = true }
+        let grant = Grant()
+        let log = ProviderLog()
+        let service = service(log: log)
+        let first = Task { await collect(service.stream(textRequest(userFeature))) }
+        try #require(await eventually { log.requests.count == 1 })
+        let page = AIPageContent(url: URL(string: "https://example.org")!, title: "Private", text: "Private body")
+        var retained = AIToolResult(callID: "read", parts: [.page(page)])
+        retained.checkingAccess = { result in
+            grant.shared ? result : AIToolResult(callID: result.callID, parts: [.text("Access withdrawn.")], isError: true)
+        }
+        let waiting = try await waitingRequest(AIRequest(feature: userFeature.id, messages: [AIMessage(role: .user, parts: [.toolResult(retained)])]), on: service)
+        grant.shared = false
+        #expect(await waiting.value == nil)
+        #expect(await first.value.error == nil)
+        let sent = try #require(log.requests.last?.messages.last)
+        guard case .toolResult(let result) = sent.parts.first else { Issue.record("Expected the checked tool result"); return }
+        #expect(result.callID == "read" && result.isError && !AIPartText.carriesData([sent]))
+        #expect(service.activity.last?.content.contains("Private body") == false)
+    }
+
     @Test func aSiteSwitchedOffDuringTheWaitKeepsItsPage() async throws {
         let log = ProviderLog()
         let service = service(log: log)
