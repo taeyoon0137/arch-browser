@@ -169,6 +169,8 @@ final class RegistryHarness {
     ])
     let javaScript = FakeScriptRunner()
     let shell = FakeScriptRunner()
+    /// Runs the JavaScript hooks in place of `javaScript` when set before `start`, as the script runner's tests set the real runner.
+    var javaScriptRunner: (any HookScriptRunning)?
     let provider: AIProviderConfiguration
     /// The registry's clock, which tests move forward.
     let clock = TestClock()
@@ -194,7 +196,7 @@ final class RegistryHarness {
     @discardableResult
     func start(version: Int = HookStore.currentVersion, migrations: [Int: HookStore.Migration] = HookStore.migrations) async throws -> HookRegistry {
         registry = HookRegistry(store: HookStore(directory: folder, keys: keys, version: version, migrations: migrations), bus: bus, ai: service, host: host,
-                                javaScript: javaScript, shell: shell, now: { [clock] in clock.now })
+                                javaScript: javaScriptRunner ?? javaScript, shell: shell, now: { [clock] in clock.now })
         try #require(await eventually { self.registry.isReady || self.registry.notice != nil })
         return registry
     }

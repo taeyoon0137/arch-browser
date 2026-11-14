@@ -74,7 +74,8 @@ let package = Package(
         ),
         .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .target(name: "Plugins", dependencies: ["ARCHEngine", "AI"], path: "Packages/ARCH/Sources/Plugins"),
+        // `Events` gives script plugins their events (`docs/hooks.md`, Plugins).
+        .target(name: "Plugins", dependencies: ["ARCHEngine", "AI", "Events"], path: "Packages/ARCH/Sources/Plugins"),
         .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions"),
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "Agent", "Events", "Hooks"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
@@ -84,9 +85,9 @@ let package = Package(
         .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Agent"),
         // `AI` gives site patterns and `AgentControl` the agent channel's address reduction and untrusted blocks, which the outside view uses.
         .target(name: "Events", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Events"),
-        // `Agent` gives the agent run's values and the sealed file, and `AgentControl` the JSON values that keep a later build's members of `hooks.json`. The script runners add `Plugins` (VII.26).
-        .target(name: "Hooks", dependencies: ["Events", "AI", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks"),
-        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Preferences"),
+        // `Agent` gives the agent run's values and the sealed file, `AgentControl` the JSON values that keep a later build's members of `hooks.json`, and `Plugins` the script runtime that JavaScript hooks run in.
+        .target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks"),
+        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Agent", "AgentControl", "Events", "Hooks"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
         .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "Agent", "Hooks", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
@@ -107,7 +108,8 @@ let package = Package(
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "HistoryTests", dependencies: ["History"], path: "Packages/ARCH/Tests/HistoryTests"),
-        .testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests"),
+        // `Fixtures` holds the hook scripts that the JavaScript runner's tests run.
+        .testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests", resources: [.copy("Fixtures")]),
         // Links SQLite to build its synthetic databases.
         .testTarget(name: "ImportTests", dependencies: ["Import", "Browsing", "History"], path: "Packages/ARCH/Tests/ImportTests", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `Fixtures` holds a sample script plugin that the tests install and run.

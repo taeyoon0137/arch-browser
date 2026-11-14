@@ -1,5 +1,6 @@
 // Registers the engines, creates the browser session, which opens the browser windows, the agents' service, and the hook registry, and connects the menu bar to them.
 import Agent
+import AI
 import AppKit
 import ARCHEngine
 import ARCHEngineChromium
@@ -66,9 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                                   version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
         self.agents = agents
         PreferencesWindowController.agents = agents
-        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain; the script runners come with VII.26 and VII.31.
-        hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
-                             javaScript: UnavailableHookScriptRunner(), shell: UnavailableHookScriptRunner())
+        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox; the shell runner comes with VII.31.
+        let settings = AIService.shared.settings
+        let hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
+                                 javaScript: HookScriptRunner(host: session.pluginBrowserHost, allowsAI: { settings.allowsAI(on: $0) }), shell: UnavailableHookScriptRunner())
+        self.hooks = hooks
+        PreferencesWindowController.hooks = hooks
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }

@@ -146,6 +146,7 @@ public final class BrowserSession: ObservableObject {
             pageAssistant.attach(to: self)
             pluginPages.attach(to: self)
             hooks.attach(to: self)
+            pluginBrowserHost.attach(to: self)
             eventSource.attach(to: self)
         }
     }
@@ -1113,7 +1114,7 @@ public final class BrowserSession: ObservableObject {
                                                 nativeMessagingHosts: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true))
         // The host knows the session before the manager asks the runtime which engines run extensions.
         webExtensionHost.follow(webExtensions, of: personaID, in: self)
-        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
+        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions], events: events, browserHost: pluginBrowserHost)
         engines.plugins = plugins
         engines.webExtensions = webExtensions
         // Profiles that started before the runtime, as the default Persona's in the primary engine at launch.
@@ -1267,6 +1268,8 @@ public final class BrowserSession: ObservableObject {
     private lazy var eventSource = BrowserEventSource(bus: events)
     /// Turns the bus's events into the AI interface's hook events and applies their actions, once the session exists.
     private let hooks = BrowserHooks()
+    /// Reaches the tabs for the plugins' and hook scripts' tab calls, once the session exists.
+    public let pluginBrowserHost = SessionPluginBrowserHost()
 
     // MARK: Drag and drop
 

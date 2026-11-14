@@ -58,6 +58,8 @@ public protocol HookScriptRunning: AnyObject {
 public struct HookInvocation: Sendable {
     public var hook: Hook
     public var run: UUID
+    /// The event's Persona, whose tabs the run reaches.
+    public var personaID: UUID
     /// The event in the hook's script view: addresses and download details with `tabs`, nothing from a site excluded from AI for a hook with `agent`.
     public var event: BrowserEventScriptView
     /// What the run's actions carry: the run, and the triggering event's hook chain followed by the hook (Loop protection).
@@ -72,7 +74,7 @@ public struct HookInvocation: Sendable {
     public var tabs: Set<UUID>
     /// The event's tab among the run's tabs: a tab event's tab, or a finished download's tab while it is open; nil for a close and a space switch.
     public var eventTab: UUID?
-    /// The document each run tab's renames belong to, here the event's address for the event's tab of a page, address, or title event; the agent runner adds the others' addresses.
+    /// The document each run tab's renames belong to: the event's address for the event's tab of a page, address, or title event, and each other run tab's committed address as the run starts. A tab without a committed address has none and takes no name.
     public var documents: [UUID: URL]
     /// A close run's closed tab, kept in memory only.
     public var closedTab: AgentRunClosedTab?
@@ -171,7 +173,7 @@ public enum HookRegistryError: LocalizedError {
     }
 }
 
-/// Stands in for a runner Arch does not have yet: VII.26 adds the JavaScript runner and VII.31 the shell runner. Every run fails with `runnerMissing`.
+/// Stands in for a runner Arch does not have yet, the shell runner until VII.31. Every run fails with `runnerMissing`.
 public final class UnavailableHookScriptRunner: HookScriptRunning {
     public init() {}
 
@@ -403,6 +405,15 @@ public final class HookRegistry: ObservableObject {
         let hook = hooks.remove(at: from)
         hooks.insert(hook, at: min(max(index, 0), hooks.count))
         persist()
+    }
+
+    /// Every Persona with its spaces, in the session's order, for filters and the names Settings gives them.
+    public var places: [HookPersonaPlaces] { host.places }
+
+    /// The bytes of the hook's script file as they are now, also when they no longer match its digest, for the editor's Edit and Review; nil when the file is missing.
+    public func scriptContents(of id: UUID) -> Data? {
+        guard let hook = hook(withID: id) else { return nil }
+        return try? Data(contentsOf: store.scriptURL(of: hook))
     }
 
     /// The user's pause: the hook's waiting runs skip and its running run stops.
@@ -732,7 +743,8 @@ public final class HookRegistry: ObservableObject {
         guard let view = event.view(access) else { return nil }
         // A close's own tab is gone, and a test treats it as closed.
         let closedID = event.kind == .tabClosed ? event.subject : nil
-        var tabs = host.tabs(inPersona: event.personaID).filter { $0.id != closedID && Self.covers(hook.filter, $0) }.map(\.id)
+        let covered = host.tabs(inPersona: event.personaID).filter { $0.id != closedID && Self.covers(hook.filter, $0) }
+        var tabs = covered.map(\.id)
         var eventTab: UUID?
         switch event.payload {
         case .downloadFinished(let download): eventTab = download.tabID
@@ -743,9 +755,10 @@ public final class HookRegistry: ObservableObject {
         let runTabs = Set(tabs)
         if let id = eventTab, !runTabs.contains(id) { eventTab = nil }
         var documents: [UUID: URL] = [:]
+        for tab in covered where runTabs.contains(tab.id) { documents[tab.id] = tab.url }
         if let id = eventTab, let document = Self.document(of: event) { documents[id] = document }
         let chain = Array(((event.cause?.hookChain ?? []) + [hook.id]).suffix(Self.maximumHookChain))
-        return HookInvocation(hook: hook, run: run.id, event: view, cause: BrowserEventCause(origin: .hookRun(hook: hook.id, run: run.id), hookChain: chain),
+        return HookInvocation(hook: hook, run: run.id, personaID: event.personaID, event: view, cause: BrowserEventCause(origin: .hookRun(hook: hook.id, run: run.id), hookChain: chain),
                               deadline: deadline, appliesActions: applying, script: script, tabs: runTabs, eventTab: eventTab, documents: documents,
                               closedTab: run.closedTab, knownProviders: Dictionary(knownProviders.map { ($0.id, $0.destination) }, uniquingKeysWith: { first, _ in first }),
                               requestDidEnd: requestDidEnd)

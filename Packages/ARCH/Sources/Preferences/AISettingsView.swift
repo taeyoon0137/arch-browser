@@ -1,6 +1,7 @@
-// Settings ▸ AI: the providers the user connects, the models for each registered feature and each model tier, the sites where AI is off, usage, recent requests, and agents' outside access, grants, and activity. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
+// Settings ▸ AI: the providers the user connects, the models for each registered feature and each model tier, the sites where AI is off, usage, recent requests, agents' outside access, grants, and activity, and the hooks. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
 import Agent
 import AI
+import Hooks
 import SwiftUI
 
 extension AIFeature {
@@ -20,10 +21,13 @@ struct AISettingsView: View {
         case usage = "Usage"
         case activity = "Activity"
         case agents = "Agents"
+        case agentHooks = "Agent Hooks"
     }
 
     /// The agents' service, whose page shows only when the app shell set one.
     let agents: AgentService?
+    /// The hook registry, whose page shows only when the app shell set one.
+    let hooks: HookRegistry?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
     @State private var page = Page.providers
@@ -33,7 +37,7 @@ struct AISettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Page", selection: $page) {
-                ForEach(Page.allCases.filter { $0 != .agents || agents != nil }, id: \.self) { Text($0.rawValue) }
+                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || hooks != nil) }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -55,6 +59,8 @@ struct AISettingsView: View {
                 case .activity: AIActivityPage(service: service, settings: settings)
                 case .agents:
                     if let agents { AgentSettingsPage(service: agents, activity: agents.activity) }
+                case .agentHooks:
+                    if let hooks { AgentHooksPage(registry: hooks, currentTab: { PreferencesWindowController.session?.lastMainWindow?.selectedTabID }) }
                 }
             }
             .formStyle(.grouped)

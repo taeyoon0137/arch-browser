@@ -3,11 +3,12 @@ import AI
 import Combine
 import Events
 import Foundation
+import Plugins
 
 @MainActor
 final class BrowserHooks: AIHookHost {
     /// The longest tab name a hook gives.
-    static let maximumTabNameLength = 60
+    static let maximumTabNameLength = PluginTab.maximumNameLength
     /// The bus events the center hears of; the filter's empty tab kinds leave agent tabs out.
     static let events = BrowserEventFilter(kinds: [.pageLoaded, .tabOpened, .downloadFinished, .addressChanged, .tabClosed])
 
@@ -126,8 +127,19 @@ final class BrowserHooks: AIHookHost {
 
     /// The first line of a hook's name, trimmed and cut to `maximumTabNameLength` characters, or nil when nothing is left.
     static func tabName(from title: String) -> String? {
-        let line = title.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let name = String(line.trimmingCharacters(in: .whitespaces).prefix(maximumTabNameLength)).trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? nil : name
+        PluginTab.name(from: title)
+    }
+
+    /// Gives the tab the suggested name for the document at `document`, under the rules the AI hooks' names follow (`docs/hooks.md`, hook decision 13), for plugins and hook scripts: the name's first line, trimmed and cut, while the tab still shows the document, the user has not named it, and the user has not turned down a suggested name for the document. Nil removes a suggested name for the document, leaving the user's name and a turned-down name as they are, while the tab shows it and the user has not named it. Returns whether the tab took the change; with `applying` false nothing changes.
+    static func suggest(_ name: String?, for document: URL, to tab: Tab, applying: Bool) -> Bool {
+        guard let name else {
+            guard tab.customTitle == nil, tab.committedURL?.withoutFragment == document.withoutFragment else { return false }
+            if applying, let suggested = tab.suggestedTitle, suggested.title != nil, suggested.isFor(document) { tab.suggestedTitle = nil }
+            return true
+        }
+        guard let shown = tabName(from: name),
+              takesName(for: document, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return false }
+        if applying { tab.suggestedTitle = SuggestedTitle(title: shown, url: document) }
+        return true
     }
 }

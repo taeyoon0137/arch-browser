@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source on fake web contents: a new tab but no restored tabs, a name from code under the suggested name rules with its cause, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -106,6 +106,37 @@ import Testing
             return "\(previousURL?.absoluteString ?? "") > \(tab.url?.absoluteString ?? "")"
         }
         #expect(changes == ["https://example.org/a > https://example.org/b", "https://example.org/b > https://example.org/b#part"])
+    }
+
+    /// The rule that plugins and hook scripts rename tabs under (`SessionPluginBrowserHost`), whose title change carries the caller's cause.
+    @Test func aNameFromCodeFollowsTheSuggestedNameRulesAndNamesItsCause() {
+        let (tab, _) = makeTab(space: space)
+        source.follow(tabs: [tab], postingNewTabs: false)
+        let document = URL(string: "https://example.org/a#top")!
+        let cause = BrowserEventCause(origin: .hookRun(hook: UUID(), run: UUID()), hookChain: [UUID()])
+        // A test changes nothing.
+        #expect(BrowserHooks.suggest("Named", for: document, to: tab, applying: false))
+        #expect(tab.suggestedTitle == nil && recorder.events.isEmpty)
+        #expect(bus.withCause(cause) { BrowserHooks.suggest("  Named  \nmore", for: document, to: tab, applying: true) })
+        #expect(tab.suggestedTitle == SuggestedTitle(title: "Named", url: document) && tab.displayTitle == "Named")
+        guard case .titleChanged(_, .suggested)? = recorder.events.last?.payload else {
+            Issue.record("The name posted no title change.")
+            return
+        }
+        #expect(recorder.events.last?.cause == cause)
+        // The name belongs to the document the tab shows.
+        #expect(!BrowserHooks.suggest("Other", for: URL(string: "https://example.org/b")!, to: tab, applying: true))
+        #expect(BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
+        #expect(tab.suggestedTitle == nil)
+        // A name the user turned down stays turned down, and the user's own name wins.
+        let refusal = SuggestedTitle(title: nil, url: document)
+        tab.suggestedTitle = refusal
+        #expect(!BrowserHooks.suggest("Again", for: document, to: tab, applying: true))
+        #expect(BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
+        #expect(tab.suggestedTitle == refusal)
+        tab.customTitle = "Mine"
+        #expect(!BrowserHooks.suggest("Again", for: document, to: tab, applying: true))
+        #expect(!BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
     }
 
     @Test func titleChangesNameTheirSourceAndNoneWhenTheShownNameStays() {

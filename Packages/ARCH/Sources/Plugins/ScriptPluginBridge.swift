@@ -1,4 +1,4 @@
-// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands and page script values. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says.
+// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says.
 import WebKit
 
 @MainActor
@@ -6,7 +6,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The name under which documents reach the handler, `window.webkit.messageHandlers.arch`.
     static let handlerName = "arch"
 
-    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null.
+    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null, and runs an event's listeners one after another; a command or an event without a listener throws `noListener`.
     static let script = #"""
     (() => {
       const handler = window.webkit.messageHandlers.arch;
@@ -16,6 +16,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
       };
       const given = (value) => (value === undefined ? [] : [value]);
       const commandListeners = new Map();
+      const eventListeners = new Map();
       let messageListener = null;
       Object.defineProperty(window, "__archDeliver", {
         value: async (kind, payload) => {
@@ -26,6 +27,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             await listener(body.invocation);
             return null;
           }
+          if (kind === "event") {
+            const listeners = eventListeners.get(body.kind) ?? [];
+            if (listeners.length === 0) throw new Error("noListener");
+            for (const listener of listeners) await listener(body.event);
+            return null;
+          }
           if (!messageListener) return null;
           const reply = await messageListener(body);
           return reply === undefined ? null : JSON.stringify(reply);
@@ -34,6 +41,17 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
       Object.defineProperty(window, "arch", {
         value: Object.freeze({
           commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
+          events: Object.freeze({
+            on: (kind, listener) => {
+              if (typeof listener !== "function") throw new TypeError("arch.events.on needs a function");
+              eventListeners.set(kind, [...(eventListeners.get(kind) ?? []), listener]);
+            },
+          }),
+          tabs: Object.freeze({
+            list: () => call("tabs.list", []),
+            get: (id) => call("tabs.get", [id]),
+            rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
+          }),
           pages: Object.freeze({ onMessage: (listener) => { messageListener = listener; } }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
@@ -54,7 +72,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     })();
     """#
 
-    /// The body of the function through which the app delivers: `kind` is `command` or `message`, and `payload` the JSON text the listener receives parsed.
+    /// The body of the function through which the app delivers: `kind` is `command`, `message`, or `event`, and `payload` the JSON text the listener receives parsed.
     static let deliveryCall = "return await window.__archDeliver(kind, payload);"
 
     private let context: any PluginContext
@@ -95,6 +113,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             context.setBadge(try call.optionalText(1), onSidebarItem: try call.text(0))
         case "ui.copy":
             try context.copyToClipboard(try call.text(0))
+        case "tabs.list":
+            return .array(try context.tabs().map(\.scriptValue))
+        case "tabs.get":
+            // A tab the script does not reach is null, as is text that names no tab.
+            return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
+        case "tabs.rename":
+            guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            return .bool(try context.renameTab(id, to: try call.optionalText(1)))
         default:
             throw BridgeFailure.invalidCall
         }
@@ -144,6 +170,7 @@ private extension PluginError {
         case .timedOut: return "timedOut"
         case .invalidVersions: return "invalidVersions"
         case .closed: return "closed"
+        case .notGranted: return "notGranted"
         }
     }
 }

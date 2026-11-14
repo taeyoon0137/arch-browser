@@ -79,8 +79,8 @@ import Testing
         #expect(runner.invocations.count == 1)
         #expect(invocation.eventTab == opened.id)
         #expect(invocation.tabs == [covered.id, opened.id])
-        // The event's address is the event tab's document only for page, address, and title events.
-        #expect(invocation.documents.isEmpty)
+        // Each run tab's document is its committed address as the run starts; the event's address stands for the event tab's only for page, address, and title events.
+        #expect(invocation.documents == [covered.id: try #require(covered.url), opened.id: try #require(opened.url)])
         #expect(invocation.cause.origin == .hookRun(hook: hook.id, run: invocation.run))
         #expect(invocation.cause.hookChain == [hook.id])
         #expect(invocation.appliesActions)

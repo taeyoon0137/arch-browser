@@ -202,7 +202,7 @@ final class BrowserEventSource {
     }
 
     /// Agent tabs take `agent` once agent folders exist (VII.12).
-    static func kind(of tab: Tab) -> BrowserTabKind {
+    nonisolated static func kind(of tab: Tab) -> BrowserTabKind {
         if tab.spaceID == nil { return .favorite }
         if tab.isInSmallWindow { return .smallWindow }
         return tab.isPinned ? .pinned : .open
