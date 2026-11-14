@@ -277,6 +277,16 @@ public enum AgentToolCatalog {
         AgentToolParameter("name", .string, required: true, "The suggested name, or an empty string to clear it.")
     ])
 
+    public static let sessionTabRequest = AgentTool("request_tab", .reads, [.waitsForUser], "Asks the user to choose one tab to share for reading.", [
+        AgentToolParameter("reason", .string, required: true, "Why this task needs another tab, shown to the user."),
+        AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
+    ])
+
+    /// A session's read-only tab request has a narrower schema than an outside grant's.
+    public static func sessionTool(named name: String) -> AgentTool? {
+        name == sessionTabRequest.name ? sessionTabRequest : tool(named: name)
+    }
+
     public static func tool(named name: String) -> AgentTool? {
         if name == renameTab.name { return renameTab }
         return tools.first { $0.name == name }

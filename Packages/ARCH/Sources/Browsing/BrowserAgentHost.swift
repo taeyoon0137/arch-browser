@@ -53,7 +53,7 @@ import Foundation
     /// A tab as the agents' service sees it.
     static func info(of tab: Tab) -> AgentTabInfo {
         AgentTabInfo(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, isLoading: tab.isLoading, canGoBack: tab.canGoBack, canGoForward: tab.canGoForward,
-                     engine: tab.engineKind, agentOwnerID: tab.agentOwnerID, documentID: tab.documentID)
+                     engine: tab.engineKind, agentOwnerID: tab.agentOwnerID, documentID: tab.documentID, isLoaded: tab.isLoaded)
     }
 
     /// The results page of the search engine chosen in Settings ▸ General, which takes the terms in `q`.

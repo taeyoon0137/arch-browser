@@ -15,6 +15,8 @@ public enum AgentApprovalKind: Equatable, Sendable {
     case handToUser(String)
     /// `request_tab`, with the tabs the user can pick and whether the agent asks to act in it.
     case requestTab([AgentTabChoice], acting: Bool)
+    /// The app session may read the one document the user explicitly chooses.
+    case shareSessionTab([AgentTabInfo])
     /// A download a page in an agent tab started (P6).
     case download
     /// A link to another app that a page in an agent tab opened (P11), with the app's name.

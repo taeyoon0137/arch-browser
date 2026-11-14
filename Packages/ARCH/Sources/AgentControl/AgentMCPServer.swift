@@ -345,7 +345,8 @@ public struct AgentMCPServer {
     /// MCP's `tools/list` result for the tools Arch named, in its order, or for the whole catalog.
     private mutating func toolList(names: [String]?) -> AgentJSON {
         hasListedTools = true
-        let tools = names.map { $0.compactMap(AgentToolCatalog.tool(named:)) } ?? AgentToolCatalog.tools
+        let lookup = mode == .outside ? AgentToolCatalog.tool(named:) : AgentToolCatalog.sessionTool(named:)
+        let tools = names.map { $0.compactMap(lookup) } ?? AgentToolCatalog.tools
         return ["tools": .array(tools.map { tool in
             guard !supports(AgentMCPVersion.annotations), case .object(var definition) = tool.mcpDefinition else { return tool.mcpDefinition }
             definition["annotations"] = nil

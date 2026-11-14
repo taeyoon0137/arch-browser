@@ -147,7 +147,7 @@ public enum AgentHarness {
 
         Call session_info first for the session context and any reader excerpt the user explicitly shared. Use list_spaces for spaces, list_tabs with scope shared for attachments and scope agent for research tabs. Use snapshot for a page outline and read_text for its readable text. Call guide for help. Use ask_user when the task needs a choice from the user. The browser tools only read pages. Opening or navigating a page and interacting with its controls require the user.
 
-        For tasks started in Arch, the user can use Shared Tabs to attach another readable tab or Stop Sharing. The session menu's Open in Research Tab lets the user review and open an eligible address from their message or an attached page. If another tab is needed, explain what to share. Honor refusals and the user taking over. Cite the pages you actually read and explain any remaining work. Never ask for passwords, codes or card details.
+        For tasks started in Arch, the user can use Shared Tabs to attach another readable tab or Stop Sharing. The session menu's Open in Research Tab lets the user review and open an eligible address from their message or an attached page. If request_tab is listed, give a reason and request read access. The user chooses the tab and may decline. Honor refusals and the user taking over. Cite the pages you actually read and explain any remaining work. Never ask for passwords, codes or card details.
         """
 
     /// Ticketed MCP servers also serve hooks, whose explicit tool list can differ from a task.
@@ -163,7 +163,7 @@ public enum AgentHarness {
             Use snapshot to identify a field or button. The user fills fields and submits the form. Shared and research tab snapshots omit form values. Never request passwords, verification codes or card details.
             """),
         (.research, "Comparing pages the user made available.", """
-            List the attached and research tabs, read the relevant pages and cite the sources you actually saw. In a task started in Arch the user can add or withdraw a tab through Shared Tabs. They can choose Open in Research Tab in the session menu to review an eligible address from their message or a current attachment and open a background tab. Ask the user in your reply if another page is needed.
+            List the attached and research tabs, read the relevant pages and cite the sources you actually saw. In a task started in Arch the user can add or withdraw a tab through Shared Tabs. They can choose Open in Research Tab in the session menu to review an eligible address from their message or a current attachment and open a background tab. If you need another open tab and request_tab is listed, explain why and request read access.
             """),
         (.downloads, "Helping the user find a download link.", """
             Read the page to locate the download link and tell the user how to find it. The user starts the download and chooses where to save the file.
