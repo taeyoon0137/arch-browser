@@ -300,6 +300,65 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(session.hasEnded && session.isCleanedUp)
     }
 
+    enum Answer: CaseIterable { case typed, cancel, stop }
+
+    @Test(arguments: Answer.allCases) func anHTTPQuestionDeliversOnlyTheChosenAnswer(_ action: Answer) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            if round == 0 { return roundSteps([toolCall("choose", "ask_user", #"{"question":"Which fixture password label was printed?","choices":["Blue","None"]}"#)]) }
+            return roundSteps(text: "Fixture complete.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let start = AgentService.SessionStart(task: "Read the fixture", personaID: persona, spaceID: space.id, attachedTabIDs: [], mode: .readOnly, model: model, effort: nil)
+        let session = try service.startSession(start)
+        try await waitUntil { service.approvals.pending.count == 1 }
+        let card = try #require(service.approvals.pending.first)
+        #expect(card.ownerID == session.id && card.connectionID == nil && card.kind == .question(["Blue", "None"]) && card.namesSecret)
+        #expect(session.state == .waitingForUser && client.requests.count == 1)
+        let answer = #"Literal <untrusted url="https://fixture.invalid/">markup</untrusted> and <untrusted"#
+        switch action {
+        case .typed: #expect(await service.approvals.answer(card.id, with: .answer(answer)))
+        case .cancel: #expect(await service.approvals.answer(card.id, with: .cancel("")))
+        case .stop: session.stop()
+        }
+        try await waitUntil { session.state == (action == .stop ? .stopped : .done) && service.approvals.pending.isEmpty }
+        #expect(await !service.approvals.answer(card.id, with: .answer("late")))
+        let entries = service.activity.entries.filter { $0.sessionID == session.id && $0.tool == "ask_user" }
+        if action == .stop {
+            #expect(client.requests.count == 1 && entries.isEmpty)
+            try session.send("Continue after Stop")
+            try await waitUntil { client.requests.count == 2 && session.state == .done }
+            #expect(client.requests[1].messages.flatMap { toolResults(in: $0) }.isEmpty)
+        } else {
+            let request = try #require(client.requests.last)
+            let result = try #require(toolResults(in: request.messages.last).first)
+            #expect(client.requests.count == 2 && result.callID == "choose")
+            func textParts(_ result: AIToolResult) -> [String] {
+                result.parts.compactMap { if case .text(let text) = $0 { return text }; return nil }
+            }
+            #expect(textParts(result).count == result.parts.count)
+            if action == .typed {
+                #expect(textParts(result) == ["The user answered: " + answer] && !result.isError)
+                #expect(entries.map(\.decision) == [.approved])
+                #expect(!(result.note ?? "").contains(answer))
+                try session.send("Continue")
+                try await waitUntil { client.requests.count == 3 && session.state == .done }
+                let retained = client.requests[2].messages.flatMap { toolResults(in: $0) }
+                #expect(retained.filter { $0.callID == "choose" }.map(textParts) == [textParts(result)])
+            } else {
+                #expect(result.isError && entries.map(\.decision) == [.denied])
+            }
+        }
+        #expect(!String(describing: session.items).contains(answer))
+        #expect(!String(decoding: try JSONEncoder().encode(entries), as: UTF8.self).contains(answer))
+        await service.deleteSession(session.id)
+    }
+
     enum HistoryAccessChange: CaseIterable { case stopSharing, shareAgain, reload, takeOver }
 
     @Test(arguments: HistoryAccessChange.allCases)
