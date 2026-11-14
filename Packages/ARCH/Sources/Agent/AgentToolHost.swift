@@ -902,8 +902,15 @@ import Foundation
 
     /// A name a page gives, such as its title, a link's scheme, or a download's file name, as an untrusted block of at most `AgentLimits.pageNameCharacters` characters; a longer one is cut and ends with an ellipsis. Pages choose them freely, and WebKit does not cut titles.
     static func pageName(_ name: String, url: URL?) -> String {
-        let cut = name.prefix(AgentLimits.pageNameCharacters)
-        return AgentUntrusted.wrap(cut.endIndex < name.endIndex ? String(cut) + "\u{2026}" : name, url: url)
+        let displayName = reducedName(name, url: url)
+        let cut = displayName.prefix(AgentLimits.pageNameCharacters)
+        return AgentUntrusted.wrap(cut.endIndex < displayName.endIndex ? String(cut) + "\u{2026}" : displayName, url: url)
+    }
+
+    /// Some documents use their own address as the title. Reduce it wherever the browser reports that page name.
+    private static func reducedName(_ name: String, url: URL?) -> String {
+        guard let url, name == url.absoluteString else { return name }
+        return AgentAddress.reduced(url).absoluteString
     }
 
     /// What a call answers in place of a result whose text would pass its limit; a tab's handle stays.
@@ -1146,15 +1153,16 @@ extension AgentToolHost {
                 line += "  (a page agents do not read)"
             } else {
                 let reduced = tab.url.map(AgentAddress.reduced)
-                row["title"] = .string(AgentUntrusted.wrap(tab.title, url: tab.url))
+                let title = AgentUntrusted.wrap(Self.reducedName(tab.title, url: tab.url), url: tab.url)
+                row["title"] = .string(title)
                 if shared {
                     row["host"] = tab.url?.host.map(AgentJSON.string) ?? .null
-                    line += "  \(AgentUntrusted.wrap(tab.title, url: tab.url))  \(tab.url?.host ?? "")"
+                    line += "  \(title)  \(tab.url?.host ?? "")"
                 } else {
                     row["url"] = reduced.map { .string($0.absoluteString) } ?? .null
                     row["loading"] = .bool(tab.isLoading)
                     row["engine"] = .string(tab.engine.rawValue)
-                    line += "  \(AgentUntrusted.wrap(tab.title, url: tab.url))  \(reduced?.absoluteString ?? "")\(tab.isLoading ? "  loading" : "")"
+                    line += "  \(title)  \(reduced?.absoluteString ?? "")\(tab.isLoading ? "  loading" : "")"
                 }
             }
             rows.append(.object(row))

@@ -158,6 +158,7 @@ public struct AgentSessionPanel: View {
         let shared = session.handles.sharedTabIDs
         let visible = service.host.userTabs(in: session.personaID)
         let available = service.shareableTabs(for: session)
+        let labels = AgentTabInfo.attachmentLabels(for: available)
         return VStack(alignment: .leading, spacing: 9) {
             Text("Shared with this session").font(.headline)
             if shared.isEmpty { Text("No shared tabs.").foregroundStyle(.secondary) }
@@ -166,7 +167,8 @@ public struct AgentSessionPanel: View {
                     ForEach(shared, id: \.self) { id in
                         let tab = visible.first { $0.id == id }
                         HStack {
-                            Text(tab.map(tabLabel) ?? "Unavailable tab").lineLimit(1)
+                            if let tab { AgentAttachmentLabel(tab: tab) }
+                            else { Text("Unavailable tab") }
                             Spacer()
                             Button("Stop Sharing") { service.stopSharing(id, with: session) }
                         }
@@ -175,7 +177,7 @@ public struct AgentSessionPanel: View {
             }.frame(maxHeight: shared.isEmpty ? 0 : min(160, CGFloat(shared.count) * 32))
             Menu("Share a Tab…") {
                 ForEach(available) { tab in
-                    Button(tabLabel(tab)) {
+                    Button(labels[tab.id] ?? tab.attachmentLabel) {
                         sharingProblem = service.share(tab, with: session) ? nil : "This tab changed or is no longer available."
                     }
                 }
@@ -186,12 +188,6 @@ public struct AgentSessionPanel: View {
         .controlSize(.small)
         .padding(12)
         .frame(width: 320)
-    }
-
-    private func tabLabel(_ tab: AgentTabInfo) -> String {
-        let host = tab.url?.host ?? ""
-        if tab.title.isEmpty { return host.isEmpty ? "Tab" : host }
-        return host.isEmpty || host == tab.title ? tab.title : "\(tab.title) · \(host)"
     }
 
     /// The tool and model, and the place as "Persona / Space".
