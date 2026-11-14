@@ -8,6 +8,8 @@ from pathlib import Path
 
 ALLOWED_TAGS = {"a", "b", "br", "code", "details", "div", "em", "h1", "i", "img", "kbd", "p", "picture", "pre",
                 "source", "strong", "sub", "summary", "sup", "table", "td", "th", "tr"}
+# Tags that show nothing without attributes, so a bare <source> or <img> in prose is a placeholder.
+ATTRIBUTE_TAGS = {"img", "source"}
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 TAG = re.compile(r"(?<!\\)<(/?)([A-Za-z][\w -]*)[^<>]*>")
 
@@ -22,7 +24,10 @@ def outside_code(line):
 
 
 def is_placeholder(match):
-    return match.group(2).split()[0].lower() not in ALLOWED_TAGS
+    name = match.group(2).split()[0].lower()
+    if name in ATTRIBUTE_TAGS:
+        return re.fullmatch(r"</?\w+\s*/?>", match.group(0)) is not None
+    return name not in ALLOWED_TAGS
 
 
 def problems(line):
