@@ -1,11 +1,13 @@
-// Registers the engines, creates the browser session, which opens the browser windows, and the agents' service, and connects the menu bar to them.
+// Registers the engines, creates the browser session, which opens the browser windows, the agents' service, and the hook registry, and connects the menu bar to them.
 import Agent
+import AI
 import AppKit
 import ARCHEngine
 import ARCHEngineChromium
 import ARCHEngineWebKit
 import Browsing
 import History
+import Hooks
 import Import
 import Plugins
 import Preferences
@@ -16,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
     private var agents: AgentService?
+    /// The hooks of `hooks.json`, which run on the session's browser events in the AI hook center's scheduler.
+    private var hooks: HookRegistry?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
@@ -72,6 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         PreferencesWindowController.agents = agents
         session.agents = agents
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
+        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox; the shell runner comes with VII.31.
+        let settings = AIService.shared.settings
+        let hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
+                                 javaScript: HookScriptRunner(host: session.pluginBrowserHost, allowsAI: { settings.allowsAI(on: $0) }), shell: UnavailableHookScriptRunner())
+        self.hooks = hooks
+        PreferencesWindowController.hooks = hooks
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }

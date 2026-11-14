@@ -79,7 +79,7 @@ Symbols use SF Symbols names, so plugins need no image files. A package may stil
 
 ### Keys the script runtime reads
 
-The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, and `background`, and these contributions:
+The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, `events` (the browser event kinds of `docs/hooks.md`, Browser events, which need a background script), and `background`, and these contributions:
 
 | Key | Fields |
 |---|---|
@@ -89,7 +89,7 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 | `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
 | `pageScripts` | `matches`, `excludes`, `js`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
 
-- Arch refuses every other key until its implementation reads it, such as `siteAccess`, `network`, `events`, a sidebar item's `panel`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has.
+- Arch refuses every other key until its implementation reads it, such as `siteAccess`, `network`, a sidebar item's `panel`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, and `clipboard`. `events` refuses a kind the bus does not have, and the plugin's own `settingChanged` is not built yet.
 - Commands need a background script. Menu items and sidebar items name listed commands. Command and sidebar item identifiers and setting keys are unique.
 - A path names a regular file of the package: names separated by `/`, none empty, `.`, or `..`, and no link leading out of the package. Each file in a page script's `js` becomes a separate page script with the entry's patterns and timing. It must be UTF-8 text that parses as a function body on its own, which both the review and the index check.
 - A refusal throws `PluginError.invalidPackage` with a sentence that names the field, such as `plugin.json: contributes.menus[0].command names “b”, which contributes.commands does not list.`
@@ -134,7 +134,7 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 | Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel will use one of its HTML files in a sandboxed web view. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
 | Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin will be able to add an HTML settings page below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
-| Event | Not shown | `tabOpened`, `tabClosed`, `tabSelected`, `pageLoaded`, `downloadFinished`, `spaceChanged`, `settingChanged` |
+| Event | Not shown | Browser event bus kinds (`docs/hooks.md`, Browser events): `tabOpened`, `tabClosed`, `pageLoaded`, `addressChanged`, `titleChanged`, `tabSelected`, `downloadFinished`, and `spaceSwitched`; and the plugin's own `settingChanged` |
 
 ## Page scripts
 
@@ -154,6 +154,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 |---|---|---|
 | `tabs` | Titles and addresses of the Persona's tabs, in calls and events | Tabs and events carry identifiers, engines, and pinned state only, except for pages the site grant covers |
 | `tabs.manage` | Open, close, select, rename, and move tabs | Calls throw `permissionDenied` |
+| `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
 | `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
@@ -161,6 +162,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
 | `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own routing entry | No AI access |
+| `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
@@ -362,8 +364,9 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 
 ## AI hooks and plugins that AI writes
 
-- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will register with the same center under its own feature.
-- The plugin API has no other AI-specific part. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
+- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will get those events from the browser event bus and run its listeners as steps of the shared hook scheduler that the center owns, at order 200 under its own feature (`docs/hooks.md`, Plugins); it will not register with the center.
+- The plugin API has no other AI-specific part except `agent`, below. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
+- Hooks (`docs/hooks.md`) reuse the script runtime. A JavaScript hook script runs as a `ScriptPlugin` with a package the hook registry creates in memory and a `PluginContext` of its own, outside the plugin manager. Its `arch.agent.run` calls the agent run API through `runAgent(_:)` under the `agent` permission. Plugin events come from the same browser event bus.
 - The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites or page scripts and with its background script as its only file, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
 - A plugin that AI wrote uses the same review sheet, which also shows the requests it came from and every file's full source. Install installs it switched off and Install and Enable switched on, with the origin `generated`, and Settings says that AI wrote it.
 - Ask for Changes in the review has AI write a new version with the same identifier, which replaces the one under review. Changing an installed plugin with AI, with a review of what changed, is not built yet. Removing a plugin that AI wrote works like removing any plugin.
@@ -372,7 +375,7 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 
 ## Swift API
 
-The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine` and on `AI`, through which the composer writes plugins. `Browsing` and `Preferences` depend on it to show contributions. So far `Browsing` hands the manager each tab that a call carries, such as an invocation's; the tab and download members of `PluginContext` will reach the browser through `PluginBrowserHost`, which `Browsing` will implement, so that `Plugins` does not depend on `Browsing`. `Extensions` depends on `ARCHEngine` and `Plugins` and supplies the web extension runtime, which `Browsing` makes for each Persona; it reaches the Persona's engines, tabs, and windows through `WebExtensionHost`, which `Browsing` implements. All types below are public. The listings design the whole API: a member whose comment, or the comment above its group, says `Not built yet` has no code so far, and the Plugins module in `docs/plan.md` Current State describes what is built.
+The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`, on `AI`, through which the composer writes plugins, and on `Events`, whose bus brings plugins their events. `Browsing` and `Preferences` depend on it to show contributions, and `Hooks` to run hook scripts. `Browsing` hands the manager each tab that a call carries, such as an invocation's, and the tab members of `PluginContext` reach the browser through `PluginBrowserHost`, which `Browsing` implements as `SessionPluginBrowserHost`, so that `Plugins` does not depend on `Browsing`; the download members will too. `Extensions` depends on `ARCHEngine` and `Plugins` and supplies the web extension runtime, which `Browsing` makes for each Persona; it reaches the Persona's engines, tabs, and windows through `WebExtensionHost`, which `Browsing` implements. All types below are public. The listings design the whole API: a member whose comment, or the comment above its group, says `Not built yet` has no code so far, and the Plugins module in `docs/plan.md` Current State describes what is built.
 
 ### Identity and manifest
 
@@ -425,15 +428,18 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     /// A web extension's `author`, as text or the email of an author object, lowercased, and its `homepage_url` without scheme, leading `www.`, and trailing `/`, lowercased, by which a package matches an installed plugin as a version of one extension. Nil for other kinds.
     public var author: String?
     public var homepage: String?
-    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far, and the fields of site access modes, network hosts, and events.
+    /// The browser event kinds that reach `Plugin.handle(_:)` and start the plugin's code.
+    public var events: Set<BrowserEventKind>
+    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far, and the fields of site access modes and network hosts.
     public var apiVersion: Int
     public var siteAccess: SiteAccess
     public var network: [String]
-    public var events: Set<PluginEventKind>
 }
 
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
-    case tabs, clipboard, nativeMessaging
+    case tabs
+    case renameTabs = "tabs.rename"
+    case clipboard, nativeMessaging
     // Not built yet.
     case manageTabs = "tabs.manage"
     case history, downloads, notifications, ai
@@ -592,9 +598,9 @@ public protocol Plugin: AnyObject {
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
     /// The panel for a sidebar item whose action is `.panel`. The manager asks each time the item opens it.
     func panel(for sidebarItemID: String) -> NSViewController?
+    /// The manager hands it only the events the manifest lists, never one the plugin's own calls caused, and at most 10 for one subject and 60 in all within a minute, and ignores what it throws; a hook script's run fails with it. A script plugin throws `noListener` when its script set no listener for the kind and `listenerFailed` with what a listener threw.
+    func handle(_ event: PluginEvent) async throws
     // Not built yet.
-    /// Receives only the events the manifest lists.
-    func handle(_ event: PluginEvent) async
     func settingsPage() -> NSViewController?
 }
 
@@ -602,8 +608,8 @@ extension Plugin {
     public func deactivate() async {}
     public func receive(_ message: PluginPageMessage) async throws -> PluginValue? { nil }
     public func panel(for sidebarItemID: String) -> NSViewController? { nil }
+    public func handle(_ event: PluginEvent) async throws {}
     // Not built yet.
-    public func handle(_ event: PluginEvent) async {}
     public func settingsPage() -> NSViewController? { nil }
 }
 
@@ -628,15 +634,21 @@ public protocol PluginContext: AnyObject {
     func setBadge(_ text: String?, onSidebarItem id: String)
     func copyToClipboard(_ text: String) throws
 
-    // Not built yet.
-    // Tabs: `tabs` to read titles and addresses, `tabs.manage` to change tabs.
+    // Tabs: `tabs` to read titles and addresses, `tabs.rename` to name tabs, `tabs.manage` to change tabs.
+    /// The Persona's open tabs in sidebar order, never agent tabs, redacted for the grant; a hook script's context gives only its run's tabs.
     func tabs() throws -> [PluginTab]
+    /// One of those tabs, for `arch.tabs.get`; nil for any other.
+    func tab(_ id: PluginTab.ID) throws -> PluginTab?
+    /// Needs `tabs.rename`. The tab's suggested name for the document it shows when the call arrives (a hook script: its run's document for the tab), under hook decision 13; nil removes it. Returns whether the tab took it, and throws `notGranted` for a tab the caller does not reach.
+    func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
+
+    // Not built yet.
     func selectedTab() throws -> PluginTab?
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
     func closeTab(_ id: PluginTab.ID) throws
     func selectTab(_ id: PluginTab.ID) throws
-    /// nil restores the page's title.
-    func renameTab(_ id: PluginTab.ID, to name: String?) throws
+    /// An agent run (`docs/hooks.md`, Agent run API); needs `agent`. The options and the result are the run's JSON.
+    func runAgent(_ options: PluginValue) async throws -> PluginValue
 
     // Pages: the tab's page must match the grant.
     func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
@@ -679,6 +691,11 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public var engine: EngineKind
     public var isPinned: Bool
     public var isSelected: Bool
+    /// Where the tab lives, as events name it: `open`, `pinned`, `favorite`, or `smallWindow`.
+    public var kind: BrowserTabKind
+    /// The longest name code gives a tab, 60, and the rule that cuts a name to it: the first line, trimmed.
+    public static let maximumNameLength: Int
+    public static func name(from text: String) -> String?
 }
 
 // Not built yet, with the tab, page, and data members of `PluginContext`.
@@ -734,21 +751,13 @@ public struct PluginPageMessage: Sendable {
     public var body: PluginValue
 }
 
-// Not built yet.
-public enum PluginEventKind: String, Hashable, Codable, Sendable, CaseIterable {
-    case tabOpened, tabClosed, tabSelected, pageLoaded, downloadFinished, spaceChanged, settingChanged
-}
-
-// Not built yet.
+/// The kinds a manifest's `events` lists are the bus's `BrowserEventKind`s (`docs/hooks.md`, Browser events).
 public enum PluginEvent: Sendable {
-    case tabOpened(PluginTab)
-    case tabClosed(PluginTab.ID)
-    case tabSelected(PluginTab.ID)
-    /// After the main frame finishes loading.
-    case pageLoaded(PluginTab)
-    case downloadFinished(PluginDownload)
-    case spaceChanged(UUID)
+    /// A bus event in the view the receiver's grant allows (`BrowserEvent.view(_:)`), with the members the sender adds to its JSON, such as a hook script's `hook`.
+    case browser(BrowserEventScriptView, extra: [String: PluginValue] = [:])
+    // Not built yet: the plugin's own setting changes, as the kind `settingChanged`.
     case settingChanged(key: String)
+    public var kind: BrowserEventKind { get }
 }
 
 @MainActor
@@ -785,6 +794,12 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidVersions(String)
     /// The manager's Persona was deleted, so it stages, installs, and stores nothing.
     case closed
+    /// A tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
+    case notGranted(UUID)
+    /// A script plugin's background script set no listener for the event's kind.
+    case noListener
+    /// A listener of the event threw, or its promise rejected, with what it threw as text.
+    case listenerFailed(String)
     // Not built yet: a page outside the plugin's sites, and a host outside its `network`.
     case siteNotGranted(URL)
     case networkHostNotGranted(String)
@@ -945,15 +960,18 @@ public protocol PluginRuntime: AnyObject, Sendable {
     func packageTypes(for engine: EngineKind) -> [UTType]
 }
 
-/// Not built yet: what `Browsing` will provide so that plugins can act on tabs without `Plugins` depending on `Browsing`.
+/// What `Browsing` provides (`SessionPluginBrowserHost`, one for the session) so that plugins and hook scripts act on tabs without `Plugins` depending on `Browsing`.
 @MainActor
 public protocol PluginBrowserHost: AnyObject {
+    /// The Persona's open tabs in sidebar order, before a grant applies; never agent tabs, which belong to agent sessions.
     func tabs(in persona: PersonaID) -> [PluginTab]
+    /// Sets a space's tab's suggested name under the AI hooks' rules: the name's first line, trimmed and cut to 60 characters, applied only while the tab shows `document`, ignoring the fragment, unless the user named the tab or turned the document's suggested name down; nil removes a suggested name and keeps a refusal (`docs/hooks.md`, hook decision 13). Plugins pass nil for the tab's committed address when the call arrives; hook scripts pass the run's document. The change posts its events with `cause`; with `applying` false it changes nothing and says whether the tab would take it.
+    func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
+    // Not built yet.
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID) -> UUID
     func closeTab(_ id: UUID)
     func selectTab(_ id: UUID)
-    func renameTab(_ id: UUID, to name: String?)
     func renameDownload(_ id: String, to filename: String) throws
     func present(_ panel: NSViewController, for item: Attributed<PluginSidebarItem>)
 }
@@ -970,7 +988,8 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var listWriteFailure: String?
 
     /// `directory` is the app's Application Support folder; the Persona's plugins live in `Plugins/<persona id>/` inside it. Reads `plugins.json`, registers the built-in plugins and reads the installed ones' packages, and tells each runtime the installed plugins of its kind, which runs what the enabled ones run without a command, such as a web extension's content scripts. Starts no plugin's instance.
-    public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [])
+    /// `events` is the session's bus, whose events of the Persona reach the enabled plugins whose manifests list their kinds, and `browserHost` reaches the tabs.
+    public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil)
     /// Copies a folder or archive into staging and validates it, refusing a `.crx` file whose signatures do not hold; the engines that run its kind check it, and the installed plugins it could update or join where they have no current answer, and the package names what the review offers. Throws, with the first engine's reason, for a package that every engine refuses.
     public func stage(_ url: URL) async throws -> PluginPackage
     /// Stages a `.crx` file that Arch downloaded with the origin `file` or `webStore`; a store package must carry the store's proof for that identifier and not be a theme (`docs/web-store.md`, Install flow).
@@ -1021,8 +1040,6 @@ public final class PluginManager: ObservableObject {
     /// Starts the plugin if needed and asks it for the item's panel. Nil, with a beep, when it offers none.
     public func panel(for item: Attributed<PluginSidebarItem>) async -> NSViewController?
     public func badge(on item: Attributed<PluginSidebarItem>) -> String?
-    /// Not built yet.
-    public func post(_ event: PluginEvent)
     /// Whether one of the enabled plugin's page scripts runs at `url`, for Reload Matching Tabs.
     public func pageScriptsCover(_ url: URL, of id: PluginID) -> Bool
     /// A message from a page script in `tab`, which the session describes in full; the manager removes what the grant does not cover. Returns the JSON reply, or nil.
@@ -1109,13 +1126,14 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
 | `arch.commands.onRun(id, (invocation) => …)` | `Plugin.run(_:_:)` |
-| `arch.events.on(kind, (event) => …)` | `Plugin.handle(_:)`; `kind` must be in the manifest's `events` |
-| `arch.tabs.list()`, `selected()`, `open(url, options)`, `close(id)`, `select(id)`, `rename(id, name)` | The tab members of `PluginContext` |
+| `arch.events.on(kind, (event) => …)` | `Plugin.handle(_:)`: only the kinds in the manifest's `events` arrive, and several listeners for a kind run one after another |
+| `arch.tabs.list()`, `get(id)`, `selected()`, `open(url, options)`, `close(id)`, `select(id)`, `rename(id, name)` | The tab members of `PluginContext` |
+| `arch.agent.run(options)` | `runAgent(_:)` |
 | `arch.pages.run(tabId, file)`, `post(tabId, message)`, `onMessage((message) => reply)` | `runPageScript(.file(_:), in:)`, `postMessage(_:toTab:)`, `Plugin.receive(_:)` |
 | `arch.storage.get(key)`, `set(key, value)`, `keys()` | `PluginStorage` |
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
@@ -1124,7 +1142,9 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
-- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, and a page message listener `{tab, frameUrl, isMainFrame, body}`; a tab is `{id, spaceId, title, url, engine, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. Absent values are left out. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
+- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, and an event listener the event's script view with its dates in ISO 8601; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
+- An event's listeners run one after another. The delivery function returns what the first that throws or rejects threw, as an error's message after its name unless it is a plain `Error`, or as the thrown value's text, and that no listener was set for the kind, as JSON, which `Plugin.handle(_:)` throws as `PluginError.listenerFailed` and `noListener`. The manager ignores both; a hook script's run fails with them.
+- A plugin never receives an event its own calls caused, such as the title change of its own rename, and receives at most 10 events for one subject and 60 in all within a minute (`docs/hooks.md`, Plugins). Its listeners run outside hook chains, so this cap is what stops two plugins, or a plugin and a hook, that answer each other's renames.
 - `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
 
 Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves with the plugin's reply, and `arch.onMessage((message) => …)` receives `postMessage(_:toTab:)`.
@@ -1182,7 +1202,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; IV.17 then added the store's page hosts, and the password managers' checks with the app (IV.13) follow.
-6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on VII.6's hook center follow.
+6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) follow.
 
 ## Open decisions
 

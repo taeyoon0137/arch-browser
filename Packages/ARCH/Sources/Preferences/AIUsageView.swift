@@ -106,12 +106,15 @@ struct AIActivityPage: View {
                         Text(Self.result(of: entry)).foregroundStyle(Self.isFailure(entry) ? .red : .secondary)
                     }
                     Text(details(of: entry)).font(.caption).foregroundStyle(.secondary)
-                    Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
-                        if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
+                    // A request that records no content, as an agent hook's run at Keep Nothing, has nothing to show.
+                    if !entry.content.isEmpty {
+                        Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
+                            if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
                     }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    if shownContent.contains(entry.id) {
+                    if shownContent.contains(entry.id), !entry.content.isEmpty {
                         ScrollView {
                             Text(entry.content)
                                 .font(.caption.monospaced())

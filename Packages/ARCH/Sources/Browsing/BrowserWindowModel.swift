@@ -338,6 +338,7 @@ public final class BrowserWindowModel: ObservableObject {
         }
         tab.forgetExternalAppDecline()
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.load(URLRequest(url: url))
     }
 
@@ -511,10 +512,8 @@ public final class BrowserWindowModel: ObservableObject {
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
         switch kind {
         case .main:
-            let tab = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false)
-            tab.opener = opener
-            selectTab(tab.id)
-        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID).selectedTab?.opener = opener
+            selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener).id)
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID, opener: opener)
         }
     }
 
@@ -587,6 +586,7 @@ public final class BrowserWindowModel: ObservableObject {
         if let tab = selectedTab {
             tab.forgetExternalAppDecline()
             tab.userDidNavigate()
+            tab.pendingCause = nil
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
             openTab(url: url)
@@ -977,12 +977,13 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Navigation
 
-    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to.
+    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to. The user's navigation drops the cause of one that code started (`Tab.pendingCause`).
     public func goBack() {
         if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
         guard let tab = selectedTab else { return }
         if tab.webContents.canGoBack { tab.userDidNavigate() }
+        tab.pendingCause = nil
         tab.webContents.navigationController.goBack()
     }
     public func goForward() {
@@ -990,6 +991,7 @@ public final class BrowserWindowModel: ObservableObject {
         internalPage = nil
         guard let tab = selectedTab else { return }
         if tab.webContents.canGoForward { tab.userDidNavigate() }
+        tab.pendingCause = nil
         tab.webContents.navigationController.goForward()
     }
     /// The selected tab's earlier pages, most recent first, for the History menu.
@@ -1003,12 +1005,14 @@ public final class BrowserWindowModel: ObservableObject {
         closePreview()
         internalPage = nil
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.go(to: item)
     }
     public func reload() {
         if let preview { return preview.webContents.navigationController.reload() }
         guard internalPage == nil, let tab = selectedTab else { return }
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.reload()
     }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }

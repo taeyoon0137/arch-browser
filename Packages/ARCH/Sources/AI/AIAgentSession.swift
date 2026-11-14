@@ -41,8 +41,10 @@ public struct AIAgentSkills: Sendable, Equatable {
 
 public struct AIAgentSessionRequest: Sendable {
     public var feature: AIFeatureID
-    /// The session's model; nil uses the feature's route, whose later models serve only when the earlier fail before `ready`, the first model output.
+    /// The session's model, a route of that one model under the rules for `route`; nil uses `route`, or the feature's route without one, whose later models serve only when the earlier fail before `ready`, the first model output.
     public var model: AIModelRef?
+    /// The route the session names for itself when `model` is nil: a tier or models of its own, under the rules for `AIRequest.route`. A session makes no Activity entry, so it has no `recordsContent`.
+    public var route: AIRouteChoice?
     /// The static harness, which holds no session facts (agent decision 12).
     public var instructions: String
     public var toolServer: AIAgentToolServer
@@ -53,10 +55,11 @@ public struct AIAgentSessionRequest: Sendable {
     public var effort: String?
     public var skills: AIAgentSkills?
 
-    public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, instructions: String, toolServer: AIAgentToolServer,
+    public init(feature: AIFeatureID = .agent, model: AIModelRef? = nil, route: AIRouteChoice? = nil, instructions: String, toolServer: AIAgentToolServer,
                 id: UUID = UUID(), folder: URL? = nil, effort: String? = nil, skills: AIAgentSkills? = nil) {
         self.feature = feature
         self.model = model
+        self.route = route
         self.instructions = instructions
         self.toolServer = toolServer
         self.id = id
@@ -332,12 +335,18 @@ public final class AIAgentSession {
         turnTask = Task { await run(message) }
     }
 
-    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error.
+    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error. A turn of an automatic feature is one of its automatic requests: it fails with `budgetReached` at the daily limit for automatic requests or the monthly spending limit before any model, and otherwise counts once toward the daily limit, whichever models it tries.
     private func run(_ message: String) async {
         transcript.append((.user, message))
         var outcome: TurnOutcome = .failed(.notConfigured(.noUsableModel))
         var reply = ""
-        while let candidate = candidates.first, !hasEnded {
+        let budget = feature.trigger == .automatic ? service.reachedBudget(for: feature) : nil
+        if let budget {
+            outcome = .failed(.budgetReached(budget))
+        } else if feature.trigger == .automatic {
+            service.usage.countAutomaticRequest(for: feature.id)
+        }
+        while budget == nil, let candidate = candidates.first, !hasEnded {
             (outcome, reply) = await attempt(message, on: candidate)
             guard model == nil, !hasEnded, candidates.count > 1 else { break }
             if case .finished = outcome { break }
@@ -370,8 +379,9 @@ public final class AIAgentSession {
             self.turn = nil
             return (.failed(.rateLimited(candidate.provider.id, until: until)), "")
         }
+        // An automatic feature's turn waits behind the user's requests and gives up after the limiter's wait limit, as its other requests do.
         do {
-            try await limiter.acquire(isUser: true) { _ in }
+            try await limiter.acquire(isUser: feature.trigger == .user) { _ in }
         } catch {
             self.turn = nil
             // Stop and `end` cancel the wait for a slot.
@@ -677,12 +687,10 @@ public final class AIAgentSession {
 // MARK: - Starting sessions
 
 extension AIService {
-    /// Starts a session on the models `agentSessionCandidates(named:for:)` gives (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off or no preset model can serve it.
+    /// Starts a session on the models `agentSessionCandidates(named:route:for:)` gives for the request's model or route (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off, the route's tier is empty, or no preset model can serve it, and `blockedByPolicy(.routeNotAllowed)` when the request names a model or a route for a stored automatic feature.
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
-        // A model the caller names does not bypass the feature's switch in Settings ▸ AI ▸ Features.
-        guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
-        let candidates = try agentSessionCandidates(named: request.model, for: feature)
+        let candidates = try agentSessionCandidates(named: request.model, route: request.route, for: feature)
         do {
             return try AIAgentSession(request: request, feature: feature, candidates: candidates, service: self)
         } catch {
@@ -690,21 +698,25 @@ extension AIService {
         }
     }
 
-    /// The models a session starts on, in order, among the Claude Code and Codex preset models that meet the feature's requirements: the model `ref` names; or else the feature's route, with its fallback to the default route; or else, when the route has none of them, as when it lists only API models, the first preset model, which the composer's menu shows first (`agentSessionModels()`), so that a session starts wherever a model can run one. Throws `noUsableModel` when there is none.
-    func agentSessionCandidates(named ref: AIModelRef?, for feature: AIFeature) throws -> [AIRouteModel] {
+    /// The models a session starts on, in order, among the Claude Code and Codex preset models that meet the feature's requirements: the model `ref` names, as a route of that one model; or else the route `choice` names, a tier or models of its own; or else the feature's route, with its fallback to the default route; or else, for a stored feature the user starts whose route has none of them, as when it lists only API models, the first preset model, which the composer's menu shows first (`agentSessionModels()`), so that a session starts wherever a model can run one. A named model or route follows the rules for `AIRequest.route`, and an automatic or per-request feature never falls back to the first preset model. Throws `notConfigured` when the feature is off, the route's tier is empty, or there is no usable model, and `blockedByPolicy(.routeNotAllowed)` when a model or a route is named for a stored automatic feature.
+    func agentSessionCandidates(named ref: AIModelRef?, route choice: AIRouteChoice? = nil, for feature: AIFeature) throws -> [AIRouteModel] {
         func runsSessions(_ candidate: AIRouteModel) -> Bool {
             guard case .commandLine(let tool) = candidate.provider.kind, tool.agent != nil else { return false }
             return feature.requirements.isSubset(of: candidate.provider.capabilities(of: candidate.model))
         }
-        let presets = settings.providers.flatMap { provider in
-            provider.models.map { AIRouteModel(ref: AIModelRef(provider: provider.id, model: $0.name), provider: provider, model: $0) }
-        }.filter(runsSessions)
         let candidates: [AIRouteModel]
-        if let ref {
-            candidates = presets.first { $0.ref == ref }.map { [$0] } ?? []
-        } else {
+        if let choice = ref.map({ AIRouteChoice.models([$0]) }) ?? choice {
+            // A model or route the caller names does not bypass the feature's switch in Settings ▸ AI ▸ Features.
+            candidates = try settings.routeModels(for: feature, route: choice).filter(runsSessions)
+        } else if feature.routing == .stored, feature.trigger == .user {
+            guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
+            let presets = settings.providers.flatMap { provider in
+                provider.models.map { AIRouteModel(ref: AIModelRef(provider: provider.id, model: $0.name), provider: provider, model: $0) }
+            }.filter(runsSessions)
             let route = ((try? settings.routeModels(for: feature)) ?? []).filter(runsSessions)
             candidates = route.isEmpty ? Array(presets.prefix(1)) : route
+        } else {
+            candidates = try settings.routeModels(for: feature).filter(runsSessions)
         }
         guard !candidates.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
         return candidates

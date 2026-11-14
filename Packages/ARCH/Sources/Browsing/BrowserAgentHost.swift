@@ -96,7 +96,7 @@ import Foundation
     public func closeAgentTab(_ tabID: UUID) {
         guard let tab = agentTab(tabID) else { return }
         closingTabID = tabID
-        session.closeTab(tab, reason: .user)
+        session.closeAgentTab(tab, reason: .user)
         closingTabID = nil
     }
 
