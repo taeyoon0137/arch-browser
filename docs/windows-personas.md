@@ -529,6 +529,8 @@ public protocol Engine: AnyObject {
 
 A signed fixture exercised the normal browser session across three processes with the same temporary profile and one pinned local page. Chromium loaded the page on the first launch. With Chromium omitted from the engine registry on the second launch, WebKit rendered the page and the saved snapshot still named Chromium. On the third launch Chromium returned and rendered the same tab. The UUID and preferred engine stayed the same, and each renderer returned the fixture’s title and text. The fixture used unseen windows and kept the foreground app in place. This check simulates an unavailable engine by omitting its registration.
 
+Two running copies using the same Application Support directory can overwrite each other’s session. In an isolated two-process check, both read the same initial snapshot. The newer process added a tab and saved. The older one then added a different tab and saved, replacing the first addition. Each rename was atomic. Quit one copy before opening a different build with the same profile. The outside-agent socket refused a second live listener. Profile-wide ownership across app versions remains open.
+
 ```swift
 struct SessionSnapshot: Codable {
     /// Each step that adds fields takes the next free number when it lands, as folders (III.3) do. The doc comment lists what each version adds.
