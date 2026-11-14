@@ -25,6 +25,8 @@ enum DatabaseCopy {
     }
 
     /// Copies the database at `source` to `copy` with the journal or write-ahead log beside it, since the owning browser may hold the database open and locked with its last committed changes still in those files. The files are copied one after another, so a write in between could pair the database with a log of another moment: while any of the files changed during a copy, they are copied again. Returns false when they still changed after `copyAttempts` copies. `copyFile` copies one file.
+    ///
+    /// Throws the copy's error for a log that stays as it was but does not copy, as when macOS lets Arch read only the database the user chose: the copy would lack the changes the log holds.
     static func copyDatabase(at source: URL, to copy: URL, copyFile: (URL, URL) throws -> Void = FileManager.default.copyItem(at:to:)) throws -> Bool {
         let logs = ["-journal", "-wal"].map { (source: URL(fileURLWithPath: source.path + $0).resolvingSymlinksInPath(), copy: URL(fileURLWithPath: copy.path + $0)) }
         let sources = [source] + logs.map(\.source)
@@ -32,11 +34,18 @@ enum DatabaseCopy {
             let states = sources.map(fileState)
             for file in [copy] + logs.map(\.copy) { try? FileManager.default.removeItem(at: file) }
             try copyFile(source, copy)
-            // A log can disappear while it is copied, as when a transaction ends; the states then differ.
+            var logError: (any Error)?
             for log in logs where FileManager.default.fileExists(atPath: log.source.path) {
-                try? copyFile(log.source, log.copy)
+                do {
+                    try copyFile(log.source, log.copy)
+                } catch {
+                    logError = error
+                }
             }
-            if sources.map(fileState) == states { return true }
+            // A log can disappear or change while it is copied, as when a transaction ends; the states then differ, and the files are copied again.
+            guard sources.map(fileState) == states else { continue }
+            if let logError { throw logError }
+            return true
         }
         return false
     }
