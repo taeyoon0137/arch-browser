@@ -779,7 +779,8 @@ import Foundation
     }
 
     /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again. A conversation a model held has no Retry, since a new runner would not carry it.
-    public func retry(_ session: AgentSession) async {
+    public func retry(_ session: AgentSession, errorID: UUID? = nil) async {
+        guard let currentError = session.transcript.retryableErrorID, errorID == nil || errorID == currentError else { return }
         guard !session.hasEnded, !restartingSessions.contains(session.id) else { return }
         guard case .failed = session.state else { return session.retryLastMessage() }
         guard session.model == nil, let old = session.runner else { return }

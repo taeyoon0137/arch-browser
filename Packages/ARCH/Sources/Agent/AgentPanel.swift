@@ -191,7 +191,8 @@ public struct AgentSessionPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(session.items) { item in
-                        AgentTranscriptRow(item: item, actions: actions, settings: settings, retry: retry)
+                        AgentTranscriptRow(item: item, actions: actions, settings: settings,
+                                           retry: item.id == session.transcript.retryableErrorID && !session.hasEnded ? { retry(item.id) } : nil)
                             .id(item.id)
                     }
                     if session.isTakenOver {
@@ -206,8 +207,8 @@ public struct AgentSessionPanel: View {
         }
     }
 
-    private func retry() {
-        Task { await service.retry(session) }
+    private func retry(_ errorID: UUID) {
+        Task { await service.retry(session, errorID: errorID) }
     }
 
     private var queued: some View {
@@ -285,7 +286,7 @@ private struct AgentTranscriptRow: View {
     let item: AgentTranscriptItem
     let actions: AgentPanelActions
     let settings: AISettingsStore
-    let retry: () -> Void
+    let retry: (() -> Void)?
 
     var body: some View {
         switch item.kind {
@@ -349,7 +350,8 @@ private struct AgentTranscriptRow: View {
 
     @ViewBuilder private func button(for action: AgentErrorAction) -> some View {
         switch action {
-        case .retry: Button("Retry", action: retry)
+        case .retry:
+            if let retry { Button("Retry", action: retry) }
         case .signIn(let provider): Button("Sign In") { actions.signIn(provider) }
         case .openAISettings: Button("Open AI Settings", action: actions.openAISettings)
         }

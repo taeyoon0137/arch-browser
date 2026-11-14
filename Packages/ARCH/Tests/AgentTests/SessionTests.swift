@@ -520,7 +520,7 @@ import Testing
         defer { harness.cleanUp() }
         let service = try await harness.makeOpenService()
         let (session, runner) = try start(service, harness)
-        runner.fail(.authentication(AIProviderID(rawValue: "claude")))
+        runner.fail(.invalidRequest("The runner could not start."))
         try await waitUntil { if case .failed = session.state { return true } else { return false } }
         runner.endDelay = .milliseconds(100)
         let first = Task { await service.retry(session) }
@@ -536,7 +536,7 @@ import Testing
         defer { harness.cleanUp() }
         let service = try await harness.makeOpenService()
         let (session, runner) = try start(service, harness)
-        runner.fail(.authentication(AIProviderID(rawValue: "claude")))
+        runner.fail(.invalidRequest("The runner could not start."))
         try await waitUntil { if case .failed = session.state { return true } else { return false } }
         runner.endDelay = .milliseconds(100)
         let retry = Task { await service.retry(session) }
@@ -545,6 +545,32 @@ import Testing
         await retry.value
         #expect(harness.runners.count == 1)
         #expect(service.sessions.isEmpty == deleting)
+    }
+
+    @Test func aPastRetryCannotResendALaterCompletedMessage() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
+        runner.emit(.turnFailed(.invalidRequest("The first message failed.")))
+        try await waitUntil { session.state == .done }
+        let firstError = try #require(session.transcript.retryableErrorID)
+        try session.send("A different question")
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { session.state == .done }
+        #expect(session.transcript.retryableErrorID == nil)
+        await service.retry(session, errorID: firstError)
+        #expect(runner.sent.count == 2)
+        try session.send("A third question")
+        runner.emit(.turnFailed(.invalidRequest("This question failed.")))
+        try await waitUntil { session.state == .done }
+        let latestError = try #require(session.transcript.retryableErrorID)
+        await service.retry(session, errorID: firstError)
+        #expect(runner.sent.count == 3)
+        await service.retry(session, errorID: latestError)
+        #expect(runner.sent.count == 4 && runner.sent.last == "A third question")
+        #expect(session.transcript.retryableErrorID == nil)
     }
 
     @Test func aSessionFailedAfterAModelHeldItOffersNoRetry() async throws {

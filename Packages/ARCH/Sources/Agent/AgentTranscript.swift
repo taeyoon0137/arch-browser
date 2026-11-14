@@ -46,6 +46,7 @@ public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
 
 struct AgentTranscript: Equatable {
     private(set) var items: [AgentTranscriptItem] = []
+    private(set) var retryableErrorID: UUID?
     /// The current turn's usage and whether its reply or thinking is still growing.
     private var turnUsage: AIUsage?
     private var growing: Growing?
@@ -56,12 +57,17 @@ struct AgentTranscript: Equatable {
 
     mutating func append(_ kind: AgentTranscriptItem.Kind) {
         growing = nil
-        items.append(AgentTranscriptItem(kind))
+        let item = AgentTranscriptItem(kind)
+        items.append(item)
+        if case .error(_, let action) = kind {
+            retryableErrorID = action == .retry ? item.id : nil
+        }
     }
 
-    mutating func userMessage(_ text: String) {
+    mutating func beginTurn(_ text: String, isRetry: Bool) {
+        retryableErrorID = nil
         turnUsage = nil
-        append(.user(text))
+        if !isRetry { append(.user(text)) }
     }
 
     /// Streamed text joins the reply it continues.
