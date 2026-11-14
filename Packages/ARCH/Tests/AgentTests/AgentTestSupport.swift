@@ -220,7 +220,7 @@ import Testing
 }
 
 /// A runner on a CLI that records what the session sends and emits the events a test gives it.
-@MainActor final class FakeRunner: AgentSessionRunning {
+@MainActor final class FakeRunner: AgentCommandLineRunning {
     let request: AIAgentSessionRequest
     let events: AsyncThrowingStream<AIAgentEvent, any Error>
     private let continuation: AsyncThrowingStream<AIAgentEvent, any Error>.Continuation
@@ -418,6 +418,8 @@ final class Shared<Value>: @unchecked Sendable {
     /// The runners the service started, in order, and the requests it started them with.
     private(set) var runners: [FakeRunner] = []
     private(set) var requests: [AIAgentSessionRequest] = []
+    var sessionRoute: (AIModelRef?) throws -> AIAgentSessionRoute = { _ in .commandLine }
+    var apiClient: any AIClient = ScriptedClient { _ in [] }
     var agentModels = [AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), AIModelRef(provider: AIProviderID(rawValue: "codex"), model: "gpt-6")]
     /// How long the services' calls wait for the user before they answer `approvalPending`, when not the default.
     var answerWait: TimeInterval?
@@ -467,10 +469,12 @@ final class Shared<Value>: @unchecked Sendable {
                 self.requests.append(request)
                 return runner
             },
+            sessionRoute: { [unowned self] in try self.sessionRoute($0) },
+            apiClient: apiClient,
             mcpExecutable: URL(fileURLWithPath: "/Applications/Arch.app/Contents/Helpers/arch-mcp"),
             sessionFolder: { sessionsFolder.appendingPathComponent($0.uuidString, isDirectory: true) },
             agentModels: { [unowned self] in self.agentModels },
-            toolName: { $0.rawValue == "codex" ? "Codex" : "Claude Code" })
+            subscriptionToolName: { ["codex": "Codex", "claude": "Claude Code"][$0.rawValue] })
         if let answerWait { dependencies.answerWait = answerWait }
         let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: dependencies)
         services.append(service)

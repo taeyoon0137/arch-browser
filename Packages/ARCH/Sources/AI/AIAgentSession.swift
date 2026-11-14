@@ -676,13 +676,27 @@ public final class AIAgentSession {
 
 // MARK: - Starting sessions
 
+/// Agent sessions use the CLI runner or the provider-neutral tool loop for HTTP models.
+public enum AIAgentSessionRoute: Equatable, Sendable {
+    case commandLine
+    case http(pinnedModel: AIModelRef?)
+}
+
 extension AIService {
-    /// Starts a session on the models `agentSessionCandidates(named:for:)` gives (API-key sessions run through `AIClient.run`). The first message starts the tool; models after the first serve only when the earlier fail before `ready`. Throws `notConfigured` when the feature is unknown or off or no preset model can serve it.
+    /// The runner to use for an in-app session. An HTTP route chooses its first serving model before pinning the conversation.
+    public func agentSessionRoute(for chosen: AIModelRef?) throws -> AIAgentSessionRoute {
+        guard let feature = features.first(where: { $0.id == .agent }) else { throw AIError.notConfigured(.unknownFeature) }
+        let first = try agentSessionCandidates(named: chosen, for: feature)[0]
+        guard case .http = first.provider.kind else { return .commandLine }
+        // With no configured route, the composer still offers the first usable model. Name it explicitly or AIClient would find no route.
+        let hasRoute = (try? settings.routeModels(for: feature))?.first?.ref == first.ref
+        return .http(pinnedModel: chosen ?? (hasRoute ? nil : first.ref))
+    }
+
+    /// Starts a CLI runner. A task authorized to use the user's subscription falls back only to another CLI preset.
     public func startAgentSession(_ request: AIAgentSessionRequest) throws -> AIAgentSession {
         guard let feature = features.first(where: { $0.id == request.feature }) else { throw AIError.notConfigured(.unknownFeature) }
-        // A model the caller names does not bypass the feature's switch in Settings ▸ AI ▸ Features.
-        guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
-        let candidates = try agentSessionCandidates(named: request.model, for: feature)
+        let candidates = try agentSessionCandidates(named: request.model, for: feature, commandLineOnly: true)
         do {
             return try AIAgentSession(request: request, feature: feature, candidates: candidates, service: self)
         } catch {
@@ -690,36 +704,39 @@ extension AIService {
         }
     }
 
-    /// The models a session starts on, in order, among the Claude Code and Codex preset models that meet the feature's requirements: the model `ref` names; or else the feature's route, with its fallback to the default route; or else, when the route has none of them, as when it lists only API models, the first preset model, which the composer's menu shows first (`agentSessionModels()`), so that a session starts wherever a model can run one. Throws `noUsableModel` when there is none.
-    func agentSessionCandidates(named ref: AIModelRef?, for feature: AIFeature) throws -> [AIRouteModel] {
-        func runsSessions(_ candidate: AIRouteModel) -> Bool {
-            guard case .commandLine(let tool) = candidate.provider.kind, tool.agent != nil else { return false }
-            return feature.requirements.isSubset(of: candidate.provider.capabilities(of: candidate.model))
+    /// Enabled models in the feature's route order, or one model for an explicit choice. Without a route, prefer the user's CLI subscription.
+    func agentSessionCandidates(named ref: AIModelRef?, for feature: AIFeature, commandLineOnly: Bool = false) throws -> [AIRouteModel] {
+        guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
+        let all = availableAgentModels(for: feature).filter { candidate in
+            !commandLineOnly || candidate.provider.commandLineAgent != nil
         }
-        let presets = settings.providers.flatMap { provider in
-            provider.models.map { AIRouteModel(ref: AIModelRef(provider: provider.id, model: $0.name), provider: provider, model: $0) }
-        }.filter(runsSessions)
-        let candidates: [AIRouteModel]
         if let ref {
-            candidates = presets.first { $0.ref == ref }.map { [$0] } ?? []
-        } else {
-            let route = ((try? settings.routeModels(for: feature)) ?? []).filter(runsSessions)
-            candidates = route.isEmpty ? Array(presets.prefix(1)) : route
+            guard let selected = all.first(where: { $0.ref == ref }) else { throw AIError.notConfigured(.noUsableModel) }
+            return [selected]
         }
-        guard !candidates.isEmpty else { throw AIError.notConfigured(.noUsableModel) }
-        return candidates
+        let refs = Set(all.map(\.ref))
+        let route = ((try? settings.routeModels(for: feature)) ?? []).filter { refs.contains($0.ref) }
+        if !route.isEmpty { return route }
+        guard let first = all.first(where: { $0.provider.commandLineAgent != nil }) ?? all.first else { throw AIError.notConfigured(.noUsableModel) }
+        return [first]
     }
 
-    /// The models that can run an agent session on the user's CLI, for the composer's menu: the `agent` route's usable models first, then every other model of a Claude Code or Codex preset; none while Agent Tasks is off.
-    public func agentSessionModels() -> [AIModelRef] {
-        // With Agent Tasks off, no model can run a session.
-        guard settings.route(for: .agent).isEnabled else { return [] }
-        let all = settings.providers.flatMap { provider -> [AIModelRef] in
-            guard case .commandLine(let tool) = provider.kind, tool.agent != nil else { return [] }
-            return provider.models.map { AIModelRef(provider: provider.id, model: $0.name) }
+    private func availableAgentModels(for feature: AIFeature) -> [AIRouteModel] {
+        settings.providers.flatMap { provider in
+            provider.models.compactMap { model -> AIRouteModel? in
+                let capabilities = provider.capabilities(of: model)
+                guard capabilities.contains(.agent), feature.requirements.isSubset(of: capabilities) else { return nil }
+                return AIRouteModel(ref: AIModelRef(provider: provider.id, model: model.name), provider: provider, model: model)
+            }
         }
-        let route = features.first { $0.id == .agent }.flatMap { try? settings.routeModels(for: $0) }?.map(\.ref).filter(all.contains) ?? []
-        return route + all.filter { !route.contains($0) }
+    }
+
+    /// Usable models for the composer, with the session's default choices first.
+    public func agentSessionModels() -> [AIModelRef] {
+        guard let feature = features.first(where: { $0.id == .agent }),
+              let candidates = try? agentSessionCandidates(named: nil, for: feature) else { return [] }
+        let first = candidates.map(\.ref)
+        return first + availableAgentModels(for: feature).map(\.ref).filter { !first.contains($0) }
     }
 
     /// The effort levels the model takes, for the composer's menu: Claude Code's `--effort` levels, or the levels Codex's bundled catalog lists for the model. Empty when there are none, as for Codex's default model or a model the catalog does not list.

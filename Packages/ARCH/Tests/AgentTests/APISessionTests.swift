@@ -237,6 +237,50 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
 
 @MainActor
 @Suite struct APISessionTurnTests {
+    @Test(arguments: [false, true]) func browserStartsAnAPISessionUsingItsRealToolGate(choosesModel: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            round == 0 ? roundSteps([toolCall("call1", "read_text", #"{"tab":"t1"}"#)]) : roundSteps(text: "Article read.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { selection in .http(pinnedModel: selection) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let address = try #require(URL(string: "https://example.org/fixture?private=1"))
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Article", url: address, isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        harness.host.pages[address] = (title: tab.title, text: "Fixture body")
+        let start = AgentService.SessionStart(task: "Read this tab", personaID: persona, spaceID: space.id, attachedTabIDs: [tab.id], mode: .readOnly,
+                                              model: choosesModel ? model : nil, effort: nil)
+        let session = try service.startSession(start)
+        session.takeOver()
+        try await waitUntil { session.model != nil }
+        #expect(client.requests.count == 1)
+        #expect(session.callsThisSession == 0)
+        session.handBack()
+        try await waitUntil { session.state == .done }
+        let requests = client.requests
+        try #require(requests.count == 2)
+        #expect(requests.first?.pinnedModel == (choosesModel ? model : nil))
+        #expect(requests.last?.pinnedModel == model)
+        #expect(!requests[0].messages.description.contains("Fixture body"))
+        #expect(toolResults(in: requests[1].messages.last).flatMap(\.parts).contains { part in
+            guard case .page(let page) = part else { return false }
+            return page.text == "Fixture body" && page.url.absoluteString == "https://example.org/fixture"
+        })
+        #expect(session.callsThisSession == 1)
+        #expect(session.items.contains { if case .step(let step) = $0.kind { return step.tool == "read_text" }; return false })
+        #expect(service.activity.entries.contains { $0.sessionID == session.id && $0.tool == "read_text" && $0.outcome == "ok" })
+        #expect(session.ticket == nil && !service.sessionsNeedChannel && harness.requests.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: harness.location.path))
+        #expect(!FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent("sessions").path))
+        await service.deleteSession(session.id)
+        #expect(session.hasEnded && session.isCleanedUp)
+    }
+
     @Test func aMessageRunsItsCallsThroughTheSessionsToolsOnThePinnedModel() async throws {
         let client = ScriptedClient { number in
             switch number {

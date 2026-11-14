@@ -1,29 +1,34 @@
-// An in-app agent session (docs/agents.md, In the browser; Sessions on the user's CLI): one conversation bound to a space and its Persona, on the user's Claude Code or Codex through `AIAgentSession`, with Arch's tools as its only tools. It keeps the transcript, the messages the user queued during a turn, the mode, the site scope, the tab handles, and its ticket, and it holds the tool host's calls until the model's first output and while the user has taken the session over. `AgentService` starts it, binds its `arch-mcp` connections, and runs its calls; the panel shows it.
+// An in-app agent session (docs/agents.md, In the browser; Sessions on the user's CLI): one conversation bound to a space and its Persona, through `AIAgentSession` on the user’s CLI or `AgentAPISession` on a connected HTTP model, with Arch's tools as its only tools. It keeps the transcript, the messages the user queued during a turn, the mode, the site scope, the tab handles, and its ticket, and it holds the tool host's calls until the model's first output and while the user has taken the session over. `AgentService` starts it, binds its `arch-mcp` connections, and runs its calls; the panel shows it.
 import AgentControl
 import AI
 import Darwin
 import Foundation
 
-/// The runner on the user's CLI that a session drives: `AIAgentSession`, or a fake in tests.
+/// The conversation, its streamed events, and its lifetime are common to every in-app session.
 @MainActor public protocol AgentSessionRunning: AnyObject {
     var events: AsyncThrowingStream<AIAgentEvent, any Error> { get }
-    /// The running CLI process, an ancestor of the session's `arch-mcp`.
-    var processID: pid_t? { get }
-    /// Called right after each CLI process starts, so that Arch reads its start time for the ticket check.
-    var processDidStart: ((pid_t) -> Void)? { get set }
-    /// Throws the refusal `send(_:)` would throw for this message, without sending it.
     func checkMessage(_ message: String) throws
     func send(_ message: String) throws
     func stop()
     func end(keepingThread: Bool) async
+}
+
+/// Only a command-line runner binds an MCP ticket and manages child processes.
+@MainActor protocol AgentCommandLineRunning: AgentSessionRunning {
+    var processID: pid_t? { get }
+    var processDidStart: ((pid_t) -> Void)? { get set }
     func toolCallDidStart()
     func toolCallDidEnd()
     func toolListDidChange(_ tools: [String])
-    /// Ends the running process group at once, as at quit, leaving the folder and Codex's thread to `end(keepingThread:)`.
     func endProcesses()
 }
 
-extension AIAgentSession: AgentSessionRunning {}
+extension AIAgentSession: AgentCommandLineRunning {}
+
+extension AgentAPISession: AgentSessionRunning {
+    public func checkMessage(_ message: String) throws {}
+    public func end(keepingThread: Bool) async { end() }
+}
 
 @MainActor public final class AgentSession: ObservableObject, Identifiable {
     public enum Origin: Equatable, Sendable {
@@ -86,7 +91,7 @@ extension AIAgentSession: AgentSessionRunning {}
     /// The scope's sites, for the panel's header and `session_info`.
     @Published public private(set) var siteScope: [String] = []
 
-    let ticket = AgentSessionTicket.make()
+    var ticket: AgentSessionTicket?
     var scope: AgentSiteScope {
         didSet { siteScope = scope.sites }
     }
@@ -162,11 +167,13 @@ extension AIAgentSession: AgentSessionRunning {}
 
     // MARK: Runner
 
+    var commandLineRunner: (any AgentCommandLineRunning)? { runner as? any AgentCommandLineRunning }
+
     /// Starts driving `runner`, whose events the session reads until it ends. `processRecord` reads each CLI process's start time right after it starts.
     func attach(_ runner: any AgentSessionRunning, processRecord: @escaping (pid_t) -> AgentProcessRecord?) {
         self.runner = runner
         // Calls wait again from each CLI process's start until its start check passed and it gave its first output (`ready` or `processReady`), as after a Retry or a Stop's new process.
-        runner.processDidStart = { [weak self] processID in
+        commandLineRunner?.processDidStart = { [weak self] processID in
             self?.spawnedProcess = processRecord(processID)
             self?.ready.close()
         }
@@ -186,7 +193,7 @@ extension AIAgentSession: AgentSessionRunning {}
 
     /// The CLI process that a ticket's peer must descend from: the one running now, as it was when it started.
     var liveProcess: AgentProcessRecord? {
-        guard let spawnedProcess, runner?.processID == spawnedProcess.processID else { return nil }
+        guard let spawnedProcess, commandLineRunner?.processID == spawnedProcess.processID else { return nil }
         return spawnedProcess
     }
 
@@ -399,7 +406,7 @@ extension AIAgentSession: AgentSessionRunning {}
 
     /// At quit, after the time to end the session ran out: the CLI's process group ends at once.
     func endProcessesAtQuit() {
-        runner?.endProcesses()
+        commandLineRunner?.endProcesses()
     }
 
     /// Gives the session a new runner after one that failed, as Retry does when no model started it; the first message goes again with the preamble.
