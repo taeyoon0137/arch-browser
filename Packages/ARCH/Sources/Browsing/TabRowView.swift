@@ -190,25 +190,49 @@ struct BlurFade: ViewModifier {
     }
 }
 
-/// Tracks whether Command alone is held while the app is active. Shortcut numbers appear after a brief hold, so quick ⌘-shortcuts do not flash them, and disappear on release.
-final class CommandKeyState: ObservableObject {
-    static let shared = CommandKeyState()
+/// Tracks whether Command alone is held while the app is active. Shortcut numbers appear after a brief hold, so quick ⌘-shortcuts do not flash them, and disappear on release. Once a key or a click uses the held Command, as ⌘L or a ⌘-click does, the numbers stay hidden until Command is released; ⌘1 to ⌘9 keep shown numbers, which are there for them.
+public final class CommandKeyState: ObservableObject {
+    public static let shared = CommandKeyState()
     @Published private(set) var showsShortcuts = false
     private var pendingShow: DispatchWorkItem?
+    /// A key or a click used Command since it went down.
+    private var isUsed = false
 
     private init() {
         NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.setDown(Self.isCommandAlone(event.modifierFlags))
+            self?.update(event.modifierFlags)
+            return event
+        }
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.commandMayBeUsed(by: event)
             return event
         }
         // The app receives no key events while inactive, so it cannot detect a release in another app.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.setDown(false)
+            self?.update([])
         }
         // Monitors receive no modifier changes while a menu tracks. Read the keys again when it closes.
         NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.setDown(Self.isCommandAlone(NSEvent.modifierFlags))
+            self?.update(NSEvent.modifierFlags)
         }
+    }
+
+    private func update(_ flags: NSEvent.ModifierFlags) {
+        if !flags.contains(.command) { isUsed = false }
+        // Releasing Shift after ⇧⌘T leaves Command alone, but it was used.
+        setDown(Self.isCommandAlone(flags) && !isUsed)
+    }
+
+    private func commandMayBeUsed(by event: NSEvent) {
+        guard event.modifierFlags.contains(.command) else { return }
+        if showsShortcuts, event.type == .keyDown, let key = event.charactersIgnoringModifiers, "123456789".contains(key), key.count == 1 { return }
+        noteCommandUse()
+    }
+
+    /// Hides the numbers until Command is released. The app shell calls it for a ⌘-shortcut that its own monitor takes before this one may see it, such as Undo Close's ⌘Z.
+    public func noteCommandUse() {
+        isUsed = true
+        setDown(false)
     }
 
     /// Caps Lock and the like do not count.

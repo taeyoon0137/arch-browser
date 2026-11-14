@@ -566,6 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let pressed = KeyShortcut(event: event)
             if pressed != nil, pressed == self.undoItem.flatMap(KeyShortcut.init(menuItem:)) {
                 self.reopenClosedTab()
+                CommandKeyState.shared.noteCommandUse()
                 return nil
             }
             // Closing and reopening tabs keep the count. Any other key, whether typing or a shortcut such as ⌘V, makes the shortcut undo where the user works.
