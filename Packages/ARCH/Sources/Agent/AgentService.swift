@@ -693,12 +693,33 @@ import Foundation
         return session.researchChoices(host: host, allowsAI: dependencies.allowsAI)
     }
 
+    func manualOutlineLinks(for session: AgentSession) -> [AgentResearchPage] {
+        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
+        return session.outlineLinks(host: host, allowsAI: dependencies.allowsAI)
+    }
+
+    func openManualResearchPage(_ choice: AgentResearchPage, in session: AgentSession) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard case .outline(let id, _, let address, _, let link) = choice.source else { return openResearchPage(choice, in: session) }
+        guard manualOutlineLinks(for: session).contains(choice), let tab = host.tabs(withIDs: [id]).first,
+              let target = AgentRefTarget(link.ref, fingerprint: link.fingerprint) else { return false }
+        let epoch = session.callEpoch, takeover = session.takeoverGeneration
+        // A document can change a link's href without changing its ref, label or fingerprint.
+        let check = await toolHost().pageScript(.snapshot(full: false, ref: target, shared: true), in: tab, as: AgentSnapshotReply.self)
+        guard case .value(let reply) = check, reply.stale != true, URL(string: reply.url) == address,
+              reply.nodes.first.flatMap(AgentOutlineLink.init) == link, !Task.isCancelled,
+              session.callEpoch == epoch, session.takeoverGeneration == takeover, manualOutlineLinks(for: session).contains(choice) else { return false }
+        return openReviewedResearchTab(choice, in: session) != nil
+    }
+
     @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
-        openReviewedResearchTab(choice, in: session) != nil
+        guard !choice.isOutlineLink else { return false }
+        return openReviewedResearchTab(choice, in: session) != nil
     }
 
     private func openReviewedResearchTab(_ choice: AgentResearchPage, in session: AgentSession) -> AgentTabInfo? {
-        guard researchChoices(for: session).contains(choice), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return nil }
+        let choices = choice.isOutlineLink ? manualOutlineLinks(for: session) : researchChoices(for: session)
+        guard choices.contains(choice), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return nil }
         let owner = AgentTabOwner(id: session.id, spaceID: session.spaceID, folderName: session.title)
         let epoch = session.callEpoch
         let takeover = session.takeoverGeneration
@@ -706,6 +727,7 @@ import Foundation
         guard let tab = host.openResearchTab(at: choice.url, for: owner, mayLoad: { [weak self, weak session] url in
             guard mayStart, let self, let session, self.canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == takeover, session.callEpoch == epoch,
                   choice.matches(url), session.permits(choice, host: self.host, allowsAI: self.dependencies.allowsAI) else { return false }
+            if choice.isOutlineLink, !self.manualOutlineLinks(for: session).contains(choice) { return false }
             mayStart = false
             return true
         }) else { return nil }

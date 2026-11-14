@@ -116,7 +116,7 @@ extension AgentToolHost {
     }
 
     func snapshot(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, access: OutlineAccess, store: AgentSnapshotStore, pages: Int,
-                  mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
+                  recordsSharedLinks: Bool = false, mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
         guard !Task.isCancelled else { return Self.ended }
         guard mayRead(tab) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)) }
         if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
@@ -142,7 +142,8 @@ extension AgentToolHost {
         if let refusal = stillReadable(tab, handle: handle, reportedURL: reply.url, mayRead: mayRead) { return refusal }
         if reply.stale == true { return Self.stale(handle) }
         guard let url = URL(string: reply.url) else { return Self.error("unreadable", "\(handle) has no document Arch can read.") }
-        let lines = outline(reply.nodes, full: full, access: access, pageURL: url)
+        let rows = outline(reply.nodes, full: full, access: access, pageURL: url)
+        let lines = rows.map(\.text)
         // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
         let prior = store.current(tab, pages: pages)
         var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, ownerID: tab.agentOwnerID, document: pages, refs: [:], lines: [])
@@ -155,7 +156,6 @@ extension AgentToolHost {
         let number = (store.counts[tab.id] ?? 0) + 1
         store.counts[tab.id] = number
         if target == nil { record.lines = lines }
-        store.records[tab.id] = record
 
         var shown = lines
         var note: String?
@@ -179,6 +179,25 @@ extension AgentToolHost {
             characters += line.count + 1
             bytes += line.utf8.count + 1
         }
+        if recordsSharedLinks {
+            let displayed = Set(kept.map { $0.hasPrefix("+ ") ? String($0.dropFirst(2)) : $0 })
+            // Diffs may omit previously shown unchanged links. Only original refs with the same full address count.
+            let known = Set(record.displayedLinks)
+            let links = rows.compactMap { row -> AgentOutlineLink? in
+                guard let link = AgentOutlineLink(row.node), displayed.contains(row.text) || known.contains(link) else { return nil }
+                return link
+            }
+            if target == nil {
+                record.displayedLinks = links
+            } else {
+                let replaced = Set(rows.compactMap { $0.node.ref })
+                let byRef = Dictionary(links.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
+                let previousRefs = Set(record.displayedLinks.map(\.ref))
+                record.displayedLinks = record.displayedLinks.compactMap { replaced.contains($0.ref) ? byRef[$0.ref] : $0 }
+                record.displayedLinks += links.filter { !previousRefs.contains($0.ref) }
+            }
+        }
+        store.records[tab.id] = record
         let header = "page \u{201C}\(Self.quoted(reply.title))\u{201D} \(Self.shortAddress(url))"
         let block = AgentUntrusted.wrap(([header] + kept).joined(separator: "\n"), url: url)
         var text = ["\(handle) \u{00B7} \(tab.engine.rawValue) \u{00B7} snapshot \(number)\(full ? " \u{00B7} full" : "")\(target.map { " \u{00B7} \($0.ref)" } ?? "")\(access.description)", block]
@@ -196,16 +215,16 @@ extension AgentToolHost {
     }
 
     /// The outline's lines from the script's nodes, with the policy's annotations. Interactive mode leaves out landmarks that hold nothing; a subtree starts at depth 0.
-    func outline(_ nodes: [AgentOutlineNode], full: Bool, access: OutlineAccess, pageURL: URL) -> [String] {
+    private func outline(_ nodes: [AgentOutlineNode], full: Bool, access: OutlineAccess, pageURL: URL) -> [(text: String, node: AgentOutlineNode)] {
         let base = nodes.first?.depth ?? 0
-        var lines: [String] = []
+        var lines: [(text: String, node: AgentOutlineNode)] = []
         for (index, node) in nodes.enumerated() {
             let isContainer = node.ref == nil && node.role != "text" && node.role != "heading" && node.role != "img" && node.role != "frame"
             if isContainer, !full {
                 let next = nodes.dropFirst(index + 1).first
                 if next == nil || next!.depth <= node.depth { continue }
             }
-            lines.append(String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, access: access, pageURL: pageURL))
+            lines.append((String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, access: access, pageURL: pageURL), node))
         }
         return lines
     }

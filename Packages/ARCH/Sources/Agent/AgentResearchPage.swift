@@ -6,15 +6,28 @@ struct AgentResearchPage: Hashable {
     enum Source: Hashable {
         case message(UUID)
         case attachment(tab: UUID, document: UUID, handle: String)
+        case outline(tab: UUID, document: UUID, address: URL, handle: String, link: AgentOutlineLink)
 
         var attachmentID: UUID? {
-            if case .attachment(let tab, _, _) = self { return tab }
-            return nil
+            switch self {
+            case .message: return nil
+            case .attachment(let id, _, _), .outline(let id, _, _, _, _): return id
+            }
         }
     }
 
     let url: URL
     let source: Source
+
+    var isOutlineLink: Bool {
+        if case .outline = source { return true }
+        return false
+    }
+
+    var outlineLabel: String? {
+        guard case .outline(_, _, _, let handle, let link) = source else { return nil }
+        return link.name.isEmpty ? "\(handle) [\(link.ref)]" : "\(handle) [\(link.ref)] · \(link.name)"
+    }
 
     func matches(_ address: URL) -> Bool {
         guard let reviewed = AgentSeenAddress(url) else { return false }
@@ -35,8 +48,21 @@ extension AgentSession {
         }
         var seen = Set<AgentSeenAddress>()
         return pages.filter { page in
-            guard let address = AgentSeenAddress(page.url), permitsAddress(page.url, host: host, allowsAI: allowsAI) else { return false }
+            guard let address = AgentSeenAddress(page.url), permitsAddress(page.url, host: host, allowsAI: allowsAI), scope.written(page.url) == .opens else { return false }
             return seen.insert(address).inserted
+        }
+    }
+
+    func outlineLinks(host: any AgentBrowserHost, allowsAI: (URL) -> Bool) -> [AgentResearchPage] {
+        let tabs = host.userTabs(in: personaID)
+        return handles.sharedTabIDs.flatMap { id -> [AgentResearchPage] in
+            guard let tab = tabs.first(where: { $0.id == id }), tab.canAttachToSession(allowsAI: allowsAI),
+                  let record = snapshots.current(tab, pages: 0) else { return [] }
+            let handle = handles.tabs.handle(for: id)
+            return record.displayedLinks.compactMap { link in
+                guard permitsAddress(link.url, host: host, allowsAI: allowsAI) else { return nil }
+                return AgentResearchPage(url: link.url, source: .outline(tab: id, document: tab.documentID, address: record.url, handle: handle, link: link))
+            }
         }
     }
 
@@ -44,10 +70,15 @@ extension AgentSession {
         guard permitsAddress(page.url, host: host, allowsAI: allowsAI) else { return false }
         switch page.source {
         case .message(let id):
-            guard let item = items.first(where: { $0.id == id }), case .user(let text) = item.kind else { return false }
+            guard scope.written(page.url) == .opens, let item = items.first(where: { $0.id == id }), case .user(let text) = item.kind else { return false }
             return AgentSiteScope.addresses(in: text).contains(where: page.matches)
+        case .outline(let id, let document, let address, let handle, let link):
+            guard link.url == page.url, handles.sharedTabIDs.contains(id), handles.tabs.id(for: handle) == id else { return false }
+            return host.userTabs(in: personaID).contains { tab in
+                tab.id == id && tab.documentID == document && tab.url == address && tab.canAttachToSession(allowsAI: allowsAI)
+            }
         case .attachment(let id, let document, let handle):
-            guard handles.sharedTabIDs.contains(id), handles.tabs.id(for: handle) == id else { return false }
+            guard scope.written(page.url) == .opens, handles.sharedTabIDs.contains(id), handles.tabs.id(for: handle) == id else { return false }
             return host.userTabs(in: personaID).contains { tab in
                 tab.id == id && tab.documentID == document && tab.url == page.url && tab.canAttachToSession(allowsAI: allowsAI)
             }
@@ -60,7 +91,7 @@ extension AgentSession {
               !AISitePattern.localNetwork.matches(url), !address.host.hasSuffix("."), address.host.contains("."),
               let suffix = address.host.split(separator: ".").last, suffix.allSatisfy({ $0.isASCII && $0.isLetter }),
               !["internal", "lan", "home", "localdomain", "arpa"].contains(suffix),
-              scope.contains(url), scope.written(url) == .opens else { return false }
+              scope.contains(url) else { return false }
         return AgentPolicy.mayOpen(url, allowsAI: allowsAI) == .allowed
     }
 

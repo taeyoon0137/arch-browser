@@ -372,6 +372,77 @@ import UserNotifications
         #expect(!service.openResearchPage(only, in: session))
     }
 
+    @Test func aManualOutlineChoiceRechecksTheLiveLinkAndKeepsItsAddressOutOfModelRequests() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService(), host = harness.host
+        let page = try await FixturePage("form")
+        _ = try await page.evaluate("""
+            document.body.innerHTML = '<a href="/article?entry=first#top">Read more</a> <a href="/article?entry=second#top">Read more</a> <a href="https://elsewhere.example/out">Outside</a>';
+            """)
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Source", url: page.url, isLoading: false, engine: .webKit)
+        host.tabs = [source]
+        host.userTabIDs = [source.id]
+        host.webContents[source.id] = page.contents
+        let (session, runner) = try start(service, harness, attaching: [source.id])
+        let client = try await connectQuestionClient(session, runner, harness)
+        func snapshot(_ arguments: [String: AgentJSON] = [:]) async -> AgentToolResult {
+            var arguments = arguments
+            arguments["tab"] = .string(session.handles.tabs.handle(for: source.id))
+            return await service.toolHost().run(AgentToolCall(name: "snapshot", arguments: arguments), in: session, searchesHistory: false)
+        }
+        #expect(service.manualOutlineLinks(for: session).isEmpty)
+        let partial = await snapshot(["max_chars": 1])
+        #expect(partial.status == .ok && service.manualOutlineLinks(for: session).isEmpty)
+        let outline = await snapshot()
+        #expect(outline.status == .ok && !outline.text.contains("entry=first") && !outline.text.contains("entry=second"))
+        let choices = service.manualOutlineLinks(for: session)
+        try #require(choices.count == 2)
+        let picked = choices[1]
+        #expect(choices.map(\.url.query) == ["entry=first", "entry=second"])
+        #expect(choices.map(\.outlineLabel) == ["t1 [e1] · Read more", "t1 [e2] · Read more"])
+        #expect(service.researchChoices(for: session).allSatisfy { $0.url != picked.url })
+        let proposed = try await client.callTool("open_tab", ["url": .string(picked.url.absoluteString)])
+        #expect(proposed.status == .refused && service.approvals.pending.isEmpty)
+        #expect(!service.openResearchPage(picked, in: session) && host.openedOwners.isEmpty)
+        #expect(session.scope.written(picked.url) != .opens)
+        _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '/article?entry=changed#top'")
+        #expect(await !service.openManualResearchPage(picked, in: session))
+        #expect(host.openedOwners.isEmpty)
+        _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '/article?entry=second#top'")
+        #expect(await service.openManualResearchPage(picked, in: session))
+        let copy = try #require(host.agentTabs(of: session.id).first)
+        let mayLoad = try #require(host.researchLoads[copy.id])
+        #expect(!mayLoad(choices[0].url) && mayLoad(picked.url) && !mayLoad(picked.url))
+        #expect(session.scope.written(picked.url) != .opens)
+        service.stopSharing(source.id, with: session)
+        #expect(host.agentTabs(of: session.id).isEmpty && service.manualOutlineLinks(for: session).isEmpty)
+        #expect(service.share(source, with: session))
+        _ = await snapshot()
+        #expect(await !service.openManualResearchPage(picked, in: session))
+        let fresh = try #require(service.manualOutlineLinks(for: session).first)
+        host.onPageScript = { harness.excludedHosts.value.insert("fixture.example") }
+        #expect(await !service.openManualResearchPage(fresh, in: session))
+        harness.excludedHosts.value.remove("fixture.example")
+        host.onPageScript = {
+            session.takeOver()
+            session.handBack()
+        }
+        #expect(await !service.openManualResearchPage(fresh, in: session))
+        host.onPageScript = nil
+        _ = await snapshot()
+        let beforeStop = try #require(service.manualOutlineLinks(for: session).first)
+        host.onPageScript = { session.stop() }
+        #expect(await !service.openManualResearchPage(beforeStop, in: session))
+        host.onPageScript = nil
+        _ = await snapshot()
+        let beforeReload = try #require(service.manualOutlineLinks(for: session).first)
+        host.onPageScript = { host.tabs[0].documentID = UUID() }
+        #expect(await !service.openManualResearchPage(beforeReload, in: session))
+        #expect(host.agentTabs(of: session.id).isEmpty)
+    }
+
     // MARK: Tickets
 
     @Test func cancellingOneGatedCallReleasesOnlyItsWaitAndCannotRunItAfterHandBack() async throws {
