@@ -1,19 +1,34 @@
-// The user's login shell and the PATH it sets up. GUI apps get a short PATH, while command-line tools usually live in folders that a shell profile adds, such as a package manager's. The built-in terminal runs the same login shell, so a tool installed there is found here.
+// The user's login shell and the variables it sets up. GUI apps get a short PATH, while command-line tools usually live in folders that a shell profile adds, such as a package manager's. The built-in terminal runs the same login shell, so a tool installed there is found here, and `gh` finds the sign-in that `gh auth login` wrote there.
 import Darwin
 import Foundation
 
-actor LoginShell {
-    static let shared = LoginShell(executable: userShell)
+public actor LoginShell {
+    /// What the login shell sets. Only `PATH` reaches every command-line tool; the GitHub CLI also gets the two configuration folders (`docs/bookmarks.md`, GitHub).
+    public struct Variables: Equatable, Sendable {
+        public var path: String
+        /// `GH_CONFIG_DIR`, when the shell sets it to an absolute path.
+        public var gitHubConfigDirectory: String?
+        /// `XDG_CONFIG_HOME`, when the shell sets it to an absolute path.
+        public var configHome: String?
+
+        public init(path: String, gitHubConfigDirectory: String? = nil, configHome: String? = nil) {
+            self.path = path
+            self.gitHubConfigDirectory = gitHubConfigDirectory
+            self.configHome = configHome
+        }
+    }
+
+    public static let shared = LoginShell(executable: userShell)
 
     /// `$SHELL`, else the account's shell, else zsh.
-    static var userShell: URL {
+    public static var userShell: URL {
         if let shell = ProcessInfo.processInfo.environment["SHELL"], !shell.isEmpty { return URL(fileURLWithPath: shell) }
         if let entry = getpwuid(getuid()), let shell = entry.pointee.pw_shell { return URL(fileURLWithPath: String(cString: shell)) }
         return URL(fileURLWithPath: "/bin/zsh")
     }
 
     /// The minimal environment command-line tools run in: HOME, USER, LOGNAME, SHELL, PATH, LANG, TMPDIR, and TERM=dumb. PATH is this app's own until the login shell's replaces it.
-    static var baseEnvironment: [String: String] {
+    public static var baseEnvironment: [String: String] {
         let inherited = ProcessInfo.processInfo.environment
         return [
             "HOME": NSHomeDirectory(),
@@ -29,27 +44,50 @@ actor LoginShell {
 
     static let marker = "__ARCH_LOGIN_SHELL_PATH__"
 
-    let executable: URL
-    private var lookup: Task<String?, Never>?
+    public let executable: URL
+    private var lookup: Task<Variables?, Never>?
 
-    init(executable: URL) {
+    public init(executable: URL) {
         self.executable = executable
     }
 
-    /// The login shell's PATH, read once per launch. Callers during a read share it; a read that fails is tried again by the next call.
-    func path() async -> String? {
-        let task = lookup ?? Task { [executable] in await Self.readPath(shell: executable) }
+    /// The login shell's variables, read once per launch and again after `reload()`. Callers during a read share it; a read that fails is tried again by the next call.
+    public func variables() async -> Variables? {
+        let task = lookup ?? Task { [executable] in await Self.readVariables(shell: executable) }
         lookup = task
-        let path = await task.value
-        if path == nil, lookup == task { lookup = nil }
-        return path
+        let variables = await task.value
+        if variables == nil, lookup == task { lookup = nil }
+        return variables
     }
 
-    /// Runs `shell -l -i -c` with a command that prints a marker followed by `$PATH`, and takes the line after the marker, since a profile may print text of its own first. Reading stops as soon as that line is complete, because a process the profile starts in the background can keep the output open; the shell and that process then end. Gives up after 10 seconds.
-    static func readPath(shell: URL) async -> String? {
+    /// Forgets the variables read, so the next call reads the login shell again, as after the user changed a profile in the built-in terminal (Check Again).
+    public func reload() {
+        lookup = nil
+    }
+
+    /// The login shell's PATH.
+    public func path() async -> String? {
+        await variables()?.path
+    }
+
+    /// The absolute path of a tool: `name` itself when it is a path, with `~` expanded, or else the first match in this shell's PATH, or in this app's when the shell cannot tell. nil when no executable file is there.
+    public func locateExecutable(named name: String) async -> URL? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        if name.contains("/") {
+            let url = URL(fileURLWithPath: (name as NSString).expandingTildeInPath)
+            return AICommandLineConfiguration.isExecutable(at: url) ? url : nil
+        }
+        let searchPath = await path() ?? Self.baseEnvironment["PATH"] ?? ""
+        return AICommandLineConfiguration.locate(name, searchPath: searchPath)
+    }
+
+    /// Runs `shell -l -i -c` with a command that prints a marker followed by `$PATH`, `GH_CONFIG_DIR`, and `XDG_CONFIG_HOME`, one to a line, and takes the lines after the marker, since a profile may print text of its own first. `printenv` prints the two folders, or `echo` an empty line, so a profile that makes unset variables an error (`set -u`, `setopt nounset`) still prints all four lines. Reading stops as soon as those lines are complete, because a process the profile starts in the background can keep the output open; the shell and that process then end. Gives up after 10 seconds.
+    static func readVariables(shell: URL) async -> Variables? {
         let process: CommandLineProcess
         do {
-            process = try CommandLineProcess(executable: shell, arguments: ["-l", "-i", "-c", "printf '%s\\n%s\\n' \(marker) \"$PATH\""],
+            let command = "printf '%s\\n%s\\n' \(marker) \"$PATH\"; printenv GH_CONFIG_DIR || echo; printenv XDG_CONFIG_HOME || echo"
+            process = try CommandLineProcess(executable: shell, arguments: ["-l", "-i", "-c", command],
                                              environment: baseEnvironment, directory: URL(fileURLWithPath: NSHomeDirectory()), input: Data())
         } catch {
             return nil
@@ -65,31 +103,29 @@ actor LoginShell {
         var output = Data()
         for await chunk in process.output {
             output.append(chunk)
-            if let path = path(inOutput: String(decoding: output, as: UTF8.self)) { return path }
+            if let variables = variables(inOutput: String(decoding: output, as: UTF8.self)) { return variables }
         }
         return nil
     }
 
-    /// The line after the last line that ends with the marker, once a newline has ended it.
-    static func path(inOutput output: String) -> String? {
+    /// The three lines after the last line that ends with the marker, once a newline has ended the third. nil without a PATH. A configuration folder that is empty or not an absolute path counts as unset.
+    static func variables(inOutput output: String) -> Variables? {
         let lines = output.components(separatedBy: "\n")
-        guard let index = lines.lastIndex(where: { $0.hasSuffix(marker) }), index + 2 < lines.count else { return nil }
+        guard let index = lines.lastIndex(where: { $0.hasSuffix(marker) }), index + 4 < lines.count else { return nil }
         let path = lines[index + 1].trimmingCharacters(in: .whitespaces)
-        return path.isEmpty ? nil : path
+        guard !path.isEmpty else { return nil }
+        func folder(_ line: String) -> String? {
+            let value = line.trimmingCharacters(in: .whitespaces)
+            return value.hasPrefix("/") ? value : nil
+        }
+        return Variables(path: path, gitHubConfigDirectory: folder(lines[index + 2]), configHome: folder(lines[index + 3]))
     }
 }
 
 extension AICommandLineConfiguration {
-    /// The absolute path of a tool: `name` itself when it is a path, with `~` expanded, or else the first match in the login shell's PATH. nil when no executable file is there.
+    /// The absolute path of a tool, found through the user's login shell (`LoginShell.locateExecutable(named:)`).
     public static func locateExecutable(named name: String) async -> URL? {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return nil }
-        if name.contains("/") {
-            let url = URL(fileURLWithPath: (name as NSString).expandingTildeInPath)
-            return isExecutable(at: url) ? url : nil
-        }
-        let searchPath = await LoginShell.shared.path() ?? LoginShell.baseEnvironment["PATH"] ?? ""
-        return locate(name, searchPath: searchPath)
+        await LoginShell.shared.locateExecutable(named: name)
     }
 
     /// Whether `url` is a file, or a link to one, that this user may run.

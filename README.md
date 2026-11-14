@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`AI`, `Browsing`, `Extensions`, `History`, `Import`, `LiveFolders`, `Plugins`, `Preferences`, and `Terminal`), and the `Arch` app shell. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -96,6 +96,7 @@ git config core.hooksPath .githooks
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 - [`docs/web-store.md`](./docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
 - [`docs/password-managers.md`](./docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
+- [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks and live folders design (saved pages, unloading, nested folders with their dragging, the Bookmarks menu, the `LiveFolders` module, and live folders in the sidebar with the New Live Folder sheet built): saved pages, unloading, nested folders, the Bookmarks menu, and folders filled from feeds and GitHub.
 
 <a id="scripts"></a>
 
@@ -124,8 +125,8 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCH/Sources/               # Feature modules: AI, Browsing, Extensions, History, Import, LiveFolders, Plugins, Preferences, Terminal
+│   ├── ARCH/Tests/                 # Tests: AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, LiveFoldersTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target and CEF helper executable
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers

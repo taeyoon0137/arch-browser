@@ -1,4 +1,4 @@
-// The space pages below the favorites: one page per space, each with the space's header and menu, then its pinned tabs, its open tabs, their folders, and the new tab row. A tab row's drag starts and ends here (`SidebarDragState.swift`).
+// The space pages below the favorites: one page per space, each with the space's header and menu, then its pinned tabs, its open tabs, their nested folders, and the new tab row. A tab or folder row's drag starts and ends here (`SidebarDragState.swift`).
 import AppKit
 import SwiftUI
 
@@ -29,7 +29,7 @@ struct SpacePagesView: View {
     }
 }
 
-/// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row. Each of the two lists starts with its folders, each followed by its tabs unless collapsed.
+/// Shows a space's pinned tabs first, followed by the remaining tabs and the new tab row. Each of the two lists starts with its folders, each followed, unless collapsed, by its own folders and then its tabs, indented by level (`FolderTree.rows(in:pinned:showingInCollapsedFolders:)`).
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -46,8 +46,10 @@ struct SpaceTabsView: View {
     private static let scrollSpace = "SpaceTabsScroll"
     /// Identifies this list as the owner of a drag it started, since each space and the floating card has its own list.
     @State private var dragOwner = UUID()
+    /// The height of the rows a folder dragged from this list hides, measured as the drag starts.
+    @State private var hiddenRowsHeight: CGFloat = 0
 
-    /// How far a folder's tabs sit in from its row.
+    /// How far a folder's folders and tabs sit in from its row.
     private static let folderIndent: CGFloat = 12
     /// The keys in `rowFrames` of the rows that end the pinned and open lists: the divider and the new tab row.
     private static let pinnedListEndID = UUID()
@@ -55,15 +57,13 @@ struct SpaceTabsView: View {
 
     /// Pinned and open tabs share one list, so a tab keeps its row and drag when moving between them or into and out of a folder.
     private enum Item: Identifiable {
-        case folder(TabFolder)
-        case tab(Tab, isInFolder: Bool)
+        case row(FolderTree.Row)
         case divider
         case newTab
 
         var id: String {
             switch self {
-            case .folder(let folder): return folder.id.uuidString
-            case .tab(let tab, _): return tab.id.uuidString
+            case .row(let row): return row.id.uuidString
             case .divider: return "divider"
             case .newTab: return "new-tab"
             }
@@ -71,17 +71,15 @@ struct SpaceTabsView: View {
     }
 
     private var items: [Item] {
-        let pinned = listItems(pinned: true)
-        return pinned + (pinned.isEmpty ? [] : [.divider]) + listItems(pinned: false) + [.newTab]
+        let tree = session.folderTree
+        let pinned = listItems(pinned: true, in: tree)
+        return pinned + (pinned.isEmpty ? [] : [.divider]) + listItems(pinned: false, in: tree) + [.newTab]
     }
 
-    /// The pinned or open list: each folder followed by its tabs, then the tabs outside folders. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row.
-    private func listItems(pinned: Bool) -> [Item] {
-        let folders = session.folders(in: space.id, pinned: pinned).flatMap { folder in
-            let shown = session.tabs(in: folder).filter { !folder.isCollapsed || $0.id == windowModel.selectedTabID || ($0.id == sidebarDrag.tabID && !sidebarDrag.isSettling) }
-            return [Item.folder(folder)] + shown.map { Item.tab($0, isInFolder: true) }
-        }
-        return folders + session.tabsOutsideFolders(in: space.id, pinned: pinned).map { Item.tab($0, isInFolder: false) }
+    /// The pinned or open list's rows. A collapsed folder still shows its selected tab, and its dragged tab until release, so that the drag keeps its row. A dragged folder shows its row alone until release.
+    private func listItems(pinned: Bool, in tree: FolderTree) -> [Item] {
+        let isDragging = !sidebarDrag.isSettling
+        return tree.rows(in: space.id, pinned: pinned, hidingContentsOf: isDragging ? sidebarDrag.folderID : nil) { $0.id == windowModel.selectedTabID || ($0.id == sidebarDrag.tabID && isDragging) }.map(Item.row)
     }
 
     var body: some View {
@@ -94,12 +92,12 @@ struct SpaceTabsView: View {
                 ForEach(items) { item in
                     Group {
                         switch item {
-                        case .folder(let folder):
-                            TabFolderRowView(session: session, folder: folder)
-                                .background(frameReader(for: folder.id))
-                        case .tab(let tab, let isInFolder):
+                        case .row(.folder(let folder, let depth)):
+                            row(for: folder)
+                                .padding(.leading, CGFloat(depth) * Self.folderIndent)
+                        case .row(.tab(let tab, let depth)):
                             row(for: tab)
-                                .padding(.leading, isInFolder ? Self.folderIndent : 0)
+                                .padding(.leading, CGFloat(depth) * Self.folderIndent)
                         case .divider:
                             Divider().padding(.vertical, 4).padding(.horizontal, 10)
                                 .background(frameReader(for: Self.pinnedListEndID))
@@ -113,6 +111,8 @@ struct SpaceTabsView: View {
             }
             // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
             .animation(.easeInOut(duration: 0.2), value: Set(items.map(\.id)))
+            // While a dragged folder hides its rows, the list keeps their height below its end, so that a list scrolled to its end does not scroll back and move other rows under the pointer.
+            .padding(.bottom, sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0)
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
             .background(GeometryReader { proxy in
@@ -121,7 +121,7 @@ struct SpaceTabsView: View {
                     .onAppear { contentFrame = frame }
                     .onChange(of: frame) { contentFrame = $1 }
             })
-            .environment(\.isDraggingTab, sidebarDrag.tabID != nil)
+            .environment(\.isDraggingTab, sidebarDrag.item?.isRow == true)
             .onPreferenceChange(TabRowFramesKey.self) { rowFrames = $0 }
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
             .onChange(of: isDragGestureActive) { _, isActive in
@@ -150,20 +150,26 @@ struct SpaceTabsView: View {
 
     /// A dragged tab leaves an empty, dimmed slot in the list.
     private func row(for tab: Tab) -> some View {
-        let isDragged = sidebarDrag.tabID == tab.id
-        return TabRowView(session: session, tab: tab)
-            .opacity(isDragged ? 0 : 1)
-            .background {
-                if isDragged {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(sidebarDrag.isLifted ? 0.06 : 0))
-                }
-            }
+        TabRowView(session: session, tab: tab)
+            .modifier(DraggedSlot(isDragged: sidebarDrag.tabID == tab.id, isLifted: sidebarDrag.isLifted))
             .background(frameReader(for: tab.id))
             // Dragging in the name field selects text instead.
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged { dragChanged(tab, $0) }
                 .onEnded { _ in dragEnded() }, including: windowModel.renamingTabID == tab.id ? .subviews : .all)
+    }
+
+    /// A dragged folder leaves an empty, dimmed slot in the list, and the rows inside it hide until release.
+    private func row(for folder: TabFolder) -> some View {
+        TabFolderRowView(session: session, folder: folder)
+            .modifier(DraggedSlot(isDragged: sidebarDrag.folderID == folder.id, isLifted: sidebarDrag.isLifted))
+            .background(frameReader(for: folder.id))
+            // Dragging in the name field selects text instead.
+            .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
+                .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
+                .onChanged { dragChanged(folder.id, $0) }
+                .onEnded { _ in dragEnded() }, including: windowModel.renamingFolderID == folder.id ? .subviews : .all)
     }
 
     /// Reports a tab's or folder's row frame in the window.
@@ -173,25 +179,43 @@ struct SpaceTabsView: View {
         }
     }
 
-    /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
-    private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
-        guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.tabID == tab.id && sidebarDrag.owner == dragOwner), let frame = rowFrames[tab.id] else { return }
+    /// Starts the drag of a row, lifting it at its frame, or continues the drag of it that this list started, and moves the lifted row to the pointer. False while another drag or a release is under way.
+    private func continueDrag(of item: SidebarDragItem, _ value: DragGesture.Value) -> Bool {
+        guard !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] else { return false }
         if sidebarDrag.item == nil {
-            sidebarDrag.begin(.tab(tab.id), frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
+            if case .folder(let id) = item { hiddenRowsHeight = contentsHeight(ofFolder: id, below: frame) }
+            sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
         sidebarDrag.move(to: value.location)
+        return true
+    }
+
+    /// The height of the rows that follow a folder's row, from its bottom to the bottom of the last of them: the folder's rows, which its drag hides.
+    private func contentsHeight(ofFolder id: UUID, below folderFrame: CGRect) -> CGFloat {
+        let tree = session.folderTree
+        guard let folder = tree.folder(id) else { return 0 }
+        let rows = tree.rows(in: space.id, pinned: folder.isPinned) { $0.id == windowModel.selectedTabID }
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return 0 }
+        let bottom = rows[(index + 1)...].prefix { $0.depth > rows[index].depth }.compactMap { rowFrames[$0.id]?.maxY }.max()
+        return max(0, (bottom ?? folderFrame.maxY) - folderFrame.maxY)
+    }
+
+    /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
+    private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
+        guard continueDrag(of: .tab(tab.id), value) else { return }
         let isOverList = listFrame.contains(value.location)
-        // Another space's symbol, or another folder's row, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
+        let tree = session.folderTree
+        // Another space's symbol, or another folder's row at any level, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
         setDropTarget(\.targetSpaceID, to: sidebarDrag.space(at: value.location).flatMap { $0 == tab.spaceID || !session.canMoveTab(tab.id, toSpace: $0) ? nil : $0 })
-        setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { $0.id != tab.folderID && rowFrames[$0.id]?.contains(value.location) == true }?.id : nil)
+        setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { rowFrames[$0.id]?.contains(value.location) == true }.flatMap { tree.canMoveTab(tab, into: $0.id) ? $0.id : nil } : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
-        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead.
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4).
         guard isOverList else { return }
-        let tabs = session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)
-        if let target = tabs.first(where: { $0.id != tab.id && !session.isInCollapsedFolder($0) && rowFrames[$0.id]?.contains(value.location) == true }) {
+        let tabs = tree.tabs(in: space.id, pinned: true) + tree.tabs(in: space.id, pinned: false)
+        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(value.location) == true }) {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
         } else if let pinned = listEnd(at: value.location), session.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id != tab.id {
             // The divider or the new tab row puts the tab last in the list it ends, outside folders, so that it can leave a folder in a list with no other tab outside folders.
@@ -202,6 +226,30 @@ struct SpaceTabsView: View {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
+    /// The lifted folder row follows the pointer anywhere in the window. `FolderTree.dropTarget(for:at:)` decides each place in the list: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. Another space's symbol of its Persona lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
+    private func dragChanged(_ folderID: UUID, _ value: DragGesture.Value) {
+        guard continueDrag(of: .folder(folderID), value) else { return }
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.space(at: value.location).flatMap { session.canMoveFolder(folderID, toSpace: $0) ? $0 : nil })
+        let tree = session.folderTree
+        let target = listFrame.contains(value.location) ? dropPosition(at: value.location, in: tree).flatMap { tree.dropTarget(for: folderID, at: $0) } : nil
+        if case .into(let parentID)? = target {
+            setDropTarget(\.targetFolderID, to: parentID)
+        } else {
+            setDropTarget(\.targetFolderID, to: nil)
+        }
+        guard let target, case .between = target else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { session.moveFolder(folderID, to: target) }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    /// Where a dragged folder's pointer is among the rows: the upper third of a folder's row is above the folder, the rest of it on the folder.
+    private func dropPosition(at point: CGPoint, in tree: FolderTree) -> FolderTree.DropPosition? {
+        if let pinned = listEnd(at: point) { return .listEnd(spaceID: space.id, pinned: pinned) }
+        guard let row = rowFrames.first(where: { $0.value.contains(point) }) else { return nil }
+        guard tree.folder(row.key) != nil else { return .onTab(row.key) }
+        return point.y < row.value.minY + row.value.height / 3 ? .aboveFolder(row.key) : .onFolder(row.key)
+    }
+
     /// The list whose closing row is under the pointer: `true` for the divider after the pinned list, `false` for the new tab row after the open list.
     private func listEnd(at point: CGPoint) -> Bool? {
         if rowFrames[Self.pinnedListEndID]?.contains(point) == true { return true }
@@ -209,32 +257,52 @@ struct SpaceTabsView: View {
         return nil
     }
 
-    /// Lights up a drop target newly under the dragged tab, with a light haptic, or turns off the one it left.
+    /// Lights up a drop target newly under the dragged row, with a light haptic, or turns off the one it left.
     private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<SidebarDragState, Target?>, to target: Target?) {
         guard sidebarDrag[keyPath: keyPath] != target else { return }
         withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag[keyPath: keyPath] = target }
         if target != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     }
 
-    /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the tab reappears in the list.
+    /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the row reappears in the list, unless a drop target under it takes it.
     private func dragEnded() {
-        guard sidebarDrag.owner == dragOwner, let id = sidebarDrag.tabID, let slot = rowFrames[id] else { return sidebarDrag.end(ownedBy: dragOwner) }
-        // Over another space's symbol, the tab goes after that space's own tabs and the lifted row shrinks into the symbol.
+        guard sidebarDrag.owner == dragOwner, let item = sidebarDrag.item, let slot = rowFrames[item.id] else { return sidebarDrag.end(ownedBy: dragOwner) }
+        // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol.
         if let spaceID = sidebarDrag.targetSpaceID {
-            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toSpace: spaceID) }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if case .folder(let id) = item { session.moveFolder(id, toSpace: spaceID) } else { session.moveTab(item.id, toSpace: spaceID) }
+            }
             return sidebarDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
         }
-        // Over a folder's row, the tab goes after the folder's own tabs and the lifted row shrinks into the folder's row.
+        // Over a folder's row, the tab goes after the folder's own tabs, or the folder after its folders, and the lifted row shrinks into the folder's row.
         if let folderID = sidebarDrag.targetFolderID, let folderRow = rowFrames[folderID] {
-            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(id, toFolder: folderID) }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if case .folder(let id) = item { session.moveFolder(id, to: .into(folderID)) } else { session.moveTab(item.id, toFolder: folderID) }
+            }
             return sidebarDrag.settle(shrinkingInto: folderRow, ownedBy: dragOwner)
         }
-        // Over the page area, the tab opens in split view, and its row returns to its slot.
-        if let drop = sidebarDrag.splitDrop, let tab = session.tabs.first(where: { $0.id == id }) {
+        // Over the page area, a tab opens in split view, and its row returns to its slot.
+        if let drop = sidebarDrag.splitDrop, case .tab(let id) = item, let tab = session.tabs.first(where: { $0.id == id }) {
             withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag.splitDrop = nil }
             windowModel.openInSplitView(tab, at: drop.index)
         }
         sidebarDrag.settle(into: slot, ownedBy: dragOwner)
+    }
+}
+
+/// The empty slot a dragged row leaves in the list: the row hides, and the slot dims while the lifted row shows its shadow.
+private struct DraggedSlot: ViewModifier {
+    let isDragged: Bool
+    let isLifted: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isDragged ? 0 : 1)
+            .background {
+                if isDragged {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(isLifted ? 0.06 : 0))
+                }
+            }
     }
 }
 
@@ -274,10 +342,12 @@ struct SpaceHeaderView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    // VoiceOver reads the Persona's name and the space's without the slash.
                     Text("/")
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                         .fixedSize()
+                        .accessibilityHidden(true)
                 }
                 spaceName
             }
@@ -304,23 +374,31 @@ struct SpaceHeaderView: View {
     /// The space's name, or the field that renames it.
     @ViewBuilder private var spaceName: some View {
         if windowModel.renamingSpaceID == space.id {
-            TextField("Space Name", text: $draftName)
-                .textFieldStyle(.plain)
+            // A hidden copy of the name sizes the field, which would otherwise take a share of the row from the Persona's name. So the header keeps its layout when renaming starts, and the Persona's name still truncates first.
+            Text(draftName.isEmpty ? "Space Name" : draftName)
                 .font(.system(size: 13, weight: .semibold))
-                .focused($isNameFocused)
-                .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
-                .onExitCommand { windowModel.renamingSpaceID = nil }
-                .onChange(of: isNameFocused) { _, focused in
-                    if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                .lineLimit(1)
+                .hidden()
+                .overlay(alignment: .leading) {
+                    TextField("Space Name", text: $draftName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .semibold))
+                        .focused($isNameFocused)
+                        .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
+                        .onExitCommand { windowModel.renamingSpaceID = nil }
+                        .onChange(of: isNameFocused) { _, focused in
+                            if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                        }
+                        .onAppear {
+                            draftName = space.name
+                            DispatchQueue.main.async { isNameFocused = true }
+                        }
+                        // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
+                        .onDisappear {
+                            if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                        }
                 }
-                .onAppear {
-                    draftName = space.name
-                    DispatchQueue.main.async { isNameFocused = true }
-                }
-                // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
-                .onDisappear {
-                    if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                }
+                .layoutPriority(1)
         } else {
             Text(space.name)
                 .font(.system(size: 13, weight: .semibold))
@@ -371,6 +449,7 @@ struct SpaceMenuItems: View {
             .disabled(personaSpaces.last?.id == space.id)
         Divider()
         Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
+        Button("New Live Folder\u{2026}") { windowModel.showNewLiveFolderSheet(inSpace: space.id) }
         Button("New Space", action: windowModel.addSpace)
         Button("Delete Space") { session.deleteSpace(space.id) }
             .disabled(!session.canDeleteSpace(space.id))

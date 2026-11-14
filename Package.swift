@@ -43,6 +43,7 @@ let package = Package(
         .library(name: "History", targets: ["History"]),
         .library(name: "Import", targets: ["Import"]),
         .library(name: "AI", targets: ["AI"]),
+        .library(name: "LiveFolders", targets: ["LiveFolders"]),
         .library(name: "Plugins", targets: ["Plugins"]),
         .library(name: "Extensions", targets: ["Extensions"]),
         .library(name: "Terminal", targets: ["Terminal"]),
@@ -71,8 +72,9 @@ let package = Package(
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
         .target(name: "Plugins", dependencies: ["ARCHEngine", "AI"], path: "Packages/ARCH/Sources/Plugins"),
         .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions"),
-        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI"], path: "Packages/ARCH/Sources/Browsing"),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "LiveFolders"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
+        .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Extensions"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
@@ -86,12 +88,14 @@ let package = Package(
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
         // Reads store pages from hosts that stand in for the Web Store's through `Extensions`.
-        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions"], path: "Packages/ARCH/Tests/BrowsingTests"),
+        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "HistoryTests", dependencies: ["History"], path: "Packages/ARCH/Tests/HistoryTests"),
         // Links SQLite to build its synthetic databases.
         .testTarget(name: "ImportTests", dependencies: ["Import", "Browsing", "History"], path: "Packages/ARCH/Tests/ImportTests", linkerSettings: [.linkedLibrary("sqlite3")]),
+        // Stands in a URL protocol for the network, shell scripts for `gh` and the login shell, and an in-memory store for the Keychain.
+        .testTarget(name: "LiveFoldersTests", dependencies: ["LiveFolders", "AI"], path: "Packages/ARCH/Tests/LiveFoldersTests"),
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing"], path: "Packages/ARCH/Tests/PreferencesTests"),

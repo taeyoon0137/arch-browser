@@ -96,9 +96,10 @@ struct GeneralSection: View {
     }
 }
 
-/// How long an unpinned tab stays open without being selected.
+/// How long an unpinned tab stays open without being selected, and how long pinned tabs and favorites keep their pages without being shown (bookmark rule 5).
 struct SidebarSection: View {
     @AppStorage(BrowserSession.archiveAfterHoursKey) private var archiveAfterHours = BrowserSession.archiveAfterHoursByDefault
+    @AppStorage(TabUnloading.unloadAfterHoursKey) private var unloadAfterHours = TabUnloading.unloadAfterHoursByDefault
 
     var body: some View {
         Form {
@@ -112,6 +113,18 @@ struct SidebarSection: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Section {
+                Stepper(value: $unloadAfterHours, in: 0...168) {
+                    Text(unloadAfterHours == 0 ? "Unload pinned tabs and favorites: Never" : "Unload pinned tabs and favorites after \(unloadAfterHours) hours")
+                }
+            } footer: {
+                // The longer footer wraps through the shared footnote style. Never also keeps every page when the Mac runs low on memory (`TabUnloading.tabsToUnload`).
+                if unloadAfterHours == 0 {
+                    aiFootnote("Tabs keep their pages until you close them, also when the Mac runs low on memory.")
+                } else {
+                    aiFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video with sound, show a video in picture in picture, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")
+                }
             }
         }
         .formStyle(.grouped)

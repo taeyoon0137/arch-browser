@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
+    /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
+    private var bookmarksMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
     private var undoItem: NSMenuItem?
     private var closingItems: [NSMenuItem] = []
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.installFromWebStore = { PreferencesWindowController.shared.showWebStoreInstall(of: $2, in: $0, space: $1) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        session.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.session = session
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
@@ -250,6 +253,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let splitViewItem = tabMenu.addItem(withTitle: "Open in Split View", action: #selector(openInSplitView), keyEquivalent: "=")
         splitViewItem.keyEquivalentModifierMask = [.command, .option]
         tabMenu.addItem(.separator())
+        // The saved page items have no default shortcuts; Settings ▸ Shortcuts can give them one.
+        tabMenu.addItem(withTitle: "Go Back to Saved Page", action: #selector(goBackToSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: "Use Current Page as Saved Page", action: #selector(useCurrentPageAsSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: "Edit Saved Address\u{2026}", action: #selector(editSavedAddress), keyEquivalent: "")
+        tabMenu.addItem(.separator())
         let nextTabItem = tabMenu.addItem(withTitle: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
         nextTabItem.keyEquivalentModifierMask = [.command, .shift]
         let previousTabItem = tabMenu.addItem(withTitle: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
@@ -277,6 +285,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         spacesMenu.addItem(withTitle: "Rename Persona\u{2026}", action: #selector(renamePersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: "Delete Persona\u{2026}", action: #selector(deletePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
+
+        // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
+        let bookmarksMenu = NSMenu(title: "Bookmarks")
+        bookmarksMenu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+        bookmarksMenu.delegate = self
+        self.bookmarksMenu = bookmarksMenu
+        mainMenu.addItem(submenu(bookmarksMenu, title: "Bookmarks"))
 
         let historyMenu = NSMenu(title: "History")
         historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[")
@@ -394,8 +409,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return history
     }()
 
-    /// Lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. The list is made when the menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; the pages have no key equivalents.
+    /// Fills the Bookmarks menu for the sidebar target, and lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. Both are made when their menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; their items have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
+        if menu === bookmarksMenu, let session { return fillBookmarks(menu, with: session.bookmarkMenuEntries) }
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
         let activeWindow = session?.activeWindow
@@ -431,9 +447,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self.item = item
         }
     }
+
+    /// Replaces the menu's items with the entries, each space and folder as a submenu. The Bookmarks menu is built like the History menu's pages, when it opens, and its items have no key equivalents.
+    private func fillBookmarks(_ menu: NSMenu, with entries: [BookmarkMenu.Entry]) {
+        menu.removeAllItems()
+        for entry in entries {
+            switch entry {
+            case .heading(let title):
+                menu.addItem(.sectionHeader(title: title))
+            case .favorite(let id, let title, let url):
+                menu.addItem(bookmarkItem(title: title, url: url, choice: .favorite(id)))
+            case .tab(let id, let title, let url, let isUnread):
+                let item = bookmarkItem(title: title, url: url, choice: .tab(id))
+                // A live folder's unread item shows a dot where a checkmark would.
+                if isUnread {
+                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Unread")?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
+                    item.state = .on
+                }
+                menu.addItem(item)
+            case .submenu(let title, let entries, let unreadCount):
+                let folderMenu = NSMenu(title: title)
+                fillBookmarks(folderMenu, with: entries)
+                let item = submenu(folderMenu, title: title)
+                if unreadCount > 0 { item.badge = NSMenuItemBadge(count: unreadCount) }
+                menu.addItem(item)
+            case .divider:
+                menu.addItem(.separator())
+            case .noBookmarks:
+                menu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+            }
+        }
+    }
+
+    private func bookmarkItem(title: String, url: URL?, choice: BookmarkMenu.Choice) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(openBookmark(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = choice
+        item.toolTip = url?.absoluteString
+        return item
+    }
+
+    @objc private func openBookmark(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? BookmarkMenu.Choice else { return }
+        session.openBookmark(choice)
+    }
     @objc private func togglePinned() { frontSidebarTarget().selectedTab.map(session.togglePinned) }
     @objc private func addFavorite() { session.activeWindow?.selectedTab.map(session.addFavorite) }
     @objc private func openInSplitView() { frontSidebarTarget().openSelectedTabInSplitView() }
+    // The saved page items act on the sidebar target's selected tab, a pinned tab or a favorite's tab.
+    @objc private func goBackToSavedPage() { frontSidebarTarget().goBackToSavedPage() }
+    @objc private func useCurrentPageAsSavedPage() { frontSidebarTarget().useCurrentPageAsSavedPage() }
+    @objc private func editSavedAddress() { frontSidebarTarget().promptToEditSavedAddress() }
     @objc private func newSpace() { frontSidebarTarget().addSpace() }
     @objc private func nextSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: true) }
     @objc private func previousSpace() { frontSidebarTarget().switchToAdjacentSpace(forward: false) }
@@ -519,6 +583,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
+        }
+        // Go Back needs a tab off its saved page with no internal page or preview over it, Use Current Page a page to save, and Edit Saved Address a pinned tab and no other sheet on its window.
+        if item.action == #selector(goBackToSavedPage) {
+            return session?.lastMainWindow?.canGoBackToSavedPage == true
+        }
+        if item.action == #selector(useCurrentPageAsSavedPage) {
+            return session?.lastMainWindow?.canUseCurrentPageAsSavedPage == true
+        }
+        if item.action == #selector(editSavedAddress) {
+            return session?.lastMainWindow?.canEditSavedAddress == true
         }
         // Clearing site data needs a web page in front, no prompt waiting on its tab, and no sheet on its window.
         if item.action == #selector(clearSiteData) {

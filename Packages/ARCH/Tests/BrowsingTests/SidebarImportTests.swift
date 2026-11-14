@@ -1,5 +1,6 @@
 // The browser import's plan on sidebars built as values: merges by name and address without a record, the record's IDs after the user moved, renamed, or removed what an import brought, new Personas, the default destination, and `imports.json`. Rows hold made-up addresses only.
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -65,6 +66,42 @@ import Testing
         #expect(items.folders == ["docs": docs.id, "recipes": plan.folders[0].id])
         #expect(Set(items.pinnedTabs.keys) == ["d", "e"])
         #expect(Set(items.favorites.keys) == ["fb"])
+    }
+
+    @Test func anAddressAPinnedTabKeepsAsItsSavedPageStaysOutAfterTheTabMovedElsewhere() throws {
+        var sidebar = Self.sidebar()
+        let work = Space(name: "Work", personaID: Persona.defaultID)
+        sidebar.spaces.append(work)
+        // c is the saved page of a pinned tab whose page went to another site, and d the page of an open tab, which pins nothing.
+        sidebar.tabs.append(SidebarImport.Sidebar.TabState(id: UUID(), spaceID: work.id, isPinned: true, url: Self.url("elsewhere.example"), savedURL: Self.url("c.example")))
+        sidebar.tabs.append(SidebarImport.Sidebar.TabState(id: UUID(), spaceID: work.id, isPinned: false, url: Self.url("d.example")))
+
+        let plan = Self.plan(in: sidebar)
+        #expect(plan.pinnedTabs.map(\.url) == [Self.url("d.example"), Self.url("e.example")])
+        #expect(plan.pinnedTabs.map(\.spaceID).first == work.id)
+        // Each pinned tab carries its imported title, which the session saves with its address (`Tab.takeImport(_:)`, `SavedPageTests`).
+        #expect(plan.pinnedTabs.map(\.title) == ["d.example", "e.example"])
+    }
+
+    @Test func anImportedFolderNamedLikeALiveFolderIsMadeBesideIt() throws {
+        var sidebar = Self.sidebar()
+        let work = Space(name: "Work", personaID: Persona.defaultID)
+        var docs = TabFolder(spaceID: work.id, name: "Docs", isPinned: true)
+        docs.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://feeds.example/docs.xml")!, isPrivate: false))
+        sidebar.spaces.append(work)
+        sidebar.folders.append(docs)
+        // A live folder item's tab at d's address keeps no imported bookmark out, since it comes and goes with its source.
+        let item = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: Self.url("d.example")), spaceID: work.id, isPinned: true, personaID: Persona.defaultID)
+        item.folderID = docs.id
+        item.liveItemID = "d"
+        #expect(SidebarImport.Sidebar.TabState(item) == nil)
+
+        let plan = Self.plan(in: sidebar)
+        let imported = try #require(plan.folders.first)
+        #expect(plan.folders.map(\.name) == ["Docs", "Other Bookmarks / Recipes"])
+        #expect(imported.id != docs.id && imported.spaceID == work.id && imported.live == nil)
+        #expect(plan.pinnedTabs.first { $0.url == Self.url("d.example") }?.folderID == imported.id)
+        #expect(plan.entry.items(in: Persona.defaultID).folders["docs"] == imported.id)
     }
 
     @Test func aSecondIdenticalImportAddsNothing() {
@@ -243,7 +280,7 @@ private extension SidebarImport.Sidebar {
         spaces += plan.spaces
         folders += plan.folders
         favorites += plan.favorites
-        tabs += plan.pinnedTabs.map { TabState(id: $0.id, spaceID: $0.spaceID, isPinned: true, url: $0.url) }
+        tabs += plan.pinnedTabs.map { TabState(id: $0.id, spaceID: $0.spaceID, isPinned: true, url: $0.url, savedURL: $0.url) }
     }
 }
 

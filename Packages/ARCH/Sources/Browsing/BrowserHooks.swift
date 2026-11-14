@@ -45,7 +45,7 @@ final class BrowserHooks: AIHookHost {
 
     // MARK: Events
 
-    /// Follows each tab's document loads and posts a tab that opens, other than one restored from the saved session or a pinned tab that a browser import opened. A tab that leaves stops its hooks.
+    /// Follows each tab's document loads and posts a tab that opens, other than one restored from the saved session, a pinned tab that a browser import opened, and a live folder item's tab, which a refresh adds. A tab that leaves stops its hooks.
     private func follow(_ tabs: [Tab], postingNewTabs: Bool) {
         let ids = Set(tabs.map(\.id))
         for id in tabObservers.keys where !ids.contains(id) {
@@ -60,7 +60,7 @@ final class BrowserHooks: AIHookHost {
                         if let self, let tab { self.tabDidLoadDocument(tab) }
                     }
                 }
-            if postingNewTabs, !tab.isRestored { center.post(.tabOpened(AITabOpen(tabID: tab.id, url: tab.url))) }
+            if postingNewTabs, !tab.isRestored, tab.liveItemID == nil { center.post(.tabOpened(AITabOpen(tabID: tab.id, url: tab.url))) }
         }
     }
 
@@ -123,9 +123,9 @@ final class BrowserHooks: AIHookHost {
         return tab.suggestedTitle?.isFor(load.url) != true
     }
 
-    /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name.
+    /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name, and a live folder item's tab by its item's title.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
-        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }),
+        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }), tab.liveItemID == nil,
               Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.url) else { return nil }
         return tab
     }

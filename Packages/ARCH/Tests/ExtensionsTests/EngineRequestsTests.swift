@@ -396,6 +396,8 @@ private final class PageStub: EngineWebContents {
     let canGoForward = false
     let restorableState: Data? = nil
     let isAudible = false
+    let isCapturingMedia = false
+    let isInPictureInPicture = false
     var zoomFactor = 1.0
     lazy var view = NSView()
     let navigationController: any EngineNavigationController = NavigationStub()

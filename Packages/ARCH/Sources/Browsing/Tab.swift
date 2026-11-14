@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
+import LiveFolders
 
 public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
@@ -15,10 +16,22 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public internal(set) var isInSmallWindow = false
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
-    @Published public var isPinned: Bool
+    /// Pinning saves the page the tab shows as its saved page, or the first address its page reports when it shows none yet, and unpinning forgets it (bookmark rule 2). Pin Tab, Unpin Tab, and drops among the pinned or open tabs or into a folder of either list all set it, so each follows the rule; a tab made pinned, as one that restores or reopens, takes its saved page from the caller.
+    @Published public var isPinned: Bool {
+        didSet {
+            guard isPinned != oldValue else { return }
+            savedPage = isPinned ? currentPage : nil
+        }
+    }
+    /// The page a pinned tab returns to (bookmark rule 2): set as the tab becomes pinned, from its record when it restores or reopens, and by Use Current Page as Saved Page and Edit Saved Address…. Nil for every other tab. `docs/bookmarks.md`, Saved pages, describes the rest.
+    @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
-    /// The window that selects the tab updates this. Archiving closes unpinned tabs whose dates are too old.
+    /// The ID of the live folder item whose tab this is, in the live folder `folderID` (live folder rule 4), or nil for every other tab. The session sets it as it adds the item's tab and clears it when the tab leaves the folder, which makes it an ordinary tab.
+    @Published var liveItemID: String?
+    /// The item as its folder last listed it, for the row's state symbol and tooltip, or nil before the folder's stored items name it and once the source no longer lists it. The session sets it; `session.json` keeps only `liveItemID`.
+    @Published var liveItem: LiveItem?
+    /// The window that selects the tab updates this, and so does a window that stops showing it. Archiving closes unpinned tabs whose dates are too old, and automatic unloading unloads tabs that no window shows (`TabUnloading.tabsToUnload`).
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
     /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
@@ -32,7 +45,13 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
-    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it.
+    /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
+    @Published public private(set) var isCapturingMedia = false
+    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). Another web contents starts without.
+    private(set) var hasTypedInput = false
+    /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
+    var answersBeforeUnloadWithStay = false
+    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it. A live folder item's tab follows its item's read state instead (live folder rule 5).
     @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
@@ -44,7 +63,7 @@ public final class Tab: ObservableObject, Identifiable {
     var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
     weak var opener: (any EngineWebContents)?
-    /// Removes the tab when its page closes itself with `window.close()`. Set by the session.
+    /// Closes the tab, as `TabCloseAction` decides, when its page closes itself with `window.close()` or the engine closes its crashed page. Set by the session.
     var didClose: (() -> Void)?
     /// The session sets this callback to learn that a page finished loading.
     var didFinishLoad: (() -> Void)?
@@ -80,9 +99,9 @@ public final class Tab: ObservableObject, Identifiable {
     var recordedURL: URL?
     /// The session sets this callback to record a visit to a page, with its title, in its history store.
     var recordVisit: ((URL, String) -> Void)?
-    /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens.
+    /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens. Closing a pinned tab clears it (`unloadToSavedPage()`).
     var isRestored = false
-    /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
+    /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session then closes the tab as `TabCloseAction` decides for such a tab: a pinned tab unloads, and any other leaves without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private(set) var isDownloadOnly = false
@@ -109,7 +128,7 @@ public final class Tab: ObservableObject, Identifiable {
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
 
-    /// Whether the tab has its engine's page. A tab restored from `session.json` has an `UnloadedWebContents` in its place until a window first shows it (`BrowserSession.loadPage(of:)`).
+    /// Whether the tab has its engine's page. A tab restored from `session.json` has an `UnloadedWebContents` in its place until a window first shows it, and so does a tab whose page unloaded until a window next shows it (`BrowserSession.loadPage(of:)`).
     var isLoaded: Bool { !(webContents is UnloadedWebContents) }
 
     /// Puts the engine's page in place of the stand-in of a tab without one: `make` creates it at the address, in the engine, and with the page state that the stand-in keeps. A tab that has its page keeps it.
@@ -118,32 +137,55 @@ public final class Tab: ObservableObject, Identifiable {
         replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
     }
 
-    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
+    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, its folder, `folderID` being the record's folder while that folder exists, and its live folder item while it is in that folder. The tab counts as restored, and loading its saved page does not count as a visit, apart from an item's tab, which the user opens as a new page: its first load is a visit, and a file it points at downloads (`docs/bookmarks.md`, Items as tabs).
     func restore(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
         lastActivatedAt = record.lastActivatedAt ?? Date()
         customTitle = record.customTitle
         suggestedTitle = record.suggestedTitle
+        savedPage = record.savedPage
         self.folderID = folderID
-        isRestored = true
-        recordedURL = record.url?.withoutCredentials
+        liveItemID = folderID == nil ? nil : record.liveItemID
+        isRestored = liveItemID == nil
+        recordedURL = isRestored ? record.url?.withoutCredentials : nil
     }
 
-    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
+    /// Takes what a closed tab's record keeps besides its page and place, as ⌘Z reopens the tab: the user's name for it, its saved page, and its folder, `folderID` being the record's folder while that folder exists.
+    func reopen(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
+        customTitle = record.customTitle
+        savedPage = record.savedPage
+        self.folderID = folderID
+    }
+
+    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    func takeImport(_ pinned: SidebarImport.Plan.PinnedTab) {
+        folderID = pinned.folderID
+        customTitle = pinned.customTitle
+        savedPage = SavedPage(url: pinned.url, title: pinned.title)
+        isRestored = true
+        recordedURL = pinned.url
+    }
+
+    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
             // A published value also sends its current value to each new subscriber, which is no change.
             publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
-        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($folderID), changes($url), changes($title),
-                                    changes($customTitle), changes($suggestedTitle))
+        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($liveItemID), changes($url),
+                                    changes($title), changes($customTitle), changes($suggestedTitle))
             .eraseToAnyPublisher()
     }
 
     /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
     var isListedInSidebar: Bool { !isInSmallWindow }
 
-    /// The user's name for the tab, a hook's name for its page, or the page's title.
-    public var displayTitle: String { customTitle ?? suggestedTitle?.title ?? pageTitle }
+    /// The user's name for the tab, a hook's name for its page, or the page's title. A live folder item's tab shows its item's title, which its saved page keeps, while it is on the saved page, and takes no hook's name.
+    public var displayTitle: String {
+        if let customTitle { return customTitle }
+        guard liveItemID != nil else { return suggestedTitle?.title ?? pageTitle }
+        if let saved = savedPage, !saved.title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) ?? true { return saved.title }
+        return pageTitle
+    }
 
     /// The page's title, or its host if it has no title.
     public var pageTitle: String {
@@ -163,14 +205,21 @@ public final class Tab: ObservableObject, Identifiable {
 }
 
 extension Tab: EngineWebContentsUIDelegate {
-    public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
+    /// A saved page taken before its page showed a title takes the first title the page shows at the saved address.
+    public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {
+        title = webContents.title
+        if let saved = savedPage, saved.title.isEmpty, !title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) == true { savedPage?.title = title }
+    }
+    /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2), with an empty title: the tab's title is still the previous page's, and the new page's first title fills it.
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url?.withoutCredentials
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+        if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
+    public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) { requestActivation?() }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
@@ -234,6 +283,9 @@ extension Tab: EngineWebContentsUIDelegate {
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
         isAudible = replacement.isAudible
+        isCapturingMedia = replacement.isCapturingMedia
+        hasTypedInput = false
+        answersBeforeUnloadWithStay = false
         hasCrashed = false
         isDownloadOnly = false
     }
@@ -260,8 +312,9 @@ extension Tab: EngineWebContentsUIDelegate {
         showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, identity: pageIdentity)) { completion(TabPromptContent.textInputResult($0)) }
     }
 
-    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show. Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it.
+    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show. Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it. An automatic unload asks nothing and stays (`answersBeforeUnloadWithStay`).
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
+        if answersBeforeUnloadWithStay { return completion(false) }
         requestSelection?()
         showPrompt(TabPromptContent.leavePage(identity: pageIdentity)) { completion(TabPromptContent.leavePageResult($0)) }
     }
@@ -329,7 +382,8 @@ extension Tab: EngineWebContentsUIDelegate {
         return ActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
     }
 
-    private static func copyToPasteboard(_ url: URL) {
+    /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.
+    static func copyToPasteboard(_ url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let item = NSPasteboardItem()
@@ -403,7 +457,12 @@ extension Tab: EngineWebContentsUIDelegate {
 // MARK: Page scripts
 
 extension Tab: EnginePageScriptDelegate {
+    /// `TabUnloading.inputScript`'s reports set `hasTypedInput`; every other world's values go to the plugins.
     public func webContents(_ webContents: any EngineWebContents, didReceive message: EnginePageScriptMessage, reply: @escaping (String?) -> Void) {
+        if message.world == TabUnloading.inputWorld {
+            if webContents === self.webContents, let event = TabUnloading.InputEvent(message) { hasTypedInput = event == .typed }
+            return reply(nil)
+        }
         guard let receivePageScriptMessage else { return reply(nil) }
         receivePageScriptMessage(message, reply)
     }

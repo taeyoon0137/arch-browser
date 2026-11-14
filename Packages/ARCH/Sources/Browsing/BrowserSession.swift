@@ -1,10 +1,11 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, and site search. Archives inactive tabs on a timer. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, site search, and the live folders' items (`LiveFolderTabs.swift`). Archives inactive tabs on a timer, which also unloads inactive pinned tabs and favorites' tabs, as memory pressure unloads every tab that no window shows. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
 import AppKit
 import ARCHEngine
 import Combine
 import Extensions
 import Foundation
 import History
+import LiveFolders
 import Plugins
 
 /// One engine's running pieces for one Persona: the Persona's profile in the engine and the browser that owns the web contents of the Persona's tabs in that engine. The session keeps the engine's application.
@@ -34,6 +35,14 @@ public final class BrowserSession: ObservableObject {
     public let siteSearch: SiteSearchStore
     /// Whether macOS lets Arch show notifications, which the download notifier, the permission card, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
+    /// Keeps the live folders up to date: `live-folders.json`, the private feed addresses in the Keychain, the refresh schedule, and the fetches. The session registers its live folders and applies each refresh to their tabs (`LiveFolderTabs.swift`).
+    let liveFolderService: LiveFolderService
+    /// Each live folder's unread count, refresh, failure, and dismissed items, which its row and menu show.
+    let liveFolderStatuses = LiveFolderStatuses()
+    /// Each feed folder's icon, the `/favicon.ico` of its feed's host, which the rows of its items' tabs show until their pages load, and the icon address it came from, loaded once per folder and launch.
+    var liveFolderIcons: [UUID: (url: URL, image: NSImage?)] = [:]
+    /// The live folders' subscriptions to the folders, the app's activation, and the windows' spaces.
+    var liveFolderObservers: Set<AnyCancellable> = []
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
     /// The engines whose application did not start the last time the session tried, which run no web extensions meanwhile.
@@ -74,9 +83,14 @@ public final class BrowserSession: ObservableObject {
     public let webStore: WebStoreInstaller
     /// `NativeMessagingHosts/` in `userDataDirectory`, which every Persona's web extensions reach native apps through, with Arch's links to the host manifests that native app vendors install for other browsers, and the proof gate on them (`docs/password-managers.md`).
     public let nativeMessagingHosts: NativeMessagingHostLinks
+    /// The app sets this to open the built-in terminal, where the New Live Folder sheet sends the user to install `gh` and sign in (live folder rule 3).
+    public var openTerminal: (() -> Void)?
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
+    /// Archives inactive tabs and unloads inactive bookmarks every 30 minutes.
     private var archiveTimer: Timer?
+    /// Unloads tabs that no window shows when macOS reports memory pressure (bookmark rule 5).
+    private var memoryPressure: MemoryPressureMonitor?
 
     /// The results page of the search engine chosen in Settings.
     public static var searchURL: URL { SearchEngine.current.resultsURL }
@@ -127,6 +141,11 @@ public final class BrowserSession: ObservableObject {
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
+        // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
+        let keepsUnknownLiveFolders = FileManager.default.fileExists(atPath: store.unreadableFileURL.path)
+        liveFolderService = MainActor.assumeIsolated {
+            LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
+        }
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
@@ -159,13 +178,18 @@ public final class BrowserSession: ObservableObject {
         restoreFavoriteTabs(snapshot)
         observeChanges()
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
-        archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in self?.archiveInactiveTabs() }
+        archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.archiveInactiveTabs()
+            self?.unloadInactiveTabs(pressure: nil)
+        }
+        memoryPressure = MemoryPressureMonitor { [weak self] in self?.unloadInactiveTabs(pressure: $0) }
         nowPlaying = NowPlaying(session: self)
         // The session is created on the main thread, where the AI interface and the plugins run.
         MainActor.assumeIsolated {
             pageAssistant.attach(to: self)
             pluginPages.attach(to: self)
             hooks.attach(to: self)
+            startLiveFolders()
         }
     }
 
@@ -190,6 +214,12 @@ public final class BrowserSession: ObservableObject {
 
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
+
+    /// The Persona of the sidebar target, read without opening a window: the last main window's, or, while none is open, that of the space the front window of `windowsToReopen` would open on, or of the first space once that one is gone, as `currentSpace` falls back. The Bookmarks menu lists its favorites.
+    var sidebarTargetPersonaID: Persona.ID {
+        if let window = lastMainWindow { return window.personaID }
+        return (spaces.first { $0.id == windowsToReopen[0].currentSpaceID } ?? spaces[0]).resolvedPersonaID
+    }
 
     /// Opens the saved session's main windows once at launch, after the app has built its menus.
     public func restoreWindows() {
@@ -263,6 +293,16 @@ public final class BrowserSession: ObservableObject {
     /// The window that shows the tab, as its selected tab or a pane of its split view, or nil while no window shows it.
     func window(showing tab: Tab) -> BrowserWindowModel? {
         windows.first { $0.shows(tab) }
+    }
+
+    /// Whether a window shows the tab or, while no main window is open, a main window that reopens from `windowsToReopen` will show it, as its saved tab or a pane of that tab's split view. A live folder's plan keeps such an item tab, also at launch before the saved session's windows open.
+    func windowShowsOrWillShow(_ tab: Tab) -> Bool {
+        if window(showing: tab) != nil { return true }
+        guard lastMainWindow == nil else { return false }
+        return windowsToReopen.contains { record in
+            guard let selectedID = record.selectedTabID else { return false }
+            return selectedID == tab.id || splitTabIDs.values.contains { $0.contains(selectedID) && $0.contains(tab.id) }
+        }
     }
 
     /// The browser window whose AppKit window is `nsWindow`, or nil for any other window, such as Settings or the developer tools.
@@ -476,9 +516,9 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Spaces
 
-    /// A space's pinned or open tabs in sidebar order: the tabs of each folder, folder by folder, then the tabs outside folders.
+    /// A space's pinned or open tabs in sidebar order: the tabs inside each folder, at every level, then the tabs outside folders (`FolderTree.tabs(in:pinned:)`).
     public func tabs(in spaceID: UUID, pinned: Bool) -> [Tab] {
-        folders(in: spaceID, pinned: pinned).flatMap(tabs(in:)) + tabsOutsideFolders(in: spaceID, pinned: pinned)
+        folderTree.tabs(in: spaceID, pinned: pinned)
     }
 
     /// Adds a space to the Persona and returns it, named `name` or else as `newSpaceName(among:)` names it, and with the next tint of the rotation.
@@ -524,7 +564,7 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }.map { spaces(in: $0.resolvedPersonaID).count > 1 } == true
     }
 
-    /// Removes a space, unless it is its Persona's last. Its tabs and folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
+    /// Removes a space, unless it is its Persona's last. Its tabs and nested folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
         guard canDeleteSpace(id), let space = spaces.first(where: { $0.id == id }) else { return }
         let group = spaces(in: space.resolvedPersonaID)
@@ -532,7 +572,7 @@ public final class BrowserSession: ObservableObject {
         let destination = group[index == 0 ? 1 : index - 1].id
         // The space's split view goes with it; its tabs join the destination as separate tabs.
         splitTabIDs[id] = nil
-        // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders.
+        // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders, and the folders their parents, so the tree moves whole.
         let moved = tabs.filter { $0.spaceID == id }
         let movedIDs = Set(moved.map(\.id))
         moved.forEach { $0.spaceID = destination }
@@ -630,7 +670,7 @@ public final class BrowserSession: ObservableObject {
             if window.preview?.personaID == id { window.closePreview() }
             if window.kind == .main, window.personaID == id { window.switchToSpace(destination.id) }
         }
-        for tab in allTabs where tab.personaID == id { closeTab(tab) }
+        for tab in allTabs where tab.personaID == id { closeTab(tab, reason: .persona) }
         undoableCloseCount = 0
         // Its unfinished downloads stop, and the pages kept for them close. Finished rows stay in the library.
         downloads.filter { $0.personaID == id && !$0.isFinished }.forEach { $0.item.cancel() }
@@ -688,6 +728,12 @@ public final class BrowserSession: ObservableObject {
         return added.count
     }
 
+    /// Changes the favorite with the ID, as Use Current Page as Saved Page and Edit Favorite… do (`SavedPage.swift`).
+    func updateFavorite(_ id: UUID, _ change: (inout Favorite) -> Void) {
+        guard let index = favorites.firstIndex(where: { $0.id == id }) else { return }
+        change(&favorites[index])
+    }
+
     /// Removes a favorite once its tab, if it has one, agrees to close.
     public func removeFavorite(_ favorite: Favorite) {
         endFavoriteTab(favorite) { [weak self] in
@@ -733,7 +779,8 @@ public final class BrowserSession: ObservableObject {
     private func endFavoriteTab(_ favorite: Favorite, then didEnd: @escaping () -> Void) {
         savedFavoriteTabs[favorite.id] = nil
         guard let tab = favoriteTabs[favorite.id] else { return didEnd() }
-        closeWhenPageAgrees(tab) { [weak self] in
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            self?.closeTab(tab)
             self?.forgetUndoableCloses()
             didEnd()
         }
@@ -752,14 +799,14 @@ public final class BrowserSession: ObservableObject {
         return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
     }
 
-    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the page scripts of the Persona's enabled plugins, which Chromium receives only with the browser it creates.
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        let pageScripts = MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts }
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts })
         return runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state, pageScripts: pageScripts))
     }
 
     /// The Persona of the space `id`, or of the sidebar target's current space when no space has that ID.
-    private func personaID(ofSpace id: UUID) -> Persona.ID {
+    func personaID(ofSpace id: UUID) -> Persona.ID {
         (spaces.first { $0.id == id } ?? sidebarTarget().currentSpace).resolvedPersonaID
     }
 
@@ -778,7 +825,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
-    private func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
+    func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space.
         tab.openNewTab = { [weak self, weak tab] popup in
@@ -834,14 +881,14 @@ public final class BrowserSession: ObservableObject {
             self.scheduleSave()
             self.applyZoom(to: tab)
         }
-        // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop.
+        // Closing a tab whose download has not started yet would cancel it, so such a tab waits for its download to appear. The engine is still inside its callback, so closing happens on the next turn of the run loop. A pinned tab unloads to its saved page and keeps its place.
         tab.didOpenOnlyDownload = { [weak self, weak tab] downloads in
             guard let self, let tab else { return }
             if downloads {
                 self.downloadOnlyTabIDs.insert(tab.id)
             } else {
                 DispatchQueue.main.async { [weak self, weak tab] in
-                    if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
+                    if let self, let tab { self.closeTab(tab, reason: .download) }
                 }
             }
         }
@@ -917,35 +964,60 @@ public final class BrowserSession: ObservableObject {
         scheduleSave()
     }
 
-    /// Closes a tab the user asked to close once its page agrees: a page with a `beforeunload` handler can ask to stay. ⌘Z reopens a space's tab; a favorite's tab opens again from its favorite.
+    /// Closes a tab the user asked to close once its page agrees, as ⌘W, the row's button, Close Tab, Close Other Tabs, and a small window's close do: a page with a `beforeunload` handler can ask to stay. What closing does follows the tab's kind (`TabCloseAction`): a pinned tab unloads, a favorite's tab ends and opens again from its favorite, and any other tab joins the closed list, which ⌘Z reopens.
     public func requestCloseTab(_ tab: Tab) {
-        let isUndoable = tab.spaceID != nil
-        closeWhenPageAgrees(tab) { [weak self] in
-            // ⌘Z cannot reopen a favorite's tab, so it reopens none of the tabs closed before it either, rather than an older tab in its place.
-            if isUndoable { self?.undoableCloseCount += 1 } else { self?.forgetUndoableCloses() }
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            guard let self else { return }
+            let action = TabCloseAction.of(tab, reason: .user)
+            self.perform(action, on: tab, reason: .user)
+            // ⌘Z reopens only a tab that joined the closed list, so after an unload or a favorite's end it reopens none of the tabs closed before either, rather than an older tab in its place.
+            if action == .close(remember: true) { self.undoableCloseCount += 1 } else { self.forgetUndoableCloses() }
         }
     }
 
-    /// Closes a tab the user asked to close, from its row, its favorite, or a menu, once its page agrees to close, then runs `didClose` if this close removed it. While the tab's leave-page card shows, that card is the question, so the tab only comes forward to show it; otherwise the tab's prompts end first (`TabPromptQueue.endForClose`).
-    private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
+    /// Delete Tab: takes a pinned tab out of its list into the closed list once its page agrees, where closing it only unloads it (bookmark rule 4). ⌘Z reopens it pinned in its folder with its saved page. A favorite's tab has no row to delete, and a live folder item's tab, which never joins the closed list, is dismissed instead.
+    public func requestDeleteTab(_ tab: Tab) {
+        guard tab.spaceID != nil, tab.liveItemID == nil else { return }
+        whenPageAgreesToLeave(tab) { [weak self] tab in
+            guard let self, self.perform(.close(remember: true), on: tab, reason: .user) else { return }
+            self.undoableCloseCount += 1
+        }
+    }
+
+    /// Runs `leave` with the tab once its page agrees to leave, which a page with a `beforeunload` handler can refuse, for a close the user asked for from the tab's row, its favorite, or a menu. While the tab's leave-page card shows, that card is the question, so the tab only comes forward to show it; otherwise the tab's prompts end first (`TabPromptQueue.endForClose`). The user's request replaces an automatic unload's that waits for the page, so the page's question shows.
+    func whenPageAgreesToLeave(_ tab: Tab, then leave: @escaping (Tab) -> Void) {
         guard prompts.endForClose(tabID: tab.id) else {
             tab.requestSelection?()
             return
         }
-        // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
-        guard !tab.webContents.closingStopsDownloads else {
-            if closeTab(tab) { didClose() }
-            return
-        }
-        tab.webContents.tryToClose { [weak self, weak tab] closing in
-            guard closing, let self, let tab, self.closeTab(tab) else { return }
-            didClose()
+        tab.answersBeforeUnloadWithStay = false
+        // Asking means closing the browser, which would stop its downloads, so such a tab leaves at once; its kept page answers the handlers with Leave when it moves to a blank page.
+        guard !tab.webContents.closingStopsDownloads else { return leave(tab) }
+        tab.webContents.tryToClose { [weak tab] agrees in
+            guard agrees, let tab else { return }
+            leave(tab)
         }
     }
 
-    /// Closes a tab and returns whether it was still open. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
+    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`, and returns whether the tab was still open: a pinned tab unloads, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a tab that only pointed at a file, Delete Persona, and archiving. `reason` goes to the tab close log when the tab leaves its list.
     @discardableResult
-    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) -> Bool {
+    public func closeTab(_ tab: Tab, reason: TabCloseReason = .user) -> Bool {
+        perform(TabCloseAction.of(tab, reason: reason), on: tab, reason: reason)
+    }
+
+    /// Does what `action` does to the tab and returns whether the tab was still open for it, as a page that agrees to close late can find its tab closed meanwhile.
+    @discardableResult
+    func perform(_ action: TabCloseAction, on tab: Tab, reason: TabCloseReason) -> Bool {
+        switch action {
+        case .unload: return unloadToSavedPage(tab, reason: reason)
+        case .end, .close: return removeTab(tab, closedRecord: action.closedRecord(of: tab), reason: reason)
+        case .dismiss: return MainActor.assumeIsolated { dismissItem(tab, reason: reason) }
+        }
+    }
+
+    /// Takes a tab out of its space's list or its favorite and returns whether it was still there: a window that shows its page in fullscreen leaves it, its prompts end, it leaves the tab close log's `reason` and each window's switcher order, its page closes (`retire`), `closedRecord` joins the closed list, and each window that selected it selects another tab (`moveSelections(awayFrom:reason:)`).
+    @discardableResult
+    func removeTab(_ tab: Tab, closedRecord: SessionSnapshot.TabRecord?, reason: TabCloseReason) -> Bool {
         guard tabs.contains(where: { $0.id == tab.id }) || favoriteTabs.values.contains(where: { $0 === tab }) else { return false }
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
         // Ending the tab's prompts runs the code that asked for them before `dismiss` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
@@ -959,10 +1031,44 @@ public final class BrowserSession: ObservableObject {
         tabObservers[tab.id] = nil
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
-        if remember, let spaceID = tab.spaceID {
-            addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
+        if let closedRecord { addToClosedList(closedRecord) }
+        moveSelections(awayFrom: tab, reason: reason)
+        return true
+    }
+
+    /// Takes the list that a live folder's plan gives (`LiveFolderTabs.applying`) and drops the tabs that the plan removed: tabs without their pages that no window shows (`LiveFolderReconciler`), so no page closes and nothing joins the closed list or the tab close log. Each leaves its split view, the windows' switcher order, and the prompts that wait for it.
+    func replaceTabs(with tabs: [Tab], removing removed: [Tab]) {
+        self.tabs = tabs
+        for tab in removed {
+            tabObservers[tab.id] = nil
+            downloadOnlyTabIDs.remove(tab.id)
+            prompts.dismiss(tabID: tab.id)
+            leaveSplitView(tab)
+            windows.forEach { $0.forgetActivation(of: tab.id) }
         }
-        // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
+    }
+
+    /// Closing a pinned tab (bookmark rule 4), which returns whether the tab was still listed: its page closes as a closed tab's does, but the tab keeps its place, folder, and ID with a stand-in at its saved page, without page state, that shows the site's icon, or a live folder item's its folder's. A window that shows its page in fullscreen leaves it, its prompts end, and it leaves its split view; each window that selected it selects another tab before the stand-in takes its place, so that no window loads the page again. Nothing joins the closed list or the tab close log.
+    @discardableResult
+    private func unloadToSavedPage(_ tab: Tab, reason: TabCloseReason) -> Bool {
+        guard tabs.contains(where: { $0 === tab }) else { return false }
+        windows.forEach { $0.setPageFullscreen(false, of: tab) }
+        // Ending the tab's prompts runs the code that asked for them, which can close the tab, so the list is read again afterwards.
+        prompts.dismiss(tabID: tab.id)
+        guard tabs.contains(where: { $0 === tab }) else { return false }
+        downloadOnlyTabIDs.remove(tab.id)
+        moveSelections(awayFrom: tab, reason: reason)
+        retire(tab.unloadToSavedPage(), of: tab.personaID)
+        if let standIn = tab.webContents as? UnloadedWebContents {
+            standIn.loadSiteIcon()
+            if tab.liveItemID != nil, let icon = tab.folderID.flatMap({ liveFolderIcons[$0]?.image }) { standIn.showIcon(icon) }
+        }
+        loadPageIfShown(tab)
+        return true
+    }
+
+    /// Each main window that selected a tab that closes or unloads selects another as `tabToSelect(after:opener:splitNeighbor:among:spaceID:isShownInAnotherWindow:)` picks: for a page that closed itself, the opener is the listed tab of the page that opened it, as a sign-in popup closes once it has reported back. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first, and the opener is read after it.
+    private func moveSelections(awayFrom tab: Tab, reason: TabCloseReason) {
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         for window in windows where window.selectedTabID == tab.id {
@@ -970,11 +1076,22 @@ public final class BrowserSession: ObservableObject {
                 window.close()
                 continue
             }
-            let siblings = tabs.filter { $0.spaceID == (tab.spaceID ?? window.currentSpaceID) && $0.isListedInSidebar }
-            let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
-            window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
+            let next = Self.tabToSelect(after: tab, opener: opener, splitNeighbor: splitNeighbor, among: tabs, spaceID: tab.spaceID ?? window.currentSpaceID,
+                                        isShownInAnotherWindow: window.isShownInAnotherWindow)
+            window.selectTab(next?.id)
         }
-        return true
+    }
+
+    /// The tab that a window selects after its selected `tab` closes or unloads, one that no other window shows (window rule 3): `opener`, then `splitNeighbor`, so the rest of a split view stays on screen, or else a listed open tab of `spaceID` among `tabs` before a pinned one, or nil for the empty page. A pinned tab without its page is passed over: it is closed (bookmark rule 4), so selecting it would load a page the user closed or has not opened since launch, and two pinned tabs whose saved pages are files would download them in turn.
+    static func tabToSelect(after tab: Tab, opener: Tab?, splitNeighbor: Tab?, among tabs: [Tab], spaceID: UUID?, isShownInAnotherWindow: (Tab) -> Bool) -> Tab? {
+        let siblings = tabs.filter { $0 !== tab && $0.spaceID == spaceID && $0.isListedInSidebar }
+        let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
+        return candidates.first { $0 !== tab && ($0.isLoaded || !$0.isPinned) && !isShownInAnotherWindow($0) }
+    }
+
+    /// Gives an unloaded tab its page again at once when a window shows it after all, as one that a window selected while its page was asked to leave.
+    private func loadPageIfShown(_ tab: Tab) {
+        if window(showing: tab) != nil { loadPage(of: tab) }
     }
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
@@ -999,7 +1116,7 @@ public final class BrowserSession: ObservableObject {
 
     public var hasClosedTabs: Bool { !closedTabs.isEmpty }
 
-    /// Reopens the newest closed tab under its own ID in its original space and folder, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
+    /// Reopens the newest closed tab under its own ID in its original space and folder, with its saved page when it was pinned, and selects it in the sidebar target. When its space is gone, it reopens in its Persona's preferred space, or in the sidebar target's current space once its Persona is gone too.
     public func reopenLastClosedTab() {
         guard let record = closedTabs.popLast() else { return }
         undoableCloseCount = max(0, undoableCloseCount - 1)
@@ -1012,8 +1129,19 @@ public final class BrowserSession: ObservableObject {
         }
         let personaID = personaID(ofSpace: spaceID)
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
-        tab.customTitle = record.customTitle
-        tab.folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
+        // Nothing else enters a live folder (live folder rule 4).
+        let folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
+        tab.reopen(record, folderID: folderTree.isLive(folderID) ? nil : folderID)
+    }
+
+    /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate, and a live folder item's tab none whose copy could enter its folder.
+    func duplicateTab(_ tab: Tab) -> Tab? {
+        guard let spaceID = tab.spaceID, tab.isListedInSidebar, tab.liveItemID == nil, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        let copy = makeTab(makeWebContents(url: tab.url, engine: tab.engineKind, state: nil, in: tab.personaID), id: UUID(), spaceID: spaceID, personaID: tab.personaID, pinned: tab.isPinned)
+        copy.folderID = tab.folderID
+        copy.savedPage = tab.savedPage
+        tabs.insert(copy, at: index + 1)
+        return copy
     }
 
     /// Pressing another key or clicking in the page makes ⌘Z undo there instead of reopening tabs.
@@ -1034,9 +1162,9 @@ public final class BrowserSession: ObservableObject {
         return true
     }
 
-    /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.
+    /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders. A live folder's tabs keep their source's order (live folder rule 4).
     func moveTab(_ tab: Tab, up: Bool) {
-        guard let spaceID = tab.spaceID, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard let spaceID = tab.spaceID, !folderTree.isLive(tab.folderID), let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         let siblings = tab.folderID == nil ? tabsOutsideFolders(in: spaceID, pinned: tab.isPinned) : tabs.filter { $0.folderID == tab.folderID }
         guard let position = siblings.firstIndex(where: { $0.id == tab.id }) else { return }
         let target = up ? position - 1 : position + 1
@@ -1044,20 +1172,28 @@ public final class BrowserSession: ObservableObject {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona leaves the tab where it is.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
     public func moveTab(_ id: UUID, to target: Tab) {
-        guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID),
+        guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
         let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
         guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
-        tab.spaceID = spaceID
-        tab.isPinned = target.isPinned
-        tab.folderID = target.folderID
-        reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
-        tabs = reordered
+        movingItemTabs {
+            tab.spaceID = spaceID
+            tab.isPinned = target.isPinned
+            tab.folderID = target.folderID
+            reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
+            tabs = reordered
+        }
+    }
+
+    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned.
+    private func movingItemTabs(_ change: () -> Void) {
+        let left = LiveFolderTabs.itemTabsLeaving(tabs, during: change)
+        if !left.isEmpty { MainActor.assumeIsolated { itemTabsDidLeave(left) } }
     }
 
     /// Settings ▸ Sidebar saves under this key how many hours an unpinned tab stays open without being selected; 0 turns archiving off.
@@ -1084,11 +1220,13 @@ public final class BrowserSession: ObservableObject {
         return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }
 
-    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list.
+    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list; a live folder item's tab becomes an ordinary tab without its saved page.
     public func togglePinned(_ tab: Tab) {
         objectWillChange.send()
-        tab.folderID = nil
-        tab.isPinned.toggle()
+        movingItemTabs {
+            tab.folderID = nil
+            tab.isPinned.toggle()
+        }
     }
 
     /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or an address without spaces whose host is dotted, `localhost` or a name under it, or an IPv6 address in brackets. Adds `http://` to an address on this Mac, where development servers run without TLS, and `https://` to the others. `localhost:3000` is thus an address, though it parses as a URL whose scheme is `localhost`. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
@@ -1316,10 +1454,12 @@ public final class BrowserSession: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0 === moving }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        tab.spaceID = spaceID
-        tab.folderID = nil
-        reordered.append(tab)
-        tabs = reordered
+        movingItemTabs {
+            tab.spaceID = spaceID
+            tab.folderID = nil
+            reordered.append(tab)
+            tabs = reordered
+        }
         for window in windows where window.selectedTabID == tab.id { window.currentSpaceID = spaceID }
     }
 
@@ -1328,35 +1468,32 @@ public final class BrowserSession: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        tab.isPinned = pinned
-        tab.folderID = nil
-        reordered.append(tab)
-        tabs = reordered
+        movingItemTabs {
+            tab.isPinned = pinned
+            tab.folderID = nil
+            reordered.append(tab)
+            tabs = reordered
+        }
     }
 
     // MARK: Folders
 
-    /// Every space's folders. The sidebar shows a space's pinned and open folders in this order, each list starting with its folders.
+    /// Every space's folders. Among the folders of each parent, or at the top of each space's pinned or open list, the sidebar shows them in this order.
     @Published public private(set) var folders: [TabFolder] = []
 
-    /// A space's folders among its pinned or open tabs, in sidebar order.
+    /// The folders and tabs as the sidebar nests them (bookmark rule 6), which the rows, the folder menus, and the moves below ask.
+    var folderTree: FolderTree {
+        FolderTree(folders: folders, tabs: tabs)
+    }
+
+    /// A space's folders in its pinned or open list, at every level.
     public func folders(in spaceID: UUID, pinned: Bool) -> [TabFolder] {
         folders.filter { $0.spaceID == spaceID && $0.isPinned == pinned }
     }
 
-    /// A space's folders in sidebar order: those among its pinned tabs, then those among its open tabs.
+    /// A space's folders at every level: those among its pinned tabs, then those among its open tabs.
     public func folders(in spaceID: UUID) -> [TabFolder] {
         folders(in: spaceID, pinned: true) + folders(in: spaceID, pinned: false)
-    }
-
-    /// A folder's tabs in sidebar order.
-    public func tabs(in folder: TabFolder) -> [Tab] {
-        tabs.filter { $0.folderID == folder.id }
-    }
-
-    /// Whether `tab` sits in a collapsed folder, which shows it in the sidebar only while it is selected.
-    func isInCollapsedFolder(_ tab: Tab) -> Bool {
-        folders.contains { $0.id == tab.folderID && $0.isCollapsed }
     }
 
     /// A space's pinned or open tabs that are in no folder, in sidebar order. A small window's tab, which is in no folder, is left out until it moves to a main window.
@@ -1364,52 +1501,98 @@ public final class BrowserSession: ObservableObject {
         tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
-    /// Moves a tab into a folder of its space, after the folder's own tabs. The tab joins the folder's pinned or open list.
+    /// Moves a tab into an ordinary folder of its space, at any level, after the folder's own tabs. The tab joins the folder's pinned or open list. Nothing else enters a live folder (live folder rule 4).
     public func moveTab(_ id: UUID, toFolder folderID: UUID) {
-        guard let folder = folders.first(where: { $0.id == folderID }), let index = tabs.firstIndex(where: { $0.id == id }),
+        guard let folder = folders.first(where: { $0.id == folderID }), folder.live == nil, let index = tabs.firstIndex(where: { $0.id == id }),
               tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folderID else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        tab.isPinned = folder.isPinned
-        tab.folderID = folderID
-        reordered.append(tab)
-        tabs = reordered
+        movingItemTabs {
+            tab.isPinned = folder.isPinned
+            tab.folderID = folderID
+            reordered.append(tab)
+            tabs = reordered
+        }
     }
 
-    /// Takes a tab out of its folder.
-    public func removeFromFolder(_ tab: Tab) {
-        guard tab.folderID != nil else { return }
-        takeOutOfFolder([tab])
+    /// Move Out of Folder: moves a tab into its folder's parent, or out of folders, first among the tabs there.
+    public func moveOutOfFolder(_ tab: Tab) {
+        changeFolderTree { $0.moveTabOut(tab) }
+    }
+
+    /// Move to Folder for a folder: moves it with everything it holds into another folder of its list, last among that folder's folders, as `FolderTree.canMoveFolder(_:into:)` allows.
+    public func moveFolder(_ id: UUID, into parentID: UUID) {
+        changeFolderTree { $0.moveFolder(id, into: parentID) }
+    }
+
+    /// Move Out of Folder for a folder: moves it with everything it holds up one level, right after the folder it leaves.
+    public func moveFolderOut(_ id: UUID) {
+        changeFolderTree { $0.moveFolderOut(id) }
+    }
+
+    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it.
+    func moveFolder(_ id: UUID, to target: FolderTree.DropTarget) {
+        changeFolderTree { $0.moveFolder(id, to: target) }
+    }
+
+    /// The guard of a folder's drop on another space's symbol: a space of the folder's Persona other than its own, to which every tab inside the folder can move (Persona rule 3).
+    func canMoveFolder(_ id: UUID, toSpace spaceID: UUID) -> Bool {
+        guard let folder = folders.first(where: { $0.id == id }), folder.spaceID != spaceID,
+              let from = spaces.first(where: { $0.id == folder.spaceID }), let to = spaces.first(where: { $0.id == spaceID }),
+              from.resolvedPersonaID == to.resolvedPersonaID else { return false }
+        return folderTree.tabs(inside: id).allSatisfy { canMoveTab($0.id, toSpace: spaceID) }
+    }
+
+    /// Moves a folder dropped on another space's symbol, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind (`FolderTree.moveFolder(_:toSpace:)`). As for a dropped tab, its tabs leave the split view of the space they leave, and a window that selects one of them follows it to the space.
+    public func moveFolder(_ id: UUID, toSpace spaceID: UUID) {
+        guard canMoveFolder(id, toSpace: spaceID) else { return }
+        let carried = folderTree.tabs(inside: id)
+        carried.forEach { leaveSplitView($0) }
+        changeFolderTree { $0.moveFolder(id, toSpace: spaceID) }
+        for window in windows where carried.contains(where: { $0.id == window.selectedTabID }) { window.currentSpaceID = spaceID }
     }
 
     public func toggleCollapsed(ofFolder id: UUID) {
         updateFolder(id) { $0.isCollapsed.toggle() }
     }
 
-    /// Removes a folder and keeps its tabs.
+    /// Expands every collapsed folder that holds the folder `id`, so that the folder's row shows.
+    func expandFolders(holding id: UUID) {
+        for ancestor in folderTree.ancestors(of: id) where ancestor.isCollapsed {
+            updateFolder(ancestor.id) { $0.isCollapsed = false }
+        }
+    }
+
+    /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place in its parent, or at the top of its list, and its tabs go first among the tabs there. A live folder's item tabs close instead (`deleteLiveFolder(_:)`).
     public func deleteFolder(_ id: UUID) {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
-        takeOutOfFolder(tabs(in: folder))
-        folders.removeAll { $0.id == id }
+        if folder.live != nil { return MainActor.assumeIsolated { deleteLiveFolder(id) } }
+        changeFolderTree { $0.deleteFolder(id) }
         windows.forEach { $0.endRenamingFolder(id) }
     }
 
-    /// Appends a folder to a space's pinned or open folders.
-    func makeFolder(in spaceID: UUID, pinned: Bool) -> TabFolder {
-        let folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+    /// Appends a folder to a space's pinned or open list: at the top of the list, or last among the folders of `parentID`, a folder of that list in which `FolderTree.canAddFolder(inside:)` allows one.
+    func makeFolder(in spaceID: UUID, pinned: Bool, inside parentID: UUID? = nil) -> TabFolder {
+        var folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+        folder.parentID = parentID
         folders.append(folder)
         return folder
     }
 
-    /// Takes tabs of one folder out of it and puts them, in order, first among their list's tabs outside folders, just below the folders.
-    private func takeOutOfFolder(_ moved: [Tab]) {
-        guard let first = moved.first else { return }
-        let movedIDs = Set(moved.map(\.id))
-        var reordered = tabs.filter { !movedIDs.contains($0.id) }
-        moved.forEach { $0.folderID = nil }
-        let destination = reordered.firstIndex { $0.spaceID == first.spaceID && $0.isPinned == first.isPinned && $0.folderID == nil } ?? reordered.endIndex
-        reordered.insert(contentsOf: moved, at: destination)
-        tabs = reordered
+    /// Appends a folder made elsewhere, such as New Live Folder…'s, which then follows its space's other folders in its list.
+    func appendFolder(_ folder: TabFolder) {
+        folders.append(folder)
+    }
+
+    /// Applies a change of the folder tree to the session's folders and tabs. Both are set, so that the session publishes a change even when only a tab's folder changed. A live folder item's tab that the change takes out of its folder becomes an ordinary tab.
+    func changeFolderTree(_ change: (inout FolderTree) -> Void) {
+        // The tree's changes set the moved tabs' folders as they run.
+        movingItemTabs {
+            var tree = folderTree
+            change(&tree)
+            folders = tree.folders
+            tabs = tree.tabs
+        }
     }
 
     func updateFolder(_ id: UUID, _ change: (inout TabFolder) -> Void) {
@@ -1424,7 +1607,7 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Browser import
 
-    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected. `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
+    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected and saved at its imported address (bookmark rule 2). `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
     public func addImport(_ row: SidebarImport, to destination: SidebarImport.Destination, record: inout SidebarImport.Record) -> SidebarImport.Counts {
         let plan = SidebarImport.Plan(row, to: destination, entry: record.entry(for: row.profile), in: importSidebar)
         if let persona = plan.newPersona {
@@ -1436,11 +1619,8 @@ public final class BrowserSession: ObservableObject {
         addFavorites(plan.favorites, in: plan.personaID)
         for pinned in plan.pinnedTabs {
             let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
-            tab.folderID = pinned.folderID
-            tab.customTitle = pinned.customTitle
-            // It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing. So it is marked before it joins the list that the hooks follow.
-            tab.isRestored = true
-            tab.recordedURL = pinned.url
+            // It opens as a restored tab does, so it is marked before it joins the list that the hooks follow.
+            tab.takeImport(pinned)
             tabs.append(tab)
         }
         record.update(plan.entry)
@@ -1450,9 +1630,7 @@ public final class BrowserSession: ObservableObject {
 
     /// The sidebar as the browser import's plan resolves a row against it.
     private var importSidebar: SidebarImport.Sidebar {
-        SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap { tab in
-            tab.spaceID.map { SidebarImport.Sidebar.TabState(id: tab.id, spaceID: $0, isPinned: tab.isPinned, url: tab.url) }
-        })
+        SidebarImport.Sidebar(personas: personas, spaces: spaces, folders: folders, favorites: favorites, tabs: tabs.compactMap(SidebarImport.Sidebar.TabState.init))
     }
 
     // MARK: Split view
@@ -1556,6 +1734,7 @@ public final class BrowserSession: ObservableObject {
 
     /// Writes `session.json` and each Persona's cookie record marked as written at quit (`CookieSync.saveAtQuit()`), then waits for the records still on their queue, as quitting needs.
     public func saveAtQuit() {
+        MainActor.assumeIsolated { liveFolderService.stop() }
         saveNow()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
@@ -1580,6 +1759,60 @@ public final class BrowserSession: ObservableObject {
             guard let tab = favoriteTabs[favorite.id] else { return savedFavoriteTabs[favorite.id] }
             return SessionSnapshot.FavoriteTabRecord(id: tab.id, favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
         }
+    }
+}
+
+// MARK: Unloading
+
+extension BrowserSession {
+    /// Unloads the loaded tabs that no window shows and that `TabUnloading.tabsToUnload` picks (bookmark rule 5): for the archive timer without `pressure`, after the hours that Settings ▸ Sidebar saves under `TabUnloading.unloadAfterHoursKey`, or at the memory pressure source's level.
+    func unloadInactiveTabs(pressure: UnloadPressure?) {
+        let candidates = allTabs.compactMap(unloadCandidate)
+        for id in TabUnloading.tabsToUnload(candidates, now: Date(), after: TabUnloading.unloadAfterHours(), pressure: pressure) {
+            if let tab = allTabs.first(where: { $0.id == id }) { unloadAutomatically(tab) }
+        }
+    }
+
+    /// The tab as automatic unloading weighs it, with what keeps it loaded, or nil for a tab without its page, one that a window shows, and one whose page has not answered an earlier unload yet.
+    private func unloadCandidate(_ tab: Tab) -> UnloadCandidate? {
+        guard tab.isLoaded, window(showing: tab) == nil, !tab.answersBeforeUnloadWithStay else { return nil }
+        let page = tab.webContents
+        var exclusions: Set<UnloadExclusion> = []
+        if tab.isAudible || page.mediaSession.playbackState == .playing { exclusions.insert(.media) }
+        if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
+        if tab.isCapturingMedia { exclusions.insert(.capture) }
+        if tab.hasTypedInput { exclusions.insert(.typedInput) }
+        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
+            exclusions.insert(.notifications)
+        }
+        if prompts.hasPrompt(for: tab.id) { exclusions.insert(.prompt) }
+        if page.closingStopsDownloads || downloadOnlyTabIDs.contains(tab.id) { exclusions.insert(.downloads) }
+        if tab.isInSmallWindow { exclusions.insert(.smallWindow) }
+        if page.devTools?.isOpen == true { exclusions.insert(.developerTools) }
+        if allTabs.contains(where: { $0.opener === page && window(showing: $0) != nil }) { exclusions.insert(.opener) }
+        let kind: UnloadCandidate.Kind = tab.spaceID == nil ? .favorite : tab.isPinned ? .pinned : .open
+        return UnloadCandidate(id: tab.id, kind: kind, lastActivatedAt: tab.lastActivatedAt, exclusions: exclusions)
+    }
+
+    /// Asks the tab's page to leave as closing does, but answers a Chromium page's leave-page question with Stay without a card, and unloads the tab in place once the page agrees; a page that stays keeps its tab loaded until the next try. WebKit agrees at once, so there its typed text exclusion keeps a draft. A close the user asks for meanwhile takes over the question (`whenPageAgreesToLeave`), and the page's answer then reaches only that close. A Chromium tab that a window starts to show meanwhile still unloads once its page agrees, since CEF is already closing the browser, and loads again at once without its page state (`docs/bookmarks.md`, risk 9).
+    private func unloadAutomatically(_ tab: Tab) {
+        let page = tab.webContents
+        tab.answersBeforeUnloadWithStay = true
+        page.tryToClose { [weak self, weak tab] agrees in
+            guard let self, let tab, tab.webContents === page, tab.answersBeforeUnloadWithStay else { return }
+            tab.answersBeforeUnloadWithStay = false
+            if agrees { self.unloadKeepingPage(tab) }
+        }
+    }
+
+    /// An automatic unload: the tab keeps its place, folder, split view, and ID, and a favorite's tab its favorite, with a stand-in that keeps its address, title, icon, and its engine's page state (`Tab.unloadKeepingPage()`), while its page closes. Nothing joins the closed list or the tab close log, and its row keeps its icon, so it requests none. A window loads each pane again as it shows the split view.
+    private func unloadKeepingPage(_ tab: Tab) {
+        guard allTabs.contains(where: { $0 === tab }) else { return }
+        // A prompt that came after the page was asked to leave ends; its code can close the tab, so the lists are read again afterwards.
+        prompts.dismiss(tabID: tab.id)
+        guard allTabs.contains(where: { $0 === tab }), tab.isLoaded else { return }
+        retire(tab.unloadKeepingPage(), of: tab.personaID)
+        loadPageIfShown(tab)
     }
 }
 
@@ -1706,7 +1939,7 @@ extension BrowserSession: EngineDownloadsDelegate {
         downloadOnlyTabIDs.remove(tab.id)
         // The engine is still choosing the file's destination, so the tab closes once that callback returns.
         DispatchQueue.main.async { [weak self, weak tab] in
-            if let self, let tab { self.closeTab(tab, remember: false, reason: .download) }
+            if let self, let tab { self.closeTab(tab, reason: .download) }
         }
     }
 

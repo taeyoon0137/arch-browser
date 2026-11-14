@@ -1,6 +1,7 @@
 // Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, a scheduled save writes the snapshot taken last, or nothing without one, and the page state is sealed in a file only the user can read.
 import CryptoKit
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -240,6 +241,144 @@ import Testing
         #expect(try #require(folder.store.load()).tabs.map(\.suggestedTitle) == loaded.tabs.map(\.suggestedTitle))
     }
 
+    @Test func version12FilesSavePinnedTabsAtThePagesTheyShow() throws {
+        let folder = try SessionFolder()
+        try folder.write(version12File)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.tabs.map(\.isPinned) == [true, false, false])
+        #expect(loaded.tabs.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/a")!, title: "A"), nil, nil])
+        #expect(loaded.closedTabs?.map(\.savedPage) == [nil])
+        // A closed pinned record gets one too, so that ⇧⌘T reopens the tab saved at the page it closed on.
+        try folder.write(version12File.replacingOccurrences(of: #""title": "Closed", "isPinned": false,"#, with: #""title": "Closed", "isPinned": true,"#))
+        let closedPinned = try #require(folder.store.load())
+        #expect(closedPinned.closedTabs?.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/closed")!, title: "Closed")])
+    }
+
+    /// A version 13 file, as the builds that seal page state write it before saved pages, folder parents, and live folders: its sealed state opens, its pinned records, open and closed, gain their saved pages, and its folders stay at the top level.
+    @Test func version13FilesKeepTheirSealedStateAndGainSavedPages() throws {
+        let folder = try SessionFolder()
+        let state = Data("back-forward list".utf8)
+        let pinned = SessionSnapshot.TabRecord(id: tab1, spaceID: spaceA, url: URL(string: "https://example.org/a")!, title: "A", isPinned: true, folderID: docsFolder, engine: .webKit, state: state)
+        let closed = SessionSnapshot.TabRecord(id: closedTab, spaceID: spaceA, url: URL(string: "https://example.org/closed")!, title: "Closed", isPinned: true)
+        let docs = TabFolder(id: docsFolder, spaceID: spaceA, name: "Docs", isPinned: true)
+        folder.store.saveNow(SessionSnapshot(version: 13, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: [pinned], folders: [docs], closedTabs: [closed]))
+        let file = try folder.contents(of: "session.json")
+        #expect(file.range(of: state) == nil)
+        #expect(["savedPage", "parentID", "live", "liveItemID"].allSatisfy { file.range(of: Data("\"\($0)\"".utf8)) == nil })
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.tabs.map(\.state) == [state])
+        #expect(loaded.tabs.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/a")!, title: "A")])
+        #expect(loaded.closedTabs?.map(\.savedPage) == [SavedPage(url: URL(string: "https://example.org/closed")!, title: "Closed")])
+        #expect(loaded.folders?.map(\.parentID) == [nil] && loaded.tabs.map(\.folderID) == [docsFolder])
+    }
+
+    @Test func savedPagesLoadAndSaveWithOpenAndClosedRecords() throws {
+        let folder = try SessionFolder()
+        try folder.write(version14File)
+        let loaded = try #require(folder.store.load())
+        let saved = SavedPage(url: URL(string: "https://example.org/saved")!, title: "Saved")
+        // The unpinned records' saved pages go, and the pinned ones keep theirs wherever their pages went.
+        #expect(loaded.tabs.map(\.url) == ["a", "b", "c"].map { URL(string: "https://example.org/\($0)") })
+        #expect(loaded.tabs.map(\.savedPage) == [saved, nil, nil])
+        #expect(loaded.closedTabs?.map(\.savedPage) == [saved, nil])
+        folder.store.saveNow(loaded)
+        let reloaded = try #require(folder.store.load())
+        #expect(reloaded.tabs.map(\.savedPage) == loaded.tabs.map(\.savedPage))
+        #expect(reloaded.closedTabs?.map(\.savedPage) == loaded.closedTabs?.map(\.savedPage))
+    }
+
+    @Test func version14FoldersLoadAtTheTopLevel() throws {
+        let folder = try SessionFolder()
+        try folder.write(version14FileWithFolders)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.map(\.id) == [workFolder, docsFolder])
+        #expect(loaded.folders?.map(\.parentID) == [nil, nil])
+        #expect(loaded.tabs.map(\.folderID) == [docsFolder, nil, nil])
+    }
+
+    @Test func folderParentsLoadAndSaveAndThoseTheFileCannotKeepAreCleared() throws {
+        let folder = try SessionFolder()
+        try folder.write(version15File)
+        let loaded = try #require(folder.store.load())
+        // Docs stays in Work; Loose names a folder that is not in the file, and Mixed one of the open list.
+        #expect(loaded.folders?.map(\.id) == [workFolder, docsFolder, looseFolder, mixedFolder])
+        #expect(loaded.folders?.map(\.parentID) == [nil, workFolder, nil, nil])
+        folder.store.saveNow(loaded)
+        #expect(try #require(folder.store.load()).folders?.map(\.parentID) == loaded.folders?.map(\.parentID))
+    }
+
+    @Test func liveFoldersAndItemTabsLoadAndSaveAndWhatTheFileCannotKeepIsRepaired() throws {
+        let folder = try SessionFolder()
+        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false), itemLimit: 10, refreshMinutes: 60)
+        let pulls = LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .myPullRequests)))
+        let work = TabFolder(id: workFolder, spaceID: spaceA, name: "Work", isPinned: true)
+        // News sits in Work; Pulls among the open tabs moves to the pinned list; Docs, inside a live folder, moves to the top.
+        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, parentID: workFolder, live: feed)
+        let pullsFolder = TabFolder(id: looseFolder, spaceID: spaceA, name: "Pulls", isPinned: false, live: pulls)
+        let inside = TabFolder(id: mixedFolder, spaceID: spaceA, name: "Docs", isPinned: true, parentID: docsFolder)
+        func record(_ id: UUID, space: UUID = spaceA, pinned: Bool = true, folder: UUID?, item: String?) -> SessionSnapshot.TabRecord {
+            SessionSnapshot.TabRecord(id: id, spaceID: space, url: URL(string: "https://blog.example.org/\(id)")!, title: "Post", isPinned: pinned, folderID: folder, liveItemID: item)
+        }
+        let records = [
+            record(tab1, folder: docsFolder, item: "a"),
+            record(tab2, pinned: false, folder: looseFolder, item: "b"),
+            // Not an item: it leaves News for Work, which holds News.
+            record(tab3, folder: docsFolder, item: nil),
+            // An item outside live folders, and one of another space, lose their items.
+            record(favoriteTab, folder: workFolder, item: "c"),
+            record(closedTab, space: spaceB, folder: docsFolder, item: "d"),
+        ]
+        let closed = record(UUID(), folder: docsFolder, item: "e")
+        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A"), Space(id: spaceB, name: "B")], currentSpaceID: spaceA, favorites: [], tabs: records,
+                                       folders: [work, news, pullsFolder, inside], closedTabs: [closed])
+        folder.store.saveNow(snapshot)
+        let loaded = try #require(folder.store.load())
+        let folders = try #require(loaded.folders)
+        #expect(folders.map(\.live) == [nil, feed, pulls, nil])
+        #expect(folders.map(\.isPinned) == [true, true, true, true])
+        #expect(folders.map(\.parentID) == [nil, workFolder, nil, nil])
+        #expect(loaded.tabs.map(\.liveItemID) == ["a", "b", nil, nil, nil])
+        #expect(loaded.tabs.map(\.folderID) == [docsFolder, looseFolder, workFolder, workFolder, nil])
+        #expect(loaded.tabs[1].isPinned)
+        // A pinned item record gets the saved page that bookmark rule 2 gives it.
+        #expect(loaded.tabs[1].savedPage?.url == records[1].url)
+        #expect(loaded.closedTabs?.map(\.liveItemID) == [nil])
+        // A round trip keeps them.
+        folder.store.saveNow(loaded)
+        let again = try #require(folder.store.load())
+        #expect(again.folders == loaded.folders)
+        #expect(again.tabs == loaded.tabs)
+    }
+
+    @Test func version15FilesLoadWithoutLiveFolders() throws {
+        let folder = try SessionFolder()
+        try folder.write(version15File)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.allSatisfy { $0.live == nil } == true)
+        #expect(loaded.tabs.allSatisfy { $0.liveItemID == nil })
+    }
+
+    @Test func aLiveFolderWhoseConfigurationDoesNotDecodeLoadsAsAnOrdinaryFolder() throws {
+        let folder = try SessionFolder()
+        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false))
+        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, live: feed)
+        let record = SessionSnapshot.TabRecord(id: tab1, spaceID: spaceA, url: URL(string: "https://blog.example.org/a")!, title: "Post", isPinned: true, folderID: docsFolder, liveItemID: "a")
+        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: [record], folders: [news])
+        // A source that a later build could add.
+        var file = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        var folders = try #require(file["folders"] as? [[String: Any]])
+        var live = try #require(folders[0]["live"] as? [String: Any])
+        live["source"] = ["laterSource": ["query": "x"]]
+        folders[0]["live"] = live
+        file["folders"] = folders
+        try JSONSerialization.data(withJSONObject: file).write(to: folder.store.fileURL)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.map(\.id) == [docsFolder])
+        #expect(loaded.folders?.map(\.live) == [nil])
+        #expect(loaded.tabs.map(\.id) == [tab1] && loaded.tabs.map(\.folderID) == [docsFolder] && loaded.tabs.map(\.liveItemID) == [nil])
+        #expect(try folder.fileNames() == ["session.json"])
+    }
+
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
         let folder = try SessionFolder()
         let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": [1, 2],"#)
@@ -382,6 +521,10 @@ private let window3 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F43")!
 private let window4 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F44")!
 private let window5 = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F45")!
 private let frontFrame = CGRect(x: 100, y: 200, width: 1000, height: 700)
+private let workFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F51")!
+private let docsFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F52")!
+private let looseFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F53")!
+private let mixedFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F54")!
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]
@@ -529,3 +672,30 @@ private let version12File = version8File
     .replacingOccurrences(of: #""version": 8,"#, with: #""version": 12,"#)
     .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "suggestedTitle": { "title": "Example Article", "url": "https://example.org/a" }, "isPinned": true,"#)
     .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "suggestedTitle": { "url": "https://example.org/b" }, "isPinned": false,"#)
+
+/// A version 14 file whose pinned tab, saved at another page, and an unpinned tab carry saved pages, as do a pinned and an unpinned closed record.
+private let version14File = version8File
+    .replacingOccurrences(of: #""version": 8,"#, with: #""version": 14,"#)
+    .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" },"#)
+    .replacingOccurrences(of: #""title": "B", "isPinned": false,"#, with: #""title": "B", "isPinned": false, "savedPage": { "url": "https://example.org/stray", "title": "Stray" },"#)
+    .replacingOccurrences(of: #""closedTabs": [ { "#, with: #""closedTabs": [ { "id": "\#(UUID())", "spaceID": "\#(spaceA)", "url": "https://example.org/gone", "title": "Gone", "isPinned": true, "savedPage": { "url": "https://example.org/saved", "title": "Saved" } }, { "savedPage": { "url": "https://example.org/stray", "title": "Stray" }, "#)
+
+/// A version 14 file whose pinned tab sits in Docs, the second of two pinned folders, which have no parents before version 15.
+private let version14FileWithFolders = version14File
+    .replacingOccurrences(of: #""title": "A", "isPinned": true,"#, with: #""title": "A", "isPinned": true, "folderID": "\#(docsFolder)","#)
+    .replacingOccurrences(of: #""selectedTabIndex": 2,"#, with: """
+"folders": [
+    { "id": "\(workFolder)", "spaceID": "\(spaceA)", "name": "Work", "isPinned": true, "isCollapsed": false },
+    { "id": "\(docsFolder)", "spaceID": "\(spaceA)", "name": "Docs", "isPinned": true, "isCollapsed": true }
+  ],
+  "selectedTabIndex": 2,
+""")
+
+/// A version 15 file whose Docs folder sits in Work, beside a folder whose parent is not in the file and an open folder whose parent is a pinned one.
+private let version15File = version14FileWithFolders
+    .replacingOccurrences(of: #""version": 14,"#, with: #""version": 15,"#)
+    .replacingOccurrences(of: #""name": "Docs", "isPinned": true, "isCollapsed": true }"#, with: """
+"name": "Docs", "isPinned": true, "isCollapsed": true, "parentID": "\(workFolder)" },
+    { "id": "\(looseFolder)", "spaceID": "\(spaceA)", "name": "Loose", "isPinned": true, "isCollapsed": false, "parentID": "\(UUID())" },
+    { "id": "\(mixedFolder)", "spaceID": "\(spaceA)", "name": "Mixed", "isPinned": false, "isCollapsed": false, "parentID": "\(workFolder)" }
+""")

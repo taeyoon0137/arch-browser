@@ -356,6 +356,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
+/// Reports whether the page uses a video source, such as the camera, and an audio source, such as the microphone, whenever either changes (CEF's `OnMediaAccessChange`).
+- (void)cefBrowserDidChangeMediaAccessWithVideo:(BOOL)hasVideoAccess audio:(BOOL)hasAudioAccess NS_SWIFT_NAME(cefBrowserDidChangeMediaAccess(video:audio:));
 /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
 - (void)cefBrowserDidChangeMedia:(nullable NSDictionary<NSString *, id> *)media frame:(NSString *)frameIdentifier;
 /// Reports the view that the developer tools fill once they open. The view stays the same until `cefBrowserDevToolsDidClose`; the app may move it between superviews and windows.

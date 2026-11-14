@@ -18,7 +18,7 @@ enum SidebarFill {
     }
 }
 
-/// The opacity of the icon and title of a sidebar item whose page is not open, so open pages stand out: a tab restored from the last session before a window shows it, and a favorite without its tab.
+/// The opacity of the icon and title of a sidebar item whose page is not open, so open pages stand out: a tab without its page, as one restored from the last session before a window shows it or one unloaded since (bookmark rules 4 and 5), and a favorite without an open page.
 enum SidebarDimming {
     static let unopened = 0.5
 }
@@ -345,7 +345,7 @@ extension EnvironmentValues {
         set { self[SidebarIsFloatingKey.self] = newValue }
     }
 
-    /// Set in a space's tab list while one of its tabs is dragged.
+    /// Set in a space's tab list while one of its tab or folder rows is dragged, and on the lifted row.
     var isDraggingTab: Bool {
         get { self[IsDraggingTabKey.self] }
         set { self[IsDraggingTabKey.self] = newValue }

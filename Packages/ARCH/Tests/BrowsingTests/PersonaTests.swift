@@ -71,6 +71,15 @@ import Testing
         #expect(BrowserWindowModel.sheetName(ofPersona: work.id, space: nil, among: personas) == "the Persona \u{201C}Work\u{201D}")
     }
 
+    /// Two Personas can each have a space named Personal, which the lists of every Persona's spaces, such as the Bookmarks menu's submenus, tell apart.
+    @Test func twoPersonasSpacesNamedPersonalAreToldApart() {
+        let personas = [defaultPersona, work]
+        let defaultPersonal = BrowserSession.displayedPlace(ofPersona: Persona.defaultID, space: Space(name: "Personal", personaID: Persona.defaultID), among: personas)
+        let workPersonal = BrowserSession.displayedPlace(ofPersona: work.id, space: Space(name: "Personal", personaID: work.id), among: personas)
+        #expect(defaultPersonal == "Default / Personal")
+        #expect(workPersonal == "Work / Personal")
+    }
+
     /// A Persona that is no longer listed, as while its deletion finishes, is not named.
     @Test func aDeletedPersonaIsNotNamed() {
         #expect(BrowserSession.displayedPlace(ofPersona: UUID(), space: research, among: [defaultPersona, work]) == nil)

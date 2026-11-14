@@ -1,4 +1,4 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab rows do, and dragging one over another moves it to that place. A tab released over the symbol of another space of its Persona moves to that space, and one released over a folder's row joins that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab rows is in `SidebarDragState.swift`.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab and folder rows do, and dragging one over another moves it to that place. A tab or folder released over the symbol of another space of its Persona moves to that space, and one released over a folder's row goes into that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab and folder rows is in `SidebarDragState.swift`.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -73,7 +73,7 @@ struct SidebarItemDrag: ViewModifier {
     }
 }
 
-/// Draws a lifted favorite or space symbol at the pointer, above the sidebar and the page. `TabDragLayer` draws lifted tabs.
+/// Draws a lifted favorite or space symbol at the pointer, above the sidebar and the page. `TabDragLayer` draws lifted tab and folder rows.
 struct SidebarItemDragLayer: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -81,7 +81,7 @@ struct SidebarItemDragLayer: View {
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
-        if sidebarDrag.item != nil, sidebarDrag.tabID == nil {
+        if let item = sidebarDrag.item, !item.isRow {
             liftedItem
                 .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
                 .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
@@ -108,7 +108,7 @@ struct SidebarItemDragLayer: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
-        case .tab, nil:
+        case .tab, .folder, nil:
             EmptyView()
         }
     }

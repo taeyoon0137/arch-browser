@@ -1,8 +1,8 @@
-// Learns whether a WebKit page plays sound and what its media is. WebKit has no public API for either, so a script in its own content world watches each document's media elements.
+// Learns whether a WebKit page plays sound, what its media is, and whether a video of it is in picture in picture. WebKit has no public API for any of them, so a script in its own content world watches each document's media elements.
 import ARCHEngine
 import WebKit
 
-/// Reports whether a document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in its own content world, so pages cannot read or replace it. Keep it in step with the Chromium engine's script in CEFBridgeHelper.mm.
+/// Reports whether a document's media elements play sound, and describes the element that last played sound together with the page's Media Session metadata. It runs in its own content world, so pages cannot read or replace it. Keep it in step with the Chromium engine's script in CEFBridgeHelper.mm. It also reports whether a video of the document is in picture in picture, which the Chromium adapter learns from the engine instead.
 final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
     static let world = WKContentWorld.world(name: "ARCHMedia")
     static let handlerName = "archAudible"
@@ -11,7 +11,7 @@ final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
       const id = `${Date.now()}-${Math.random()}`;
       const post = (body) => window.webkit.messageHandlers.\(handlerName).postMessage({ id, ...body });
       const session = navigator.mediaSession;
-      let audible = false, hidden = false, current = null, actions = [], reported = 'null';
+      let audible = false, hidden = false, current = null, actions = [], reported = 'null', pictureInPicture = false;
       const sounds = (m) => !m.paused && !m.ended && !m.muted && m.volume > 0;
       const largest = (artwork) => {
         let best = '', area = -1;
@@ -32,6 +32,11 @@ final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
           next: actions.includes('nexttrack'), previous: actions.includes('previoustrack'),
         };
       };
+      // A paused or muted video in picture in picture counts too, since its window closes with the page.
+      const updatePictureInPicture = () => {
+        const now = !hidden && (document.pictureInPictureElement != null || [...document.querySelectorAll('video')].some((v) => v.webkitPresentationMode === 'picture-in-picture'));
+        if (now !== pictureInPicture) { pictureInPicture = now; post({ pictureInPicture: now }); }
+      };
       const updateMedia = () => { const media = describe(), text = JSON.stringify(media); if (text !== reported) { reported = text; post({ media }); } };
       const update = (event) => {
         if (event && event.target instanceof HTMLMediaElement && sounds(event.target)) current = event.target;
@@ -41,8 +46,10 @@ final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
         const now = !hidden && media.some(sounds);
         if (now !== audible) { audible = now; post({ audible: now }); }
         updateMedia();
+        updatePictureInPicture();
       };
       for (const type of ['play', 'playing', 'pause', 'ended', 'volumechange', 'emptied', 'seeked', 'ratechange', 'durationchange', 'loadedmetadata']) document.addEventListener(type, update, true);
+      for (const type of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) document.addEventListener(type, updatePictureInPicture, true);
       addEventListener('pagehide', () => { hidden = true; update(); });
       addEventListener('pageshow', () => { hidden = false; update(); });
       // The page world's script reports the actions the page handles whenever they or the metadata change.
@@ -93,6 +100,9 @@ final class WebKitAudibleScript: NSObject, WKScriptMessageHandler {
         if let media = body["media"] {
             contents.setDocument(id, media: media, frame: message.frameInfo)
         }
+        if let isInPictureInPicture = body["pictureInPicture"] as? Bool {
+            contents.setDocument(id, pictureInPicture: isInPictureInPicture)
+        }
     }
 }
 
@@ -112,6 +122,15 @@ extension WebKitWebContents {
         if isAudible != wasAudible { uiDelegate?.webContentsDidChangeAudibleState(self) }
     }
 
+    /// Records whether one document has a video in picture in picture; the page has one while any of its documents does.
+    func setDocument(_ id: String, pictureInPicture: Bool) {
+        if pictureInPicture {
+            pictureInPictureDocuments.insert(id)
+        } else {
+            pictureInPictureDocuments.remove(id)
+        }
+    }
+
     /// Records one document's media, or its lack of media, and the frame where its media actions run.
     func setDocument(_ id: String, media: Any, frame: WKFrameInfo) {
         mediaFrames[id] = media is [String: Any] ? frame : nil
@@ -124,9 +143,10 @@ extension WebKitWebContents {
         webView.callAsyncJavaScript("__archMediaControl(id, action)", arguments: ["id": id, "action": action.rawValue], in: frame, in: WebKitAudibleScript.world)
     }
 
-    /// A page whose process quit plays nothing, and its documents never report again.
+    /// A page whose process quit plays nothing, its picture in picture ends, and its documents never report again.
     func clearAudibleDocuments() {
         mediaFrames.removeAll()
+        pictureInPictureDocuments.removeAll()
         webKitMediaSession.removeAllDocuments()
         guard isAudible else { return }
         audibleDocuments.removeAll()

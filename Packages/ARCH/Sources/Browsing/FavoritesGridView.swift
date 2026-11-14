@@ -37,6 +37,15 @@ struct FavoritesGridView: View {
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
                     .contextMenu {
+                        // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
+                        if let tab = session.openTab(ofFavorite: favorite) {
+                            FavoriteTabSavedPageItems(tab: tab, session: session)
+                        } else {
+                            Button("Use Current Page as Saved Page") {}.disabled(true)
+                        }
+                        Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
+                        Button("Copy Address") { BrowserSession.copyAddress(favorite.url) }
+                        Divider()
                         Button("Close") { session.closeFavorite(favorite) }
                             .disabled(!session.hasTab(favorite))
                         Divider()
@@ -56,6 +65,20 @@ struct FavoritesGridView: View {
     }
 }
 
+/// A favorite tile's Go Back to Saved Page and Use Current Page as Saved Page, which follow the favorite's open tab: the grid redraws with the window's selected tab and the session's lists, so a page change in the tab while another tab is selected would otherwise leave them as they were.
+private struct FavoriteTabSavedPageItems: View {
+    @ObservedObject var tab: Tab
+    @ObservedObject var session: BrowserSession
+
+    var body: some View {
+        if session.isOffSavedPage(tab) {
+            Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+        }
+        Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }
+            .disabled(!session.canUseCurrentPageAsSavedPage(tab))
+    }
+}
+
 struct FavoriteTileView: View {
     let favorite: Favorite
     /// Set while the favorite's tab is selected.
@@ -64,6 +87,8 @@ struct FavoriteTileView: View {
     let isOpen: Bool
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
+    /// The icon address last requested, so that an icon arriving after the favorite moved to another site is dropped.
+    @State private var iconURL: URL?
     @State private var isHovering = false
 
     var body: some View {
@@ -103,9 +128,21 @@ struct FavoriteTileView: View {
             .accessibilityLabel(favorite.title)
             .accessibilityValue(isOpen ? "Open" : "")
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-            .onAppear {
-                guard icon == nil, let url = FaviconLoader.defaultIconURL(for: favorite.url) else { return }
-                FaviconLoader.load(url) { icon = $0 }
+            .onAppear(perform: loadIcon)
+            // Use Current Page as Saved Page and Edit Favorite… can move the favorite to another site.
+            .onChange(of: favorite.url) {
+                icon = nil
+                loadIcon()
             }
+    }
+
+    private func loadIcon() {
+        guard icon == nil else { return }
+        let url = FaviconLoader.defaultIconURL(for: favorite.url)
+        iconURL = url
+        guard let url else { return }
+        FaviconLoader.load(url) { image in
+            if iconURL == url { icon = image }
+        }
     }
 }

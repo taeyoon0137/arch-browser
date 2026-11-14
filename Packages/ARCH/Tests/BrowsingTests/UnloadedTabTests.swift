@@ -128,7 +128,7 @@ import Testing
         let tab = restoredTab(record)
         let page = tab.webContents
         #expect(tab.engineKind == .webKit)
-        #expect(!page.isLoading && !page.canGoBack && !page.canGoForward && !page.isAudible)
+        #expect(!page.isLoading && !page.canGoBack && !page.canGoForward && !page.isAudible && !page.isInPictureInPicture)
         #expect(page.devTools == nil)
         #expect(page.mediaSession.playbackState == .none)
         #expect(page.navigationController.backForwardList.backList.isEmpty)
@@ -155,25 +155,40 @@ import Testing
     }
 }
 
-/// An engine's page as far as these tests need one: its engine and address, and a load in progress.
-private final class PageStub: EngineWebContents {
+/// An engine's page as far as the tab tests need one: its engine, address, title, icon, page state, and capture, a load in progress, and the loads asked of it. `report(url:title:)` tells the tab what the page shows, as an engine does.
+final class PageStub: EngineWebContents {
     let engineKind: EngineKind
-    let url: URL?
+    private(set) var url: URL?
+    private(set) var title = ""
     init(engine: EngineKind, url: URL?) {
         engineKind = engine
         self.url = url
     }
 
-    let title = ""
-    let favicon: NSImage? = nil
+    /// The page moves to `url`, then shows `title`, each reported to the tab.
+    func report(url: URL?, title: String = "") {
+        self.url = url
+        uiDelegate?.webContentsDidChangeURL(self)
+        self.title = title
+        uiDelegate?.webContentsDidChangeTitle(self)
+    }
+
+    /// The addresses loaded through the navigation controller, in order.
+    var loadedURLs: [URL?] { navigation.loadedURLs }
+
+    /// The page's icon, page state, and capture, which a test sets as an engine's page would have them.
+    var favicon: NSImage?
+    var restorableState: Data?
+    var isCapturingMedia = false
     let isLoading = true
     let canGoBack = false
     let canGoForward = false
-    let restorableState: Data? = nil
     let isAudible = false
+    let isInPictureInPicture = false
     var zoomFactor = 1.0
     lazy var view = NSView()
-    let navigationController: any EngineNavigationController = NavigationStub()
+    private let navigation = NavigationStub()
+    var navigationController: any EngineNavigationController { navigation }
     let mediaSession: any EngineMediaSession = MediaStub()
     weak var uiDelegate: (any EngineWebContentsUIDelegate)?
     weak var navigationDelegate: (any EngineWebContentsNavigationDelegate)?
@@ -208,9 +223,10 @@ private final class MediaStub: EngineMediaSession {
 }
 
 private final class NavigationStub: EngineNavigationController, EngineBackForwardList {
+    private(set) var loadedURLs: [URL?] = []
     var backForwardList: any EngineBackForwardList { self }
     let backList: [any EngineBackForwardListItem] = []
-    func load(_ request: URLRequest) {}
+    func load(_ request: URLRequest) { loadedURLs.append(request.url) }
     func reload() {}
     func reloadWithoutCache() {}
     func stop() {}

@@ -1,4 +1,4 @@
-// The stand-in for the page of a tab restored from `session.json` until a window first shows the tab. It keeps the address, title, engine, and page state of the tab's record, so saving writes the record back unchanged, and it loads nothing, so no engine starts a page, or a renderer, for a tab that no window shows. The session puts the engine's web contents in its place as a window first shows the tab (`BrowserSession.loadPage(of:)`).
+// The stand-in for the page of a tab without one: a tab restored from `session.json` until a window first shows it, and a tab whose page unloaded (`docs/bookmarks.md`, Unloading). It keeps the address, title, engine, and page state of the tab's record or of the page that unloaded, so saving writes the record back unchanged, and it loads nothing, so no engine starts a page, or a renderer, for a tab that no window shows. The session puts the engine's web contents in its place as a window next shows the tab (`BrowserSession.loadPage(of:)`).
 import AppKit
 import ARCHEngine
 import Foundation
@@ -9,8 +9,10 @@ final class UnloadedWebContents: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
     private(set) var title: String
-    /// The site's usual icon once `loadSiteIcon()` finds one.
+    /// The icon of the page that unloaded, the site's usual icon once `loadSiteIcon()` finds one, or a live folder's icon (`showIcon(_:)`).
     private(set) var favicon: NSImage?
+    /// False for a live folder item's tab, whose row shows its folder's icon, so that a folder of links to many sites contacts none of them until the user opens an item (`docs/bookmarks.md`, Items as tabs): `loadSiteIcon()` requests nothing, and a load keeps the icon.
+    let requestsSiteIcon: Bool
     /// The engine's saved state, which the page restores when it loads, or nil after a load replaced the saved page.
     private(set) var restorableState: Data?
     /// Kept for the page, which takes its host's remembered zoom once it loads.
@@ -27,24 +29,29 @@ final class UnloadedWebContents: EngineWebContents {
     var canGoBack: Bool { false }
     var canGoForward: Bool { false }
     var isAudible: Bool { false }
+    var isCapturingMedia: Bool { false }
+    var isInPictureInPicture: Bool { false }
     var closingStopsDownloads: Bool { false }
     var devTools: (any EngineDevTools)? { nil }
 
-    init(url: URL?, title: String, engine: EngineKind, state: Data?) {
+    /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing, or a live folder's icon.
+    init(url: URL?, title: String, engine: EngineKind, state: Data?, icon: NSImage? = nil, requestsSiteIcon: Bool = true) {
         self.url = url
         self.title = title
         engineKind = engine
         restorableState = state
+        favicon = icon
+        self.requestsSiteIcon = requestsSiteIcon
     }
 
-    /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state.
+    /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state. A live folder item's stand-in requests no site icon.
     convenience init(record: SessionSnapshot.TabRecord, defaultEngine: EngineKind) {
-        self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
+        self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state, requestsSiteIcon: record.liveItemID == nil)
     }
 
-    /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`).
+    /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`). A live folder item's stand-in requests none.
     func loadSiteIcon() {
-        guard let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }
+        guard requestsSiteIcon, let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }
         FaviconLoader.load(iconURL) { [weak self] image in
             guard let self, let image, self.url == pageURL else { return }
             self.favicon = image
@@ -52,11 +59,17 @@ final class UnloadedWebContents: EngineWebContents {
         }
     }
 
-    /// Replaces the saved page with `url`, which the tab then loads from the start, without the saved state, title, or icon.
+    /// Shows a live folder's icon in an item's row until the item's page loads and reports its own.
+    func showIcon(_ icon: NSImage) {
+        favicon = icon
+        uiDelegate?.webContentsDidChangeFavicon(self)
+    }
+
+    /// Replaces the saved page with `url`, which the tab then loads from the start, without the saved state, title, or icon. A live folder item's stand-in keeps its folder's icon.
     fileprivate func replacePage(with url: URL?) {
         self.url = url
         title = ""
-        favicon = nil
+        if requestsSiteIcon { favicon = nil }
         restorableState = nil
         uiDelegate?.webContentsDidChangeURL(self)
         uiDelegate?.webContentsDidChangeTitle(self)
