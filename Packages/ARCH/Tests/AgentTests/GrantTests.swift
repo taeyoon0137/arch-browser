@@ -125,6 +125,25 @@ import Testing
         #expect(AgentClientError.noGrant("").exitCode.rawValue == 6)
     }
 
+    @Test func disconnectEmptiesTheSidebarAndKeepsTheGrantForReconnect() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice()]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        _ = try await client.callTool("session_info")
+        let grant = try #require(service.connectedGrants.first)
+        service.stopClient(grant.id)
+        try await waitUntil { service.connectedGrants.isEmpty }
+        #expect(service.grants.map(\.id) == [grant.id])
+        let next = try TestClient(harness.location)
+        _ = try await next.hello()
+        #expect(try await next.callTool("list_spaces").status == .ok)
+        #expect(service.connectedGrants.map(\.id) == [grant.id])
+        #expect(harness.prompt.requests.count == 1)
+    }
+
     @Test func revocationSendsRevokedAndClosesTheConnection() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

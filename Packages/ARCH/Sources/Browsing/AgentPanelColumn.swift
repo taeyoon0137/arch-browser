@@ -91,6 +91,60 @@ private struct AgentPanelFrame: View {
     }
 }
 
+/// A connected program's current access and its panel. Disconnect keeps its grant and cancels its work.
+struct ConnectedAgentRows: View {
+    @ObservedObject var agents: AgentService
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+
+    var body: some View {
+        let connected = agents.connectedGrants
+        if !connected.isEmpty {
+            ViewThatFits(in: .vertical) {
+                rows(connected)
+                ScrollView { rows(connected) }
+            }
+            .frame(maxHeight: min(CGFloat(connected.count) * 40, 120))
+            .padding(.horizontal, SidebarView.inset)
+        }
+    }
+
+    private func rows(_ grants: [AgentGrant]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(grants) { grant in
+                let name = grant.client.displayName
+                let persona = agents.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
+                let access = "\(grant.level.title) · \(persona)"
+                HStack(spacing: 8) {
+                    Button { windowModel.showClientPanel(grant.id) } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "terminal").frame(width: 18)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(name).lineLimit(1)
+                                Text(access).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(name)\n\(access)")
+                    .accessibilityLabel("Show \(name)")
+                    .accessibilityValue(access)
+                    Button { agents.stopClient(grant.id) } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Disconnect \(name)")
+                    .accessibilityLabel("Disconnect \(name)")
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 40)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// The bottom bar's agents indicator, while a session's turn runs or an outside client is connected.
 struct AgentsIndicator: View {
     @ObservedObject var session: BrowserSession
@@ -119,7 +173,7 @@ private struct AgentsIndicatorMenu: View {
                 ForEach(agents.sessions.filter(\.isTurnRunning)) { session in
                     Button("\(session.title) \u{2014} \(agents.place(of: session))") { windowModel.showAgentSession(session.id) }
                 }
-                ForEach(agents.grants.filter { agents.connectedGrantIDs.contains($0.id) }) { grant in
+                ForEach(agents.connectedGrants) { grant in
                     let waits = approvals.pending.contains { $0.ownerID == grant.id }
                     Button(waits ? "\(grant.client.displayName) \u{2014} Waiting for You" : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
                 }
