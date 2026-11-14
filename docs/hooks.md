@@ -1073,6 +1073,14 @@ Instructions: "Give this browser tab a short name that tells it apart from other
 - Which to turn on: Tidy Tab Names for the user's case of new tabs only, a fast model, no page text, and no record. Tab Names remains for naming every page a tab loads from its text.
 - The preset is data, `HookPresets.tidyTabNames`. Once saved it is an ordinary hook that the user can edit, duplicate, or delete.
 
+### Bundle checks 89 and 90
+
+In an isolated profile, a signed debug build opened New Agent Hook… and the preset from Settings. A loopback server served the fixture pages and streamed a Chat Completions response that requested one `rename_tab` call. The editor showed the Fast tier’s model and endpoint, revealed its generated script, accepted a script edit, and restored Arch’s template. The title-only preview reported the suggested name. With Apply Changes on, the editor reported the rename.
+
+For the saves and relaunch, the same build used a fixture seal store under that profile in place of the login Keychain. The hand-created hook saved with the preset’s instructions, model, record level, grant, trigger, limits, tab kinds, and script digest. The preset saved paused and started after its row switch was turned on. A dry run left the fixture tab’s original title intact, and Apply Changes renamed it. A new WebKit tab and a new Chromium tab each issued exactly one model request with only `rename_tab`. Reopening the saved session issued no request and kept the suggested name. Keep Nothing left no `hooks-activity.json`. The built-in Tab Names warning and its Turn Off action worked in the editor and on the active row, preserving the feature’s model choice.
+
+The real-provider part of check 90 remains. Run it with a connected API-key account, then the user’s Claude Code and Codex, and verify CLI process cleanup and Codex thread retention after each turn. Production Keychain persistence was outside these isolated checks.
+
 ## Outside programs
 
 ### Grants
