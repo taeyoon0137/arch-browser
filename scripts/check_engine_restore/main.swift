@@ -5,7 +5,9 @@ import ARCHEngineChromium
 import ARCHEngineWebKit
 @testable import Browsing
 import CEFBridge
+import CryptoKit
 import Foundation
+import LiveFolders
 
 private struct CheckFailure: LocalizedError {
     let errorDescription: String?
@@ -54,7 +56,11 @@ private let committedTitle = "Pinned tab renamed during fallback"
             registry.register(chromium)
         }
         let profile = root.appendingPathComponent("profile", isDirectory: true)
-        let session = try BrowserSession(registry: registry, userDataDirectory: profile, builtInPlugins: [], cefVersion: nil)
+        let keyData = try Data(contentsOf: root.appendingPathComponent("session-key"))
+        guard keyData.count == 32 else { throw CheckFailure("Missing disposable session key.") }
+        let session = try BrowserSession(registry: registry, userDataDirectory: profile, builtInPlugins: [], cefVersion: nil,
+                                         sessionSeal: SessionStateSeal { SymmetricKey(data: keyData) },
+                                         liveFolderAddresses: InMemoryLiveFolderKeychain())
         let firstID = root.appendingPathComponent("first-id")
         let tab: Tab
         if phase == 1 {

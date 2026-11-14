@@ -102,8 +102,7 @@ def main():
         for subdir in ["temp", "profile", "home/Library/Application Support", "home/Library/Caches",
                        "home/Library/Preferences", "home/Library/WebKit"]:
             (root / subdir).mkdir(parents=True)
-        # Preserve unknown live-folder credentials: this disposable profile owns no system Keychain items.
-        (root / "profile/session.unreadable.json").touch()
+        (root / "session-key").write_bytes(os.urandom(32))
         (root / "fixture.html").write_text(FIXTURE, encoding="utf-8")
         bundle_id = "xyz.taeyoon.arch.engine-restore-check." + uuid.uuid4().hex
         executable = make_probe(root, frameworks, bundle_id)
