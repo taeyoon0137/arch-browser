@@ -109,6 +109,7 @@ import Testing
         let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Quarterly Secret Plan", url: URL(string: "https://intranet.example.com/plans/q3?id=7#budget"), isLoading: false, engine: .webKit)
         let excluded = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Excluded", url: URL(string: "https://excluded.example/"), isLoading: false, engine: .webKit)
         harness.host.tabs = [tab, excluded]
+        harness.host.userTabIDs = [tab.id, excluded.id]
         let (session, runner) = try start(service, harness, task: "Compare this with example.org/pricing", attaching: [tab.id, excluded.id])
         let first = try #require(runner.sent.first)
         #expect(first.contains("t1"))
@@ -124,7 +125,7 @@ import Testing
         #expect(request.instructions == AgentHarness.instructions)
         #expect(request.toolServer.arguments == ["--session"])
         #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: session.ticket.text])
-        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "guide"])
+        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "read_text", "guide"])
         #expect(request.skills?.plugin == "arch")
         #expect(request.skills?.names == AgentHarness.sessionSkills.map(\.name))
         let skills = try #require(request.skills)
@@ -173,7 +174,7 @@ import Testing
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
-        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "guide"]])
+        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "read_text", "guide"]])
         // Before `ready`, a call waits and is then refused, so no page data flows before the start check passed.
         let early = try await client.callTool("list_tabs")
         #expect(early.status == .refused && early.code == "notReady")
@@ -195,7 +196,7 @@ import Testing
         session.reportedTools = ["session_info"]
         _ = try await client.call(AgentControlMethod.toolsList)
         _ = try await client.call(AgentControlMethod.toolsList)
-        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "guide"]])
+        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "read_text", "guide"]])
         // While the user has taken the session over, calls wait until Hand Back.
         session.takeOver()
         let waiting = Task { try await client.callTool("list_spaces") }
@@ -203,6 +204,52 @@ import Testing
         #expect(runner.activeToolCalls == 1)
         session.handBack()
         #expect(try await waiting.value.status == .ok)
+    }
+
+    @Test func readTextUsesTheSharedTabAndChecksAgainBeforeReturningItsPage() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let address = try #require(URL(string: "https://example.org/article?tracking=private#part"))
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Article", url: address, isLoading: false, engine: .webKit)
+        var other = tab
+        other.id = UUID()
+        other.agentOwnerID = UUID()
+        host.tabs = [tab, other]
+        host.userTabIDs = [tab.id]
+        host.pages[address] = (title: "Article", text: "First page body")
+        let (session, runner) = try start(service, harness, attaching: [tab.id, other.id], mode: .readOnly)
+        #expect(session.handles.sharedTabIDs == [tab.id])
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
+        let result = try await client.callTool("read_text", ["tab": "t1", "max_chars": 5])
+        #expect(result.status == .ok)
+        #expect(result.structured?["text"]?.stringValue == AgentUntrusted.wrap("First", url: address))
+        #expect(result.structured?["url"] == "https://example.org/article")
+        #expect(result.structured?["limits"]?["readText"]?["nextOffset"] == 5)
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "tabNotFound")
+
+        func checkRead(after change: @escaping () -> Void, code: String) async throws {
+            host.beforeReturningContent = change
+            let answer = try await client.callTool("read_text", ["tab": "t1"])
+            host.beforeReturningContent = nil
+            #expect(answer.code == code)
+            #expect(!answer.text.contains("First page body"))
+            #expect(answer.structured?["text"] == nil)
+            host.tabs = [tab, other]
+            host.userTabIDs = [tab.id]
+        }
+        try await checkRead(after: { host.userTabIDs.remove(tab.id) }, code: "P17")
+        try await checkRead(after: { host.tabs[0].url = URL(string: "https://excluded.example/private") }, code: "P16")
+        try await checkRead(after: { host.tabs[0].url = URL(string: "https://example.org/another") }, code: "pageChanged")
+        try await checkRead(after: { host.tabs.removeAll() }, code: "tabNotFound")
+        try await checkRead(after: { session.takeOver() }, code: "stopped")
+        session.handBack()
+        try await checkRead(after: { session.stop() }, code: "stopped")
     }
 
     @Test func callsWaitAgainAfterEachProcessStartUntilItsOwnOutput() async throws {

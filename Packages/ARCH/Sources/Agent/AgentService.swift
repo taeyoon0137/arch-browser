@@ -628,7 +628,10 @@ import Foundation
         // While the seal is not checked, Settings' mode is not known, so the session starts in Read Only.
         let mode = canChangeSettings ? start.mode : newSessionMode
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
-        let tabs = host.tabs(withIDs: Set(attached)).filter { tab in tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } ?? false }
+        let attachedIDs = Set(attached)
+        let tabs = host.userTabs(in: personaID).filter { tab in
+            attachedIDs.contains(tab.id) && tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } == true
+        }
         tabs.compactMap(\.url).forEach { scope.add($0) }
         let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: mode,
                                    model: start.model, effort: start.effort, scope: scope, attachedTabIDs: tabs.map(\.id), tools: [])
@@ -900,9 +903,12 @@ import Foundation
         guard connections[connection.id] != nil else { return AgentToolResult(status: .refused, code: "stopped", text: "The connection closed, so Arch did not run this call.") }
         guard !running.isCancelled else { return nil }
         if let refusal = session.countCall() { return refusal }
-        var handles = session.handles
-        let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: AgentToolClient(session: session, searchesHistory: searchesHistory(session)), handles: &handles)
-        session.handles = handles
+        let toolHost = AgentToolHost(host: host, allowsAI: dependencies.allowsAI)
+        let result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
+        if session.isTakenOver {
+            return AgentToolResult(status: .refused, code: "stopped", text: "The user took over this session. Ask again after Hand Back.")
+        }
         return result
     }
 
