@@ -63,13 +63,14 @@ public struct SyncedSetting: Hashable, Sendable {
 /// Its result replaces the pending saves that `comparison.contains` covers, and the pending `Setting` saves of the keys in `comparison.heldOut` are dropped.
 @MainActor
 public final class SyncedSettings {
-    /// The keys that sync, in the order of the note's Settings list. `ARCHUnloadAfterHours` (0 to 168) joins after `ARCHArchiveAfterHours` once III.17, which adds the key, is on `main`.
+    /// The keys that sync, in the order of the note's Settings list.
     nonisolated public static let list: [SyncedSetting] = [
         SyncedSetting(key: "ARCHAppearance", values: .oneOf(["system", "light", "dark"])),
         SyncedSetting(key: "ARCHTintStrength", values: .oneOf(["subtle", "medium", "strong"])),
         SyncedSetting(key: "ARCHDefaultEngine", values: .oneOf(["webKit", "chromium"])),
         SyncedSetting(key: "ARCHSearchEngine", values: .oneOf(["google", "bing", "duckDuckGo"])),
         SyncedSetting(key: "ARCHArchiveAfterHours", values: .wholeNumber(0...168)),
+        SyncedSetting(key: "ARCHUnloadAfterHours", values: .wholeNumber(0...168)),
         SyncedSetting(key: "ARCHOpensLinksInSmallWindow", values: .flag),
         SyncedSetting(key: "ARCHAskWhereToSaveDownloads", values: .flag),
     ]
