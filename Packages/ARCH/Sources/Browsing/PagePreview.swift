@@ -134,7 +134,7 @@ struct PagePreviewPanel: View {
 }
 
 /// Closes the preview on Escape and on a click in its window outside the panel, which then goes on to whatever it hit. A field of the app's own, such as the palette's or the find bar's, keeps its Escape. Clicks in other windows leave the panel open: the previewed page opens some of them, such as a date picker or the window a fullscreen video moves to.
-private struct PreviewDismissal: NSViewRepresentable {
+struct PreviewDismissal: NSViewRepresentable {
     let close: () -> Void
     /// Whether something above the panel that has no field, such as the tab switcher, takes Escape first.
     let ignoresEscape: () -> Bool
@@ -177,10 +177,11 @@ private struct PreviewDismissal: NSViewRepresentable {
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-        private func closesOnEscape(_ event: NSEvent) -> Bool {
+        func closesOnEscape(_ event: NSEvent) -> Bool {
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
                   let window, event.window === window else { return false }
-            return !(window.firstResponder is NSText) && ignoresEscape?() != true
+            let responder = window.firstResponder
+            return !(responder is NSText) && (responder as? NSTextInputClient)?.hasMarkedText() != true && ignoresEscape?() != true
         }
 
         private func closesOnClick(_ event: NSEvent) -> Bool {

@@ -1,3 +1,4 @@
+import AppKit
 import ARCHEngine
 @testable import Browsing
 import Foundation
@@ -72,6 +73,24 @@ import Testing
         }
     }
 
+    @Test func escapeWaitsForThePageToFinishComposingText() throws {
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 320, height: 200), styleMask: .borderless, backing: .buffered, defer: false)
+        let monitor = PreviewDismissal.MonitorView()
+        let page = ComposingPageView()
+        window.contentView?.addSubview(monitor)
+        window.contentView?.addSubview(page)
+        #expect(window.makeFirstResponder(page) && !window.isVisible)
+        let escape = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                  context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        #expect(monitor.closesOnEscape(escape))
+        page.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(!monitor.closesOnEscape(escape))
+        page.unmarkText()
+        #expect(monitor.closesOnEscape(escape))
+        monitor.ignoresEscape = { true }
+        #expect(!monitor.closesOnEscape(escape))
+    }
+
     @Test func promotingAPreviewForItsPopupKeepsTheNativeOpenerAndPopupEngines() throws {
         try withSession { session, chromium, window in
             let persona = session.addPersona(named: "Work")
@@ -91,4 +110,20 @@ import Testing
             #expect(opened.personaID == persona.id && opener.personaID == persona.id)
         }
     }
+}
+
+/// The field editor in an engine view adopts the input client protocol without being an NSTextView.
+private final class ComposingPageView: NSView, NSTextInputClient {
+    override var acceptsFirstResponder: Bool { true }
+    private var markedText = ""
+    func setMarkedText(_ text: Any, selectedRange: NSRange, replacementRange: NSRange) { markedText = text as? String ?? "" }
+    func unmarkText() { markedText = "" }
+    func hasMarkedText() -> Bool { !markedText.isEmpty }
+    func markedRange() -> NSRange { NSRange(location: hasMarkedText() ? 0 : NSNotFound, length: markedText.utf16.count) }
+    func selectedRange() -> NSRange { NSRange(location: 0, length: 0) }
+    func insertText(_ text: Any, replacementRange: NSRange) { unmarkText() }
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect { .zero }
+    func characterIndex(for point: NSPoint) -> Int { 0 }
 }

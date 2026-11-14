@@ -885,6 +885,7 @@ import Terminal
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+                  (event.window?.firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
                   let windowModel = self?.session?.window(for: event.window), windowModel.fullscreenTabID != nil, windowModel.regionCaptureTabID == nil else { return event }
             windowModel.exitPageFullscreen()
             return nil
