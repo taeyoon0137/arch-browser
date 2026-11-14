@@ -97,9 +97,12 @@ private struct PagePaneView: View {
     let isSplit: Bool
     let isPageFullscreen: Bool
     @Environment(\.spaceTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     private var cornerRadius: CGFloat { isPageFullscreen ? 0 : PageFrameShape.cornerRadius }
+    /// Whether the region capture overlay covers the pane. The find bar, the question popover, and the close control then hide, so that they neither cover the overlay's hint nor take its drags.
+    private var isCapturingRegion: Bool { isSelected && windowModel.regionCaptureTabID == tab.id && windowModel.internalPage == nil }
 
     var body: some View {
         let isOnScreen = windowModel.tabsOnScreen.contains { $0.id == tab.id }
@@ -111,14 +114,15 @@ private struct PagePaneView: View {
             .overlay { PageCrashNoticeView(tab: tab) }
             .overlay { if isSelected { InternalPageOverlay() } }
             .overlay {
-                if isSelected, windowModel.regionCaptureTabID == tab.id, windowModel.internalPage == nil {
+                if isCapturingRegion {
                     CaptureRegionOverlay(windowModel: windowModel, pageView: tab.webContents.view, cornerRadius: cornerRadius)
                 }
             }
             .overlay(frameBorder.allowsHitTesting(false))
-            // The find bar and the question popover act on the selected tab, so they float over that pane's top trailing corner, the popover below the bar.
+            // The find bar and the question popover act on the selected tab, so they float over that pane's top trailing corner, the popover below the bar. In a narrow pane they keep clear of its leading edge and of a split view pane's close control. A region capture hides them without closing them, so that their fields do not take the focus again when it ends, and so does a prompt card, under which they wait, going and coming back with its dimming.
             .overlay(alignment: .topTrailing) {
                 if isSelected {
+                    let hidesPanels = isCapturingRegion || showsCard
                     VStack(alignment: .trailing, spacing: 8) {
                         if windowModel.isFindBarVisible {
                             FindBarView()
@@ -127,14 +131,20 @@ private struct PagePaneView: View {
                     }
                     .padding(.top, 12)
                     .padding(.trailing, 16)
+                    .padding(.leading, isSplit ? PaneCloseButton.clearance : 16)
+                    .opacity(hidesPanels ? 0 : 1)
+                    .allowsHitTesting(!hidesPanels)
+                    .disabled(isCapturingRegion)
+                    .accessibilityHidden(hidesPanels)
+                    .animation(PromptMotion.scrim(reduceMotion: reduceMotion), value: showsCard)
                 }
             }
             .overlay {
                 PanePromptLayer(prompts: prompts, tab: tab, isOnScreen: isOnScreen, isFocusedPane: isSelected, isCovered: isCovered,
-                                cornerRadius: cornerRadius, leadingClearance: isSplit ? PaneCloseButton.reach : 0, selectPane: selectTab)
+                                cornerRadius: cornerRadius, leadingClearance: isSplit ? PaneCloseButton.clearance : 0, selectPane: selectTab)
             }
             .overlay(alignment: .topLeading) {
-                if isSplit {
+                if isSplit, !isCapturingRegion {
                     PaneCloseButton { windowModel.closePane(tab) }
                         .padding(PaneCloseButton.inset)
                 }
@@ -177,6 +187,8 @@ private struct ShownElsewherePaneView: View {
                 .controlSize(.large)
                 .padding(.top, 6)
         }
+        // A narrow pane wraps the line, centered like the rest.
+        .multilineTextAlignment(.center)
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PageBackgroundView(isEmpty: true))
@@ -207,8 +219,10 @@ private struct PaneCloseButton: View {
     /// The control's distance from the pane's top leading corner.
     static let inset: CGFloat = 6
     static let diameter: CGFloat = 20
-    /// How far the control reaches from the pane's leading edge, which a prompt card leaves free.
+    /// How far the control reaches from the pane's leading edge.
     static var reach: CGFloat { inset + diameter }
+    /// The room that a prompt card and the find bar leave at the pane's leading edge: the control's reach and, past it, the gap the control keeps from the edge, so that neither touches the control or its shadow.
+    static var clearance: CGFloat { reach + inset }
 
     let action: () -> Void
     @State private var isHovering = false
@@ -268,19 +282,24 @@ extension SidebarDragState {
             return nil
         }
         let halves = frame.divided(atDistance: frame.width / 2, from: .minXEdge)
-        return SplitDrop(index: index, frame: (isLeading ? halves.slice : halves.remainder).insetBy(dx: 4, dy: 4))
+        return SplitDrop(index: index, frame: (isLeading ? halves.slice : halves.remainder).insetBy(dx: SplitDropIndicator.inset, dy: SplitDropIndicator.inset))
     }
 }
 
-/// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes.
+/// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes, in the current space's tint, as the focused pane's ring over the same pages.
 struct SplitDropIndicator: View {
     @ObservedObject var sidebarDrag: SidebarDragState
+    @Environment(\.spaceTheme) private var theme
+
+    /// How far the indicator sits inside the half of the pane. Its corners are the pane's, less this, so they stay concentric with the pane's.
+    static let inset: CGFloat = 4
 
     var body: some View {
         if let frame = sidebarDrag.splitDrop?.frame {
-            RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius, style: .continuous)
-                .fill(Color.accentColor.opacity(0.15))
-                .overlay(RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius, style: .continuous).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2))
+            let shape = RoundedRectangle(cornerRadius: PageFrameShape.cornerRadius - Self.inset, style: .continuous)
+            shape
+                .fill(theme.tint.opacity(0.15))
+                .overlay(shape.strokeBorder(theme.tint.opacity(0.6), lineWidth: 2))
                 .frame(width: frame.width, height: frame.height)
                 .offset(x: frame.minX, y: frame.minY)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

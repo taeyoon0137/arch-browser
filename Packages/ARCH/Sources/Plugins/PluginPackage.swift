@@ -166,7 +166,7 @@ public struct PluginPackage: Identifiable, Sendable {
             if let crx, package.kind != .webExtension || package.manifest.id.rawValue != webExtensionIDPrefix + crx.extensionID {
                 if case .webStore = origin { throw PluginError.invalidPackage("The Web Store sent the package of another extension.") }
                 // A web extension takes the identifier of the key that staging wrote into its manifest, so this guards against a runtime that names it otherwise.
-                throw PluginError.invalidPackage(package.kind == .webExtension ? "\(crx.name) has no key for its extension's identifier." : "\(crx.name) holds no web extension.")
+                throw PluginError.invalidPackage(package.kind == .webExtension ? "\(crx.name) has no key for its extension\u{2019}s identifier." : "\(crx.name) holds no web extension.")
             }
             if case .webStore = origin, package.isTheme {
                 throw PluginError.invalidPackage("\u{201C}\(package.manifest.name)\u{201D} is a theme, which Arch does not use.")

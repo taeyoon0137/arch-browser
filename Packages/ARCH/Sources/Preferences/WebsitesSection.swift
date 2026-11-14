@@ -28,6 +28,10 @@ struct WebsitesSection: View {
         }
     }
 
+    let session: BrowserSession
+    /// Whether the session has more than one Persona. The section follows only that, not every change of the session.
+    @State private var hasSeveralPersonas = false
+
     var body: some View {
         let origins = store.decisions.keys.sorted { Self.siteTitle(for: $0).localizedStandardCompare(Self.siteTitle(for: $1)) == .orderedAscending }
         let hasAllowedSite = store.decisions.values.contains { $0[.notifications] == .allow }
@@ -60,6 +64,7 @@ struct WebsitesSection: View {
         .formStyle(.grouped)
         // A fixed height keeps the window still while answers come and go; the list scrolls instead.
         .frame(width: sectionWidth, height: 360)
+        .onReceive(session.$personas) { hasSeveralPersonas = $0.count > 1 }
     }
 
     private func row(for type: EnginePermissionType, origin: String) -> some View {
@@ -111,11 +116,7 @@ struct WebsitesSection: View {
     }
 
     private var footer: some View {
-        // A grouped form's footer is trailing-aligned and primary by default.
-        Text("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        formFootnote("Arch remembers your answer\(hasSeveralPersonas ? " in every Persona" : "") when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
     }
 
     /// The origin's permission types in the order of their titles.

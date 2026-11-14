@@ -1,4 +1,4 @@
-// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock; and the frame of a page dialog when it is not the page's.
+// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a file page by its file, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock; and the frame of a page dialog when it is not the page's.
 import AppKit
 import Foundation
 import Testing
@@ -30,9 +30,13 @@ import Testing
         #expect(PromptSiteIdentity.embeddedFrame(of: nil, pageURL: nil) == nil)
     }
 
-    @Test func aPageWithoutAHostIsThisPage() {
-        let identity = PromptSiteIdentity.make(for: URL(fileURLWithPath: "/tmp/page.html"), tabURL: nil, favicon: nil)
-        #expect(identity == PromptIdentity(icon: .symbol("doc"), name: "This page", isSecure: false))
+    @Test func aFilePageIsItsFileAndAnotherPageWithoutAHostIsThisPage() {
+        let file = URL(fileURLWithPath: "/tmp/page.html")
+        let identity = PromptSiteIdentity.make(for: file, tabURL: nil, favicon: nil)
+        #expect(identity == PromptIdentity(icon: .symbol("doc"), name: "page.html", isSecure: false))
+        // Chromium asks for a file page's permission from the origin `file:///`, which the tab's file names.
+        #expect(PromptSiteIdentity.make(for: URL(string: "file:///"), tabURL: file, favicon: nil).name == "page.html")
+        #expect(PromptSiteIdentity.make(for: URL(string: "about:blank"), tabURL: nil, favicon: nil).name == "This page")
         #expect(PromptSiteIdentity.make(for: nil, tabURL: Self.tabURL, favicon: nil).name == "This page")
     }
 

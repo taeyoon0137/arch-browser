@@ -33,7 +33,7 @@ final class SitePermissionAnswers {
     /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card whose maker it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
     ///
     /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and again when the permission changes while a card shows it, and the answer acts on the permission the card showed last.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity, inEveryPersona: Bool = false,
                 ask: (@escaping () -> PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
         if personaID == agentOnlyPersonaID {
             completion(false)
@@ -68,7 +68,7 @@ final class SitePermissionAnswers {
         var shownStatus: NotificationAuthorization.Status?
         let makeContent = {
             if asksForNotifications { shownStatus = notifications.status }
-            return Self.content(for: request, remembersAnswer: origin != nil, identity: identity, notificationStatus: shownStatus)
+            return Self.content(for: request, remembersAnswer: origin != nil, identity: identity, inEveryPersona: inEveryPersona, notificationStatus: shownStatus)
         }
         ask(makeContent) { [weak self] response in
             let waiters = self?.waiters.removeValue(forKey: key) ?? [answer]
@@ -117,10 +117,11 @@ final class SitePermissionAnswers {
     }
 
     /// The card that asks, under the site that asks, with the symbol of the first of its types in the order screen, camera, microphone, location, notifications, clipboard, and MIDI. The engine asks from inside its own message loop, so the card never blocks, and the answer reaches the engine once. Allow waits for the card to arm. `notificationStatus`, Arch's notification permission for a request for notifications, adds a note on what macOS does with them, and while the permission is off a third button, Open System Settings, apart from the answers at the leading edge, which takes no key, opens it there.
-    static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity, notificationStatus: NotificationAuthorization.Status? = nil) -> PromptContent {
+    static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity, inEveryPersona: Bool = false, notificationStatus: NotificationAuthorization.Status? = nil) -> PromptContent {
         var notes: [PromptNote] = []
         if remembersAnswer {
-            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", tone: .info))
+            // With several Personas the answer holds in all of them (Persona rule 6); with one, the note says nothing of Personas (Persona rule 7).
+            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website\(inEveryPersona ? " in every Persona" : ""). You can change it in Settings \u{25B8} Websites.", tone: .info))
         }
         switch notificationStatus {
         case .notDetermined:
@@ -155,13 +156,13 @@ final class SitePermissionAnswers {
         }
     }
 
-    /// The phrases of the request's types, with the camera and the microphone of a call as one phrase.
+    /// The request's types as one phrase each, in the order they arrive. The camera and the microphone alone, as a video call asks for them, share one verb; with a third type, each keeps its own, so that the list has one "and".
     private static func description(of types: [EnginePermissionType]) -> String {
-        let asksForBoth = types.contains(.camera) && types.contains(.microphone)
+        let both = Set(types) == [.camera, .microphone]
         let phrases = types.compactMap { type -> String? in
             switch type {
-            case .camera: return asksForBoth ? "use the camera and microphone" : "use the camera"
-            case .microphone: return asksForBoth ? nil : "use the microphone"
+            case .camera: return both ? "use the camera and microphone" : "use the camera"
+            case .microphone: return both ? nil : "use the microphone"
             case .screenCapture: return "record the screen"
             case .geolocation: return "see your location"
             case .notifications: return "send notifications"

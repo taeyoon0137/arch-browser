@@ -46,6 +46,8 @@ struct PromptInlineGlyph: View {
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 16, height: 16)
+                // An image has no baseline, so it would sit on the title's; its center goes to the middle of the title's capitals, where the symbols sit.
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
                 .accessibilityLabel(label)
         }
     }

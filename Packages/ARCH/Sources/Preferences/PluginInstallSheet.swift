@@ -58,12 +58,18 @@ struct PluginInstallSheet: View {
         return space == nil ? "Installs in \u{201C}\(place)\u{201D} for all its spaces." : "Installs in the Persona of \u{201C}\(place)\u{201D} for all its spaces."
     }
 
+    /// The review's height, which keeps the sheet within Settings ▸ Plugins: its form scrolls between the header and the buttons.
+    static let reviewHeight: CGFloat = 520
+
+    /// Each step gives the sheet a height of its own, never an open one: the store sheet and the last step the height of what they show, and every review, also one that the store sheet staged, the same fixed height, so that its buttons stay at the bottom within the window.
     var body: some View {
         Group {
             switch step {
             case let .webStore(start):
                 if let webStore {
                     WebStoreInstallSheet(plugins: plugins, installer: webStore, start: start, close: { dismiss() }) { step = .review($0) }
+                        .padding(20)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             case let .review(review):
                 PluginReviewView(plugins: plugins, review: review, personaSentence: personaSentence, askForChanges: askForChanges, close: { dismiss() }) { id, isNewPlugin in
@@ -75,20 +81,17 @@ struct PluginInstallSheet: View {
                 }
                 // A review that takes the last step's place starts with its own sites and choice.
                 .id(review.id)
+                .frame(height: Self.reviewHeight)
             case let .installed(id, engine):
                 VersionLastStep(plugins: plugins, plugin: id, engine: engine, offersWebStore: webStore != nil, close: { dismiss() },
                                 review: { step = .review($0) }, storeSheet: { step = .webStore($0) })
+                    .padding(20)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(20)
-        // A plugin that AI wrote shows its sources, and the store sheet takes the height of its field and messages.
-        .frame(width: isWrittenByAI ? 600 : 480, height: isStoreSheet ? nil : isWrittenByAI ? 640 : 520)
+        // A plugin that AI wrote shows its sources wider, as wide as the Settings window, so the sheet stays within it.
+        .frame(width: isWrittenByAI ? sectionWidth : 480)
         .interactiveDismissDisabled()
-    }
-
-    private var isStoreSheet: Bool {
-        guard case .webStore = step else { return false }
-        return true
     }
 
     /// Whether the sheet reviews a plugin that AI wrote.
@@ -164,6 +167,7 @@ private struct PluginReviewView: View {
 
     var body: some View {
         let manifest = package.manifest
+        // The form runs edge to edge, so its sections line up with the header and the buttons, as in the AI and Site Search editors.
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -187,12 +191,10 @@ private struct PluginReviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let target, let warning = otherSourceWarning(for: target) {
-                    Label(warning, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    WarningLabel(text: warning)
                 }
                 if let target, let warning = package.proofWarning(updating: target) {
-                    Label(warning, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    WarningLabel(text: warning)
                 }
                 if let target, refusal == nil {
                     let lost = EngineKind.allCases.filter { engine in
@@ -200,23 +202,21 @@ private struct PluginReviewView: View {
                         return true
                     }
                     ForEach(lost, id: \.self) { engine in
-                        Label("\(engine.displayName) tabs lose \u{201C}\(name(of: target))\u{201D}.", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
+                        WarningLabel(text: "\(engine.displayName) tabs lose \u{201C}\(name(of: target))\u{201D}.")
                     }
                 }
                 if let joined, let engine = choiceEngine, refusal == nil, let takeover = plugins.versionTakeover(for: package, joining: joined.id, for: engine) {
-                    Label(takeover, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    WarningLabel(text: takeover)
                 }
                 if let joined, review.versionOf != nil, refusal == nil, differsInNameOrDeveloper(from: joined) {
-                    Label("Its name or developer differs from \u{201C}\(name(of: joined))\u{201D}. Join only if both come from the same developer.", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    WarningLabel(text: "Its name or developer differs from \u{201C}\(name(of: joined))\u{201D}. Join only if both come from the same developer.")
                 }
                 if let refusal {
                     Text(refusal)
                         .foregroundStyle(.red)
                 }
             }
+            .padding([.horizontal, .top], 20)
             Form {
                 if let composition {
                     Section("Requests") {
@@ -227,9 +227,9 @@ private struct PluginReviewView: View {
                     Section {
                         Picker("Install", selection: $choice) {
                             ForEach(package.joinableEngines, id: \.self) { engine in
-                                Text("Install as the \(engine.displayName) Version").tag(Choice.version(engine))
+                                Text("Install as the \(engine.displayName) version").tag(Choice.version(engine))
                             }
-                            Text(package.updates == match.id ? "Update \u{201C}\(name(of: match))\u{201D}" : "Install as a Separate Plugin").tag(Choice.plugin)
+                            Text(package.updates == match.id ? "Update \u{201C}\(name(of: match))\u{201D}" : "Install as a separate plugin").tag(Choice.plugin)
                         }
                         .pickerStyle(.radioGroup)
                         .labelsHidden()
@@ -282,17 +282,19 @@ private struct PluginReviewView: View {
             if let failure {
                 Text(failure)
                     .foregroundStyle(.red)
+                    .padding(.horizontal, 20)
             }
+            // Ask for Changes… goes back to the composer rather than ending the sheet, so it leads, as Don’t Ask Again does in the last step.
             HStack {
+                if let askForChanges {
+                    Button("Ask for Changes\u{2026}", action: askForChanges)
+                }
                 Spacer()
                 Button("Cancel", role: .cancel) {
                     plugins.discard(package)
                     close()
                 }
                 .keyboardShortcut(.cancelAction)
-                if let askForChanges {
-                    Button("Ask for Changes\u{2026}", action: askForChanges)
-                }
                 if refusal == nil {
                     if let joined {
                         // A version installs on or off as the plugin it joins is.
@@ -308,6 +310,7 @@ private struct PluginReviewView: View {
                     }
                 }
             }
+            .padding([.horizontal, .bottom], 20)
         }
         .onChange(of: choice) { sites = Self.offeredSites(review: review, choice: choice, target: updateTarget, in: plugins) }
         .onChange(of: updateTarget) { sites = Self.offeredSites(review: review, choice: choice, target: updateTarget, in: plugins) }
@@ -441,7 +444,6 @@ private struct VersionLastStep: View {
                 Text(failure)
                     .foregroundStyle(.red)
             }
-            Spacer()
             HStack {
                 Button("Don\u{2019}t Ask Again") {
                     plugins.dismissVersionNote(of: plugin, for: engine)
@@ -535,13 +537,28 @@ extension EngineKind {
     }
 }
 
+/// A warning in the review's header: an orange outlined triangle beside text in the primary color, since orange text falls below the contrast that body text needs.
+private struct WarningLabel: View {
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+        }
+    }
+}
+
 /// One thing the plugin asks for, marked when an update asks for it and the installed version did not.
 private struct RequestRow: View {
     let text: String
     let isNew: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        // The badge's smaller text shares the first line's baseline, also when the text wraps.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(text)
             if isNew {
                 Text("New")

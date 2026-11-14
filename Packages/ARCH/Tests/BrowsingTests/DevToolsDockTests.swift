@@ -39,7 +39,7 @@ import Testing
         settings.side = .floating
         let window = try #require(windows.window(of: tools))
         #expect(view.superview === window.contentView)
-        #expect(window.title == "Developer Tools \u{2013} Example")
+        #expect(window.title == "Developer Tools \u{2014} Example")
         #expect(dock.dockedSide == nil)
         settings.side = .left
         #expect(windows.window(of: tools) == nil)

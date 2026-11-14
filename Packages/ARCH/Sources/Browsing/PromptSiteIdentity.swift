@@ -6,9 +6,13 @@ enum PromptSiteIdentity {
         make(for: url, tabURL: tab.url, favicon: tab.favicon)
     }
 
-    /// The asker at `url` in a tab at `tabURL`: its host with the tab's icon when it is the tab's host, or with a globe and "in <the tab's host>" when it is another, as for a frame from another site. An address without a host, such as a file's, is "This page". An https address gets the lock.
+    /// The asker at `url` in a tab at `tabURL`: its host with the tab's icon when it is the tab's host, or with a globe and "in <the tab's host>" when it is another, as for a frame from another site. A file's page is its file name, as the address pill shows it, and another address without a host, such as `about:blank` or a `data:` address, is "This page". An https address gets the lock.
     static func make(for url: URL?, tabURL: URL?, favicon: NSImage?) -> PromptIdentity {
         guard let url, let host = url.host, !host.isEmpty else {
+            // A file origin, `file://` from WebKit or `file:///` from Chromium for a file page's permission request, names no file, so the tab's file names it.
+            if let url, url.isFileURL, let file = ([url] + (tabURL.map { [$0] } ?? [])).first(where: { $0.isFileURL && !$0.path.isEmpty && $0.path != "/" }) {
+                return PromptIdentity(icon: .symbol("doc"), name: file.lastPathComponent, isSecure: false)
+            }
             return PromptIdentity(icon: .symbol("doc"), name: "This page", isSecure: false)
         }
         let isSecure = url.scheme?.lowercased() == "https"

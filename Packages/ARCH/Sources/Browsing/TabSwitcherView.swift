@@ -55,6 +55,13 @@ private struct TabSwitcherRow: View {
     @ObservedObject var tab: Tab
     let isHighlighted: Bool
 
+    /// The site after the title, as the address pill names it, or nil without a host or when the title already is the site, as for a page without a title.
+    private var site: String? {
+        guard let url = tab.url, let host = url.host, !host.isEmpty, tab.displayTitle != host else { return nil }
+        let site = AddressPillView.siteName(of: url)
+        return site == tab.displayTitle ? nil : site
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             TabIconView(tab: tab)
@@ -63,17 +70,19 @@ private struct TabSwitcherRow: View {
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 8)
-            if let host = tab.url?.host {
-                Text(host)
+            if let site {
+                // Keeps its width, so a long title truncates first, as in the palette's rows.
+                Text(site)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: TabSwitcherView.rowHeight)
         .background(RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius - PaletteRowHighlight.panelInset, style: .continuous)
-            .fill(isHighlighted ? Color.accentColor.opacity(0.24) : .clear))
+            .fill(isHighlighted ? Color.accentColor.opacity(PaletteRowHighlight.selectedOpacity) : .clear))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isHighlighted ? .isSelected : [])
     }

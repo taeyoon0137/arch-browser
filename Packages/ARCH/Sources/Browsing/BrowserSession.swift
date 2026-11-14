@@ -385,8 +385,8 @@ public final class BrowserSession: ObservableObject {
         return address
     }
 
-    /// The app sets this to name Move to Main Window's shortcut, which Settings can change, in the small window's button.
-    public var moveToMainWindowShortcut: () -> String? = { nil }
+    /// The app sets this to name the shortcut of the menu bar command whose action has the given name, such as `goBack`, which Settings can change, in the tooltips of the buttons that run the same command. Nil for a command without a shortcut.
+    public var menuShortcut: (String) -> String? = { _ in nil }
 
     /// Opens `url` in a small window of its own, made key and ordered front, in a new tab of the default engine. The tab belongs to the space it moves to: the last main window's current space, or the last closed main window's, or the first space once that one is gone, and to that space's Persona (open decision 6).
     @discardableResult
@@ -715,9 +715,15 @@ public final class BrowserSession: ObservableObject {
     /// The favorites' tabs from the last session, by favorite ID. Each opens where it was when its favorite is next opened, so launching loads none of them.
     @Published private var savedFavoriteTabs: [UUID: SessionSnapshot.FavoriteTabRecord] = [:]
 
+    /// Whether the tab shows a page that is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
+    public func canAddFavorite(_ tab: Tab) -> Bool {
+        guard let url = tab.url else { return false }
+        return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
+    }
+
     /// Adds the tab's page to the favorites of the tab's Persona, unless it is one of them already.
     public func addFavorite(_ tab: Tab) {
-        guard let url = tab.url, !favorites.contains(where: { $0.url == url && $0.resolvedPersonaID == tab.personaID }) else { return }
+        guard canAddFavorite(tab), let url = tab.url else { return }
         favorites.append(Favorite(url: url, title: tab.displayTitle, personaID: tab.personaID))
     }
 
@@ -915,7 +921,7 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.personas.count > 1, ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -2120,7 +2126,7 @@ extension BrowserSession: EngineDownloadsDelegate {
 
     /// Asks with a card over the tab whether its page may download more files (`TabPromptContent.pageDownloads`). Only Allow allows; Don't Allow and a card that ended without the user, as when the tab closes, answer no.
     private func askToAllowDownloads(from tab: Tab) {
-        let content = TabPromptContent.pageDownloads(pageURL: tab.url, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        let content = TabPromptContent.pageDownloads(identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         enqueuePrompt(content, for: tab) { [weak tab] response in
             guard let tab else { return }
             let allowed = TabPromptContent.pageDownloadsResult(response)

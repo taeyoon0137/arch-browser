@@ -204,7 +204,7 @@ enum NativeMessagingError: LocalizedError, Equatable {
         switch self {
         case let .invalidName(name): return "“\(name)” is not the name of a native app."
         case let .notFound(name): return "No native app named \(name) is set up for Arch."
-        case let .invalidManifest(name): return "The host manifest of the native app \(name) does not read."
+        case let .invalidManifest(name): return "The host manifest of the native app \(name) could not be read."
         case let .notAllowed(name): return "The native app \(name) does not accept this extension."
         case let .unproven(sentence): return sentence
         case let .held(app): return "Arch did not start \(app), which macOS does not start for Arch."

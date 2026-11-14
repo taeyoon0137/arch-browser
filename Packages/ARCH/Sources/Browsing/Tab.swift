@@ -420,7 +420,7 @@ extension Tab: EngineWebContentsUIDelegate {
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
            let sourceURL = url, let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
-            sections.append([EngineActionMenuItem("Ask About Selection") { askAboutSelection(selection, sourceURL) }])
+            sections.append([EngineActionMenuItem("Ask About Selection\u{2026}") { askAboutSelection(selection, sourceURL) }])
         }
         sections += [handed.fieldSubmenus, handed.share]
         if sections.allSatisfy(\.isEmpty) {
@@ -475,7 +475,7 @@ extension Tab: EngineWebContentsUIDelegate {
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
         isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
-        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path), scheme: url.scheme ?? "",
+        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path),
                                                  hasHost: self.url?.host?.isEmpty == false, identity: pageIdentity)
         let pageSite = Self.site(of: self.url)
         showPrompt(content) { [weak self] response in

@@ -47,7 +47,7 @@ import Testing
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "content_scripts": [{"matches": ["<all_urls>"], "js": ["../outside.js"]}]}"#])
             == "It names ../outside.js as a content script, which is not in the package.")
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "action": {"default_icon": {"16": "icon.png"}}}"#])
-            == "It names icon.png as the action's icon, which is not in the package.")
+            == "It names icon.png as the action\u{2019}s icon, which is not in the package.")
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "default_locale": "en"}"#])
             == "It names _locales/en/messages.json as the default locale, which is not in the package.")
     }

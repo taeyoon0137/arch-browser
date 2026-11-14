@@ -314,13 +314,14 @@ private struct TabRowFramesKey: PreferenceKey {
     }
 }
 
-/// The space's symbol and name above its tabs, with a button for the space menu. With several Personas, the name follows the space's Persona on one line, as "Work / Research" (Persona rule 7), at one size: the Persona's name in regular secondary text, the slash in tertiary, and the space's name in semibold primary, with the Persona's name truncating first in a narrow sidebar. With one Persona, the space's name stays semibold secondary. Double-clicking the name renames the space in place; the Persona's name is not part of the field.
+/// The space's symbol and name above its tabs, with a button for the space menu. The symbol sits in the tab rows' 18-point icon column, so the name starts where their titles do. With several Personas, the name follows the space's Persona on one line, as "Work / Research" (Persona rule 7), at one size: the Persona's name in regular secondary text, the slash in tertiary, and the space's name in semibold primary, with the Persona's name truncating first in a narrow sidebar, down to its first 36 points so that it stays recognizable. With one Persona, the space's name stays semibold secondary. Double-clicking the name renames the space in place; the Persona's name is not part of the field.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
     @State private var draftName = ""
     @FocusState private var isNameFocused: Bool
+    @State private var isMenuHovering = false
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
@@ -332,16 +333,19 @@ struct SpaceHeaderView: View {
     }
 
     private var nameRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: space.symbol)
-                .font(.system(size: 10))
+                .font(.system(size: 12))
                 .foregroundStyle(theme.symbolColor(for: space.tint))
+                .frame(width: 18)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
                     Text(personaName)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        // Truncating keeps at least the name's first 36 points, or all of a shorter name.
+                        .frame(minWidth: min(36, ceil((personaName as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)]).width)), alignment: .leading)
                     // VoiceOver reads the Persona's name and the space's without the slash.
                     Text("/")
                         .font(.system(size: 13))
@@ -358,6 +362,7 @@ struct SpaceHeaderView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 26, height: 22)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isMenuHovering ? 0.08 : 0)))
                     .contentShape(Rectangle())
             }
             .menuStyle(.button)
@@ -365,6 +370,7 @@ struct SpaceHeaderView: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .foregroundStyle(.secondary)
+            .onHover { isMenuHovering = $0 }
             .help("Space Options")
             .accessibilityLabel("Space Options")
         }
@@ -427,7 +433,7 @@ struct SpaceMenuItems: View {
             windowModel.renamingSpaceID = space.id
         }
         // Automatic follows the system accent color; the others are the space's own color.
-        Picker("Theme", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
+        Picker("Tint", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
             ForEach([SpaceTint.automatic] + SpaceTint.colors, id: \.self) { tint in
                 Text(tint.title).tag(tint)
             }

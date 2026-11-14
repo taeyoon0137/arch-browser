@@ -108,7 +108,7 @@ struct WebExtensionRuntimeTests {
     }
 
     @Test func asksAboutAccessAndConfirmsOnlyWhatReachesEverySite() async throws {
-        try await installLoaded(from: sampleExtensionFolder)
+        let installed = try await installLoaded(from: sampleExtensionFolder)
         let access: Set<EngineExtensionAccess> = [.permission("cookies"), .permission("nativeMessaging"), .site("https://example.com/*"), .site("file:///*"),
                                                   .page(URL(string: "about:blank")!)]
         var allowed: Set<EngineExtensionAccess>?
@@ -116,7 +116,7 @@ struct WebExtensionRuntimeTests {
         #expect(await eventually { allowed != nil })
         // Native messaging, which only the install grants, and sites and pages other than web pages are never asked about.
         #expect(allowed == [.permission("cookies"), .site("https://example.com/*")])
-        #expect(host.questions.first == WebExtensionQuestion(kind: .access, extensionName: "Sample Extension", items: ["Use the extension API cookies", "Run scripts on pages from example.com"],
+        #expect(host.questions.first == WebExtensionQuestion(kind: .access, extensionName: "Sample Extension", pluginID: installed.id, items: ["Use the extension API cookies", "Run scripts on pages from example.com"],
                                                              keeps: "The extension keeps this access until you quit Arch or switch the extension off.", confirmsNext: false))
         // Don't Allow, or a question that ended without the user, allows nothing.
         host.answer = false

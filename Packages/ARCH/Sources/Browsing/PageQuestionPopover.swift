@@ -35,7 +35,7 @@ private struct PageQuestionPopover: View {
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close", action: windowModel.dismissPageQuestion)
+                SidebarIconButton(symbol: "xmark", label: "Close Question", action: windowModel.dismissPageQuestion)
             }
             if let selection = question.selection {
                 SelectionQuote(text: selection.text)
@@ -56,12 +56,17 @@ private struct PageQuestionPopover: View {
             }
         }
         .padding(12)
-        .frame(width: 380)
+        // Narrower in a narrow pane, so the popover stays over its page.
+        .frame(maxWidth: 380)
         // A solid background, as the find bar has: a material over the engine's view cannot sample it.
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor)))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFieldFocused = true } }
+        // Allow AI on This Site puts the field in the notice's place, and the field takes the keys as on opening.
+        .onChange(of: tab.url.map { settings.allowsAI(on: $0) }) { _, allows in
+            if allows == true { DispatchQueue.main.async { isFieldFocused = true } }
+        }
     }
 
     private var questionField: some View {

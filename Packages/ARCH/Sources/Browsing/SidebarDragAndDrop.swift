@@ -97,14 +97,17 @@ struct SidebarItemDragLayer: View {
         switch sidebarDrag.item {
         case .favorite(let id):
             if let favorite = session.favorites.first(where: { $0.id == id }) {
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasOpenPage(favorite))
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasOpenPage(favorite),
+                                 prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
                     .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
+            // The symbol keeps the size and color it has in the strip, as a lifted favorite keeps its tile, so it does not jump on lift or when it settles back.
             if let space = session.spaces.first(where: { $0.id == id }) {
+                let isCurrent = space.id == windowModel.currentSpaceID
                 Image(systemName: space.symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.symbolColor(for: space.tint))
+                    .font(.system(size: isCurrent ? 12 : 9))
+                    .foregroundStyle(isCurrent ? theme.symbolColor(for: space.tint) : Color.secondary)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
@@ -114,7 +117,7 @@ struct SidebarItemDragLayer: View {
     }
 }
 
-/// Opens links, addresses, and files that other apps drop here in new tabs of the window's current space, in the default engine. A ring aligned with the tab rows shows while a drop can land.
+/// Opens links, addresses, and files that other apps drop here in new tabs of the window's current space, in the default engine. A ring aligned with the tab rows shows while a drop can land, in the color a folder row lights up in for a dragged tab.
 struct SidebarDropTarget: ViewModifier {
     /// Links and files, and text that may be an address.
     static let types: [UTType] = [.url, .plainText]
@@ -122,15 +125,17 @@ struct SidebarDropTarget: ViewModifier {
     private static let schemes: Set<String> = ["http", "https", "file"]
 
     @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.spaceTheme) private var theme
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
         content
             .overlay {
                 if isTargeted {
+                    let color = theme.symbolColor(for: windowModel.currentSpace.tint)
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2))
+                        .fill(color.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.6), lineWidth: 2))
                         .padding(.horizontal, SidebarView.inset)
                         .allowsHitTesting(false)
                 }

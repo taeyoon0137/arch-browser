@@ -541,8 +541,9 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
             let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
             guard let requestable = WebExtensionManifest.runTimeAccess(of: installed),
                   !requestable.permissions.contains("nativeMessaging") || installed.grant.permissions.contains(.nativeMessaging) else { return completion(false) }
-            let question = WebExtensionEnginePrompt.permissionsQuestion(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind,
+            var question = WebExtensionEnginePrompt.permissionsQuestion(messages: messages, extensionName: lead.manifest.name, version: installed.pairEngine, engine: kind,
                                                                        confirmsNext: requestable.grant.confirmationReason(for: lead.manifest.name) != nil)
+            question.pluginID = lead.id
             host.ask(question, for: prompt.tab) { allowed in
                 guard allowed else { return completion(false) }
                 Task { completion(await WebExtensionEnginePrompt.confirm(requestable.grant, extensionName: lead.manifest.name)) }
@@ -559,7 +560,9 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         let lead = plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed
         let prompt = WebExtensionAccessPrompt(requested: access, extensionName: lead.manifest.name, version: installed.pairEngine)
         guard !prompt.access.isEmpty else { return completion([]) }
-        host.ask(prompt.question(), for: tab) { allowed in
+        var question = prompt.question()
+        question.pluginID = lead.id
+        host.ask(question, for: tab) { allowed in
             guard allowed else { return completion([]) }
             Task { completion(await prompt.confirm() ? prompt.access : []) }
         }

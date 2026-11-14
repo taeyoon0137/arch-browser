@@ -34,7 +34,7 @@ struct LibraryView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
             Divider().padding(.horizontal, 10)
             VStack(spacing: 2) {
-                LibraryToolRow(symbol: "arrow.uturn.backward", title: "Reopen Closed Tab", action: session.reopenLastClosedTab)
+                LibraryToolRow(symbol: "arrow.uturn.backward", title: "Reopen Last Closed Tab", action: session.reopenLastClosedTab)
                     .disabled(!session.hasClosedTabs)
                 LibraryToolRow(symbol: "gearshape", title: "Settings") { session.showSettings?() }
             }
@@ -94,6 +94,8 @@ struct LibraryButton: View {
         }
     }
 
+    private var label: String { windowModel.isLibraryVisible ? "Hide Library" : "Show Library" }
+
     private var accessibilityValue: String {
         if downloads.isDownloading { return "Downloading" }
         let count = session.unseenDownloadIDs.count
@@ -134,8 +136,8 @@ struct LibraryButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(windowModel.isLibraryVisible ? .primary : .secondary)
         .onHover { isHovering = $0 }
-        .help("Library")
-        .accessibilityLabel("Library")
+        .help(session.menuShortcut("toggleDownloads").map { "\(label) (\($0))" } ?? label)
+        .accessibilityLabel(label)
         .accessibilityValue(accessibilityValue)
     }
 }

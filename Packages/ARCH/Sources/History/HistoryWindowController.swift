@@ -1,9 +1,10 @@
 // History window that lists visited pages by day, searches them, and deletes single pages or a time range.
 import AppKit
+import Combine
 import SwiftUI
 
 /// Owns the History window of one store, which stays in memory when closed and reloads the store each time it becomes key. The store answers off the main thread, so the list fills in once the read is done. The app makes one for the session's store.
-public final class HistoryWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
+public final class HistoryWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSToolbarItemValidation {
 
     /// Opens a page from the window in a new browser tab.
     public var openURL: ((URL) -> Void)? {
@@ -14,6 +15,10 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
     private let model: HistoryModel
     private static let clearItem = NSToolbarItem.Identifier("ARCHHistoryClear")
     private static let searchItem = NSToolbarItem.Identifier("ARCHHistorySearch")
+    /// The toolbar's search field, which Edit ▸ Find… focuses.
+    private weak var searchToolbarItem: NSSearchToolbarItem?
+    /// Validates the toolbar again when rows arrive, which they do off any user event.
+    private var daysSubscription: AnyCancellable?
 
     public init(store: HistoryStore) {
         let model = HistoryModel(store: store)
@@ -30,6 +35,8 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         window.toolbar = toolbar
         window.toolbarStyle = .unified
         window.center()
+        // The model sets its entries before it publishes the days that follow from them.
+        daysSubscription = model.$days.sink { [weak self] _ in self?.window?.toolbar?.validateVisibleItems() }
     }
 
     @available(*, unavailable)
@@ -48,6 +55,12 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
     public func showClearHistory() {
         show()
         if window?.attachedSheet == nil { chooseRangeToClear() }
+    }
+
+    /// Puts the cursor in the toolbar's search field, for Edit ▸ Find…, unless the Clear History sheet shows.
+    public func focusSearch() {
+        guard window?.attachedSheet == nil else { return }
+        searchToolbarItem?.beginSearchInteraction()
     }
 
     // Pages visited in another window since the last look appear when the user returns here.
@@ -80,10 +93,16 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
             item.searchField.placeholderString = "Search History"
             item.searchField.target = self
             item.searchField.action = #selector(search(_:))
+            searchToolbarItem = item
             return item
         default:
             return nil
         }
+    }
+
+    /// Clear History… waits for pages to clear. A search that shows none leaves it enabled, since it clears by time.
+    public func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        item.itemIdentifier != Self.clearItem || model.hasEntries
     }
 
     @objc private func search(_ sender: NSSearchField) {
@@ -176,6 +195,9 @@ private final class HistoryModel: ObservableObject {
         ordered(urls).forEach { openURL?($0) }
     }
 
+    /// Whether the store has pages, whatever the search shows.
+    var hasEntries: Bool { !entries.isEmpty }
+
     func copy(_ urls: Set<URL>) {
         let links = ordered(urls)
         guard !links.isEmpty else { return }
@@ -184,6 +206,15 @@ private final class HistoryModel: ObservableObject {
         if links.count == 1 { item.setString(links[0].absoluteString, forType: .URL) }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([item])
+    }
+
+    /// What Edit ▸ Copy writes for the pages, the same as Copy Link: their addresses, one per line, and for one page its address as a URL too. SwiftUI writes the providers to the pasteboard.
+    func copyItems(_ urls: Set<URL>) -> [NSItemProvider] {
+        let links = ordered(urls)
+        guard !links.isEmpty else { return [] }
+        let provider = NSItemProvider(object: links.map(\.absoluteString).joined(separator: "\n") as NSString)
+        if links.count == 1 { provider.registerObject(links[0] as NSURL, visibility: .all) }
+        return [provider]
     }
 
     /// The rows leave the list at once; a read that started before the removal is dropped.
@@ -259,7 +290,9 @@ private struct HistoryList: View {
                 } primaryAction: { urls in
                     model.open(urls)
                 }
-                .onDeleteCommand { model.delete(model.selection) }
+                // Without a selection, Edit ▸ Delete and Copy have nothing to act on and stay disabled.
+                .onDeleteCommand(perform: model.selection.isEmpty ? nil : { model.delete(model.selection) })
+                .onCopyCommand(perform: model.selection.isEmpty ? nil : { model.copyItems(model.selection) })
             }
         }
         .frame(minWidth: 420, minHeight: 300)

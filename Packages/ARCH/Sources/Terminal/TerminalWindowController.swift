@@ -134,12 +134,14 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         terminal = nil
     }
 
-    /// Quitting the app ends the shell as closing the window does, so while a program runs in front the terminal comes forward and the user confirms first. Returns whether the app may quit; it may when the terminal never showed. The app asks it when a quit starts, before it answers the tabs' prompts.
-    public static func allowsQuit() -> Bool {
-        guard let controller = instance, controller.terminal?.hasRunningProgram == true else { return true }
-        controller.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate()
-        return runningProgramAlert(message: "Quit Arch?", action: "Quit").runModal() == .alertFirstButtonReturn
+    /// Whether a program other than the shell runs in front, which quitting the app ends as closing the window does. False when the terminal never showed. The app reads it when a quit starts, before it answers the tabs' prompts, and asks in one alert with whatever else the quit stops.
+    public static var hasRunningProgram: Bool {
+        instance?.terminal?.hasRunningProgram == true
+    }
+
+    /// Brings the terminal forward, so that the program the quit alert names shows behind it.
+    public static func bringForward() {
+        instance?.window?.makeKeyAndOrderFront(nil)
     }
 
     private static func runningProgramAlert(message: String, action: String) -> NSAlert {

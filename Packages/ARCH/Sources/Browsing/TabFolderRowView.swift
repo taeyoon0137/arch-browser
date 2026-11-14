@@ -12,6 +12,7 @@ struct TabFolderRowView: View {
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isDraggingTab) private var isDraggingTab
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     init(session: BrowserSession, folder: TabFolder) {
@@ -23,6 +24,7 @@ struct TabFolderRowView: View {
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
     private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
     private var status: LiveFolderStatus { statuses[folder.id] }
+    private var dropColor: Color { theme.symbolColor(for: windowModel.currentSpace.tint) }
 
     /// A feed's or GitHub's symbol for a live folder, in place of the folder symbol.
     private var symbol: String {
@@ -35,7 +37,7 @@ struct TabFolderRowView: View {
 
     /// Rows ignore the pointer while a tab or folder is dragged over them; the folder under it lights up instead.
     private var fill: Color {
-        if isDropTarget { return Color.accentColor.opacity(0.15) }
+        if isDropTarget { return dropColor.opacity(0.15) }
         return isHovering && !isDraggingTab ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -43,7 +45,7 @@ struct TabFolderRowView: View {
         HStack(spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isDropTarget ? Color.accentColor : .secondary)
+                .foregroundStyle(isDropTarget ? dropColor : .secondary)
                 .frame(width: 18, height: 18)
             if isRenaming {
                 SidebarNameField(placeholder: "Folder Name", name: folder.name,

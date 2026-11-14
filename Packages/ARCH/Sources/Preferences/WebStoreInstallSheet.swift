@@ -1,4 +1,4 @@
-// The store sheet (`docs/web-store.md`, Entry points and Updates): a field for a Web Store address or an extension identifier, whose Continue asks the store for the extension's current package and stages it, with progress while it runs and the install flow's failures, after which the package's review takes the sheet's place. `PluginInstallSheet` shows it as its first step for Install from Web Store… and From the Web Store… in Settings ▸ Plugins, for a start from a store page or the palette, which fills in the identifier and asks at once, and, without the field, for a plugin's Review Update…, which downloads the update at once. Cancel, closing the sheet, and deleting the Persona cancel the install, which then leaves nothing staged.
+// The store sheet (`docs/web-store.md`, Entry points and Updates): a field for a Web Store address or an extension identifier, whose Continue asks the store for the extension's current package and stages it, with progress while it runs and the install flow's failures, after which the package's review takes the sheet's place. `PluginInstallSheet` shows it as its first step for Install from the Web Store… and From the Web Store… in Settings ▸ Plugins, for a start from a store page or the palette, which fills in the identifier and asks at once, and, without the field, for a plugin's Review Update…, which downloads the update at once. Cancel, closing the sheet, and deleting the Persona cancel the install, which then leaves nothing staged.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -52,7 +52,7 @@ struct WebStoreInstallSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if start.update == nil {
-                TextField("Web Store address or extension ID", text: $text)
+                TextField("Web Store address or extension identifier", text: $text)
                     .textFieldStyle(.roundedBorder)
                     .disabled(install != nil)
                     .onSubmit(begin)

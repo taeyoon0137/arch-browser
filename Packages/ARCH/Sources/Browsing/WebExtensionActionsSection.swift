@@ -23,10 +23,17 @@ struct WebExtensionActionsSection: View {
                 : engines.contains(tab.engineKind)
                 ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
                 : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {
-                VStack(alignment: .leading, spacing: 2) {
+                let rows = VStack(alignment: .leading, spacing: 2) {
                     if let storeRow { row(for: storeRow) }
                     ForEach(items) { row(for: $0, engineRunsExtensions: engines.contains(tab.engineKind)) }
                 }
+                // As tall as the rows up to 260 points, about ten actions; more scroll, so that the popover stays on the screen. The scroll view's inset keeps the hover fill, which reaches past the section's edges, from being clipped.
+                ViewThatFits(in: .vertical) {
+                    rows
+                    ScrollView { rows.padding(.horizontal, ExtensionActionRow.fillOverhang) }
+                        .padding(.horizontal, -ExtensionActionRow.fillOverhang)
+                }
+                .frame(maxHeight: 260)
             }
         }
     }
@@ -60,40 +67,13 @@ struct WebExtensionActionsSection: View {
         }
     }
 
-    /// An action that the tab's engine does not run, or that its extension switched off for the tab, shows dimmed.
+    /// The action's row, and below it, where they apply, Allow on This Site and the note on the engines the plugin runs on.
     private func row(for item: WebExtensionActionItem, engineRunsExtensions: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button {
+            ExtensionActionRow(item: item) {
                 close()
                 webExtensions.performAction(of: item.id, for: tab.webContents)
-            } label: {
-                HStack(spacing: 8) {
-                    Group {
-                        if let icon = item.action?.icon {
-                            Image(nsImage: icon).resizable()
-                        } else {
-                            Image(systemName: "puzzlepiece.extension")
-                        }
-                    }
-                    .frame(width: 16, height: 16)
-                    Text(item.action.flatMap { $0.label.isEmpty ? nil : $0.label } ?? item.name)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if let badge = item.action?.badgeText, !badge.isEmpty {
-                        Text(badge)
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(Capsule().fill(Color.primary.opacity(0.1)))
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .disabled(item.action?.isEnabled != true)
-            .help(item.name)
             if item.wantsSiteAccess {
                 Button("Allow on This Site") {
                     close()
@@ -105,9 +85,15 @@ struct WebExtensionActionsSection: View {
             if engineRunsExtensions, !item.engines.contains(tab.engineKind), let note = PluginPackage.runsNote(on: item.engines) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if item.asksForVersion {
                         let engine = tab.engineKind
                         Text("Its developer may offer a separate version for \(engine.displayName).")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         HStack {
                             Button("Install \(engine.displayName) Version\u{2026}") {
                                 close()
@@ -118,8 +104,6 @@ struct WebExtensionActionsSection: View {
                         .controlSize(.small)
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
                 .padding(.leading, 24)
             }
         }
@@ -128,6 +112,57 @@ struct WebExtensionActionsSection: View {
     /// The engines' names in the order of `EngineKind`, such as "WebKit" or "WebKit and Chromium".
     private static func names(_ engines: Set<EngineKind>, joinedBy conjunction: String = "and") -> String {
         EngineKind.allCases.filter(engines.contains).map(\.displayName).joined(separator: " \(conjunction) ")
+    }
+}
+
+/// An action's icon, label, and badge for the tab, with the hover fill of the app's other plain buttons, which reaches past the section's edges so that the icon stays on the section's leading edge. An action that the tab's engine does not run, or that its extension switched off for the tab, shows dimmed and takes no fill.
+private struct ExtensionActionRow: View {
+    /// How far the hover fill reaches past each side of the row.
+    static let fillOverhang: CGFloat = 4
+
+    let item: WebExtensionActionItem
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        let isEnabled = item.action?.isEnabled == true
+        let title = item.action.flatMap { $0.label.isEmpty ? nil : $0.label } ?? item.name
+        let badge = item.action.flatMap { $0.badgeText.isEmpty ? nil : $0.badgeText }
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Group {
+                    if let icon = item.action?.icon {
+                        Image(nsImage: icon).resizable()
+                    } else {
+                        Image(systemName: "puzzlepiece.extension")
+                    }
+                }
+                .frame(width: 16, height: 16)
+                Text(title)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Capsule().fill(Color.primary.opacity(0.1)))
+                }
+            }
+            .padding(.horizontal, Self.fillOverhang)
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { isHovering = $0 }
+        .help(item.name)
+        .accessibilityLabel(title)
+        .accessibilityValue(badge ?? "")
+        // Last, so that the pointer's hover and click areas are the fill's.
+        .padding(.horizontal, -Self.fillOverhang)
     }
 }
 

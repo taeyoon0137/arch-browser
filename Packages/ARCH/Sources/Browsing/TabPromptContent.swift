@@ -64,7 +64,7 @@ enum TabPromptContent {
         }
         return PromptContent(kind: .signIn, identity: identity, glyph: .symbol("person.badge.key.fill", tint: .accent, label: "Log In"),
                              title: isProxy ? "Log In to This Proxy" : "Log In to This Website",
-                             pageText: space.realm.flatMap { $0.isEmpty ? nil : PageAuthoredText(caption: isProxy ? "The proxy says" : "The site says", text: $0) },
+                             pageText: space.realm.flatMap { $0.isEmpty ? nil : PageAuthoredText(caption: isProxy ? "The proxy says" : "The website says", text: $0) },
                              fields: [PromptField(id: "user", kind: .userName, label: "User Name", initialValue: user),
                                       PromptField(id: "password", kind: .password, label: "Password", initialValue: "")],
                              focusedFieldID: identity.context != nil ? nil : user.isEmpty ? "user" : "password", notes: notes,
@@ -80,10 +80,10 @@ enum TabPromptContent {
 
     // MARK: Links for other apps
 
-    /// A page's link for another app, with the app's icon. Open waits for the card to arm.
-    static func openInApp(appName: String, appIcon: NSImage, scheme: String, hasHost: Bool, identity: PromptIdentity) -> PromptContent {
+    /// A page's link for another app, with the app's icon. The message names the app, not the link's scheme, which the card never shows. Open waits for the card to arm.
+    static func openInApp(appName: String, appIcon: NSImage, hasHost: Bool, identity: PromptIdentity) -> PromptContent {
         PromptContent(kind: .openInApp, identity: identity, glyph: .appIcon(appIcon, label: appName),
-                      title: "Open \u{201C}\(appName)\u{201D}?", message: "\(hasHost ? "This website" : "This page") wants to open a \(scheme) link in \(appName).",
+                      title: "Open \u{201C}\(appName)\u{201D}?", message: "\(hasHost ? "This website" : "This page") wants to open a link in \(appName).",
                       buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "open", title: "Open", needsArming: true)],
                       defaultButtonID: "open", cancelButtonID: "cancel")
     }
@@ -106,28 +106,25 @@ enum TabPromptContent {
 
     // MARK: Site data
 
-    /// Clear Site Data for the site of the tab's page, which `identity` names by its host, as the tab's other cards do. With several Personas, the message names the Persona whose data goes as `BrowserWindowModel.sheetName(ofPersona:space:among:)` does, as "the Persona of “Work / Research”" (Persona rule 7). Clear is destructive, so Return and Escape both press Cancel.
+    /// Clear Site Data for the site of the tab's page, which `identity` names by its host, as the tab's other cards do. The card takes the command's name, and its words say "website", as the app's other sentences do. With several Personas, the message names the Persona whose data goes as `BrowserWindowModel.sheetName(ofPersona:space:among:)` does, as "the Persona of “Work / Research”" (Persona rule 7). Clear is destructive, so Return and Escape both press Cancel.
     static func clearSiteData(persona: String?, identity: PromptIdentity) -> PromptContent {
         let inPersona = persona.map { " in \($0)" } ?? ""
-        return PromptContent(kind: .clearSiteData, identity: identity, glyph: .symbol("trash.fill", tint: .red, label: "Clear Website Data"),
+        return PromptContent(kind: .clearSiteData, identity: identity, glyph: .symbol("trash.fill", tint: .red, label: "Clear Site Data"),
                              title: "Clear the data stored by this website?",
-                             message: "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again.",
+                             message: "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the website. Its open tabs load again.",
                              buttons: [PromptButton(id: "clear", title: "Clear", isDestructive: true), PromptButton(id: "cancel", title: "Cancel")],
                              defaultButtonID: "cancel", cancelButtonID: "cancel")
     }
 
     // MARK: Downloads
 
-    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page's host, a file's name for a page without one, or else this page, never the page's own title. The question is about the page, since an Allow ends when the tab loads another one. Allow waits for the card to arm.
-    static func pageDownloads(pageURL: URL?, identity: PromptIdentity) -> PromptContent {
-        var identity = identity
-        let hasHost = pageURL?.host?.isEmpty == false
-        if !hasHost, let pageURL, pageURL.isFileURL, !pageURL.lastPathComponent.isEmpty { identity.name = pageURL.lastPathComponent }
-        return PromptContent(kind: .pageDownloads, identity: identity, glyph: .symbol("arrow.down.circle.fill", tint: .accent, label: "Downloads"),
-                             title: "Allow this page to download multiple files?",
-                             message: "This page started another download on its own. If you allow it, it can download files until it loads another page.",
-                             buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
-                             defaultButtonID: "allow", cancelButtonID: "deny")
+    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page as the tab's other cards do (`PromptSiteIdentity.make`): its host, a file's name for a file page, or else this page, never the page's own title. The question is about the page, since an Allow ends when the tab loads another one. Allow waits for the card to arm.
+    static func pageDownloads(identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageDownloads, identity: identity, glyph: .symbol("arrow.down.circle.fill", tint: .accent, label: "Downloads"),
+                      title: "Allow this page to download multiple files?",
+                      message: "This page started another download on its own. If you allow it, it can download files until it loads another page.",
+                      buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
+                      defaultButtonID: "allow", cancelButtonID: "deny")
     }
 
     /// Only Allow lets the page download more files; Don't Allow and a question that ended without the user refuse.

@@ -21,8 +21,8 @@ struct TabRowView: View {
 
     private var fill: Color {
         if isSelected { return SidebarFill.selected.color(in: colorScheme) }
-        // The other panes of the split view on screen show a lighter selection.
-        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(0.5) }
+        // The other panes of the split view on screen show a lighter selection. The dark selection is faint, so half of it would read as hover; there it sits halfway between hover and selected.
+        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(colorScheme == .dark ? 0.7 : 0.5) }
         return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
     }
 
@@ -121,7 +121,7 @@ struct TabRowView: View {
             windowModel.renamingTabID = tab.id
         }
         Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
-        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
         Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
         Divider()
         // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
@@ -166,7 +166,7 @@ private struct LiveItemTabItems: View {
         }
         Divider()
         Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
-        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
         let tree = session.folderTree
         MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
@@ -383,6 +383,8 @@ struct TabRowButton: View {
 /// A tab's icon: a spinner while it loads, its page's icon, or a globe without one. A live folder item's tab without its page shows its GitHub item's state, or its feed folder's icon, or the feed symbol until that loads, since it requests no icon from the item's site.
 struct TabIconView: View {
     @ObservedObject var tab: Tab
+    /// The globe's size for a page without an icon, as large as the symbols in the rows around it.
+    var symbolSize: CGFloat = 13
 
     var body: some View {
         if tab.isLoading {
@@ -406,7 +408,7 @@ struct TabIconView: View {
                 .foregroundStyle(.secondary)
         } else {
             Image(systemName: "globe")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(.secondary)
         }
     }
@@ -433,7 +435,7 @@ struct NewTabButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
                 Text("New Tab")
                     .font(.system(size: 14))

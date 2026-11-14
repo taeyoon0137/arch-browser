@@ -30,7 +30,7 @@ import Testing
         #expect(BrowserWindowModel.sheetName(ofPersona: Persona.defaultID, space: personal, among: [defaultPersona]) == nil)
         let clear = TabPromptContent.clearSiteData(persona: nil, identity: site)
         #expect(clear.identity == site)
-        #expect(clear.message == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
+        #expect(clear.message == "Its cookies and other website data are removed from both engines, which signs you out of the website. Its open tabs load again.")
     }
 
     @Test func twoPersonasNameThePersonaWithTheSpace() {
@@ -43,11 +43,11 @@ import Testing
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
         let clear = TabPromptContent.clearSiteData(persona: persona, identity: site)
         #expect(clear.identity == site)
-        #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
-        let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3)
+        #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
+        let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, downloadCount: 2)
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
-        #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
-        #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1).information.hasPrefix("Its 1 space and 0 favorites are removed, and its 1 tab closes into"))
+        #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its 2 downloads in progress stop. Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
+        #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1, downloadCount: 0).information.hasPrefix("Its space is removed, and its tab closes into the closed list. Arch removes"))
     }
 
     /// A favorite's tab belongs to no space and shows in the window's current space, so a sheet or card about it names the Persona with that space, as the window title does.
@@ -64,7 +64,7 @@ import Testing
         let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: space, among: personas)
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
         #expect(TabPromptContent.clearSiteData(persona: persona, identity: site).message
-            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
         // Only a tab outside every space of its Persona names the Persona alone.
         #expect(BrowserWindowModel.sheetSpace(ofTabIn: nil, personaID: work.id, spaces: spaces, currentSpace: personal) == nil)
         #expect(BrowserSession.displayedPlace(ofPersona: work.id, space: nil, among: personas) == "Work")

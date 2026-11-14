@@ -100,15 +100,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return CGRect(x: area.midX - fitted.width / 2, y: area.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
     }
 
-    /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it.
+    /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it. While an internal page covers the page area, the title names that page, as the page area and the address pill do, not the tab under it.
     private func updateTitle() {
         guard let window else { return }
         let space = model.currentSpace
-        let title = Self.title(tabTitle: model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
+        let title = Self.title(tabTitle: model.internalPage?.title ?? model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
         if window.title != title { window.title = title }
     }
 
-    /// A window's title: the selected tab's title followed by `place`, the window's Persona and current space, as "Example Domain — Work / Research", or with no tab selected `place` alone. With one Persona, `place` is nil, and the title is the tab's title or the space's name.
+    /// A window's title: `tabTitle`, the selected tab's title or the internal page's while one is open, followed by `place`, the window's Persona and current space, as "Example Domain — Work / Research", or without either title `place` alone. With one Persona, `place` is nil, and the title is the tab's or page's title or the space's name.
     nonisolated static func title(tabTitle: String?, spaceName: String, place: String?) -> String {
         guard let tabTitle else { return place ?? spaceName }
         return place.map { "\(tabTitle) \u{2014} \($0)" } ?? tabTitle

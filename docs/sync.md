@@ -80,7 +80,7 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 - Applying a change:
   - A new or changed Persona, space, or favorite updates the sidebar at once.
   - A new pinned tab opens in its space without becoming selected. A changed address or engine reloads an unselected tab at once. The selected tab keeps its page and applies the change when the user leaves it. A changed tab name or order applies at once.
-  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Closed Tab can bring it back.
+  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Last Closed Tab can bring it back.
   - A deleted space moves this Mac's open tabs to its neighbor, as `deleteSpace` does.
   - A deleted Persona closes its tabs into the closed list and removes its local site data, as a local deletion does (III.12).
 - Orphans: after a fetch, a tab whose space is missing moves to the first space of the first Persona. A space or favorite whose Persona is missing moves to the first Persona. Every Mac picks the same destination. The Mac that finds the orphan writes the move. A Persona left without spaces gets a new space named Personal, as at first launch.

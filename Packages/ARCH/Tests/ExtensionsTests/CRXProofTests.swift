@@ -56,7 +56,7 @@ import Testing
         parts.proofs[1] = (CRXFile.publisher.filedAsRSA, parts.proofs[1].signature)
         #expect(throws: mismatch) { try read(parts.data) }
         // No proof's key has the identifier, or the signed header has none.
-        let noKey = PluginError.invalidPackage("Packed.crx has no key for its extension's identifier.")
+        let noKey = PluginError.invalidPackage("Packed.crx has no key for its extension\u{2019}s identifier.")
         #expect(throws: noKey) { try read(CRXFile.parts(archive: archive, crxID: Data(repeating: 7, count: 16)).data) }
         parts = CRXFile.parts(archive: archive)
         parts.signedHeader = Data()
@@ -65,7 +65,7 @@ import Testing
         // A header that is not a protocol buffer message.
         var data = CRXFile.data(archive: archive)
         data[12] = 0xFF
-        #expect(throws: PluginError.invalidPackage("The header of Packed.crx does not read.")) { try read(data) }
+        #expect(throws: PluginError.invalidPackage("The header of Packed.crx could not be read.")) { try read(data) }
     }
 
     @Test func refusesHeadersWithTheSignatureOfAZipArchivesEnd() throws {
@@ -75,7 +75,7 @@ import Testing
         #expect(try read(parts.data).proof == .developer)
         for signature in CRXArchive.zipEndSignatures {
             parts.unsignedFields = CRXFile.field(4, Data("contents ".utf8) + Data(signature))
-            #expect(throws: PluginError.invalidPackage("The header of Packed.crx does not read.")) { try read(parts.data) }
+            #expect(throws: PluginError.invalidPackage("The header of Packed.crx could not be read.")) { try read(parts.data) }
         }
         #expect(CRXArchive.zipEndSignatures.map { Data($0) } == [Data("PK\u{05}\u{06}".utf8), Data("PK\u{06}\u{07}".utf8), Data("PK\u{06}\u{06}".utf8)])
     }

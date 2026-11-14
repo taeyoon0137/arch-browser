@@ -50,7 +50,7 @@ import Testing
         let space = URLProtectionSpace(host: "intranet.example", port: 80, protocol: "http", realm: "Staff", authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
         let first = TabPromptContent.signIn(space, proposedUser: nil, failed: false, identity: Self.site)
         #expect(first.title == "Log In to This Website")
-        #expect(first.pageText == PageAuthoredText(caption: "The site says", text: "Staff"))
+        #expect(first.pageText == PageAuthoredText(caption: "The website says", text: "Staff"))
         #expect(first.fields.map(\.kind) == [.userName, .password])
         #expect(first.focusedFieldID == "user")
         #expect(first.notes.map(\.id) == ["unencrypted"])
@@ -82,12 +82,12 @@ import Testing
 
     @Test func openingAnotherAppWaitsToArmAndOnlyCancelIsADecline() {
         let icon = NSImage(size: NSSize(width: 32, height: 32))
-        let content = TabPromptContent.openInApp(appName: "Mail", appIcon: icon, scheme: "mailto", hasHost: true, identity: Self.site)
+        let content = TabPromptContent.openInApp(appName: "Mail", appIcon: icon, hasHost: true, identity: Self.site)
         #expect(content.title == "Open \u{201C}Mail\u{201D}?")
-        #expect(content.message == "This website wants to open a mailto link in Mail.")
+        #expect(content.message == "This website wants to open a link in Mail.")
         #expect(content.glyph == .appIcon(icon, label: "Mail"))
         #expect(content.buttons.first { $0.id == "open" }?.needsArming == true)
-        #expect(TabPromptContent.openInApp(appName: "Mail", appIcon: icon, scheme: "mailto", hasHost: false, identity: Self.site).message == "This page wants to open a mailto link in Mail.")
+        #expect(TabPromptContent.openInApp(appName: "Mail", appIcon: icon, hasHost: false, identity: Self.site).message == "This page wants to open a link in Mail.")
         #expect(TabPromptContent.openInAppResult(Self.answered("open")) == .open)
         #expect(TabPromptContent.openInAppResult(Self.answered("cancel")) == .decline)
         #expect(TabPromptContent.openInAppResult(.dismissed) == .none)
@@ -96,12 +96,12 @@ import Testing
     @Test func clearSiteDataNamesThePersonaOnlyWithSeveralPersonas() {
         let alone = TabPromptContent.clearSiteData(persona: nil, identity: Self.site)
         #expect(alone.identity == Self.site)
-        #expect(alone.message == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
+        #expect(alone.message == "Its cookies and other website data are removed from both engines, which signs you out of the website. Its open tabs load again.")
         let several = TabPromptContent.clearSiteData(persona: "the Persona of \u{201C}Work / Research\u{201D}", identity: Self.site)
         #expect(several.identity == Self.site)
-        #expect(several.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        #expect(several.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
         #expect(several.buttons.map(\.title) == ["Clear", "Cancel"])
-        #expect(several.glyph == .symbol("trash.fill", tint: .red, label: "Clear Website Data"))
+        #expect(several.glyph == .symbol("trash.fill", tint: .red, label: "Clear Site Data"))
     }
 
     @Test func aNoticeShowsAPathWholeOnlyInItsTooltip() {
@@ -112,7 +112,7 @@ import Testing
     }
 
     @Test func aPagesDownloadsQuestionNamesItsHostOrFileAndWaitsToArm() throws {
-        let page = TabPromptContent.pageDownloads(pageURL: URL(string: "https://example.com/files"), identity: Self.site)
+        let page = TabPromptContent.pageDownloads(identity: Self.site)
         #expect(page.kind == .pageDownloads && page.identity == Self.site)
         #expect(page.title == "Allow this page to download multiple files?")
         #expect(page.message == "This page started another download on its own. If you allow it, it can download files until it loads another page.")
@@ -123,9 +123,9 @@ import Testing
         #expect(!TabPromptContent.pageDownloadsResult(.dismissed))
 
         let file = try #require(URL(string: "file:///Users/a/Report.html"))
-        let filePage = TabPromptContent.pageDownloads(pageURL: file, identity: PromptSiteIdentity.make(for: file, tabURL: file, favicon: nil))
+        let filePage = TabPromptContent.pageDownloads(identity: PromptSiteIdentity.make(for: file, tabURL: file, favicon: nil))
         #expect(filePage.identity.name == "Report.html" && filePage.title == "Allow this page to download multiple files?")
-        let blank = TabPromptContent.pageDownloads(pageURL: nil, identity: PromptSiteIdentity.make(for: nil, tabURL: nil, favicon: nil))
+        let blank = TabPromptContent.pageDownloads(identity: PromptSiteIdentity.make(for: nil, tabURL: nil, favicon: nil))
         #expect(blank.identity.name == "This page")
     }
 

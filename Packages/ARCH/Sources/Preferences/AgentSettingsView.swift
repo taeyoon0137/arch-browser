@@ -45,7 +45,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Outside Clients")
         } footer: {
-            aiFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
+            formFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
         }
         AgentCommandLineToolsSection()
         AgentSkillsSection()
@@ -65,7 +65,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Agent Sessions")
         } footer: {
-            aiFootnote("A session the user starts begins in this mode and can be lowered at any time; raising it asks first. Sessions that a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; Claude Code keeps none of Arch\u{2019}s sessions.")
+            formFootnote("A session the user starts begins in this mode and can be lowered at any time; raising it asks first. Sessions that a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; Claude Code keeps none of Arch\u{2019}s sessions.")
         }
         .disabled(!service.canChangeSettings)
     }
@@ -125,7 +125,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Grants")
         } footer: {
-            aiFootnote("Revoking ends a program's access at once: its connections close, and its next command asks again.")
+            formFootnote("Revoking ends a program's access at once: its connections close, and its next command asks again.")
         }
     }
 
@@ -188,7 +188,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Activity")
         } footer: {
-            aiFootnote("Arch keeps \(AgentActivityLog.keptDays) days of what agents did and what you decided, without page text, typed text, addresses' paths, or screenshots.")
+            formFootnote("Arch keeps \(AgentActivityLog.keptDays) days of what agents did and what you decided, without page text, typed text, addresses' paths, or screenshots.")
         }
     }
 
@@ -359,7 +359,7 @@ struct AgentCommandLineToolsSection: View {
         } header: {
             Text("Command-Line Tools")
         } footer: {
-            aiFootnote("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on.")
+            formFootnote("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on.")
         }
     }
 
@@ -680,7 +680,7 @@ struct AgentSkillsSection: View {
         } header: {
             Text("Skills")
         } footer: {
-            aiFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME.")
+            formFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME.")
         }
     }
 

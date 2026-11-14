@@ -151,7 +151,7 @@ final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        fail("The background script's process ended unexpectedly.", throwing: .stopped)
+        fail("The background script\u{2019}s process ended unexpectedly.", throwing: .stopped)
     }
 }
 
