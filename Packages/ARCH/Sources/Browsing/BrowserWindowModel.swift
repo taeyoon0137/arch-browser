@@ -886,11 +886,19 @@ public enum BrowserWindowKind {
         }
     }
 
+    private var resumableAgentDraft: AgentComposerContext? {
+        guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID else { return nil }
+        return draft
+    }
+
+    /// An open panel and this space’s unfinished setup draft stay reachable before a model can run.
+    public var canToggleAgentPanel: Bool { agentPanel != nil || resumableAgentDraft != nil || canStartAgentTask }
+
     /// Hides the panel, or resumes its draft in this space before showing the most recent session or a new composer.
     public func toggleAgentPanel() {
         guard agentPanel == nil else { return hideAgentPanel() }
-        if let agentDraft = agentDrafts[currentSpaceID], agentDraft.personaID == personaID {
-            showAgentPanel(.composer(agentDraft))
+        if let draft = resumableAgentDraft {
+            showAgentPanel(.composer(draft))
         } else if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
             showAgentSession(latest.id)
         } else {

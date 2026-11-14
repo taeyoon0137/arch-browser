@@ -37,12 +37,22 @@ import Testing
         let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: space.id, select: false)
         let requested = browser.openTab(url: URL(string: "https://fixture.invalid/background"), in: space.id, select: false)
         window.selectTab(selected.id)
-        #expect(!window.canStartAgentTask && service.agentModels().isEmpty)
+        #expect(!window.canStartAgentTask && !window.canToggleAgentPanel && service.agentModels().isEmpty)
         let reviewed = try #require(window.sidebarAgentDraft(for: requested))
         window.askAgentAboutSidebarTab(requested, reviewed: reviewed)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a local task draft"); return }
         #expect(draft.text.isEmpty && draft.tab?.id == requested.id && draft.tab?.documentID == reviewed.tab?.documentID)
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
+        #expect(window.canToggleAgentPanel)
+        draft.text = "Compare these notes"
+        window.toggleAgentPanel()
+        #expect(window.agentPanel == nil && window.canToggleAgentPanel)
+        window.switchToSpace(browser.makeSpace(in: window.personaID).id)
+        #expect(!window.canToggleAgentPanel)
+        window.switchToSpace(space.id)
+        #expect(window.canToggleAgentPanel)
+        window.toggleAgentPanel()
+        #expect(window.agentPanel == .composer(draft) && draft.text == "Compare these notes" && service.sessions.isEmpty)
     }
 
     @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {

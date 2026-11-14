@@ -804,12 +804,14 @@ import Terminal
             item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
             return activeWindow?.canTogglePageReader == true
         }
-        // The agent commands stay out of the menu until a Claude Code or Codex model can run a session; Stop All Agents works while an agent acts.
-        if item.action == #selector(newAgentTask) || item.action == #selector(toggleAgentPanel) {
-            item.isHidden = MainActor.assumeIsolated { agents?.agentModels().isEmpty ?? true }
-            if item.action == #selector(toggleAgentPanel) {
-                item.title = (activeWindow ?? session?.lastMainWindow)?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
-            }
+        if item.action == #selector(toggleAgentPanel) {
+            let window = activeWindow ?? session?.lastMainWindow
+            item.title = window?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
+            item.isHidden = !(window?.canToggleAgentPanel ?? (agents?.agentModels().isEmpty == false))
+            return !item.isHidden
+        }
+        if item.action == #selector(newAgentTask) {
+            item.isHidden = agents?.agentModels().isEmpty ?? true
             return !item.isHidden
         }
         if item.action == #selector(stopAllAgents) {
