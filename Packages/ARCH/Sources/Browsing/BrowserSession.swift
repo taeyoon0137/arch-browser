@@ -428,7 +428,11 @@ final class EngineRuntime {
         reordered.append(reordered.remove(at: index))
         tabs = reordered
         let target = sidebarTarget()
+        let panel = smallWindow.agentPanel
         target.selectTab(tab.id)
+        if case .session(let id) = panel, target.agentPanel == nil {
+            target.showAgentSession(id)
+        }
         target.nsWindow?.makeKeyAndOrderFront(nil)
         target.focusPage()
     }
@@ -992,7 +996,6 @@ final class EngineRuntime {
     func selectUnshownTab(_ tab: Tab) {
         let window = windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
             ?? windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
-        if tab.spaceID == nil, window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
         window.selectTab(tab.id)
     }
 
