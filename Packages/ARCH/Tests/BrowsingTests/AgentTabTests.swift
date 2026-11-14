@@ -4,6 +4,7 @@ import Combine
 import Agent
 import ARCHEngine
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -163,12 +164,20 @@ import Testing
         let ordinary = session.openTab(url: url, in: home.id, select: false)
         let pinned = session.openTab(url: url, in: home.id, pinned: true, select: false)
         let elsewhere = session.openTab(url: url, in: otherSpace.id, select: false)
+        let folder = session.makeFolder(in: home.id, pinned: true)
+        session.updateFolder(folder.id) { $0.live = LiveFolderConfiguration(source: .feed(address: url, isPrivate: true)) }
+        let child = session.openTab(url: url, in: home.id, pinned: true, select: false)
+        LiveFolderTabs.prepare(child, as: LiveItem(id: "entry", url: url, title: "Private feed entry"), inFolder: folder.id)
         _ = try #require(host.openAgentTab(at: url, engine: .webKit, for: AgentTabOwner(id: owner, spaceID: home.id, folderName: "Task")))
         #expect(session.closeTab(pinned))
 
         let homeChoices = host.userTabs(in: home.resolvedPersonaID)
-        #expect(Set(homeChoices.map(\.id)) == [ordinary.id, pinned.id])
-        #expect(homeChoices.filter(\.isLoaded).map(\.id) == [ordinary.id])
+        #expect(Set(homeChoices.map(\.id)) == [ordinary.id, pinned.id, child.id])
+        let entry = try #require(homeChoices.first { $0.id == child.id })
+        #expect(entry.isLoaded && entry.isLiveFolderItem)
+        let context = AgentComposerContext(personaID: home.resolvedPersonaID, spaceID: home.id, place: "Home", tab: entry)
+        #expect(context.attachableTab { _ in true } == nil)
+        #expect(homeChoices.filter { $0.isLoaded && !$0.isLiveFolderItem }.map(\.id) == [ordinary.id])
         #expect(host.userTabs(in: work.id).map(\.id) == [elsewhere.id])
     }
 

@@ -311,7 +311,7 @@ import Testing
         #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
     }
 
-    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, exclude, revoke, takeOver, stop, decline }
+    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, liveFolderItem, exclude, revoke, takeOver, stop, decline }
 
     @Test(arguments: ChangeBeforeTabConsent.allCases)
     func aTabRequestCannotShareAfterItsReviewedChoiceChanges(_ change: ChangeBeforeTabConsent) async throws {
@@ -332,6 +332,12 @@ import Testing
         case .navigate: harness.host.tabs[0].url = URL(string: "https://fixture.invalid/new")
         case .close: harness.host.tabs.removeAll()
         case .unload: harness.host.tabs[0].isLoaded = false
+        case .liveFolderItem:
+            harness.host.tabs[0].isLiveFolderItem = true
+            #expect(!service.canReattach(tab, in: session.personaID))
+            let context = AgentComposerContext(personaID: session.personaID, spaceID: session.spaceID, place: "Home", tab: tab)
+            let reviewed = context.sessionStart(task: "Read", mode: .readOnly, allowsAI: { _ in true })
+            #expect(throws: AgentService.SessionError.self) { try service.startSession(reviewed) }
         case .exclude: harness.excludedHosts.value.insert("fixture.invalid")
         case .revoke:
             #expect(service.share(tab, with: session))

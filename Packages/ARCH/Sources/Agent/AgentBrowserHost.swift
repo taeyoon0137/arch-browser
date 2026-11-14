@@ -34,13 +34,15 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     public var isLoading: Bool
     /// A restored or unloaded tab has no current engine document to review.
     public var isLoaded: Bool
+    /// A Live Folder item is managed by its source even after its document has loaded.
+    public var isLiveFolderItem: Bool
     public var canGoBack: Bool
     public var canGoForward: Bool
     public var engine: EngineKind
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for a tab of the user's.
     public var agentOwnerID: UUID?
 
-    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil, documentID: UUID = UUID(), isLoaded: Bool = true) {
+    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil, documentID: UUID = UUID(), isLoaded: Bool = true, isLiveFolderItem: Bool = false) {
         self.id = id
         self.documentID = documentID
         self.spaceID = spaceID
@@ -48,10 +50,15 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
         self.url = url
         self.isLoading = isLoading
         self.isLoaded = isLoaded
+        self.isLiveFolderItem = isLiveFolderItem
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
         self.engine = engine
         self.agentOwnerID = agentOwnerID
+    }
+
+    func canAttachToSession(allowsAI: (URL) -> Bool) -> Bool {
+        isLoaded && !isLiveFolderItem && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
     }
 
     func showsSameDocument(as other: Self) -> Bool {

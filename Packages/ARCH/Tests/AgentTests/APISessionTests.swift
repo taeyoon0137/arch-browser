@@ -377,11 +377,12 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         let space = try #require(harness.host.spaces(in: persona).first)
         let otherSpace = try #require(harness.host.spaces(in: FakeHost.workPersona.id).first)
         let addresses = ["https://chosen.invalid/report?private=one", "https://other.invalid/report?private=two",
-                         "https://excluded.invalid", "arch://settings", "https://unloaded.invalid", "https://owned.invalid", "https://elsewhere.invalid"]
+                         "https://excluded.invalid", "arch://settings", "https://unloaded.invalid", "https://owned.invalid", "https://feed-item.invalid", "https://elsewhere.invalid"]
         var tabs = addresses.map { AgentTabInfo(id: UUID(), spaceID: space.id, title: "Duplicate fixture title", url: URL(string: $0), isLoading: false, engine: .webKit) }
         tabs[4].isLoaded = false
         tabs[5].agentOwnerID = UUID()
-        tabs[6].spaceID = otherSpace.id
+        tabs[6].isLiveFolderItem = true
+        tabs[7].spaceID = otherSpace.id
         harness.host.tabs = tabs
         // FakeHost's userTabIDs represent the user's tabs returned for the requested Persona.
         harness.host.userTabIDs = Set(tabs.dropLast().map(\.id))
