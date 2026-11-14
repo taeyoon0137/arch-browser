@@ -5,6 +5,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_extension_runtime.h"
 #include "include/cef_request_context.h"
+#include "include/cef_request_context_handler.h"
 
 namespace cef_bridge {
 
@@ -79,6 +80,8 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser);
 }
 /// Gives the object CEF's context and that context's cookie manager.
 - (void)attachContext:(CefRefPtr<CefRequestContext>)context;
+/// Gives the attached context's storage a handler through a context that shares it, for a context such as the global one, which CEF makes without a handler. Call it once Chromium has initialized the context.
+- (void)attachHandlerContext;
 /// Releases the CEF objects and runs the waiting calls. Calls after that change nothing.
 - (void)detachContext;
 /// Runs `call` at once, or after the calls that wait for Chromium to initialize the context.
@@ -107,4 +110,6 @@ void ExtensionsBrowserWillClose(ARCHCEFBrowser *browser);
 @property (nonatomic, readonly) BOOL isOpen;
 /// Whether the developer tools fill the browser's tools view, from `cefBrowserDevToolsDidOpenView:` until `cefBrowserDevToolsDidClose`.
 @property (nonatomic, readonly) BOOL showsDevToolsInView;
+/// Answers a service worker's request for a new tab, which this browser is, with CEF's browser as soon as CEF has created it, before its first page loads, or with null when the browser closes or goes first.
+- (void)continueOpenTab:(CefRefPtr<CefOpenTabCallback>)callback;
 @end

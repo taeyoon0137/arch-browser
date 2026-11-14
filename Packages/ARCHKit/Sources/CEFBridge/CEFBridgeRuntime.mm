@@ -168,7 +168,10 @@ public:
 
     // Runs on the UI thread, which is the main thread, once the global context's profile has initialized.
     void OnContextInitialized() override {
-        dispatch_async(dispatch_get_main_queue(), ^{ GlobalContextDidInitialize(); });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            GlobalContextDidInitialize();
+            [ARCHCEFRequestContext.globalContext attachHandlerContext];
+        });
     }
 
     // CEF calls this from any thread, including the main thread from inside one of its own API calls such as `LoadURL`.

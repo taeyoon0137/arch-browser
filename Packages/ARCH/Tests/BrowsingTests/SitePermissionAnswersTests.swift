@@ -1,4 +1,4 @@
-// The answers to websites' permission requests: remembered answers decide without a card, requests that wait for one card share its answer, Allow and Don't Allow are remembered and a card that ended without the user is not, engine profiles take the remembered answers and, when they start, the removals of answers, and a card for notifications says that they don't show as banners yet. Each test keeps its store in a temporary folder of its own.
+// The answers to websites' permission requests: remembered answers decide without a card, requests that wait for one card share its answer, Allow and Don't Allow are remembered and a card that ended without the user is not, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the card's Allow and offer System Settings while Arch's notifications are off, as the permission is when the card shows. Each test keeps its store in a temporary folder of its own.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -17,7 +17,7 @@ import Testing
         let store = SitePermissionStore(directory: folder.url)
         store.set(.allow, for: [.camera, .microphone], origin: Self.origin)
         store.set(.deny, for: [.geolocation], origin: Self.origin)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
@@ -30,7 +30,7 @@ import Testing
     @Test func requestsThatWaitForOneCardShareItsAnswerAndTheAnswerIsRemembered() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let prompts = PromptRecorder()
         let tabID = UUID()
         let request = EnginePermissionRequest(origin: Self.site, types: [.camera])
@@ -50,7 +50,7 @@ import Testing
     @Test func aCardThatEndedWithoutTheUserAndScreenRecordingLeaveNothingRemembered() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
@@ -69,7 +69,7 @@ import Testing
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
         store.set(.allow, for: [.camera], origin: Self.origin)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
 
         answers.follow(context)
@@ -96,7 +96,7 @@ import Testing
         // The next launch reads the removal from the file, and a profile that starts then takes the answer away.
         let relaunched = SitePermissionStore(directory: folder.url)
         #expect(relaunched.removed == [Self.origin: [.geolocation]])
-        let answers = SitePermissionAnswers(store: relaunched)
+        let answers = SitePermissionAnswers(store: relaunched, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
         answers.follow(context)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(nil))
@@ -108,31 +108,118 @@ import Testing
         #expect(context.kept["geolocation \(Self.origin)"] == .some(true))
     }
 
-    @Test func aCardForNotificationsSaysTheyDoNotShowAsBannersYetAndOffersOnlyTheAnswers() throws {
+    @Test func allowingNotificationsAsksMacOSOnceAfterTheCard() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let system = FakeNotificationSystem(status: .notDetermined)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
-        let content = try #require(prompts.contents.first)
+        let content = try #require(prompts.show())
+        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "After you allow, macOS asks whether Arch may show notifications."])
         #expect(content.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"])
-        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "Websites\u{2019} notifications don\u{2019}t show as banners yet."])
-        #expect(content.notes.map(\.symbol) == ["info.circle", "bell.slash"])
+        #expect(system.requests == 0)
+
         prompts.respond(Self.allow)
         #expect(granted == [true])
+        #expect(system.requests == 1)
         #expect(store.decision(for: .notifications, origin: Self.origin) == .allow)
 
+        // The remembered Allow answers without a card and without asking macOS again.
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        #expect(granted == [true, true])
+        #expect(prompts.contents.count == 1)
+        #expect(system.requests == 1)
+    }
+
+    @Test func dontAllowAndOtherPermissionsDoNotAskMacOS() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .notDetermined)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
+        let prompts = PromptRecorder()
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        _ = prompts.show()
+        prompts.respond(Self.deny)
         // A card for another permission says nothing about notifications.
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
-        #expect(prompts.contents.last?.notes.map(\.id) == ["remembers"])
+        #expect(prompts.show()?.notes.map(\.id) == ["remembers"])
+        prompts.respond(Self.allow)
+
+        #expect(granted == [false, true])
+        #expect(system.requests == 0)
+        #expect(store.decision(for: .notifications, origin: Self.origin) == .deny)
+    }
+
+    @Test func whileArchsNotificationsAreOffTheCardOpensSystemSettingsAndRemembersNothing() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .denied)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: system.system))
+        let prompts = PromptRecorder()
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        let content = try #require(prompts.show())
+        #expect(content.buttons.map(\.title) == ["Open System Settings", "Don\u{2019}t Allow", "Allow"])
+        #expect(content.notes.contains { $0.text.contains("off in System Settings") })
+        // Return and Escape keep Allow and Don't Allow, and only Allow waits for the card to arm.
+        #expect(PromptKeys.returnButton(in: content) == "allow" && PromptKeys.escapeButton(in: content) == "deny")
+        #expect(content.buttons.filter(\.needsArming).map(\.id) == ["allow"])
+
+        prompts.respond(.answered(PromptAnswer(buttonID: "openSystemSettings")))
+        #expect(granted == [false])
+        #expect(system.opened.count == 1)
+        #expect(system.requests == 0)
+        #expect(store.decisions.isEmpty)
+
+        // A bare build says that it cannot show notifications and offers no setting.
+        let bare = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
+        bare.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        let bareContent = try #require(prompts.show())
+        #expect(bareContent.buttons.map(\.id) == ["deny", "allow"])
+        #expect(bareContent.notes.contains { $0.text.contains("can\u{2019}t show notifications") })
+    }
+
+    /// A card that waits behind another while macOS's answer changes the permission shows, and acts on, the permission as it is when it shows.
+    @Test func aWaitingCardShowsThePermissionAsItIsWhenItShows() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let system = FakeNotificationSystem(status: .notDetermined)
+        system.grants = false
+        let authorization = NotificationAuthorization(system: system.system)
+        let answers = SitePermissionAnswers(store: store, notifications: authorization)
+        let prompts = PromptRecorder()
+        let other = try #require(URL(string: "https://example.org/"))
+
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: other, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        // Both cards said that macOS asks when they were queued.
+        #expect(prompts.contents.allSatisfy { $0.notes.contains { $0.id == "asksMacOS" } })
+        #expect(prompts.show()?.notes.contains { $0.id == "asksMacOS" } == true)
+        // Allow on the first card asks macOS, and the user refuses there.
+        prompts.respond(Self.allow)
+        #expect(system.requests == 1)
+        #expect(authorization.status == .denied)
+
+        // The second card, made again as it shows, says that Arch's notifications are off, and its Allow does not ask macOS.
+        let waiting = try #require(prompts.show())
+        #expect(waiting.buttons.map(\.title) == ["Open System Settings", "Don\u{2019}t Allow", "Allow"])
+        prompts.respond(Self.allow)
+        #expect(granted == [true, true])
+        #expect(system.requests == 1)
+        #expect(system.opened.isEmpty)
     }
 
     @Test func theCardAsksUnderTheSiteWithAllowArmedLaterAndEscapeOnDontAllow() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        let answers = SitePermissionAnswers(store: store)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
@@ -158,18 +245,23 @@ import Testing
     }
 }
 
-/// Keeps the cards that the answers asked with and answers the oldest one still waiting.
+/// Stands in for a tab's prompt queue without windows: keeps the cards that the answers asked with, each with the content its maker made when asked, as `BrowserSession.enqueuePrompt(making:for:completion:)` queues it, and shows and answers the oldest one still waiting, making its content again as it shows, as `PromptState.remake()` does when `PanePromptLayer` shows a card.
 private final class PromptRecorder {
     private(set) var contents: [PromptContent] = []
-    private var waiting: [(PromptResponse) -> Void] = []
+    private var waiting: [(makeContent: () -> PromptContent, completion: (PromptResponse) -> Void)] = []
 
-    func ask(_ content: PromptContent, _ completion: @escaping (PromptResponse) -> Void) {
-        contents.append(content)
-        waiting.append(completion)
+    func ask(_ makeContent: @escaping () -> PromptContent, _ completion: @escaping (PromptResponse) -> Void) {
+        contents.append(makeContent())
+        waiting.append((makeContent, completion))
+    }
+
+    /// The oldest waiting card's content as the maker makes it when the card shows, or nil without one.
+    func show() -> PromptContent? {
+        waiting.first?.makeContent()
     }
 
     func respond(_ response: PromptResponse) {
-        waiting.removeFirst()(response)
+        waiting.removeFirst().completion(response)
     }
 }
 

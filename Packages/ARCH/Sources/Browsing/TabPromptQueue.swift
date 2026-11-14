@@ -11,10 +11,10 @@ final class TabPromptQueue: ObservableObject {
     /// False while Arch quits, when every new prompt ends at once.
     private(set) var isAccepting = true
 
-    /// Adds a prompt after the tab's others. While Arch quits, it ends at once with `.dismissed`.
-    func enqueue(_ content: PromptContent, for tabID: UUID, completion: @escaping (PromptResponse) -> Void) {
+    /// Adds a prompt after the tab's others, with `content`, or, with `makeContent`, the content that it makes each time a card shows the prompt (`PromptState.remake()`). While Arch quits, it ends at once with `.dismissed`.
+    func enqueue(_ content: PromptContent, for tabID: UUID, makeContent: (() -> PromptContent)? = nil, completion: @escaping (PromptResponse) -> Void) {
         guard isAccepting else { return completion(.dismissed) }
-        let state = PromptState(tabID: tabID, content: content)
+        let state = PromptState(tabID: tabID, content: content, makeContent: makeContent)
         completions[state.id] = completion
         waiting[tabID, default: []].append(state)
     }

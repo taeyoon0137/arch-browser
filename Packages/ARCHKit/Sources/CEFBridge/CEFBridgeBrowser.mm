@@ -280,6 +280,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleResetDialogs;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
+- (void)handleActivate;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
 - (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
 - (void)handleScriptReply:(int)request succeeded:(BOOL)succeeded result:(nullable NSString *)result;
@@ -657,6 +658,9 @@ public:
     // CEF calls this on a task after the tools' contents have gone and their view has left the container, so `showDevTools` may open new tools from here on.
     void OnDevToolsInViewClosed(CefRefPtr<CefBrowser> browser) override { FinishDevTools(); }
 
+    // Alloy style browsers leave a page's request to come to the front, as after a click on its notification, to the client (VI.8).
+    void OnActivate(CefRefPtr<CefBrowser> browser) override { [owner_ handleActivate]; }
+
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString &title) override {
         [owner_ handleTitle:ToNSString(title)];
     }
@@ -871,6 +875,8 @@ private:
     BOOL _closeRequested;
     /// The address the app last asked to load before CEF created the browser, which loads once it has.
     NSString *_pendingURL;
+    /// The answer to a service worker's request for this tab, from `continueOpenTab:` until CEF has created the browser or the app closes it first.
+    CefRefPtr<CefOpenTabCallback> _openTabCallback;
 }
 
 @synthesize delegate = _delegate;
@@ -971,6 +977,8 @@ private:
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _browserView = view;
     [self applyAccessibilityState];
+    // A tab that a service worker asked for goes to CEF now, before its first page loads, unless nobody keeps it or the app closed it already.
+    [self finishOpenTabWithBrowser:_delegate && !_closeRequested ? browser : nullptr];
     if (_pendingURL && !_closeRequested) {
         browser->GetMainFrame()->LoadURL(CefString(_pendingURL.UTF8String));
     }
@@ -1003,6 +1011,10 @@ private:
 
 - (void)handleFullscreen:(BOOL)isFullscreen {
     [_delegate cefBrowserDidChangeFullscreen:isFullscreen];
+}
+
+- (void)handleActivate {
+    [_delegate cefBrowserDidRequestActivation];
 }
 
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier {
@@ -1375,6 +1387,28 @@ private:
     }
 }
 
+- (BOOL)setContextMenuPasswordAutoFill:(BOOL)enabled {
+    return _browser && _browser->GetHost()->SetContextMenuPasswordAutoFill(enabled);
+}
+
+// A browser that CEF has created, or one whose creation will not come, answers at once; a browser that CEF has created may already have its first page, and CEF then opens nothing for the request.
+- (void)continueOpenTab:(CefRefPtr<CefOpenTabCallback>)callback {
+    if (_browser || _closeRequested || ![gBrowsersInTransition containsObject:self]) {
+        callback->Continue(_closeRequested ? nullptr : _browser);
+        return;
+    }
+    [self finishOpenTabWithBrowser:nullptr];
+    _openTabCallback = callback;
+}
+
+- (void)finishOpenTabWithBrowser:(CefRefPtr<CefBrowser>)browser {
+    CefRefPtr<CefOpenTabCallback> callback = _openTabCallback;
+    _openTabCallback = nullptr;
+    if (callback) {
+        callback->Continue(browser);
+    }
+}
+
 - (void)replaceMisspellingWithWord:(NSString *)word {
     if (_browser) {
         _browser->GetHost()->ReplaceMisspelling(CefString(word.UTF8String));
@@ -1734,12 +1768,15 @@ private:
     if (_browser) {
         [gBrowsersInTransition addObject:self];
         _browser->GetHost()->CloseBrowser(true);
+    } else {
+        [self finishOpenTabWithBrowser:nullptr];
     }
 }
 
 - (void)tryCloseWithCompletion:(void (^)(BOOL))completion {
     _closeRequested = YES;
     if (!_browser) {
+        [self finishOpenTabWithBrowser:nullptr];
         completion(YES);
         return;
     }

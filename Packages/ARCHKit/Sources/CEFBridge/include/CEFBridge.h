@@ -61,8 +61,19 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 @property (nonatomic) ARCHCEFCookieSameSite sameSite;
 @end
 
+@class ARCHCEFBrowser;
+
+/// What the app does for a request context's pages that no browser holds. Every call comes on the main thread.
+@protocol ARCHCEFRequestContextDelegate <NSObject>
+/// A service worker of the context asks for a new tab that loads `url`, as `clients.openWindow()` does after a click on its notification (an experimental CEF API of Arch's engine, VI.8). Return YES and call `completion` once with the tab's browser right after making it, or with nil when no tab opened; the bridge hands CEF the browser as soon as CEF has created it, before its first page loads. Return NO to leave the request to Chromium, which opens a window of its own that the bridge closes.
+- (BOOL)cefRequestContextOpenTabWithURL:(NSString *)url
+                             completion:(void (^)(ARCHCEFBrowser *_Nullable browser))completion NS_SWIFT_NAME(cefRequestContextOpenTab(withURL:completion:));
+@end
+
 /// A Chromium profile: cookies, site storage, caches, and the permission answers it keeps. Browsers of different contexts never share a render process. Until `ARCHCEFRuntime` initializes and once it begins to shut down, calls change nothing and completions still run.
 @interface ARCHCEFRequestContext : NSObject
+/// The app's side of the context's requests that come from no browser. The global context has no handler of its own in CEF, so the bridge gives its storage one through a context that shares it.
+@property (nonatomic, weak, nullable) id<ARCHCEFRequestContextDelegate> delegate;
 /// The global context, whose profile is `Default` under the root cache path. Ready once the runtime initializes.
 @property (class, nonatomic, readonly) ARCHCEFRequestContext *globalContext;
 /// A context whose profile lives at `cachePath`, which must be a direct child of the root cache path. Nil for any other path or before the runtime initializes. Browsers can use it at once; cookie, storage, and permission calls wait, in order, until Chromium reports the context and its cookie store initialized.
@@ -339,6 +350,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRunContextMenu:(ARCHCEFContextMenuParams *)params completion:(void (^)(void))completion;
 /// Reports that the page's renderer process has exited. The page stays blank until it loads again.
 - (void)cefBrowserRenderProcessDidTerminate;
+/// Reports that the page asks for its browser to come to the front, as `window.focus()` does after a click on the page's notification or from the page's opener, and `WindowClient.focus()` from its service worker (an experimental CEF API of Arch's engine, VI.8): select the browser's tab and bring its window, and the app, forward.
+- (void)cefBrowserDidRequestActivation;
 /// Reports that the page entered or left fullscreen through the Fullscreen API. CEF has already sized the content; the app makes the window's transition and handles Escape.
 - (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
 /// Reports whether any frame's media elements play sound that is not muted.
@@ -466,6 +479,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
 /// Replaces the selected misspelled word with `word`.
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
+/// Call with YES right before the app shows its own context menu for the browser's view with `+[NSMenu popUpContextMenu:withEvent:forView:]`, and with NO right after the menu closes (an experimental CEF API of Arch's engine, VI.9). Meanwhile a focused password field gives the page's view a text input context, so that AppKit adds AutoFill to the menu, and the view offers the field's text to no service; input methods stay off in password fields at all other times. Returns whether the focused field is a password field or has been one. Before CEF has created the browser, it does nothing and returns NO.
+- (BOOL)setContextMenuPasswordAutoFill:(BOOL)enabled NS_SWIFT_NAME(setContextMenuPasswordAutoFill(_:));
 @end
 
 NS_ASSUME_NONNULL_END

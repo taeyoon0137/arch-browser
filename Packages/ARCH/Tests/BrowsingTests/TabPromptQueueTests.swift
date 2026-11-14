@@ -1,4 +1,4 @@
-// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first, and let go of them, and a close the user asks for ends the tab's prompts unless its leave-page card is the question.
+// The tabs' prompt queue: each tab's prompts wait in order apart from other tabs', an answer reaches its prompt once, after the prompt has left the queue, closing a tab, a navigation that cancels page dialogs, and quitting end the prompts without the user, oldest first, and let go of them, a close the user asks for ends the tab's prompts unless its leave-page card is the question, and a prompt queued with a maker makes its content again as a card shows it.
 import Foundation
 import Testing
 @testable import Browsing
@@ -153,5 +153,33 @@ import Testing
         queue.enqueue(Self.content(.pageAlert), for: tab) { _ in log.append("after") }
         #expect(queue.hasPrompt(for: tab))
         #expect(log.last == "during quit true")
+    }
+
+    /// A prompt queued with a maker takes its content again each time a card shows it (`PromptState.remake()`), and keeps what its fields hold; without a maker, a prompt keeps the content it was queued with.
+    @Test func aQueuedPromptMakesItsContentAgainOnlyWithAMaker() throws {
+        let queue = TabPromptQueue()
+        var made: [String] = []
+        let makeContent = { () -> PromptContent in
+            var content = Self.content(.sitePermission)
+            content.title = "made \(made.count + 1)"
+            content.fields = [PromptField(id: "text", kind: .text, label: "Text", initialValue: "")]
+            made.append(content.title ?? "")
+            return content
+        }
+        queue.enqueue(makeContent(), for: tab, makeContent: makeContent) { _ in }
+        queue.enqueue(Self.content(.pageAlert), for: otherTab) { _ in }
+
+        let remade = try #require(queue.current(for: tab))
+        remade.fieldValues["text"] = "typed"
+        remade.remake()
+        #expect(made == ["made 1", "made 2"])
+        #expect(remade.content.title == "made 2")
+        #expect(remade.fieldValues == ["text": "typed"])
+
+        let kept = try #require(queue.current(for: otherTab))
+        let queued = kept.content
+        kept.remake()
+        #expect(kept.content == queued)
+        #expect(made.count == 2)
     }
 }

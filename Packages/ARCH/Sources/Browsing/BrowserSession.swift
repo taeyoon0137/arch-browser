@@ -32,7 +32,7 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
-    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission card and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
+    /// Whether macOS lets Arch show notifications, which the download notifier, the permission card, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
@@ -123,7 +123,7 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization)
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
@@ -452,6 +452,7 @@ public final class BrowserSession: ObservableObject {
         engines.runtimes[kind] = runtime
         if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions, of: kind) } }
         context.downloads.delegate = self
+        context.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
@@ -846,8 +847,8 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), ask: { content, response in
-                self.enqueuePrompt(content, for: tab, completion: response)
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), ask: { makeContent, response in
+                self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
@@ -884,11 +885,11 @@ public final class BrowserSession: ObservableObject {
         tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID) }
     }
 
-    /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
+    /// Selects a tab that no window shows. A space's tab goes to the front main window on its space, or else to the front main window of its Persona, which then shows the tab's space, so that a window of another Persona keeps its Persona / Space while one of the tab's Persona is open; only without either does it go to the sidebar target. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
-        let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
-        if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
+        let window = windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
+            ?? windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
+        if tab.spaceID == nil, window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
         window.selectTab(tab.id)
     }
 
@@ -1208,6 +1209,11 @@ public final class BrowserSession: ObservableObject {
     /// Queues a prompt for a tab, which a card shows over the tab's pane while a window shows the tab (`TabPromptQueue`). While the app quits, it ends at once without the user.
     func enqueuePrompt(_ content: PromptContent, for tab: Tab, completion: @escaping (PromptResponse) -> Void) {
         prompts.enqueue(content, for: tab.id, completion: completion)
+    }
+
+    /// Queues a prompt whose content `makeContent` makes again each time a card shows it, from what is true then.
+    func enqueuePrompt(making makeContent: @escaping () -> PromptContent, for tab: Tab, completion: @escaping (PromptResponse) -> Void) {
+        prompts.enqueue(makeContent(), for: tab.id, makeContent: makeContent, completion: completion)
     }
 
     // MARK: Zoom
@@ -1593,6 +1599,20 @@ public enum CommandPaletteOrigin {
 
 extension BrowserSession: EngineApplicationDelegate {
     public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
+}
+
+extension BrowserSession: EngineBrowserContextDelegate {
+    /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the current space of the Persona's front main window, or without one in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A window of another Persona keeps its Persona / Space while one of the Persona is open. A quit opens none.
+    public func browserContext(_ context: any EngineBrowserContext, openTabWith url: URL, completion: @escaping ((any EngineWebContents)?) -> Void) {
+        guard !isQuitting,
+              let runtime = personaEngines.values.lazy.flatMap(\.runtimes.values).first(where: { ($0.context as AnyObject) === (context as AnyObject) }) else {
+            return completion(nil)
+        }
+        let spaceID = windows.first { $0.kind == .main && $0.personaID == runtime.personaID }?.currentSpaceID ?? preferredSpace(in: runtime.personaID).id
+        let tab = openTab(url: url, in: spaceID, select: false, engine: runtime.kind)
+        tab.requestActivation?()
+        completion(tab.webContents)
+    }
 }
 
 // MARK: Downloads

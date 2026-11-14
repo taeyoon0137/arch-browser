@@ -124,7 +124,7 @@ struct PanePromptLayer: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + departure, execute: work)
     }
 
-    /// Shows a card: the first time with its motion, after its page leaves fullscreen and the pane's region capture ends, and later at once. The buttons that grant something arm again each time. The card takes the focus as the focus rules allow, or after the tab's card that had it, and VoiceOver announces one that shows without it.
+    /// Shows a card: the first time with its motion, after its page leaves fullscreen and the pane's region capture ends, and later at once. A prompt with a maker takes its content again each time, from what is true then, and the buttons that grant something arm again each time. The card takes the focus as the focus rules allow, or after the tab's card that had it, and VoiceOver announces one that shows without it.
     private func show(_ state: PromptState?, afterFocusedCard: Bool) {
         guard let state, prompts.isAccepting else { return }
         let isFirst = PromptPresentation.markAppeared(state)
@@ -132,6 +132,7 @@ struct PanePromptLayer: View {
             if windowModel.fullscreenTabID == tab.id { windowModel.exitPageFullscreen() }
             if windowModel.regionCaptureTabID == tab.id { windowModel.cancelRegionCapture() }
         }
+        state.remake()
         state.arming.restart(at: Date())
         let takesFocus = afterFocusedCard || canTakeFocus()
         isArriving = isFirst

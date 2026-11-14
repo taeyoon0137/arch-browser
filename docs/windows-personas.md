@@ -294,7 +294,8 @@ final class PersonaEngines {
 final class TabPromptQueue: ObservableObject {
     @Published private(set) var waiting: [UUID: [PromptState]]
     private(set) var isAccepting: Bool
-    func enqueue(_ content: PromptContent, for tabID: UUID, completion: @escaping (PromptResponse) -> Void)
+    /// With `makeContent`, the prompt takes its content again each time a card shows it, as a website's notification card reads Arch's notification permission then.
+    func enqueue(_ content: PromptContent, for tabID: UUID, makeContent: (() -> PromptContent)? = nil, completion: @escaping (PromptResponse) -> Void)
     func current(for tabID: UUID) -> PromptState?
     func hasPrompt(for tabID: UUID?) -> Bool
     /// The prompt leaves the queue before its completion runs; a second answer or an unknown prompt does nothing.
@@ -595,7 +596,7 @@ Monitors
 Engine and tab events
 - A popup opens in its opener's space and Persona, owned by the opener's runtime. When a window shows the opener, the popup is selected there; from step 11, a small window's popup opens in a new small window (open decision 11). Otherwise it opens unread in the background, as today.
 - Open Link in New Tab opens unread in the background of the page's space, as today; for a small-window tab, that is its destination space.
-- `requestSelection`, which a leave-page card uses on close, shows the page the card asks about. The window that shows the tab selects it when it is another pane there, or closes the internal page over it when it is selected already. Otherwise the sidebar target selects it. A favorite's tab keeps a window's current space, so it goes to the front main window of its Persona instead, or to the sidebar target moved to the Persona's preferred space.
+- `requestSelection`, which a leave-page card uses on close and a page's request to be seen uses, shows the page the card asks about. The window that shows the tab selects it when it is another pane there, or closes the internal page over it when it is selected already. Otherwise the front main window on the tab's space selects it, or else the front main window of the tab's Persona, and only without either the sidebar target, so that a window of another Persona keeps its Persona / Space. A favorite's tab keeps a window's current space, so it goes to the front main window of its Persona instead, or to the sidebar target moved to the Persona's preferred space.
 - Page fullscreen goes to the window that shows the tab. A tab that no window shows exits fullscreen at once.
 - Closing a tab that windows show makes each of them pick its fallback (window rule 3).
 - `deleteSpace` moves the tabs to a neighbor space in the same Persona and switches every window on the deleted space there.
