@@ -224,7 +224,7 @@ public struct AgentSessionPanel: View {
         let cards = approvals.pending.filter { card in
             guard card.ownerID == session.id else { return false }
             switch card.kind {
-            case .question, .shareSessionTab: return true
+            case .question, .shareSessionTab, .openSessionResearch: return true
             default: return false
             }
         }

@@ -44,10 +44,11 @@ struct AgentApprovalCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .accessibilityLabel("The page, with the element marked")
             }
-            if let exact = approval.exactText {
-                Text(exact)
+            if let exactText {
+                Text(verbatim: exactText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
@@ -72,6 +73,11 @@ struct AgentApprovalCard: View {
 
     private var questionAnswer: Binding<String> {
         Binding(get: { approvals.draftAnswer(to: approval.id) }, set: { approvals.setDraftAnswer($0, to: approval.id) })
+    }
+
+    private var exactText: String? {
+        if case .openSessionResearch(let url) = approval.kind { return url.absoluteString }
+        return approval.exactText
     }
 
     @ViewBuilder private var inputs: some View {
@@ -125,6 +131,9 @@ struct AgentApprovalCard: View {
             case .handToUser:
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
                 AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
+            case .openSessionResearch:
+                AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.deny) }
+                AgentPointerButton(title: "Open in Research Tab", requiresPointer: true) { answer(.allowOnce) }
             case .shareSessionTab, .requestTab:
                 if case .shareSessionTab = approval.kind {
                     Button("Don\u{2019}t Share") { answer(.deny) }
