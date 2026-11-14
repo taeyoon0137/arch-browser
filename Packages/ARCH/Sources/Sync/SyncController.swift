@@ -197,7 +197,10 @@ import Foundation
                 lastError = "The previous sync state could not be removed."
                 return
             }
-            mirror = SyncMirror.read(from: url, database: target)
+            // A recovered or replacement local session says nothing about deletions. Its old
+            // mirror could turn every missing row into an outgoing delete. A nil token and
+            // first-sync merge restore the complete zone while preserving local-only additions.
+            mirror = sidebar.needsFullSidebarSync ? SyncMirror() : SyncMirror.read(from: url, database: target)
             first = mirror.isEmpty
             fetching = true
             lastError = nil
@@ -485,6 +488,7 @@ import Foundation
             try compareSidebar(sidebar.sidebarSyncState, publish: true)
             compareSettings(publish: true)
             try writeMirror()
+            sidebar.finishSidebarSyncRecovery()
             fetched.removeAll()
             deleted.removeAll()
             deletedNames.removeAll()

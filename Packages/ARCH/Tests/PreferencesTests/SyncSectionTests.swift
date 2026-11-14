@@ -33,6 +33,8 @@ import Testing
     }
 
     private final class Sidebar: SyncedSidebar {
+        let needsFullSidebarSync = false
+        func finishSidebarSyncRecovery() {}
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
         var sidebarSyncState: SidebarSyncState { .init(personas: [], spaces: [], folders: [], favorites: [], pinnedTabs: []) }
         func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements) { Issue.record("Unexpected sync") }

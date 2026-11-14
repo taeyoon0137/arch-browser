@@ -6,6 +6,8 @@ import Testing
 
 @MainActor @Suite struct SyncControllerTests {
     private final class Sidebar: SyncedSidebar {
+        let needsFullSidebarSync = false
+        func finishSidebarSyncRecovery() {}
         var sidebarSyncState: SidebarSyncState
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
         var firstReplacements: [SidebarSyncReplacements] = []

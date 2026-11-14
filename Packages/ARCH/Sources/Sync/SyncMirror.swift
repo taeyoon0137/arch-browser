@@ -1,4 +1,4 @@
-// The file `sync.json`, beside `session.json` in the app's Application Support folder (`docs/sync.md`, Mapping the session store to records and Offline behavior). It keeps what sync needs between launches, for one CloudKit database (`SyncDatabase`); `session.json` holds no sync fields. Sync writes it at every state update of the sync engine, once `session.json` holds every change applied from the mirror it writes, and deleting it makes the next sync a first sync.
+// The file `sync.json`, beside `session.json` in the app's Application Support folder (`docs/sync.md`, Mapping the session store to records and Offline behavior). It keeps what sync needs between launches, for one CloudKit database (`SyncDatabase`); `session.json` holds the local sidebar and its recovery marker. Sync writes it at every state update of the sync engine, once `session.json` holds every change applied from the mirror it writes, and deleting it makes the next sync a first sync.
 import CloudKit
 import Foundation
 

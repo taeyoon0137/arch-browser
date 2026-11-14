@@ -25,6 +25,9 @@ final class FakeSyncEngine: SyncEngineClient {
 
     /// The events the next fetch reports before its state update and its end, such as fetched changes and zone deletions.
     var fetchScript: [SyncEvent] = []
+    var fetchToken: Data?
+    var onFetch: (() -> [SyncEvent])?
+    var onSavedBatch: ((Batch) -> Void)?
     /// The failure of the next fetch's zone fetch, which its end reports and its call throws, as after a network that dropped between pages.
     var fetchFailure: CKError.Code?
     /// The failure for the next save of each record name. A batch with a failure saves nothing, as an atomic batch does, and its other changes stay pending, as `CloudKitSyncEngine` adds them back, so the send's next batch takes them.
@@ -67,7 +70,7 @@ final class FakeSyncEngine: SyncEngineClient {
 
     /// The state serialization, which holds the pending changes.
     var stateSerialization: Data {
-        Self.stateSerialization(of: pendingChanges)
+        fetchToken ?? Self.stateSerialization(of: pendingChanges)
     }
 
     var pendingChanges: [SyncPendingChange] {
@@ -95,7 +98,7 @@ final class FakeSyncEngine: SyncEngineClient {
     func fetchChanges() async throws {
         guard !isStopped else { return }
         fetchCount += 1
-        let script = fetchScript
+        let script = (onFetch?() ?? []) + fetchScript
         let failure = fetchFailure
         fetchScript = []
         fetchFailure = nil
@@ -185,6 +188,7 @@ final class FakeSyncEngine: SyncEngineClient {
             add(sent.filter { !refused.contains($0) })
             deliver([.sentChanges(SyncSentChanges(failedSaves: failures))])
         } else {
+            onSavedBatch?(Batch(records: records, deletedRecordNames: deletions))
             deliver([.sentChanges(SyncSentChanges(savedRecords: records, deletedRecordNames: deletions))])
         }
         deliverStateUpdate()
