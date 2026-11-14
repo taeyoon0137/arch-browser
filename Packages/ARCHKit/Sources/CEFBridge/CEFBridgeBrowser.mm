@@ -672,7 +672,7 @@ public:
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
         if (!gInitialized || target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE || ![owner_.delegate cefBrowserCanAdoptPopup] ||
-            ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture] ||
+            (target_disposition == CEF_WOD_NEW_WINDOW && ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture]) ||
             [owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             return true;
         }

@@ -72,7 +72,7 @@ import LiveFolders
     /// How many times this tab's page process quit, kept for the tab close log.
     public private(set) var crashCount = 0
     /// The session sets this callback so popups from this tab open as new tabs, with the address the page opened when the engine reports one.
-    var openNewTab: ((any EngineWebContents, URL?) -> Void)?
+    var openNewTab: ((any EngineWebContents, URL?, EngineNavigationDisposition) -> Void)?
     /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
     var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
@@ -365,7 +365,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
 
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
-        openNewTab?(newWebContents, targetURL)
+        openNewTab?(newWebContents, targetURL, disposition)
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
         guard webContents === self.webContents else { return }
@@ -655,6 +655,7 @@ extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {
             guard agentOwnerID == nil else { return .cancel }
+            if webContents.engineKind == .webKit { return .openLinkInNewTab }
             let foreground = action.disposition == .newForegroundTab
             DispatchQueue.main.async { openURLInNewTab(action.url, foreground) }
             return .cancel

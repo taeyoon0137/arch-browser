@@ -105,6 +105,17 @@ import Testing
         #expect(foreground == [false, true])
     }
 
+    @Test func webKitHandlesItsOriginalModifiedLinkRequestAfterTheTabsPolicyCheck() throws {
+        let url = try #require(URL(string: "https://example.org/next"))
+        let page = UnloadedWebContents(url: url, title: "", engine: .webKit, state: nil)
+        let tab = Tab(id: UUID(), webContents: page, spaceID: UUID(), isPinned: false, personaID: UUID())
+        tab.openURLInNewTab = { _, _ in Issue.record("WebKit has the original request") }
+        for destination in [EngineNavigationDisposition.newForegroundTab, .newBackgroundTab] {
+            let action = EngineNavigationAction(url: url, disposition: destination, isUserInitiated: true, opensLinkInNewTab: true)
+            #expect(tab.webContents(page, decidePolicyFor: action) == .openLinkInNewTab)
+        }
+    }
+
     @Test func aPagesDialogsAskUnderThePagesSiteAndTakeTheCardsAnswer() {
         let tab = Self.tab()
         let prompts = PromptRecorder()

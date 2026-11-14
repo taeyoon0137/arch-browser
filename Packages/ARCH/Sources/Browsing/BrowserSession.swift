@@ -906,12 +906,13 @@ final class EngineRuntime {
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space.
-        tab.openNewTab = { [weak self, weak tab] popup, targetURL in
+        tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
-            if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
+            let window = self.window(showing: tab)
+            if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
             opened.isUnread = true
         }
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.

@@ -28,6 +28,8 @@ public struct EngineNavigationAction: Sendable {
 public enum EngineNavigationPolicy: Sendable {
     case allow
     case cancel
+    /// Open the original link request in the tab disposition requested by the user.
+    case openLinkInNewTab
 }
 
 public enum EnginePermissionType: String, Codable, Sendable {

@@ -67,8 +67,17 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         let disposition = linkTab ?? Self.disposition(of: navigationAction)
         if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
            navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow || linkTab != nil {
-            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated, opensLinkInNewTab: linkTab != nil)
-            if delegate.webContents(owner, decidePolicyFor: action) != .allow { policy = .cancel }
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated, opensLinkInNewTab: linkTab != nil && navigationAction.targetFrame != nil)
+            let decision = delegate.webContents(owner, decidePolicyFor: action)
+            if decision == .openLinkInNewTab, let linkTab, let ui = owner.uiDelegate {
+                decisionHandler(.cancel)
+                // Use WebKit's own request, including its effective referrer. A new browsing context with a nil target frame is created by WebKit's popup delegate instead.
+                let child = WebKitWebContents(context: owner.context, configuration: EngineWebContentsConfiguration(pageScripts: owner.userContent.pageScripts))
+                ui.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: linkTab)
+                child.webView.load(navigationAction.request)
+                return
+            }
+            if decision != .allow { policy = .cancel }
         }
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
         let isAppLoad = owner.appLoadURL == url.absoluteURL
@@ -169,6 +178,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let delegate = owner.uiDelegate, delegate.webContentsMayCreatePopup(owner) else { return nil }
+        let disposition = Self.linkTabDisposition(of: navigationAction) ?? .newForegroundTab
         // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
         if let url = navigationAction.request.url, Self.opensExternally(url) {
             delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
@@ -178,11 +188,11 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         if let url = navigationAction.request.url, owner.extensionBaseURL != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             let child = WebKitWebContents(context: owner.context,
                                           configuration: EngineWebContentsConfiguration(initialURL: url, pageScripts: owner.userContent.pageScripts))
-            delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: .newForegroundTab)
+            delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: disposition)
             return nil
         }
         let child = WebKitWebContents(parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context)
-        delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: .newForegroundTab)
+        delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: disposition)
         return child.webView
     }
 
