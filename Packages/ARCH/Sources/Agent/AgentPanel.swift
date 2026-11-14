@@ -13,6 +13,7 @@ public struct AgentSessionPanel: View {
     @State private var showsSharedTabs = false
     @State private var sharingProblem: String?
     @State private var raisingTo: AgentAccessLevel?
+    @State private var deleting: AgentSession?
 
     public init(service: AgentService, session: AgentSession, actions: AgentPanelActions) {
         self.service = service
@@ -36,6 +37,9 @@ public struct AgentSessionPanel: View {
             actions.openLink(url)
             return .handled
         })
+        .confirmAgentSessionDeletion($deleting) { reviewed in
+            Task { await service.deleteSession(reviewed.id) }
+        }
         .confirmationDialog(raisingTo.map { "Raise this session to \($0.title)?" } ?? "", isPresented: Binding(get: { raisingTo != nil }, set: { if !$0 { raisingTo = nil } })) {
             if let raisingTo {
                 Button("Raise to \(raisingTo.title)") { session.setMode(raisingTo) }
@@ -70,7 +74,7 @@ public struct AgentSessionPanel: View {
                             .disabled(session.hasEnded)
                     }
                     Divider()
-                    Button("Delete Session", role: .destructive) { Task { await service.deleteSession(session.id) } }
+                    Button("Delete Session…", role: .destructive) { deleting = session }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -148,19 +152,7 @@ public struct AgentSessionPanel: View {
     /// The tool and model, and the place as "Persona / Space".
     private var details: String {
         let model = session.model ?? session.requestedModel
-        return [model.map(settings.title(of:)), service.place(of: session), stateText].compactMap { $0 }.joined(separator: " \u{00B7} ")
-    }
-
-    private var stateText: String? {
-        if session.isTakenOver { return "You have control" }
-        switch session.state {
-        case .starting: return "Starting"
-        case .running: return "Working"
-        case .waitingForUser: return "Waiting for you"
-        case .done: return nil
-        case .stopped: return "Stopped"
-        case .failed: return "Failed"
-        }
+        return [model.map(settings.title(of:)), service.place(of: session), session.statusText].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     private var scopeText: String {
@@ -369,5 +361,18 @@ private struct AgentTranscriptRow: View {
             }
         }
         return parts.joined(separator: " \u{00B7} ")
+    }
+}
+
+extension View {
+    /// Both entry points name the conversation and explain which browser tabs will close.
+    @MainActor public func confirmAgentSessionDeletion(_ selection: Binding<AgentSession?>, delete: @escaping (AgentSession) -> Void) -> some View {
+        alert("Delete Session?", isPresented: Binding(get: { selection.wrappedValue != nil }, set: { if !$0 { selection.wrappedValue = nil } }),
+              presenting: selection.wrappedValue) { session in
+            Button("Delete Session", role: .destructive) { delete(session) }
+            Button("Cancel", role: .cancel) {}
+        } message: { session in
+            Text("This deletes “\(session.title)” and closes its remaining agent tabs. Tabs you kept stay open.")
+        }
     }
 }
