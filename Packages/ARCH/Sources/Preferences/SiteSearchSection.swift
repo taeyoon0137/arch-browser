@@ -24,24 +24,18 @@ struct SiteSearchSection: View {
                             Button("Edit\u{2026}") { editing = shortcut }
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(shortcut.name)
-                            Text(shortcut.template)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
+                        Text(shortcut.name)
+                        Text(shortcut.template)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
-            } footer: {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Type a keyword and a space in the command palette to search its site.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                HStack {
                     Spacer()
-                    Button("Add\u{2026}") { editing = SiteSearchShortcut(keyword: "", name: "", template: "") }
+                    Button("Add Shortcut\u{2026}") { editing = SiteSearchShortcut(keyword: "", name: "", template: "") }
                 }
+            } footer: {
+                formFootnote("Type a keyword and a space in the command palette to search its site.")
             }
         }
         .formStyle(.grouped)
@@ -69,25 +63,28 @@ private struct SiteSearchEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(isNew ? "Add Site Search Shortcut" : "Edit Site Search Shortcut")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.horizontal, .top], 20)
             Form {
                 Section {
                     TextField("Name", text: $shortcut.name, prompt: Text("Example"))
                     TextField("Keyword", text: $shortcut.keyword, prompt: Text("ex"))
+                    if store.isKeywordInUse(shortcut.keyword, except: shortcut.id) {
+                        Text("Another shortcut uses this keyword.").font(.callout).foregroundStyle(.red)
+                    }
                     // Verbatim text keeps `%s` from being read as a format specifier.
                     TextField("Address", text: $shortcut.template, prompt: Text(verbatim: "https://example.com/search?q=%s"))
                 } footer: {
-                    Text(verbatim: store.isKeywordInUse(shortcut.keyword, except: shortcut.id)
-                        ? "Another shortcut uses this keyword."
-                        : "Put %s in the address where the search text goes.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // The footnote's text is verbatim, so `%s` stays as typed.
+                    formFootnote("Put %s in the address where the search text goes.")
                 }
             }
             .formStyle(.grouped)
             HStack {
                 if !isNew {
-                    Button("Delete", role: .destructive) {
+                    Button("Remove Shortcut", role: .destructive) {
                         store.remove(shortcut)
                         dismiss()
                     }
@@ -104,6 +101,6 @@ private struct SiteSearchEditor: View {
             }
             .padding([.horizontal, .bottom], 20)
         }
-        .frame(width: sectionWidth)
+        .frame(width: 480)
     }
 }

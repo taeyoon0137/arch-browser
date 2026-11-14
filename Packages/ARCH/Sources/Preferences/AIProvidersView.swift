@@ -11,16 +11,14 @@ struct AIProvidersPage: View {
     var body: some View {
         Section {
             if settings.providers.isEmpty {
-                Text("No providers yet.").foregroundStyle(.secondary)
+                Text("No providers yet").foregroundStyle(.secondary)
             }
             ForEach(settings.providers) { provider in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(provider.name)
-                        Text(Self.detail(of: provider)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
+                LabeledContent {
                     Button("Edit\u{2026}") { editing = AIProviderSheet(provider) }
+                } label: {
+                    Text(provider.name)
+                    Text(Self.detail(of: provider))
                 }
             }
             HStack {
@@ -43,7 +41,7 @@ struct AIProvidersPage: View {
         } header: {
             Text("Providers")
         } footer: {
-            aiFootnote("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
+            formFootnote("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
         }
     }
 
@@ -154,10 +152,18 @@ private struct AIProviderEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isReplacingKey = false
     @State private var isRefreshing = false
+    /// What the last Refresh added, or why it failed, under the model list.
+    @State private var refreshResult: String?
+    @State private var refreshFailed = false
+    /// Why the last save or removal failed, over the buttons.
     @State private var message: String?
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(draft.isNew ? "Add HTTP API Provider" : "Edit HTTP API Provider")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.horizontal, .top], 20)
             Form {
                 Section {
                     TextField("Name", text: $draft.name)
@@ -169,26 +175,24 @@ private struct AIProviderEditor: View {
                         Text("Use an https address, or http for a server on this Mac.").font(.callout).foregroundStyle(.red)
                     }
                 } footer: {
-                    aiFootnote(draft.format == .chatCompletions
-                               ? "Requests go to the base URL followed by /chat/completions, with the key as a bearer token."
-                               : "Requests go to the base URL followed by /messages, with the key in an x-api-key header. Add the version header the server requires under Headers.")
+                    formFootnote(draft.format == .chatCompletions
+                                 ? "Requests go to the base URL followed by /chat/completions, with the key as a bearer token."
+                                 : "Requests go to the base URL followed by /messages, with the key in an x-api-key header. Add the version header the server requires under Headers.")
                 }
                 keySection
                 headersSection
                 modelsSection
                 AIProviderLimitsSection(limits: $draft.limits)
-                if let message {
-                    Section { Text(message).foregroundStyle(.secondary) }
-                }
             }
             .formStyle(.grouped)
             Divider()
             AIProviderEditorButtons(name: draft.name, isNew: draft.isNew,
                                     canSave: draft.configuration != nil && !draft.name.trimmingCharacters(in: .whitespaces).isEmpty,
+                                    failure: message,
                                     removalNote: "Its key leaves the Keychain, and features that used its models fall back to their other models.",
                                     remove: remove, save: save)
         }
-        .frame(width: 480, height: 580)
+        .frame(width: 480, height: 500)
     }
 
     // MARK: Key
@@ -214,7 +218,7 @@ private struct AIProviderEditor: View {
         } header: {
             Text("API Key")
         } footer: {
-            aiFootnote("A server on this Mac may need no key. The key is entered once and never shown again.")
+            formFootnote("A server on this Mac may need no key. The key is entered once and never shown again.")
         }
     }
 
@@ -222,11 +226,11 @@ private struct AIProviderEditor: View {
 
     @ViewBuilder private var headersSection: some View {
         Section {
-            AINameValueRows(rows: $draft.headers, addTitle: "Add Header")
+            AINameValueRows(rows: $draft.headers, addTitle: "Add Header", removeTitle: "Remove Header")
         } header: {
             Text("Headers")
         } footer: {
-            aiFootnote("Headers are saved in ai.json, so they must not hold secrets. The key goes under API Key.")
+            formFootnote("Headers are saved in ai.json, so they must not hold secrets. The key goes under API Key.")
         }
     }
 
@@ -235,14 +239,20 @@ private struct AIProviderEditor: View {
     @ViewBuilder private var modelsSection: some View {
         Section {
             AIModelList(models: $draft.models, defaultCapabilities: draft.format.capabilities) {
-                Button(isRefreshing ? "Refreshing\u{2026}" : "Refresh") { Task { await refreshModels() } }
+                Button("Refresh") { Task { await refreshModels() } }
                     .disabled(isRefreshing || draft.configuration == nil)
                     .help("Add the models the provider lists")
+            }
+            // The button keeps its width while it runs, so the field beside it stays still.
+            if isRefreshing {
+                AIProgressRow(text: "Asking the provider for its models\u{2026}")
+            } else if let refreshResult {
+                Text(refreshResult).font(.callout).foregroundStyle(refreshFailed ? .red : .secondary)
             }
         } header: {
             Text("Models")
         } footer: {
-            aiFootnote("Refresh asks the provider for its models; it is the only request Settings sends on its own.")
+            formFootnote("Refresh asks the provider for its models; it is the only request Settings sends on its own.")
         }
     }
 
@@ -253,14 +263,17 @@ private struct AIProviderEditor: View {
             configuration.kind = .http(http)
         }
         isRefreshing = true
+        refreshResult = nil
+        refreshFailed = false
         defer { isRefreshing = false }
         do {
             let names = try await service.listModels(of: configuration, key: draft.enteredKey)
             let added = names.filter { name in !draft.models.contains(where: { $0.name == name }) }
             draft.models += added.map { AIModelConfiguration(name: $0) }
-            message = added.isEmpty ? "No new models." : "Added \(added.count) of \(names.count) models."
+            refreshResult = added.isEmpty ? "No new models." : "Added \(added.count) of \(names.count) models."
         } catch {
-            message = error.localizedDescription
+            refreshResult = error.localizedDescription
+            refreshFailed = true
         }
     }
 
@@ -289,7 +302,7 @@ private struct AIProviderEditor: View {
     }
 
     private func remove() async {
-        if draft.hasKey, !(await Self.authorize("remove the API key for \(draft.name)")) {
+        if draft.hasKey, !(await Self.authorize("remove the API key for \(draft.name.trimmingCharacters(in: .whitespaces))")) {
             message = "The provider was not removed."
             return
         }
@@ -372,6 +385,8 @@ struct AINameValue: Identifiable {
 struct AINameValueRows: View {
     @Binding var rows: [AINameValue]
     let addTitle: String
+    /// The tooltip and accessibility label of each row's minus button, such as "Remove Header".
+    let removeTitle: String
 
     var body: some View {
         ForEach(rows) { row in
@@ -386,6 +401,8 @@ struct AINameValueRows: View {
                     Image(systemName: "minus.circle")
                 }
                 .buttonStyle(.borderless)
+                .help(removeTitle)
+                .accessibilityLabel(removeTitle)
             }
         }
         HStack {
@@ -416,11 +433,25 @@ struct AIProviderLimitsSection: View {
     }
 }
 
-/// The buttons under a provider editor: Remove Provider… for a saved provider, which asks first, then Cancel and Add or Save.
+/// A spinner with what is under way, in the row where its result shows next, so that the button that started it keeps its title and width.
+struct AIProgressRow: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The bar under a provider editor: why the last save or removal failed, in red over the buttons as the plugin sheets show a failure, then Remove Provider… for a saved provider, which asks first, Cancel, and Add or Save.
 struct AIProviderEditorButtons: View {
     let name: String
     let isNew: Bool
     let canSave: Bool
+    /// Why the last save or removal failed.
+    let failure: String?
     /// What removing the provider changes, under the confirmation's title.
     let removalNote: String
     let remove: () async -> Void
@@ -429,19 +460,26 @@ struct AIProviderEditorButtons: View {
     @State private var confirmsRemoval = false
 
     var body: some View {
-        HStack {
-            if !isNew {
-                Button("Remove Provider\u{2026}", role: .destructive) { confirmsRemoval = true }
+        VStack(alignment: .leading, spacing: 12) {
+            if let failure {
+                Text(failure)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
-            Button("Cancel", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button(isNew ? "Add" : "Save") { Task { await save() } }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSave)
+            HStack {
+                if !isNew {
+                    Button("Remove Provider\u{2026}", role: .destructive) { confirmsRemoval = true }
+                }
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add" : "Save") { Task { await save() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
+            }
         }
-        .padding(16)
-        .confirmationDialog("Remove \(name)?", isPresented: $confirmsRemoval) {
+        .padding(20)
+        .confirmationDialog("Remove \u{201C}\(name.trimmingCharacters(in: .whitespaces))\u{201D}?", isPresented: $confirmsRemoval) {
             Button("Remove", role: .destructive) { Task { await remove() } }
         } message: {
             Text(removalNote)
@@ -467,7 +505,7 @@ private struct AIModelRow: View {
                 TextField("Output", value: priceBinding(\.outputPerMillion, fallback: 0), format: .number)
                 TextField("Cached input", value: priceBinding(\.cachedInputPerMillion, fallback: nil), format: .number, prompt: Text("Same as input"))
             }
-            Toggle("Use the provider's capabilities", isOn: Binding(
+            Toggle("Use the provider\u{2019}s capabilities", isOn: Binding(
                 get: { model.capabilities == nil },
                 set: { model.capabilities = $0 ? nil : defaultCapabilities }))
             if let capabilities = model.capabilities {

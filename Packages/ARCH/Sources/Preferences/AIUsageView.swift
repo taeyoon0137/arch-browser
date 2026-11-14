@@ -47,13 +47,13 @@ struct AIUsagePage: View {
         } header: {
             Text("Limits")
         } footer: {
-            aiFootnote("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model.")
+            formFootnote("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model.")
         }
     }
 
     @ViewBuilder private func rows(_ rows: [Row]) -> some View {
         if rows.isEmpty {
-            Text("No requests.").foregroundStyle(.secondary)
+            Text("No requests").foregroundStyle(.secondary)
         }
         ForEach(rows) { row in
             LabeledContent(row.title) {
@@ -95,22 +95,29 @@ struct AIActivityPage: View {
     var body: some View {
         Section {
             if service.activity.isEmpty {
-                Text("No requests since Arch started.").foregroundStyle(.secondary)
+                Text("No requests since Arch started").foregroundStyle(.secondary)
             }
             ForEach(service.activity.reversed()) { entry in
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(entry.date, style: .time)
+                    // The time is secondary, as in the History window. A failure's reason takes a line of its own, so that a long one cannot squeeze the feature's name.
+                    HStack(alignment: .firstTextBaseline) {
                         Text(service.features.first(where: { $0.id == entry.feature })?.name ?? entry.feature.rawValue)
+                        Text(entry.date, style: .time)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                         Spacer()
                         Text(Self.result(of: entry)).foregroundStyle(Self.isFailure(entry) ? .red : .secondary)
                     }
-                    Text(details(of: entry)).font(.caption).foregroundStyle(.secondary)
+                    if case .failed(let error) = entry.result {
+                        Text(error.localizedDescription).font(.callout).foregroundStyle(.red)
+                    }
+                    // A form row's subtitle size. The link takes it too, so that it is not the row's smallest text.
+                    Text(details(of: entry)).font(.subheadline).foregroundStyle(.secondary)
                     Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
                         if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
                     }
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(.subheadline)
                     if shownContent.contains(entry.id) {
                         ScrollView {
                             Text(entry.content)
@@ -125,15 +132,15 @@ struct AIActivityPage: View {
         } header: {
             Text("Recent Requests")
         } footer: {
-            aiFootnote("Kept in memory until Arch quits. Replies are not kept.")
+            formFootnote("Kept in memory until Arch quits. Replies are not kept.")
         }
     }
 
     private func details(of entry: AIActivityEntry) -> String {
         var parts = [entry.model.map(settings.title(of:)) ?? "No model"]
-        parts += entry.parts.map { "\($0.kind) \($0.characters.formatted())" }
+        parts += entry.parts.map { "\($0.kind) \($0.characters.formatted()) \($0.characters == 1 ? "character" : "characters")" }
         if let usage = entry.usage {
-            parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) in, \(usage.outputTokens.formatted()) out")
+            parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
         }
         return parts.joined(separator: " \u{00B7} ")
     }
@@ -143,7 +150,8 @@ struct AIActivityPage: View {
         case .completed(.lengthLimit): return "Cut at the length limit"
         case .completed: return "Answered"
         case .cancelled: return "Cancelled"
-        case .failed(let error): return error.localizedDescription
+        // The reason shows on its own line under the row's first line.
+        case .failed: return "Failed"
         }
     }
 

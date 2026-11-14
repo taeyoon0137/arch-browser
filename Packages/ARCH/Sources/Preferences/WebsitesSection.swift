@@ -61,11 +61,8 @@ struct WebsitesSection: View {
     }
 
     private var footer: some View {
-        // A grouped form's footer is trailing-aligned and primary by default. Chromium's page banners do not show until the engine change VI.7 in `docs/plan.md`, and WebKit refuses a page's request without asking the app.
-        Text("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites\u{2019} notifications don\u{2019}t show as banners yet, and websites can\u{2019}t show notifications in WebKit tabs.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        // Chromium's page banners do not show until the engine change VI.7 in `docs/plan.md`, and WebKit refuses a page's request without asking the app.
+        formFootnote("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites\u{2019} notifications don\u{2019}t show as banners yet, and websites can\u{2019}t show notifications in WebKit tabs.")
     }
 
     /// The origin's permission types in the order of their titles.

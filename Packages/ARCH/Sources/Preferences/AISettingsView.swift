@@ -5,7 +5,7 @@ import SwiftUI
 extension AIFeature {
     /// Sends what the user types under Features ▸ Test Prompt, so a provider and its fallbacks can be tried before any browsing feature uses them.
     static let testPrompt = AIFeature(id: AIFeatureID(rawValue: "testPrompt"), name: "Test Prompt",
-                                      summary: "Sends the prompt below and shows the reply, to try a provider and its fallbacks.",
+                                      summary: "Sends the prompt above and shows the reply, to try a provider and its fallbacks.",
                                       trigger: .user, data: .textOnly)
 }
 
@@ -58,16 +58,6 @@ struct AISettingsView: View {
     }
 }
 
-/// A grouped form's footer is trailing-aligned, primary, and sometimes cut to one line by default.
-func aiFootnote(_ text: String) -> some View {
-    Text(text)
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-}
-
 // MARK: - Features
 
 /// The default route, then one section per registered feature with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them. The Test Prompt feature's section also holds the prompt.
@@ -83,18 +73,18 @@ private struct AIFeaturesPage: View {
         } header: {
             Text("Default Model")
         } footer: {
-            aiFootnote("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do.")
+            formFootnote("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do.")
         }
         ForEach(service.features) { feature in
             Section {
-                Toggle("On", isOn: Binding(
+                Toggle("Use \(feature.name)", isOn: Binding(
                     get: { settings.route(for: feature.id).isEnabled },
                     set: { isOn in
                         var route = settings.route(for: feature.id)
                         route.isEnabled = isOn
                         settings.setRoute(route, for: feature.id)
                     }))
-                AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? "Default Model" : "None")
+                AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? "Same as Default Model" : "None")
                 if feature.id == AIFeature.testPrompt.id {
                     AITestPromptRows(service: service, settings: settings, task: $testPromptTask)
                 } else if let error = lastError(of: feature) {
@@ -110,7 +100,7 @@ private struct AIFeaturesPage: View {
             } header: {
                 Text(feature.name)
             } footer: {
-                aiFootnote("\(feature.summary) \(Self.sentence(for: feature))")
+                formFootnote("\(feature.summary) \(Self.sentence(for: feature))")
             }
         }
     }
@@ -124,9 +114,9 @@ private struct AIFeaturesPage: View {
 
     /// What the feature sends, in words.
     private static func sentence(for feature: AIFeature) -> String {
-        let names: [(AIDataKind, String)] = [(.page, "the page's text"), (.selection, "the selection"), (.file, "files"), (.download, "download details")]
+        let names: [(AIDataKind, String)] = [(.page, "the page\u{2019}s text"), (.selection, "the selection"), (.file, "files"), (.download, "download details")]
         let kinds = names.filter { feature.data.kinds.contains($0.0) }.map(\.1)
-        let sends = kinds.isEmpty ? "It sends text only." : "It sends text and \(ListFormatter.localizedString(byJoining: kinds))."
+        let sends = kinds.isEmpty ? "It sends text only." : "It sends \(ListFormatter.localizedString(byJoining: kinds)) with its requests."
         return feature.trigger == .automatic ? "\(sends) It runs on its own." : sends
     }
 }
@@ -226,7 +216,7 @@ private struct AITestPromptRows: View {
                     case .waiting(.queued):
                         status = "Waiting for a free request slot\u{2026}"
                     case .waiting(.rateLimited(let until)):
-                        status = "Waiting for the provider's rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}"
+                        status = "Waiting for the provider\u{2019}s rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}"
                     case .started(let ref):
                         model = ref
                         status = "Answering: \(settings.title(of: ref))"
@@ -273,6 +263,7 @@ private struct AISitesPage: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Allow AI on this site")
+                    .accessibilityLabel("Allow AI on this site")
                 }
             }
             HStack {
@@ -284,7 +275,7 @@ private struct AISitesPage: View {
         } header: {
             Text("AI Is Off on These Sites")
         } footer: {
-            aiFootnote("Nothing from these sites goes to any provider. A site includes its subdomains. Internal pages such as flags:// are always excluded.")
+            formFootnote("Nothing from these sites goes to any provider. A site includes its subdomains. Internal pages such as flags:// are always excluded.")
         }
     }
 

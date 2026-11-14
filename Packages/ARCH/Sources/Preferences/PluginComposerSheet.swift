@@ -73,14 +73,15 @@ struct PluginComposerSheet: View {
                     }
                 }
             }
+            // Back to Review goes to another step rather than ending the sheet, so it leads, as Don’t Ask Again does in the install sheet's last step.
             HStack {
-                Spacer()
-                Button(draft == nil ? "Cancel" : "Discard", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
                 if draft != nil {
                     Button("Back to Review") { isReviewing = true }
                         .disabled(writing != nil)
                 }
+                Spacer()
+                Button(draft == nil ? "Cancel" : "Discard", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 if writing != nil {
                     Button("Stop") { writing?.cancel() }
                 } else {
