@@ -898,6 +898,8 @@ Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePa
 
 ## Facts
 
+- On 2026-11-14, a signed debug bundle with an isolated profile opened an agent draft from the native sidebar menu of a background Chromium fixture tab. The foreground tab stayed selected, and the draft showed the clicked tab, Persona, mode and fixture model. The empty task kept Start disabled. No model request was made.
+
 - On 2026-11-14, the debug bundle made by `scripts/bundle_app.sh` passed `codesign --verify --deep --strict`. Its relative `arch-mcp` link points to `arch-cli`. The helper printed the agent guide and command help. With the installed app running without a control listener, status returned 69. An MCP initialize request over standard input returned server name `arch` and the helper exited 0 at EOF.
 Checked on this Mac with Claude Code 2.1.323 and Codex 0.164.0, with no model run and nothing signed in or out:
 
