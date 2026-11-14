@@ -2,6 +2,14 @@
 import AppKit
 import SwiftUI
 
+private struct FavoriteBarFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// Lays out one page per space side by side and shows the current space's page. During a swipe the pages follow the fingers; a change of space slides them into place.
 struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
@@ -30,6 +38,7 @@ struct SpacePagesView: View {
                     .accessibilityHidden(!isCurrent)
             }
         }
+        .onPreferenceChange(FavoriteBarFramesKey.self) { sidebarDrag.favoriteBarFrames = $0 }
         .offset(x: -CGFloat(index) * width + translation)
         .frame(width: width, alignment: .leading)
         .clipped()
@@ -62,10 +71,7 @@ struct SpacePagesView: View {
             }
             .background(GeometryReader { proxy in
                 let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
-                Color.clear
-                    .onAppear { sidebarDrag.favoriteBarFrames[space.id] = frame }
-                    .onChange(of: frame) { sidebarDrag.favoriteBarFrames[space.id] = $1 }
-                    .onDisappear { sidebarDrag.favoriteBarFrames.removeValue(forKey: space.id) }
+                Color.clear.preference(key: FavoriteBarFramesKey.self, value: [space.id: frame])
             })
             .padding(.horizontal, SidebarView.inset)
         }
