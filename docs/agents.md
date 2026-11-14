@@ -877,7 +877,7 @@ Continue as Agent Task opens the composer with the user's draft or question. Sha
 
 The Shared Tabs button in an app-started session lists its attached tabs. Share a Tab offers readable user tabs from that session’s Persona and checks the chosen document again before attaching it. Stop Sharing removes that session’s handle and any attached reader excerpt immediately. Sharing the same tab again issues a new handle. A read waiting for the engine under the old handle discards its answer. The conversation continues on its existing model, with previously sent messages and previously allowed sites in its scope. Outside-client tasks have no attachment controls in the panel.
 
-In a signed WebKit bundle with an isolated profile, a loopback HTTP model held a turn while another tab was selected. Take Over selected the shared source tab and showed Hand Back in the header. A subsequent `read_text` call waited. Hand Back let the read finish and the answer appeared in the same session. On a separate held turn, Stop showed Stopped within one second, and a follow-up completed. A service test also revoked a read already awaiting the engine across a quick Take Over and Hand Back.
+In a signed WebKit bundle with an isolated profile, a loopback HTTP model held a turn while another tab was selected. Take Over selected the shared source tab and showed Hand Back in the header. A subsequent `read_text` call waited. Hand Back let the read finish and the answer appeared in the same session. On a separate held turn, Stop showed Stopped within one second, and a follow-up completed. Service and WebKit tests also interrupt page text and shared outlines across a quick Take Over and Hand Back. Both tools identify the active tab for the panel. Interrupted outlines publish no content or refs and leave no lines available for a later diff.
 
 ## Checks from the bundle
 
@@ -900,6 +900,8 @@ Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePa
 86. An API-key session (VII.19.1), with Allow Outside Clients off and on a `messages` and a `chatCompletions` model with tools: New Agent Task with the selected tab attached reads the tab and opens its first link without a control socket; Settings ▸ AI ▸ Activity lists one Agent request per round on the session's model, with the tab's text in a page block without query or fragment; a site excluded mid-session is refused at the next read, and the next request holds no page block or image from it, with the earlier results from it shown as refused (the model's own earlier replies stay, and may quote the page); after more than eight rounds the earlier results are one-line notes, and a screenshot is in the request after its call only, on `messages`, while `chatCompletions` shows a note in its place; Stop ends the turn at once and a follow-up continues on the same model.
 
 ## Facts
+
+- On 2026-11-14, the signed debug app ran an HTTP session from its composer with a Chromium fixture tab attached. A local test model called `list_tabs` and `snapshot`. Its third request received the heading and link from the outline and omitted the value typed in a form field. The response appeared in the session panel.
 
 - On 2026-11-14, a signed debug bundle with an isolated profile opened an agent draft from the native sidebar menu of a background Chromium fixture tab. The foreground tab stayed selected, and the draft showed the clicked tab, Persona, mode and fixture model. The empty task kept Start disabled. No model request was made.
 

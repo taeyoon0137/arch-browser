@@ -50,6 +50,37 @@ import Testing
         #expect(await snapshot(fresh, ref: "e17").status == .stale)
     }
 
+    @Test func takingOverAnActiveOutlineAndHandingBackDropsItsContentsRefsAndDiff() async throws {
+        let fixture = try await PageFixture(shared: true)
+        let session = session(sharing: fixture)
+        var call = AgentToolCall(name: "snapshot", arguments: ["tab": "t1", "diff": true])
+        var validations: [UUID?] = []
+        let excluded = AgentToolHost(host: fixture.host, allowsAI: { _ in
+            validations.append(session.latestActiveTab)
+            return false
+        })
+        let denied = await excluded.run(call, in: session, searchesHistory: false)
+        #expect(denied.code == "P16" && validations.count == 1 && validations[0] == nil)
+        let original = await fixture.toolHost.run(call, in: session, searchesHistory: false)
+        #expect(original.status == .ok && session.snapshots.records[fixture.tabID] != nil)
+        let oldStore = session.snapshots
+        fixture.host.onPageScript = {
+            #expect(session.latestActiveTab == fixture.tabID)
+            session.takeOver()
+            session.handBack()
+        }
+        let interrupted = await fixture.toolHost.run(call, in: session, searchesHistory: false)
+        #expect(interrupted.status == .refused && interrupted.structured?["outline"] == nil && !interrupted.text.contains("Place order"))
+        #expect(session.latestActiveTab == nil && session.snapshots !== oldStore && session.snapshots.records.isEmpty && session.snapshots.counts.isEmpty)
+        #expect(oldStore.counts[fixture.tabID] == 1)
+        fixture.host.onPageScript = nil
+        call.arguments["ref"] = "e17"
+        #expect(await fixture.toolHost.run(call, in: session, searchesHistory: false).status == .stale)
+        call.arguments["ref"] = nil
+        let fresh = await fixture.toolHost.run(call, in: session, searchesHistory: false)
+        #expect(fresh.status == .ok && fresh.text.contains("first snapshot") && !fresh.text.contains("Alex Kim"))
+    }
+
     @Test func aSessionChecksItsAttachmentAndDocumentAgainAfterAnOutline() async throws {
         let fixture = try await PageFixture(shared: true)
         let session = session(sharing: fixture)
