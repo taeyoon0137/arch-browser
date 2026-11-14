@@ -6,7 +6,8 @@ import Foundation
 import Testing
 import WebKit
 
-@MainActor @Suite(.timeLimit(.minutes(1))) struct WebKitFileChooserTests {
+// Each test starts a real renderer. Limit concurrent cold starts so input and chooser deadlines measure their own page.
+@MainActor @Suite(.serialized, .timeLimit(.minutes(1))) struct WebKitFileChooserTests {
     private let browser: any EngineBrowser
     /// Keeps the tests' windows, which nothing else holds while they are not ordered in.
     private let windows = Windows()
