@@ -30,7 +30,13 @@ import Testing
         draft.readsPageText = true
         try draft.configureAgent(in: &hook)
         #expect(hook.agent?.tools == ["read_text", "rename_tab"] && hook.agent?.tabAccess == .page)
+        let restored = ScriptHookDraft(editing: hook, script: "", places: places, reviewing: false)
+        #expect(restored.readsPageText && !restored.readsPageOutline)
         draft.readsPageText = false
+        draft.readsPageOutline = true
+        try draft.configureAgent(in: &hook)
+        #expect(hook.grant.agent?.tools == ["rename_tab", "snapshot"] && hook.agent?.tabAccess == .page)
+        draft.readsPageOutline = false
         try draft.configureAgent(in: &hook)
         #expect(hook.grant.agent?.tools == ["rename_tab"] && hook.grant.agent?.tabAccess == .title)
         draft.enablesAgent = false
@@ -45,6 +51,7 @@ import Testing
         draft.closeReasons = [.user]
         draft.agentPrompt = "Name the remaining tab."
         draft.agentModel = .tier(.deep)
+        draft.readsPageOutline = true
         draft.agentRenamesTabs = true
         draft.seconds = 10
         draft.rounds = 1
@@ -54,7 +61,7 @@ import Testing
         let (hook, bytes) = try draft.makeHook()
         #expect(hook.trigger == .tabClosed(reasons: [.user]))
         #expect(hook.grant.permissions == [.agent] && hook.agent?.model == .tier(.deep))
-        #expect(hook.grant.agent?.tools == ["rename_tab"] && hook.grant.agent?.tabAccess == .title)
+        #expect(hook.grant.agent?.tools == ["rename_tab", "snapshot"] && hook.grant.agent?.tabAccess == .page)
         #expect(hook.grant.agent?.minimumRecord == .activity && hook.grant.agent?.maximumRecord == .activity)
         #expect(hook.agent?.limits == hook.grant.agent?.limits && hook.agent?.limits.rounds == 1)
         #expect(hook.timing.runsPerDay == 11 && hook.grant.agent?.runsPerDay == 11)

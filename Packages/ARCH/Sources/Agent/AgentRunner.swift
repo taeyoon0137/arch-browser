@@ -68,9 +68,6 @@ public final class AgentRunner: ObservableObject {
               (options.closedTab == nil) == (request.closedTab == nil), let knownProviders = request.knownProviders else {
             return Self.refused("notGranted", "The requested tabs or caller are outside this hook's grant.")
         }
-        guard !options.tools.contains("snapshot") else {
-            return Self.refused("notAvailable", "The hook runner cannot take page outlines yet.")
-        }
         let requested = Set(request.tabs)
         let open = host.userTabs(in: personaID).filter { requested.contains($0.id) && $0.agentOwnerID == nil }
         guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer in the hook's Persona.") }
@@ -146,6 +143,7 @@ public final class AgentRunner: ObservableObject {
         let closed: AgentRunClosedTab?
         let rename: Rename
         var actions: [AgentRunAction] = []
+        let snapshots = AgentSnapshotStore()
         var active = true
         var messages: [AIMessage] = []
         var timedOut = false
@@ -296,7 +294,7 @@ public final class AgentRunner: ObservableObject {
     }
 
     private static var supportedTools: [AgentTool] {
-        [AgentToolCatalog.renameTab] + AgentToolCatalog.tools.filter { $0.name == "read_text" }
+        [AgentToolCatalog.renameTab] + AgentToolCatalog.tools.filter { $0.name == "read_text" || $0.name == "snapshot" }
     }
 
     private func handler(for tool: AgentTool, run: Execution) -> AIToolHandler {
@@ -339,14 +337,17 @@ public final class AgentRunner: ObservableObject {
               tab.documentID == run.tabs[index - 1].documentID, Self.sameDocument(tab.url, document), AgentPolicy.showsTitle(of: document, allowsAI: allowsAI) else {
             return response("stale", error: true)
         }
-        if tool.name == "read_text" {
+        if tool.name == "read_text" || tool.name == "snapshot" {
             let host = self.host
             let toolHost = AgentToolHost(host: host, allowsAI: allowsAI)
-            let outcome = await toolHost.readText(args, tab: tab, handle: handle) { current in
+            func mayRead(_ current: AgentTabInfo) -> Bool {
                 run.active && !Task.isCancelled && current.agentOwnerID == nil && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
                     && host.userTabs(in: run.personaID).contains { $0.id == id }
             }
-            return outcome.result
+            if tool.name == "snapshot" {
+                return await toolHost.snapshot(args, tab: tab, handle: handle, shared: true, store: run.snapshots, pages: 0, mayRead: mayRead).result
+            }
+            return await toolHost.readText(args, tab: tab, handle: handle, mayReadTab: mayRead).result
         }
         guard let name = args["name"]?.stringValue else { return response("invalidArguments", error: true) }
         let firstLine = name.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces)

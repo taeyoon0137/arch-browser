@@ -44,6 +44,7 @@ struct ScriptHookDraft: Identifiable {
     var agentPrompt = ""
     var agentRenamesTabs = false
     var readsPageText = false
+    var readsPageOutline = false
     var guided = false
     var generated = false
     var origin: HookOrigin = .user
@@ -125,6 +126,7 @@ struct ScriptHookDraft: Identifiable {
         agentPrompt = hook.agent?.prompt ?? ""
         agentRenamesTabs = hook.grant.agent?.tools.contains("rename_tab") == true
         readsPageText = hook.grant.agent?.tools.contains("read_text") == true
+        readsPageOutline = hook.grant.agent?.tools.contains("snapshot") == true
         readsTabs = hook.grant.permissions.contains(.tabs)
         renamesTabs = hook.grant.permissions.contains(.tabsRename)
     }
@@ -154,8 +156,8 @@ struct ScriptHookDraft: Identifiable {
         if renamesTabs { hook.grant.permissions.insert(.tabsRename) }
         if !hook.origin.isOutsideProgram { try configureAgent(in: &hook) }
         if guided, let model = agentModel {
-            let tools = (agentRenamesTabs ? ["rename_tab"] : []) + (readsPageText ? ["read_text"] : [])
-            let options = AgentRunOptions(prompt: agentPrompt, tabAccess: readsPageText ? .page : .title, model: model, record: agentRecord,
+            let tools = (agentRenamesTabs ? ["rename_tab"] : []) + (readsPageText ? ["read_text"] : []) + (readsPageOutline ? ["snapshot"] : [])
+            let options = AgentRunOptions(prompt: agentPrompt, tabAccess: readsPageText || readsPageOutline ? .page : .title, model: model, record: agentRecord,
                                           tools: tools, limits: AgentRunLimits(timeout: .seconds(seconds), rounds: rounds, toolCalls: toolCalls))
             AgentHookTemplate.configure(&hook, options: options, dailyLimit: dailyLimit, delay: .seconds(delay), generated: generated)
             if let reason = hook.grant.agent?.refusal(for: options) { throw invalid(reason) }
@@ -176,6 +178,7 @@ struct ScriptHookDraft: Identifiable {
         let previouslyGranted = grant.tools
         if agentRenamesTabs { grant.tools.insert("rename_tab") } else { grant.tools.remove("rename_tab") }
         if readsPageText { grant.tools.insert("read_text") } else { grant.tools.remove("read_text") }
+        if readsPageOutline { grant.tools.insert("snapshot") } else { grant.tools.remove("snapshot") }
         grant.tabAccess = grant.tools.contains("read_text") || grant.tools.contains("snapshot") ? .page : .title
         var options = hook.agent ?? AgentRunOptions(prompt: agentPrompt, model: agentModel, tools: [])
         options.tools = Set(options.tools).intersection(grant.tools).union(grant.tools.subtracting(previouslyGranted)).sorted()
@@ -342,7 +345,13 @@ struct ScriptHookSheet: View {
             if draft.enablesAgent {
                 TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
                 Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
-                Text(draft.readsPageText ? "The model may read page text on the allowed tabs. Sites excluded from AI are skipped." : "The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
+                Toggle(draft.kind == .tabClosed ? "Read Outlines of the Tabs Left" : "Read Page Outline", isOn: $draft.readsPageOutline)
+                if draft.readsPageOutline { Text("Outlines include page labels and links. Form values are hidden.").font(.caption) }
+                if draft.readsPageText || draft.readsPageOutline {
+                    Text("Sites excluded from AI are skipped.").font(.caption)
+                } else {
+                    Text("The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
+                }
                 if draft.kind == .tabClosed { Text("The closed tab provides its last title and address. Actions apply to tabs left in its space.").font(.caption) }
             }
         }
