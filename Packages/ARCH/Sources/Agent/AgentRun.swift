@@ -66,7 +66,14 @@ public struct AgentRunLimits: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AgentRunLimits()
-        timeout = try container.decodeIfPresent(Double.self, forKey: .timeout).map { Duration.seconds($0) } ?? defaults.timeout
+        if let seconds = try container.decodeIfPresent(Double.self, forKey: .timeout) {
+            guard seconds.isFinite, abs(seconds) < Double(Int64.max) else {
+                throw DecodingError.dataCorruptedError(forKey: .timeout, in: container, debugDescription: "The timeout is out of range.")
+            }
+            timeout = .seconds(seconds)
+        } else {
+            timeout = defaults.timeout
+        }
         rounds = try container.decodeIfPresent(Int.self, forKey: .rounds) ?? defaults.rounds
         toolCalls = try container.decodeIfPresent(Int.self, forKey: .toolCalls) ?? defaults.toolCalls
     }
@@ -148,6 +155,22 @@ public struct AgentRunGrant: Codable, Hashable, Sendable {
         self.runsPerDay = runsPerDay
         self.limits = limits
         self.returnsReply = returnsReply
+    }
+
+    /// Why the requested run exceeds its grant or Arch's run limits. The editor and the runner use the same check.
+    public func refusal(for options: AgentRunOptions) -> String? {
+        guard !options.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              options.prompt.count <= AgentRunOptions.maximumPromptLength else { return "The prompt must contain 1 to 4,000 characters." }
+        guard options.tabAccess <= tabAccess else { return "The grant does not allow this tab access." }
+        guard minimumRecord <= options.record, options.record <= maximumRecord else { return "The record level is outside the grant." }
+        let permittedTools: Set<String> = options.tabAccess == .page ? ["rename_tab", "read_text", "snapshot"] : ["rename_tab"]
+        guard options.tools.allSatisfy({ tools.contains($0) && permittedTools.contains($0) }) else { return "The run asks for a tool outside its grant or tab access." }
+        guard (1...2_000).contains(runsPerDay) else { return "The daily run limit must be from 1 to 2,000." }
+        let request = options.limits
+        guard (.seconds(5)...Duration.seconds(600)).contains(request.timeout), request.timeout <= limits.timeout else { return "The timeout exceeds the allowed range." }
+        guard (1...20).contains(request.rounds), request.rounds <= limits.rounds else { return "The number of model rounds exceeds the allowed range." }
+        guard (1...50).contains(request.toolCalls), request.toolCalls <= limits.toolCalls else { return "The number of tool calls exceeds the allowed range." }
+        return nil
     }
 
     private enum CodingKeys: String, CodingKey {

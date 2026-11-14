@@ -72,6 +72,30 @@ import Testing
         #expect(user.minimumRecord == .none && user.maximumRecord == .session && user.runsPerDay == 200 && user.returnsReply && user.tabAccess == .title)
     }
 
+    @Test func grantChecksToolsRecordBoundsAndLimitsAtThePointOfUse() throws {
+        let grant = AgentRunGrant(tools: ["rename_tab", "read_text", "snapshot"], tabAccess: .page, minimumRecord: .activity, maximumRecord: .activity)
+        let allowed = AgentRunOptions(prompt: "Name the tab.", model: .tier(.fast), record: .activity, tools: ["rename_tab"])
+        #expect(grant.refusal(for: allowed) == nil)
+        let changes: [(inout AgentRunOptions) -> Void] = [
+            { $0.tools = ["read_text"] }, { $0.tools = ["snapshot"] }, { $0.tools = ["open_tab"] },
+            { $0.record = .none }, { $0.record = .session }, { $0.limits.rounds += 1 },
+            { $0.limits.toolCalls += 1 }, { $0.limits.timeout += .seconds(1) },
+            { $0.limits.timeout = .zero }, { $0.limits.rounds = 0 }, { $0.limits.toolCalls = 0 },
+            { $0.prompt = "  " }, { $0.prompt = String(repeating: "x", count: 4_001) }
+        ]
+        for change in changes {
+            var options = allowed
+            change(&options)
+            #expect(grant.refusal(for: options) != nil)
+        }
+        var page = allowed
+        page.tabAccess = .page
+        page.tools = ["read_text"]
+        #expect(grant.refusal(for: page) == nil)
+        #expect(AgentRunGrant(tools: ["read_text"]).refusal(for: page) != nil)
+        #expect(throws: DecodingError.self) { try decode(AgentRunLimits.self, #"{"timeout":1e300}"#) }
+    }
+
     @Test func aResultHasFixedJSON() throws {
         let completed = AgentRunResult(status: .completed, actions: [.renamedTab(tab: tab, name: "Docs")], reply: "Done", model: AIModelRef(provider: provider, model: "model-a"),
                                        usage: AIUsage(inputTokens: 310, outputTokens: 12))
