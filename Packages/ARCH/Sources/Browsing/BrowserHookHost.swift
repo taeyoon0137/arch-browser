@@ -41,6 +41,6 @@ import Hooks
 
     /// The tab as `BrowserEventSource` describes it in events: with its committed address, not the address a WebKit navigation shows before it commits, so a run's documents and site checks follow the page the tab shows.
     static func ref(_ tab: Tab) -> BrowserTabRef {
-        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: BrowserEventSource.kind(of: tab), engine: tab.engineKind, url: tab.committedURL)
+        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: BrowserEventSource.kind(of: tab), engine: tab.engineKind, url: tab.committedURL, documentID: tab.documentID)
     }
 }

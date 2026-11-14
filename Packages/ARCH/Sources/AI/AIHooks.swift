@@ -51,6 +51,11 @@ public enum AIHookEvent: Sendable {
         guard case .pageLoaded(let load) = self else { return nil }
         return load.url
     }
+
+    var documentID: UUID? {
+        guard case .pageLoaded(let load) = self else { return nil }
+        return load.documentID
+    }
 }
 
 public struct AIPageLoad: Sendable {
@@ -58,11 +63,13 @@ public struct AIPageLoad: Sendable {
     public var url: URL
     /// The first load of a tab restored from the saved session or of a pinned tab that a browser import opened.
     public var isRestore: Bool
+    public var documentID: UUID?
 
-    public init(tabID: UUID, url: URL, isRestore: Bool) {
+    public init(tabID: UUID, url: URL, isRestore: Bool, documentID: UUID? = nil) {
         self.tabID = tabID
         self.url = url
         self.isRestore = isRestore
+        self.documentID = documentID
     }
 }
 
@@ -254,7 +261,7 @@ public final class AIHookCenter: ObservableObject {
         guard !listening.isEmpty else { return }
         let run = EventRun()
         let steps = listening.map { step(for: $0.value, registrationID: $0.key, event: event, in: run) }
-        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: id, document: event.document, urls: event.urls)
+        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: id, document: event.document, documentID: event.documentID, urls: event.urls)
     }
 
     /// Stops the hooks for a tab that closed or a download the user removed, and drops their actions.

@@ -53,6 +53,15 @@ let tabJSON = #"{"id":"00000000-0000-0000-0000-000000000001","personaID":"000000
 // MARK: - Payloads
 
 @Suite struct BrowserEventPayloadTests {
+    @Test func theLiveDocumentIDStaysOffTheWire() throws {
+        var tab = tabRef()
+        let wire = try JSONEncoder().encode(tab)
+        tab.documentID = UUID()
+        let encoded = try JSONEncoder().encode(tab)
+        #expect(try JSONSerialization.jsonObject(with: wire) as? NSDictionary == JSONSerialization.jsonObject(with: encoded) as? NSDictionary)
+        #expect(try JSONDecoder().decode(BrowserTabRef.self, from: encoded).documentID == nil)
+    }
+
     @Test func eachPayloadHasFixedJSON() throws {
         try expectJSON(BrowserEventPayload.tabOpened(tab: tabRef(), openerTabID: IDs.opener),
                        #"{"tabOpened":{"tab":\#(tabJSON),"openerTabID":"00000000-0000-0000-0000-000000000002"}}"#)

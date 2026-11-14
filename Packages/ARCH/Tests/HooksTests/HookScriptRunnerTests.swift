@@ -45,7 +45,7 @@ final class FakePluginHost: PluginBrowserHost {
     func tabs(in persona: PersonaID) -> [PluginTab] {
         tabs.openTabs.filter { $0.personaID == persona }.map {
             PluginTab(id: $0.id, spaceID: $0.spaceID, title: "Title of \($0.url?.path ?? "")", url: shownURLs[$0.id] ?? $0.url, engine: $0.engine, isPinned: $0.kind == .pinned,
-                      isSelected: false, kind: $0.kind)
+                      isSelected: false, kind: $0.kind, documentID: $0.documentID)
         }
     }
 
@@ -181,15 +181,19 @@ extension PluginValue {
         let registry = try await harness.start()
         let preset = try harness.add(HookPresets.tidyTabNames, script: AgentHookTemplate.script(for: .pageLoaded))
         registry.resume(preset.id)
-        let web = harness.tab("/web")
+        var web = harness.tab("/web")
+        web.documentID = UUID()
         var chromium = harness.tab("/chromium", kind: .pinned)
         chromium.engine = .chromium
+        chromium.documentID = UUID()
         harness.load(harness.tab("/restored"), restore: true)
         harness.load(harness.tab("/revisited"), first: false)
         harness.load(web)
         harness.load(chromium)
         try #require(await eventually(within: .seconds(20)) { recording.outcomes.count == 2 })
         #expect(Set(requests.flatMap(\.tabs)) == [web.id, chromium.id])
+        #expect(requests.contains { $0.documentIDs[web.id] == web.documentID })
+        #expect(requests.contains { $0.documentIDs[chromium.id] == chromium.documentID })
         #expect(requests.allSatisfy { $0.options == preset.agent && $0.knownProviders?[harness.provider.id] == HookKnownProvider(harness.provider).destination })
         #expect(recording.outcomes.allSatisfy { $0.actions?.count == 1 })
         #expect(harness.entries(of: preset.id).isEmpty)
@@ -206,11 +210,14 @@ extension PluginValue {
         var draft = instantHook("Close preview", .tabClosed(reasons: [.user]))
         let options = AgentRunOptions(prompt: "Name the remaining tab.", model: .tier(.fast), tools: ["rename_tab"])
         AgentHookTemplate.configure(&draft, options: options, dailyLimit: 20, delay: .zero, generated: true)
-        let selected = harness.tab("/selected"), left = harness.tab("/left"), elsewhere = harness.tab("/home", space: HookIDs.home)
+        let selected = harness.tab("/selected"), elsewhere = harness.tab("/home", space: HookIDs.home)
+        var left = harness.tab("/left")
+        left.documentID = UUID()
         [selected, left, elsewhere].forEach(harness.host.show)
         let result = await registry.testDraft(draft, script: Data(AgentHookTemplate.script(for: .tabClosed).utf8), onTab: selected.id, applying: false)
         guard case .finished(.completed(_, let use)) = result else { Issue.record("The generated script failed: \(result)"); return }
         let request = try #require(call)
+        #expect(request.documentIDs[left.id] == left.documentID)
         #expect(request.tabs == [left.id] && request.options.closedTab == selected.id && request.options.dryRun)
         #expect(request.options.model == options.model && request.options.prompt == options.prompt)
         #expect(request.knownProviders?[harness.provider.id] == HookKnownProvider(harness.provider).destination)
@@ -399,6 +406,24 @@ extension PluginValue {
         let count = plugins.renames.count
         #expect(await runner.run(invocation(of: hook, script: script, loading: shown, documents: [:])).failure == "notTaken")
         #expect(plugins.renames.count == count)
+    }
+
+    @Test func aScriptCannotInspectOrRenameAReplacementDocumentAtTheSameAddress() async throws {
+        defer { harness.cleanUp() }
+        let hook = instantHook("Inspect and rename", pageLoads, grant: HookGrant(permissions: [.tabs, .tabsRename]))
+        var tab = harness.tab("/a", id: Probe.covered)
+        let captured = UUID()
+        tab.documentID = captured
+        var listing = invocation(of: hook, script: try fixture("report.js"), loading: tab)
+        listing.documentIDs = [tab.id: captured]
+        var rename = invocation(of: hook, script: try fixture("rename.js"), loading: tab)
+        rename.documentIDs = listing.documentIDs
+        tab.documentID = UUID()
+        harness.host.show(tab)
+        let result = try report(of: await runner.run(listing))
+        #expect(result["get"]?[Probe.covered.uuidString] == .null && result["list"]?.array?.isEmpty == true)
+        #expect(await runner.run(rename).failure == "notTaken")
+        #expect(plugins.renames.isEmpty)
     }
 
     @Test func aRenameOfATabOutsideTheFilterIsRefused() async throws {

@@ -224,6 +224,8 @@ public struct AgentRunRequest: Sendable {
     public var allowedTabs: Set<UUID>?
     /// The document each run tab's renames belong to: the event's address for the event's tab; the runner adds the others' addresses as it writes the first message.
     public var documents: [UUID: URL]
+    /// Live document identities when the hook captured its tabs. Never sent to the provider.
+    public var documentIDs: [UUID: UUID]
     /// A close run's closed tab, from the registry.
     public var closedTab: AgentRunClosedTab?
     /// For a hook, the providers in `knownProviders`, by `destination(of:)`; a route that resolves to another provider, or to one whose destination changed, is refused (`docs/hooks.md`, Known providers).
@@ -234,12 +236,13 @@ public struct AgentRunRequest: Sendable {
     public var feature: AIFeatureID
     public var grant: AgentRunGrant
 
-    public init(options: AgentRunOptions, tabs: [UUID], allowedTabs: Set<UUID>?, documents: [UUID: URL] = [:], closedTab: AgentRunClosedTab? = nil,
+    public init(options: AgentRunOptions, tabs: [UUID], allowedTabs: Set<UUID>?, documents: [UUID: URL] = [:], documentIDs: [UUID: UUID] = [:], closedTab: AgentRunClosedTab? = nil,
                 knownProviders: [AIProviderID: String]?, origin: AgentRunOrigin, promptSource: AgentRunPromptSource, feature: AIFeatureID, grant: AgentRunGrant) {
         self.options = options
         self.tabs = tabs
         self.allowedTabs = allowedTabs
         self.documents = documents
+        self.documentIDs = documentIDs
         self.closedTab = closedTab
         self.knownProviders = knownProviders
         self.origin = origin

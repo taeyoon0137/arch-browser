@@ -99,7 +99,7 @@ public final class AIHookScheduler: ObservableObject {
     }
 
     /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events, and `urls` are the addresses that site exclusions apply to. `causes` are the owners whose runs led to the event, from its cause: an event that the running step's owner caused, such as the title change of the step's own rename, joins that chain after its waiting steps instead of replacing it, so a step is never stopped by its own effect. A step with a feature whose event has an excluded address skips at once, and a post left without steps changes no chain.
-    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, urls: [URL] = [], causes: Set<String> = []) {
+    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, documentID: UUID? = nil, urls: [URL] = [], causes: Set<String> = []) {
         let reachesAI = urls.allSatisfy(service.settings.allowsAI(on:))
         var accepted: [AIHookStep] = []
         for step in steps {
@@ -125,7 +125,7 @@ public final class AIHookScheduler: ObservableObject {
         }
         let previous = chains[key]
         previous?.cancel()
-        let chain = Chain(event: event, document: document, urls: urls)
+        let chain = Chain(event: event, document: document, documentID: documentID, urls: urls)
         chain.add(accepted)
         chains[key] = chain
         chain.task = Task { [weak self] in
@@ -144,10 +144,12 @@ public final class AIHookScheduler: ObservableObject {
     }
 
     /// The tab committed another document: cancels its chains that have a document other than this one, ignoring the fragment. Chains without a document stay.
-    public func cancel(subject: UUID, otherThan document: URL?) {
+    public func cancel(subject: UUID, otherThan document: URL?, documentID: UUID? = nil) {
         let shown = document.map(Self.withoutFragment)
         for (key, chain) in chains where key.subject == subject {
-            guard let chainDocument = chain.document, Self.withoutFragment(chainDocument) != shown else { continue }
+            guard let chainDocument = chain.document else { continue }
+            let reloaded = documentID.map { chain.documentID != nil && chain.documentID != $0 } ?? false
+            guard reloaded || Self.withoutFragment(chainDocument) != shown else { continue }
             chain.cancel()
         }
     }
@@ -179,6 +181,7 @@ public final class AIHookScheduler: ObservableObject {
         /// The event the chain was posted for, and the events of its steps' own effects that joined it.
         private(set) var events: Set<UUID>
         let document: URL?
+        let documentID: UUID?
         let urls: [URL]
         let postedAt = ContinuousClock.now
         /// The steps that have not started, in order.
@@ -189,9 +192,10 @@ public final class AIHookScheduler: ObservableObject {
         /// Set once the chain has run its last step; a later post for its event starts a new chain.
         var isFinished = false
 
-        init(event: UUID, document: URL?, urls: [URL]) {
+        init(event: UUID, document: URL?, documentID: UUID?, urls: [URL]) {
             events = [event]
             self.document = document
+            self.documentID = documentID
             self.urls = urls
         }
 

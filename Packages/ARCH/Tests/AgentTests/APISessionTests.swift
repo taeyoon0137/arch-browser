@@ -9,6 +9,7 @@ import Testing
 enum ClientStep: Sendable {
     case event(AIEvent)
     case fail(AIError)
+    case perform(@Sendable () async -> Void)
     /// Waits until the request is cancelled.
     case hold
 }
@@ -40,6 +41,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
                         switch step {
                         case .event(let event): continuation.yield(event)
                         case .fail(let error): throw error
+                        case .perform(let action): await action()
                         case .hold: try await Task.sleep(for: .seconds(60))
                         }
                     }

@@ -78,6 +78,7 @@ public struct HookInvocation: Sendable {
     public var eventTab: UUID?
     /// The document each run tab's renames belong to: the event's address for the event's tab of a page, address, or title event, and each other run tab's committed address as the run starts. A tab without a committed address has none and takes no name.
     public var documents: [UUID: URL]
+    public var documentIDs: [UUID: UUID] = [:]
     /// A close run's closed tab, kept in memory only.
     public var closedTab: AgentRunClosedTab?
     /// `knownProviders` by provider, for the run's agent runs (`docs/hooks.md`, Known providers).
@@ -660,9 +661,10 @@ public final class HookRegistry: ObservableObject {
         let closedTab = event.kind == .tabClosed ? host.closingTab(event.subject) : nil
         switch event.payload {
         case .pageLoaded(let tab, _, _):
+            scheduler.cancel(subject: tab.id, otherThan: tab.url, documentID: tab.documentID)
             lastDocuments[tab.id] = tab.url
         case .addressChanged(let tab, _):
-            scheduler.cancel(subject: tab.id, otherThan: tab.url)
+            scheduler.cancel(subject: tab.id, otherThan: tab.url, documentID: tab.documentID)
         case .tabClosed(let tab, _):
             lastDocuments[tab.id] = nil
             firstLoadCarryOvers[tab.id] = nil
@@ -702,7 +704,7 @@ public final class HookRegistry: ObservableObject {
         guard !steps.isEmpty else { return }
         // The effect of a running hook's own run, such as its rename's title change, joins that run's chain rather than stopping the run.
         let causes = Set((event.cause?.hookChain ?? []).map(Hook.owner(of:)))
-        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event), urls: event.urls, causes: causes)
+        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event), documentID: event.tab?.documentID, urls: event.urls, causes: causes)
     }
 
     /// The address a page, address, or title event belongs to, whose chain ends when the tab commits another document.
@@ -736,7 +738,9 @@ public final class HookRegistry: ObservableObject {
         // A close's subject is gone by design.
         if let tab = event.tab, event.kind != .tabClosed {
             guard let current = host.tab(tab.id) else { return decline(run, .subjectGone) }
-            if let document = Self.document(of: event), current.url?.hookDocument != document.hookDocument { return decline(run, .documentChanged) }
+            if let document = Self.document(of: event), current.url?.hookDocument != document.hookDocument || tab.documentID != current.documentID {
+                return decline(run, .documentChanged)
+            }
         }
         if hook.usesAgent, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { return decline(run, .excludedSite) }
         return true
@@ -761,11 +765,8 @@ public final class HookRegistry: ObservableObject {
         }
         defer { slots.release(run: run.id) }
         guard !Task.isCancelled, let current = self.hook(withID: run.hookID), current.state == .active else { return }
-        // Runs that passed the check after their delay may have waited together, so the count is checked again where it grows.
-        guard dayCount(of: current.id).runs < current.timing.runsPerDay else {
-            run.declined = .dailyLimit
-            return
-        }
+        // A queued run may have lost its document, permissions or daily budget while waiting for a slot.
+        guard mayStart(run) else { return }
         run.startedAt = .now
         countRun(of: current.id)
         guard let script = store.script(for: current) else {
@@ -814,11 +815,15 @@ public final class HookRegistry: ObservableObject {
         let runTabs = Set(tabs)
         if let id = eventTab, !runTabs.contains(id) { eventTab = nil }
         var documents: [UUID: URL] = [:]
-        for tab in covered where runTabs.contains(tab.id) { documents[tab.id] = tab.url }
+        var documentIDs: [UUID: UUID] = [:]
+        for tab in covered where runTabs.contains(tab.id) {
+            documents[tab.id] = tab.url
+            documentIDs[tab.id] = tab.documentID
+        }
         if let id = eventTab, let document = Self.document(of: event) { documents[id] = document }
         let chain = Array(((event.cause?.hookChain ?? []) + [hook.id]).suffix(Self.maximumHookChain))
         return HookInvocation(hook: hook, run: run.id, personaID: event.personaID, event: view, cause: BrowserEventCause(origin: .hookRun(hook: hook.id, run: run.id), hookChain: chain),
-                              deadline: deadline, isTest: run.isTest, appliesActions: applying, script: script, tabs: runTabs, eventTab: eventTab, documents: documents,
+                              deadline: deadline, isTest: run.isTest, appliesActions: applying, script: script, tabs: runTabs, eventTab: eventTab, documents: documents, documentIDs: documentIDs,
                               closedTab: run.closedTab, knownProviders: Dictionary(knownProviders.map { ($0.id, $0.destination) }, uniquingKeysWith: { first, _ in first }),
                               requestDidEnd: requestDidEnd)
     }
@@ -839,6 +844,8 @@ public final class HookRegistry: ObservableObject {
                 record(result, of: run)
             } else if run.wasDropped {
                 recordSkip(of: run, .dropped)
+            } else if run.declined == .documentChanged {
+                keepsCarryOver = true
             } else if run.declined == .dailyLimit {
                 recordSkip(of: run, .dailyLimit)
             }

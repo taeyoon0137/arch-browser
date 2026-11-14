@@ -34,6 +34,8 @@ extension BrowserTabCloseReason {
 @MainActor
 final class BrowserEventSource {
     let bus: BrowserEventBus
+    /// Ends work on a replaced document as soon as it commits, even if the address stays the same.
+    var documentDidChange: ((UUID, URL?, UUID) -> Void)?
     /// The Persona of a space, which a space switch names. Attaching to the session sets it.
     var personaOfSpace: (UUID) -> UUID? = { _ in nil }
 
@@ -125,6 +127,13 @@ final class BrowserEventSource {
     }
 
     private func observe(_ tab: Tab, _ followed: FollowedTab) {
+        tab.$documentID.dropFirst()
+            .sink { [weak self, weak tab] documentID in
+                MainActor.assumeIsolated {
+                    if let tab { self?.documentDidChange?(tab.id, tab.committedURL, documentID) }
+                }
+            }
+            .store(in: &followed.observers)
         tab.didLoadDocument
             .sink { [weak self, weak tab] in
                 MainActor.assumeIsolated {
@@ -214,7 +223,7 @@ final class BrowserEventSource {
     }
 
     private func ref(_ tab: Tab, url: URL?) -> BrowserTabRef {
-        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: Self.kind(of: tab), engine: tab.engineKind, url: url)
+        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: Self.kind(of: tab), engine: tab.engineKind, url: url, documentID: tab.documentID)
     }
 
     /// A tab that an agent folder holds (`Tab.agentOwnerID`) is an agent's, whatever else it is, and becomes the user's kind again once it leaves the folder.
