@@ -55,6 +55,101 @@ import Testing
         #expect(pageParts.count == 1 && pageParts[0].url.absoluteString == "https://example.org/path" && pageParts[0].title == "Title" && pageParts[0].text.isEmpty)
     }
 
+    private func outlineRequest(_ fixture: FixturePage) -> AgentRunRequest {
+        var req = request()
+        req.options.tools = ["snapshot"]
+        req.options.limits.rounds = 2
+        req.options.tabAccess = .page
+        req.grant.tools = ["snapshot"]
+        req.grant.tabAccess = .page
+        host.tabs[0].url = fixture.url
+        host.webContents[tab] = fixture.contents
+        req.documents[tab] = fixture.url
+        return req
+    }
+
+    @Test(arguments: [false, true])
+    func aHookReadsOnlyItsGrantedOutlineAndRejectsAReloadDuringExtraction(reload: Bool) async throws {
+        let page = try await FixturePage("form")
+        let req = outlineRequest(page)
+        if reload { host.onPageScript = { host.tabs[0].documentID = UUID() } }
+        let client = ScriptedClient { index in
+            index == 0 ? [.event(.toolCall(AIToolCall(id: "outline", name: "snapshot", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))]
+                : [.event(.text("Done")), .event(.finished(.completed))]
+        }
+        let result = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        #expect(result.status == .completed && result.actions.isEmpty && result.keptRun == nil)
+        #expect(client.requests.first?.tools.map(\.name) == ["snapshot"])
+        guard case .toolResult(let answer)? = client.requests.last?.messages.last?.parts.first else { Issue.record("The model received no outline result."); return }
+        let text = answer.parts.compactMap { part -> String? in if case .page(let page) = part { return page.text }; return nil }.joined()
+        #expect(answer.isError == reload && text.contains("Place order") == !reload)
+        #expect(!text.contains("Alex Kim") && !text.contains("session=secret"))
+    }
+
+    @Test func pageAccessAndAnExplicitOutlineGrantAreBothRequired() async {
+        var req = request()
+        req.options.tools = ["snapshot"]
+        req.options.tabAccess = .page
+        req.grant.tabAccess = .page
+        req.grant.tools = ["read_text"]
+        let client = ScriptedClient { _ in [] }
+        let runner = runner(client)
+        #expect(await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }.code == "notGranted")
+        req.grant.tools = ["snapshot"]
+        req.options.tabAccess = .title
+        #expect(await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }.code == "notGranted")
+        #expect(client.requests.isEmpty)
+    }
+
+    @Test func stoppingAHookOutlineCancelsASilentPage() async throws {
+        let fixture = try await FixturePage("form")
+        let req = outlineRequest(fixture)
+        var started = false
+        host.onPageScript = { started = true }
+        host.silentTabIDs = [tab]
+        let client = ScriptedClient { _ in [.event(.toolCall(AIToolCall(id: "r", name: "snapshot", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))] }
+        let runner = runner(client)
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        try await waitUntil { started }
+        let stopped = ContinuousClock.now
+        runner.cancelAll()
+        #expect(await task.value.status == .cancelled)
+        #expect(ContinuousClock.now - stopped < .seconds(2))
+        #expect(client.requests.count == 1 && runner.keptRuns.isEmpty)
+    }
+
+    @Test func theAuthenticatedCLIReceivesTheSameSharedTabOutline() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let fixture = try await FixturePage("form")
+        var req = outlineRequest(fixture)
+        let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
+        let model = AIModelRef(provider: preset.id, model: "chosen")
+        req.knownProviders = [preset.id: preset.hookDestination]
+        let client = ScriptedClient { _ in [] }
+        let runner = AgentRunner(host: host, client: client, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        runner.startCLI = { try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4) }
+        runner.finishCLI = { service.finishHookCLI($0) }
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        try await waitUntil { !harness.runners.isEmpty }
+        let cli = try #require(harness.runners.first)
+        let ticket = try #require(cli.request.toolServer.environment[AgentMCPServer.ticketVariable])
+        let pid: pid_t = 4242
+        harness.addProcess(pid, parent: 1)
+        cli.startProcess(pid)
+        harness.addProcess(getpid(), parent: pid)
+        let peer = try TestClient(harness.location)
+        #expect(try await peer.hello(ticket: ticket).status == .bound)
+        #expect(cli.request.toolServer.tools == ["snapshot"])
+        cli.emit(.ready(model))
+        let answer = try await peer.call(AgentControlMethod.toolsCall, params: ["name": "snapshot", "arguments": ["tab": "t1"]]).decode(as: AgentToolResult.self)
+        #expect(answer.status == .ok && answer.text.contains("Place order") && !answer.text.contains("Alex Kim"))
+        cli.emit(.turnFinished(.completed))
+        #expect(await task.value.status == .completed && client.requests.isEmpty && service.sessions.isEmpty)
+    }
+
     @Test func anEditorTestReportsUsageWithoutSpendingTheHooksAutomaticAllowance() async {
         var req = request()
         req.origin = .test(hook: hook)
