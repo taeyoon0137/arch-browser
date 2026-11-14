@@ -73,6 +73,7 @@ Code comments and documents cite these rules by number, as in "bookmark rule 4".
 ## Saved pages (III.16, built)
 
 - The divider above the open tabs accepts the first pinned tab in a space. While a tab is lifted, the empty pinned area shows “Pin Tab”. Crossing another tab’s midpoint moves it aside once. Holding the pointer there keeps that position as the rows animate.
+- Releasing a regular tab over the top favorites grid adds its current address to the same Persona. An empty grid shows an Add to Favorites target during the drag. The source tab keeps its live page.
 - `SavedPage` holds an address and a title. `Tab.savedPage` follows bookmark rule 2: `isPinned` turning on sets it from the tab's address and page title, turning off clears it, and a pinned tab without one takes the first address its page reports, with an empty title. `restore(_:folderID:)` takes the saved page from the record, and `takeImport(_:)` from the imported address and title.
 - `URL.isSamePage(as:)` and `URL.isSameSite(as:)` compare according to bookmark rule 3. `Tab.isOffSavedPage` and `Tab.isOffSavedSite` use them; a favorite's tab compares with its favorite's address, which the session supplies.
 - Go Back to Saved Page loads the saved address in the tab, or the favorite's address in its tab. For a tab without its page, the stand-in takes the saved page without loading, as any load on it does.

@@ -704,6 +704,8 @@ A loopback form export interrupted after 16 KiB produced one POST. A native retr
 
 The old page’s unresolved site permission and file chooser now end at a new main document, including a same-address reload. Two real renderers confirmed that a late chooser answer supplies no file, and another tab’s request survives. A local permission callback confirmed that an old answer writes no decision. A 48-hour simulated age with both engines preserved edits and visible split panes through the real archive and unload actions. Closing the last main window then restoring it kept an independent small window’s draft. Actual Mac sleep and wake remain open.
 
+The sidebar’s favorites, regular pinned tabs and download status were checked against the user’s November 15 report. With one through four favorites per row, a signed offscreen sidebar kept tiles at 44 points and moved both Personas exactly 125 points horizontally across a half-width swipe with no vertical change. Source-page native link clicks were exercised on both engines, including ordinary links, new-window links, modifiers and cancelled clicks. Held downloads reported progress in the hidden-sidebar control and small-window header, and temporary download tabs returned to their opener. Actual trackpad feel remains a hands-on check.
+
 ### Primary browser acceptance checklist
 
 Assessment on November 14, 2026. Open rows describe what still needs to pass for the user's own workload. Two-Mac sync and protected playback apply when that workflow is used. Run the checks on the same signed build intended for everyday use.

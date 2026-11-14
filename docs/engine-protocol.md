@@ -17,6 +17,8 @@
 
 - The engine modules and `CEFBridge` are declared manually in `Package.swift`.
 
+Both adapters pass the disposition of a user-activated link to the tab. Command-click and middle-click open a background tab, Shift-Command-click selects the new tab, and Shift-click opens a preview. The source tab stays in place. A page can cancel its link click.
+
 ## Tier 1: protocols implemented by both engines
 
 | Protocol | Members | WebKit implementation |
