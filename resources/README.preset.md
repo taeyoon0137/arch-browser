@@ -42,7 +42,7 @@ We also recommend [Dia](https://www.diabrowser.com), the new browser from the te
 
 ## 🧭 Role
 
-Arch is a sidebar-first macOS browser with its own implementation: Personas with their own spaces, pinned tabs, split view, a command bar, plugins, and media controls.
+Arch is a sidebar-first macOS browser. Keep tabs pinned in a space, compare pages in split view, and ask your own agent about a tab while the page stays in view. Each Persona has its own spaces.
 
 The core goals are:
 
@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Hooks`, `Import`, `LiveFolders`, `Plugins`, `Preferences`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Hooks`, `Import`, `LiveFolders`, `Plugins`, `Preferences`, `Sync`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -80,6 +80,12 @@ After cloning, enable the commit message hook once:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+### Start a task from a tab
+
+1. In **Settings ▸ AI ▸ Providers**, add a tool-capable HTTP model or a Claude Code or Codex preset. For the preset, sign in through Arch’s terminal. In **AI ▸ Features**, choose a model for **Agent Tasks**.
+2. Right-click a web tab in the sidebar and choose **Ask Agent About This Tab…**. Review the attached tab and model, type a question, and choose **Start**. The conversation opens beside the page.
+3. Open **Shared Tabs** in the session to add or remove a tab. To continue a question from the page reader, choose **Continue as Agent Task**. You can preview and attach the reader excerpt before starting.
 
 <a id="docs"></a>
 
