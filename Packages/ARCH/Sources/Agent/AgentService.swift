@@ -661,6 +661,21 @@ import Foundation
         session.unshare(tabID: tabID)
     }
 
+    /// The panel pauses its session and shows a tab it can still reach. An ended or detached session cannot change the visible tab.
+    func takeOver(_ session: AgentSession, showTab: (UUID) -> Void) {
+        guard self.session(withID: session.id) === session, !session.hasEnded, !session.isTakenOver else { return }
+        session.takeOver()
+        let owned = host.agentTabs(of: session.id)
+        let shared = host.userTabs(in: session.personaID).filter { $0.agentOwnerID == nil && session.handles.sharedTabIDs.contains($0.id) }
+        let eligible = Set((owned + shared).map(\.id))
+        let recent = session.items.reversed().lazy.compactMap { item -> UUID? in
+            guard case .step(let step) = item.kind, step.status == .ok else { return nil }
+            return step.tabID
+        }
+        if let tab = session.latestActiveTab, eligible.contains(tab) { showTab(tab) }
+        else if let tab = recent.first(where: eligible.contains) ?? owned.first?.id ?? shared.first?.id { showTab(tab) }
+    }
+
     /// The models that can run a session, the `agent` route's first, for the composer's menu.
     public func agentModels() -> [AIModelRef] {
         dependencies.agentModels()
@@ -1056,11 +1071,12 @@ import Foundation
         }
         if let refusal = session.countCall() { return refusal }
         let toolHost = AgentToolHost(host: host, allowsAI: dependencies.allowsAI)
+        let generation = session.takeoverGeneration
         let result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
         if Task.isCancelled || !isConnected() { return AgentToolHost.ended.result }
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
-        if session.isTakenOver {
-            return AgentToolResult(status: .refused, code: "stopped", text: "The user took over this session. Ask again after Hand Back.")
+        if session.isTakenOver || generation != session.takeoverGeneration {
+            return AgentToolResult(status: .refused, code: "stopped", text: "The user took over while this call was running. Request the step again when the user hands the session back.")
         }
         return result
     }

@@ -1033,9 +1033,12 @@ extension AgentToolHost {
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
+            let reading = session.beganReading(id)
+            defer { session.finishedReading(reading) }
+            let takeover = session.takeoverGeneration
             let epoch = session.callEpoch
             func mayRead(_ current: AgentTabInfo) -> Bool {
-                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.handles.tabs.id(for: handle) == id else { return false }
+                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.takeoverGeneration == takeover, session.handles.tabs.id(for: handle) == id else { return false }
                 if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
                 return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
