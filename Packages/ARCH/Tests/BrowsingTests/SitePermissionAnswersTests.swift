@@ -1,4 +1,4 @@
-// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the sheet's Allow and offer System Settings while Arch's notifications are off, as the permission is when the sheet shows. Each test keeps its store in a temporary folder of its own.
+// The answers to websites' permission requests: remembered answers decide without a sheet, requests that wait for one sheet share its answer, only a given answer is remembered, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the sheet's Allow and offer System Settings while Arch's notifications are off, as the permission is when the sheet shows, which a queued sheet with a maker makes again. Each test keeps its store in a temporary folder of its own.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -207,9 +207,27 @@ import Testing
         #expect(system.requests == 1)
         #expect(system.opened.isEmpty)
     }
+
+    /// A tab's sheet queue makes a queued sheet's alert again as the sheet shows only when the sheet has a maker; without one, the sheet shows the alert it was queued with.
+    @Test func aQueuedSheetMakesItsAlertAgainOnlyWithAMaker() {
+        let queued = NSAlert()
+        var made: [NSAlert] = []
+        let makeAlert = {
+            let alert = NSAlert()
+            made.append(alert)
+            return alert
+        }
+        let remade = TabSheet(tabID: UUID(), alert: queued, makeAlert: makeAlert, isPageDialog: false) { _ in }.remade()
+        #expect(made.count == 1)
+        #expect(remade.alert === made.first)
+
+        let kept = TabSheet(tabID: UUID(), alert: queued, makeAlert: nil, isPageDialog: false) { _ in }.remade()
+        #expect(kept.alert === queued)
+        #expect(made.count == 1)
+    }
 }
 
-/// Keeps the sheets that the answers asked with, each as its maker made it when asked, as a tab's sheet queue makes it, and shows and answers the oldest one still waiting.
+/// Stands in for a tab's sheet queue without windows: keeps the sheets that the answers asked with, each with the alert its maker made when asked, as `BrowserSession.enqueueSheet(making:for:completion:)` queues it, and shows and answers the oldest one still waiting, making its alert again as it shows, as `TabSheet.remade()` does when `TabSheetQueue.showNext()` shows a sheet.
 private final class SheetRecorder {
     private(set) var alerts: [NSAlert] = []
     private var waiting: [(makeAlert: () -> NSAlert, completion: (NSApplication.ModalResponse) -> Void)] = []

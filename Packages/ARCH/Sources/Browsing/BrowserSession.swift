@@ -883,11 +883,11 @@ public final class BrowserSession: ObservableObject {
         tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID) }
     }
 
-    /// Selects a tab that no window shows. A space's tab goes to the sidebar target, which then shows the tab's space. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
+    /// Selects a tab that no window shows. A space's tab goes to the front main window on its space, or else to the front main window of its Persona, which then shows the tab's space, so that a window of another Persona keeps its Persona / Space while one of the tab's Persona is open; only without either does it go to the sidebar target. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        guard tab.spaceID == nil else { return sidebarTarget().selectTab(tab.id) }
-        let window = windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
-        if window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
+        let window = windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
+            ?? windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
+        if tab.spaceID == nil, window.personaID != tab.personaID { window.currentSpaceID = preferredSpace(in: tab.personaID).id }
         window.selectTab(tab.id)
     }
 
@@ -1586,13 +1586,14 @@ extension BrowserSession: EngineApplicationDelegate {
 }
 
 extension BrowserSession: EngineBrowserContextDelegate {
-    /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A quit opens none.
+    /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the current space of the Persona's front main window, or without one in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A window of another Persona keeps its Persona / Space while one of the Persona is open. A quit opens none.
     public func browserContext(_ context: any EngineBrowserContext, openTabWith url: URL, completion: @escaping ((any EngineWebContents)?) -> Void) {
         guard !isQuitting,
               let runtime = personaEngines.values.lazy.flatMap(\.runtimes.values).first(where: { ($0.context as AnyObject) === (context as AnyObject) }) else {
             return completion(nil)
         }
-        let tab = openTab(url: url, in: preferredSpace(in: runtime.personaID).id, select: false, engine: runtime.kind)
+        let spaceID = windows.first { $0.kind == .main && $0.personaID == runtime.personaID }?.currentSpaceID ?? preferredSpace(in: runtime.personaID).id
+        let tab = openTab(url: url, in: spaceID, select: false, engine: runtime.kind)
         tab.requestActivation?()
         completion(tab.webContents)
     }
