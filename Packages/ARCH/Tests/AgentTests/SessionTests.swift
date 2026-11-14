@@ -379,7 +379,7 @@ import UserNotifications
     }
 
     enum ResearchConsentChange: CaseIterable {
-        case approve, deny, reload, query, path, close, exclude, removeSpace, stopSharingAndReattach, takeOverAndHandBack, stop, cancelCall
+        case approve, deny, reload, unload, query, path, close, exclude, removeSpace, stopSharingAndReattach, takeOverAndHandBack, stop, cancelCall
     }
 
     @Test(arguments: ResearchConsentChange.allCases)
@@ -405,6 +405,7 @@ import UserNotifications
         switch change {
         case .approve, .deny: break
         case .reload: host.tabs[0].documentID = UUID()
+        case .unload: host.tabs[0].isLoaded = false
         case .query: host.tabs[0].url = URL(string: "https://review.example/reports/one?version=b#detail")
         case .path: host.tabs[0].url = URL(string: "https://review.example/reports/two?version=a#detail")
         case .close: host.tabs.removeAll()
@@ -473,6 +474,35 @@ import UserNotifications
         }
         #expect(session.state == .running && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
         #expect(harness.host.shownTabIDs.isEmpty && harness.attentionOwners.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func ineligibleSharedSourceCannotSupplyAFreshResearchRequest(unloaded: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        harness.now = Date()
+        let service = try harness.makeService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let address = URL(string: "https://review.example/pinned?version=one")!
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Pinned", url: address, isLoading: false, engine: .webKit)
+        host.tabs = [tab]
+        host.userTabIDs = [tab.id]
+        let (session, runner) = try start(service, harness, task: "Check the attached page", attaching: [tab.id])
+        let client = try await connectQuestionClient(session, runner, harness)
+        let previous = try #require(service.researchChoices(for: session).first)
+        if unloaded {
+            // A pinned tab's placeholder keeps the URL when the browser replaces its live web contents.
+            host.tabs[0].isLoaded = false
+            host.tabs[0].documentID = UUID()
+        } else {
+            host.tabs[0].isLiveFolderItem = true
+        }
+        #expect(!session.permits(previous, host: host, allowsAI: { _ in true }))
+        service.sessionQuestionWindow = 0.05
+        let result = try await client.callTool("open_tab", ["url": .string(address.absoluteString)])
+        #expect(result.status == .refused)
+        #expect(harness.attentionOwners.isEmpty && host.openedOwners.isEmpty && service.researchChoices(for: session).isEmpty)
     }
 
     enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, liveFolderItem, exclude, revoke, takeOver, stop, decline }

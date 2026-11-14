@@ -28,7 +28,7 @@ extension AgentSession {
             guard case .user(let text) = item.kind else { return [] }
             return AgentSiteScope.addresses(in: text).map { AgentResearchPage(url: $0, source: .message(item.id)) }
         }
-        for tab in host.userTabs(in: personaID) where tab.agentOwnerID == nil && handles.sharedTabIDs.contains(tab.id) {
+        for tab in host.userTabs(in: personaID) where handles.sharedTabIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: allowsAI) {
             if let url = tab.url {
                 pages.append(AgentResearchPage(url: url, source: .attachment(tab: tab.id, document: tab.documentID, handle: handles.tabs.handle(for: tab.id))))
             }
@@ -49,7 +49,7 @@ extension AgentSession {
         case .attachment(let id, let document, let handle):
             guard handles.sharedTabIDs.contains(id), handles.tabs.id(for: handle) == id else { return false }
             return host.userTabs(in: personaID).contains { tab in
-                tab.id == id && tab.agentOwnerID == nil && tab.documentID == document && tab.url == page.url
+                tab.id == id && tab.documentID == document && tab.url == page.url && tab.canAttachToSession(allowsAI: allowsAI)
             }
         }
     }
