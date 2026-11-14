@@ -46,7 +46,7 @@ public struct SidebarImport {
         }
     }
 
-    /// A folder that becomes a pinned folder. Folders do not nest, so the name is the source folder's path.
+    /// A folder that becomes a pinned folder. Browser import keeps folders one level deep, since its record and merging by name use the joined names as keys (bookmark rule 6), so the name is the source folder's path.
     public struct Folder: Equatable {
         public var sourceID: String?
         public var name: String
