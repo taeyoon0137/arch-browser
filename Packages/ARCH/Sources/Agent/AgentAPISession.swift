@@ -44,7 +44,7 @@ import Foundation
 
     /// `client` is the app's `AIService`. With `model` nil, the first round takes the feature's route, whose later models serve only when the earlier fail before any output, and command-line tools never serve, since the requests carry tools.
     public init(client: any AIClient, tools: any AgentSessionTools, feature: AIFeatureID = .agent, model: AIModelRef? = nil,
-                instructions: String = AgentHarness.instructions, id: UUID = UUID()) {
+                instructions: String = AgentHarness.sessionInstructions, id: UUID = UUID()) {
         (events, continuation) = AsyncThrowingStream.makeStream()
         self.client = client
         self.tools = tools

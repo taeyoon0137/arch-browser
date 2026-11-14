@@ -13,7 +13,7 @@ final class MCPServerLoop: @unchecked Sendable {
             CLICommands.printError("arch-mcp: \((error as? AgentUsageError)?.message ?? "\(error)")")
             exit(AgentExitCode.usage.rawValue)
         }
-        MCPServerLoop(server: AgentMCPServer(mode: mode, version: CLICommands.clientVersion, instructions: AgentHarness.mcpInstructions)).run()
+        MCPServerLoop(server: AgentMCPServer(mode: mode, version: CLICommands.clientVersion)).run()
     }
 
     /// The queue that owns the server and the connection.

@@ -768,7 +768,7 @@ import Foundation
         let folder = dependencies.sessionFolder(session.id)
         let skills = AgentSessionSkills.skills(inSessionFolder: folder)
         let server = AIAgentToolServer(executable: dependencies.mcpExecutable, arguments: ["--session"], environment: [AgentMCPServer.ticketVariable: ticket.text], tools: session.reportedTools)
-        let request = AIAgentSessionRequest(model: session.requestedModel, instructions: AgentHarness.instructions, toolServer: server, id: session.id, folder: folder, effort: session.effort, skills: skills)
+        let request = AIAgentSessionRequest(model: session.requestedModel, instructions: AgentHarness.sessionInstructions, toolServer: server, id: session.id, folder: folder, effort: session.effort, skills: skills)
         let runner = try dependencies.startRunner(request)
         do {
             try AgentSessionSkills.write(skills)

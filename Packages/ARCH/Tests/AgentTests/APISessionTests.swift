@@ -316,7 +316,7 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         #expect(events.entries == ["ready:model-a", "text:Done.", "usage:4/6", "turnFinished:completed"])
         #expect(tools.calls == [AgentToolCall(name: "list_tabs", arguments: ["scope": "agent"])])
         let first = try #require(client.requests.first)
-        #expect(first.feature == .agent && first.instructions == AgentHarness.instructions && first.pinnedModel == nil)
+        #expect(first.feature == .agent && first.instructions == AgentHarness.sessionInstructions && first.pinnedModel == nil)
         #expect(first.maxOutputTokens == AgentAPISession.outputTokensPerRound)
         #expect(first.tools.map(\.name) == ["session_info", "list_tabs", "read_text"])
         let schema = try AgentJSON.decode(try #require(first.tools.last?.inputSchema))

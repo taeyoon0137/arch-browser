@@ -11,7 +11,7 @@ enum AgentSessionPreamble {
         }
         return """
             <arch-session>
-            This message starts a session in Arch. \(tabs) Call session_info first: it gives the mode, the Persona and space, the site scope, the limits, and what asks the user.
+            This message starts a session in Arch. \(tabs) Call session_info first for the session context and any reader excerpt the user shared.
             </arch-session>
 
             \(words)

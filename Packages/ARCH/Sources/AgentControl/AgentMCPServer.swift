@@ -110,10 +110,10 @@ public struct AgentMCPServer {
         var progress = 0
     }
 
-    public init(mode: Mode, version: String, instructions: String) {
+    public init(mode: Mode, version: String, instructions: String? = nil) {
         self.mode = mode
         self.version = version
-        self.instructions = instructions
+        self.instructions = instructions ?? (mode == .outside ? AgentHarness.mcpInstructions : AgentHarness.boundMCPInstructions)
     }
 
     /// An in-app session's server connects at once, so that its CLI's first `tools/list` comes from the session; an outside client connects when it first needs Arch.
