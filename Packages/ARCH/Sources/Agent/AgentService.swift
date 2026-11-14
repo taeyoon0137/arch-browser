@@ -40,6 +40,9 @@ import Foundation
     /// The grants in force: those `agent.json` keeps, then those until quit.
     public var grants: [AgentGrant] { settings.grants + launchGrants }
 
+    /// Connected programs in the same order as their grants, shown in the sidebar and the agents menu.
+    public var connectedGrants: [AgentGrant] { grants.filter { connectedGrantIDs.contains($0.id) } }
+
     /// What the service reads and asks through, which tests replace.
     struct Dependencies {
         var location: AgentSocketLocation?
@@ -523,7 +526,7 @@ import Foundation
     }
 
     /// A client's Stop, and Deny and Stop on one of its cards: cancels its running calls, denies its waiting cards, and disconnects it. Its grant stays.
-    func stopClient(_ grantID: UUID) {
+    public func stopClient(_ grantID: UUID) {
         states[grantID]?.cancelCalls()
         approvals.end(owner: grantID, because: "The user stopped this client's work in Arch.")
         guard let grant = grants.first(where: { $0.id == grantID }) else { return }

@@ -127,6 +127,7 @@ struct SidebarView: View {
                             .transition(.opacity)
                     }
                     PluginSidebarItemsView(plugins: windowModel.plugins)
+                    if let agents = session.agents { ConnectedAgentRows(agents: agents) }
                     SpacePagesView(session: session, translation: swipeTranslation)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
