@@ -139,6 +139,23 @@ public struct AgentComposer: View {
     }
 
     public var body: some View {
+        VStack(spacing: 0) {
+            ScrollView { form }
+                .scrollBounceBehavior(.basedOnSize)
+            if !models.isEmpty {
+                HStack {
+                    Spacer()
+                    Button("Start", action: start)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding([.horizontal, .bottom], 14)
+            }
+        }
+        .task(id: effortSource) { await loadEffortLevels() }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("What should the agent do?", text: $context.text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -201,17 +218,10 @@ public struct AgentComposer: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack {
-                    Spacer()
-                    Button("Start", action: start)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
             }
         }
         .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: effortSource) { await loadEffortLevels() }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var modelSetup: some View {

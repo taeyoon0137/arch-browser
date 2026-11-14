@@ -71,6 +71,34 @@ import UserNotifications
         await service.deleteSession(session.id)
     }
 
+    @Test func aLongTaskCanScrollThroughTheFormInASmallWindow() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let text = (1...10).map { "Question \($0) about the reviewed document." }.joined(separator: "\n")
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Notes", url: URL(string: "https://example.invalid/notes"), isLoading: false, engine: .webKit)
+        let draft = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: tab, text: text,
+                                         problem: "The reviewed document changed. Remove its attachment or reopen the task for the new page.")
+        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let composer = AgentComposer(service: service, context: draft, actions: actions, permissionNote: "Sites previously allowed to use the camera may keep that access in Chromium agent tabs.") { _ in }
+        let host = NSHostingView(rootView: composer)
+        let size = NSSize(width: 332, height: 304)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView?.addSubview(host)
+        host.frame = NSRect(origin: .zero, size: size)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        host.layoutSubtreeIfNeeded()
+        let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first { view in
+            (view.documentView?.bounds.height ?? 0) > size.height && view.contentSize.height > 150
+        })
+        let document = try #require(scroll.documentView)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: document.bounds.maxY - scroll.contentSize.height))
+        #expect(scroll.documentVisibleRect.maxY >= document.bounds.maxY - 1)
+        #expect(!window.isVisible && draft.text == text && service.sessions.isEmpty)
+    }
+
     @Test func theAgentsPersonaPreviewOmitsSitePermissionsWithoutCreatingAPersona() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
