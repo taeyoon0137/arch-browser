@@ -760,9 +760,9 @@ public final class BrowserSession: ObservableObject {
         endFavoriteTab(favorite) {}
     }
 
-    /// Whether the favorite's page is open: its tab exists, which always has its engine's page. A tab saved from the last session does not count until the favorite is opened.
+    /// Whether the favorite's page is open: its tab exists and has its engine's page, which an automatic unload takes away until a window shows the tab again (bookmark rule 5). A tab saved from the last session does not count until the favorite is opened.
     public func hasOpenPage(_ favorite: Favorite) -> Bool {
-        favoriteTabs[favorite.id] != nil
+        favoriteTabs[favorite.id]?.isLoaded == true
     }
 
     /// Whether the favorite has a tab of its own: an open one, or one saved from the last session.
@@ -1811,6 +1811,8 @@ extension BrowserSession {
         // A prompt that came after the page was asked to leave ends; its code can close the tab, so the lists are read again afterwards.
         prompts.dismiss(tabID: tab.id)
         guard allTabs.contains(where: { $0 === tab }), tab.isLoaded else { return }
+        // The favorites grid reads from the session whether a favorite's page is open (`hasOpenPage(_:)`).
+        if tab.spaceID == nil { objectWillChange.send() }
         retire(tab.unloadKeepingPage(), of: tab.personaID)
         loadPageIfShown(tab)
     }

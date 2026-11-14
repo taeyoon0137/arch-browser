@@ -83,7 +83,7 @@ struct FavoriteTileView: View {
     let favorite: Favorite
     /// Set while the favorite's tab is selected.
     let isActive: Bool
-    /// Set while the favorite's page is open, which a dot below the tile shows, as the Dock does for an open app. Otherwise the icon is dimmed, as an unopened tab's row is.
+    /// Set while the favorite's page is open, which a dot below the tile shows, as the Dock does for an open app. Otherwise, as before the favorite's first click or after its tab unloaded, the icon is dimmed, as the row of a tab without its page is.
     let isOpen: Bool
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
