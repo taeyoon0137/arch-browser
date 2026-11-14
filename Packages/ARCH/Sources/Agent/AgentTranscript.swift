@@ -118,13 +118,17 @@ enum AgentStepText {
     static func sentence(for call: AgentToolCall, result: AgentToolResult) -> String {
         let done: String
         switch call.name {
+        case "read_text": done = "Read the page text"
+        case "snapshot": done = "Read the page outline"
         case "session_info": done = "Read the session\u{2019}s details"
         case "list_spaces": done = "Listed the spaces"
         case "list_tabs": done = call.arguments["scope"]?.stringValue == "shared" ? "Listed the tabs you shared" : "Listed the agent tabs"
         case "guide":
             // The model wrote the topic, so only a topic the guide has appears in the sentence.
             done = call.arguments["topic"]?.stringValue.flatMap(AgentGuideTopic.init(rawValue:)).map { "Read the guide\u{2019}s \($0.rawValue) topic" } ?? "Read the guide"
-        default: done = "Ran \(call.name)"
+        default:
+            guard let tool = AgentToolCatalog.tool(named: call.name) else { return "Unrecognized tool" }
+            done = "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")
         }
         switch result.status {
         case .ok, .approvalPending: return done
