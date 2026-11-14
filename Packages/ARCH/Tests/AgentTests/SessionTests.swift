@@ -471,16 +471,23 @@ import Testing
         let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: "Research", tab: tab)
         let start = context.sessionStart(task: "Review this page", mode: .readOnly, allowsAI: { _ in true })
         #expect(service.sessions.isEmpty)
+        #expect(service.canReattach(tab, in: persona))
         harness.host.tabs[0].documentID = UUID()
+        #expect(!service.canReattach(tab, in: persona))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         harness.host.tabs = [tab]
         harness.host.tabs[0].url = URL(string: "https://docs.example/next")
+        #expect(!service.canReattach(tab, in: persona))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         harness.host.tabs = [tab]
         harness.excludedHosts.value.insert("docs.example")
+        #expect(!service.canReattach(tab, in: persona))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         #expect(service.sessions.isEmpty && harness.runners.isEmpty)
         harness.excludedHosts.value = []
+        harness.host.userTabIDs = []
+        #expect(!service.canReattach(tab, in: persona))
+        harness.host.userTabIDs = [tab.id]
         let session = try service.startSession(start)
         #expect(session.handles.sharedTabIDs == [tab.id])
     }

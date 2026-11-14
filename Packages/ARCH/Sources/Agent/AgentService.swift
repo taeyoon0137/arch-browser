@@ -649,9 +649,16 @@ import Foundation
         self.session(withID: session.id) === session && session.origin == .app && !session.hasEnded
     }
 
+    /// The composer may offer its detached tab again only while the originally reviewed document is eligible.
+    func canReattach(_ choice: AgentTabInfo, in personaID: UUID) -> Bool {
+        host.userTabs(in: personaID).contains {
+            $0.showsSameDocument(as: choice) && $0.agentOwnerID == nil && AgentPolicy.showsTitle(of: $0.url, allowsAI: dependencies.allowsAI)
+        }
+    }
+
     /// Recheck the choice against the live tab and document when the user picks it from the panel.
     @discardableResult func share(_ choice: AgentTabInfo, with session: AgentSession) -> Bool {
-        guard let current = shareableTabs(for: session).first(where: { $0.id == choice.id && $0.documentID == choice.documentID && $0.url == choice.url }) else { return false }
+        guard let current = shareableTabs(for: session).first(where: { $0.showsSameDocument(as: choice) }) else { return false }
         _ = session.share(tabID: current.id, url: current.url)
         return true
     }
@@ -730,7 +737,7 @@ import Foundation
         let tabs = host.userTabs(in: personaID).filter { tab in
             tab.agentOwnerID == nil && attachedIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
         }
-        if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.id == reviewed.id && $0.documentID == reviewed.documentID && $0.url == reviewed.url }) {
+        if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.showsSameDocument(as: reviewed) }) {
             throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
         }
         if let excerpt = start.readerExcerpt, !tabs.contains(where: excerpt.matches) {
