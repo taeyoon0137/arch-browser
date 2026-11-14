@@ -163,7 +163,7 @@ public enum AgentHarness {
             Use snapshot to identify a field or button. The user fills fields and submits the form. Shared and research tab snapshots omit form values. Never request passwords, verification codes or card details.
             """),
         (.research, "Comparing pages the user made available.", """
-            List the attached and research tabs, read the relevant pages and cite the sources you actually saw. In a task started in Arch the user can add or withdraw a tab through Shared Tabs. They can choose Open in Research Tab in the session menu to review an eligible address from their message or a current attachment and open a background tab. Ask the user in your reply if another page is needed.
+            List the attached and research tabs, read the relevant pages and cite the sources you actually saw. In a task started in Arch the user can add or withdraw a tab through Shared Tabs. They can choose Open in Research Tab in the session menu to review an eligible address from their message or a current attachment and open a background tab. If you need another open tab and request_tab is listed, explain why and request read access.
             """),
         (.downloads, "Helping the user find a download link.", """
             Read the page to locate the download link and tell the user how to find it. The user starts the download and chooses where to save the file.

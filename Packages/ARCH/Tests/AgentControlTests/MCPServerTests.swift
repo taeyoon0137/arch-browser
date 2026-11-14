@@ -308,6 +308,22 @@ private let notRunning = AgentClientError.notRunning.message
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"The message is not valid JSON."}}"#) == ["log Arch could not read a message: The message is not valid JSON."])
     }
 
+    @Test(arguments: [true, false])
+    func tabRequestSchemaReflectsTheConnection(isSession: Bool) throws {
+        var transcript = Transcript(isSession ? .session(ticket: "dGlja2V0") : .outside)
+        _ = transcript.start()
+        transcript.initialize("2025-06-18")
+        _ = transcript.client(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+        _ = transcript.connected(isSession ? .bound : .noGrant)
+        let answer = transcript.arch(#"{"jsonrpc":"2.0","id":1,"result":{"tools":["request_tab"]}}"#)
+        let rendered = try #require(answer.first)
+        let definition = try #require(try tools(rendered).first)
+        let input = try #require(definition["inputSchema"])
+        let values = input["properties"]?["access"]?["enum"]
+        #expect(values == (isSession ? ["read"] : ["read", "act"]))
+        #expect(input["additionalProperties"] == false)
+    }
+
     @Test func anInAppSessionsServer() throws {
         var transcript = Transcript(.session(ticket: "dGlja2V0"))
         // It connects at once with the ticket, and its requests wait for the session's connection.
