@@ -8,6 +8,7 @@ import SwiftUI
 struct AgentSettingsPage: View {
     @ObservedObject var service: AgentService
     @ObservedObject var activity: AgentActivityLog
+    var hookName: (UUID) -> String? = { _ in nil }
     @State private var isChangingAccess = false
     @State private var accessError: String?
     @State private var clientFilter: String?
@@ -170,7 +171,7 @@ struct AgentSettingsPage: View {
                 ForEach(day.entries) { entry in
                     HStack(alignment: .firstTextBaseline) {
                         Text(entry.date, style: .time).monospacedDigit()
-                        Text(entry.clientName)
+                        Text(entry.hookID.flatMap(hookName) ?? entry.clientName)
                         Spacer()
                         Text(Self.summary(of: entry)).foregroundStyle(.secondary)
                     }

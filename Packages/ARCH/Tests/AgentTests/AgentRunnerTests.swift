@@ -20,8 +20,8 @@ import Testing
                                origin: .hook(hook, run: UUID()), promptSource: .user, feature: .agentHook(hook), grant: AgentRunGrant(tools: ["rename_tab"]))
     }
 
-    private func runner(_ client: ScriptedClient, reserve: @escaping () -> Bool = { true }) -> AgentRunner {
-        AgentRunner(host: host, client: client, resolve: { feature, route in
+    private func runner(_ client: ScriptedClient, activity: AgentActivityLog? = nil, reserve: @escaping () -> Bool = { true }) -> AgentRunner {
+        AgentRunner(host: host, client: client, activity: activity, resolve: { feature, route in
             #expect(feature == .agentHook(hook) && route == .tier(.fast))
             return [AIModelRef(provider: provider.id, model: "selected")]
         }, provider: { $0 == provider.id ? provider : nil }, allowsAI: { $0.host != "private.example" }, reserve: { _, _ in reserve() })
@@ -140,7 +140,66 @@ import Testing
         #expect(runner.keptRuns.isEmpty)
     }
 
-    @Test func aCLIRunUsesItsOwnBoundConnectionAndLeavesNoTask() async throws {
+    @Test(arguments: [AgentRunRecord.none, .activity, .session])
+    func httpHookActivityContainsOnlyCatalogMetadataAndKnownOutcomes(level: AgentRunRecord) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let url = harness.folder.appendingPathComponent("agent-activity.json")
+        let activity = AgentActivityLog(fileURL: url, now: Date.init)
+        var req = request()
+        req.options.record = level
+        req.options.tabAccess = .page
+        req.grant.tabAccess = .page
+        req.options.tools = ["read_text", "rename_tab"]
+        req.grant.tools = ["read_text", "rename_tab"]
+        let marker = "never-store-this"
+        req.options.prompt = marker
+        host.tabs[0].title = marker
+        host.pages[page] = (marker, marker)
+        let calls = [AIToolCall(id: "a", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8)),
+                     AIToolCall(id: "b", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"never-store-this"}"#.utf8)),
+                     AIToolCall(id: "c", name: "rename_tab", arguments: Data(marker.utf8)),
+                     AIToolCall(id: "d", name: marker, arguments: Data("{}".utf8))]
+        let client = ScriptedClient { _ in calls.map { .event(.toolCall($0)) } + [.event(.finished(.toolUse))] }
+        let runner = runner(client, activity: activity)
+        let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in true }
+        #expect(result.status == .completed && result.actions.count == 1)
+        if level == .none {
+            #expect(activity.entries.isEmpty && !FileManager.default.fileExists(atPath: url.path))
+            return
+        }
+        #expect(activity.entries.map(\.tool) == ["read_text", "rename_tab", "rename_tab", nil])
+        #expect(activity.entries.map(\.outcome) == ["ok", "previewed", "refused", "refused"])
+        guard case .hook(_, let runID) = req.origin else { Issue.record("Expected a hook run"); return }
+        #expect(activity.entries.allSatisfy { $0.hookID == hook && $0.hookRunID == runID && $0.site == nil && $0.sessionID == nil && $0.rule == nil })
+        activity.saveNow()
+        let bytes = try String(contentsOf: url, encoding: .utf8)
+        #expect(!bytes.contains(marker) && !bytes.contains("example.org") && !bytes.contains("private=yes"))
+        #expect(AgentActivityLog(fileURL: url, now: Date.init).entries.map(\.id) == activity.entries.map(\.id))
+        #expect((result.keptRun != nil) == (level == .session))
+    }
+
+    @Test func cancellingAnInFlightReadRecordsOnlyItsStatus() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        var req = request()
+        req.origin = .test(hook: hook)
+        req.options.record = .activity
+        req.options.tools = ["read_text"]
+        req.options.tabAccess = .page
+        req.grant.tools = ["read_text"]
+        req.grant.tabAccess = .page
+        let activity = AgentActivityLog(fileURL: harness.folder.appendingPathComponent("agent-activity.json"), now: Date.init)
+        let client = ScriptedClient { _ in [.event(.toolCall(AIToolCall(id: "r", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))] }
+        let runner = runner(client, activity: activity)
+        host.beforeReturningContent = { runner.cancelAll() }
+        let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        #expect(result.status == .cancelled && result.keptRun == nil)
+        try await waitUntil { activity.entries.count == 1 }
+        #expect(activity.entries.first?.outcome == "cancelled" && activity.entries.first?.hookRunID == nil)
+    }
+
+    @Test func cancellingAnEphemeralCLIRunDuringAReadRecordsNoContent() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
         let service = try harness.makeService()
@@ -149,8 +208,49 @@ import Testing
         let model = AIModelRef(provider: preset.id, model: "chosen")
         var req = request()
         req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        req.options.record = .activity
+        req.options.tools = ["read_text"]
+        req.options.tabAccess = .page
+        req.grant.tools = ["read_text"]
+        req.grant.tabAccess = .page
         let client = ScriptedClient { _ in [] }
-        let runner = AgentRunner(host: host, client: client, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        let runner = AgentRunner(host: host, client: client, activity: service.activity, resolve: { _, _ in [model] }, provider: { _ in preset },
+                                 allowsAI: { _ in true }, reserve: { _, _ in true })
+        var binding: AgentHookCLIRun?
+        runner.startCLI = {
+            binding = $0
+            return try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4)
+        }
+        runner.finishCLI = { service.finishHookCLI($0) }
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        try await waitUntil { !harness.runners.isEmpty }
+        let cli = try #require(harness.runners.first)
+        cli.emit(.ready(model))
+        let call = try #require(binding)
+        host.silentTabIDs = [tab]
+        let read = Task { await call.call(AgentToolCall(name: "read_text", arguments: ["tab": "t1"])) }
+        try await waitUntil { cli.activeToolCalls > 0 }
+        runner.cancelAll()
+        read.cancel()
+        _ = await read.value
+        #expect(await task.value.status == .cancelled)
+        #expect(service.activity.entries.filter { $0.hookID == hook }.map(\.outcome) == ["cancelled"])
+        #expect(runner.keptRuns.isEmpty && service.sessions.isEmpty)
+    }
+
+    @Test(arguments: [AgentRunRecord.none, .activity])
+    func aCLIRunUsesItsOwnBoundConnectionAndLeavesNoTask(level: AgentRunRecord) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
+        let model = AIModelRef(provider: preset.id, model: "chosen")
+        var req = request()
+        req.options.record = level
+        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        let client = ScriptedClient { _ in [] }
+        let runner = AgentRunner(host: host, client: client, activity: service.activity, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
         runner.startCLI = { try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4) }
         runner.finishCLI = { service.finishHookCLI($0) }
         let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { id, suggestion, _, applies in
@@ -183,6 +283,12 @@ import Testing
         let result = await task.value
         #expect(result.status == .completed && result.reply == "Done" && result.actions == [.renamedTab(tab: tab, name: "Docs")])
         #expect(client.requests.isEmpty && runner.keptRuns.isEmpty && service.sessions.isEmpty)
+        let entries = service.activity.entries.filter { $0.hookID == hook }
+        if level == .none {
+            #expect(entries.isEmpty)
+        } else {
+            #expect(entries.map(\.tool) == ["rename_tab", nil] && entries.map(\.outcome) == ["previewed", "refused"])
+        }
         #expect(cli.endedKeepingThread == false && cli.processID == nil)
         #expect(!FileManager.default.fileExists(atPath: harness.location.path))
     }

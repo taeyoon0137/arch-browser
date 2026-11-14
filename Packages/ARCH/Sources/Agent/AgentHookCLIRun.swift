@@ -48,7 +48,6 @@ final class AgentHookCLIRun {
                 runner?.stop()
             }
         }
-        guard tools.contains(where: { $0.name == call.name }) else { return AgentToolResult(status: .refused, code: "notGranted", text: "The hook did not grant this tool.") }
         return await dispatch(call)
     }
 }

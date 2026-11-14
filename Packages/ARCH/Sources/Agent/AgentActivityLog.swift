@@ -1,4 +1,5 @@
 // `agent-activity.json`: what agents did and what the user decided, for 90 days, without content (docs/agents.md, Storage). An entry names a tool call or a grant event, the client, the Persona, and the page's site at most: never page text, typed text, an address's path or query, or a screenshot. Settings ▸ AI ▸ Agents ▸ Activity lists it.
+import AgentControl
 import Foundation
 
 public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
@@ -37,6 +38,9 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     public var grantID: UUID?
     /// The in-app session the entry belongs to.
     public var sessionID: UUID?
+    /// A user-authored hook whose bounded run called a tool.
+    public var hookID: UUID?
+    public var hookRunID: UUID?
     public var clientName: String
     public var personaID: UUID?
     public var tool: String?
@@ -50,13 +54,15 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     /// The result's status, or the refusal's reason.
     public var outcome: String?
 
-    public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, sessionID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
+    public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, sessionID: UUID? = nil, hookID: UUID? = nil, hookRunID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
                 site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil) {
         self.id = id
         self.date = date
         self.event = event
         self.grantID = grantID
         self.sessionID = sessionID
+        self.hookID = hookID
+        self.hookRunID = hookRunID
         self.clientName = clientName
         self.personaID = personaID
         self.tool = tool
@@ -106,6 +112,23 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         entries.append(entry)
         dropOldEntries()
         scheduleSave()
+    }
+
+    /// Keeps only Arch's identifiers, catalog metadata, and a fixed outcome. The caller supplies no model or page strings.
+    func recordTool(of hook: UUID, run: UUID?, persona: UUID, tool: AgentTool?, status: AgentResultStatus, cancelled: Bool, dryRun: Bool) {
+        let outcome: String
+        if cancelled { outcome = "cancelled" }
+        else if dryRun && status == .ok && tool?.name == "rename_tab" { outcome = "previewed" }
+        else { outcome = status.rawValue }
+        let decision: AgentActivityEntry.Decision
+        switch status {
+        case .refused: decision = .refused
+        case .denied: decision = .denied
+        case .timeout: decision = .timedOut
+        default: decision = .auto
+        }
+        record(AgentActivityEntry(date: now(), event: .toolCall, hookID: hook, hookRunID: run, clientName: "Agent Hook", personaID: persona,
+                                  tool: tool?.name, toolClass: tool?.toolClass.rawValue, decision: cancelled ? nil : decision, outcome: outcome))
     }
 
     /// Settings' Clear Activity.

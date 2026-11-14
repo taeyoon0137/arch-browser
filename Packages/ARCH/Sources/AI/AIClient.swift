@@ -298,10 +298,17 @@ extension AIClient {
     /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
     public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8, performsFinalCalls: Bool = false, maximumToolCalls: Int? = nil,
                     conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
+        run(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls,
+            unavailableTool: nil, conversationDidChange: conversationDidChange)
+    }
+
+    /// The same tool loop, with notice of calls rejected before any offered handler can see them. The notice carries no model-supplied name or arguments.
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?,
+                    unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await runRounds(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls, conversationDidChange: conversationDidChange, continuation: continuation)
+                    try await runRounds(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls, unavailableTool: unavailableTool, conversationDidChange: conversationDidChange, continuation: continuation)
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: AIError.cancelled)
@@ -313,7 +320,7 @@ extension AIClient {
         }
     }
 
-    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
+    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?, unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
                            continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         var request = request
         request.tools = tools.map(\.tool)
@@ -355,7 +362,7 @@ extension AIClient {
                 try Task.checkCancellation()
                 if let maximumToolCalls, callCount >= maximumToolCalls { break }
                 callCount += 1
-                results.append(.toolResult(await Self.perform(call, with: tools)))
+                results.append(.toolResult(await Self.perform(call, with: tools, unavailableTool: unavailableTool)))
             }
             try Task.checkCancellation()
             let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.prefix(results.count).map { .toolCall($0) }
@@ -368,8 +375,9 @@ extension AIClient {
         throw AIError.toolRoundLimit
     }
 
-    private static func perform(_ call: AIToolCall, with tools: [AIToolHandler]) async -> AIToolResult {
+    private static func perform(_ call: AIToolCall, with tools: [AIToolHandler], unavailableTool: (@Sendable () async -> Void)?) async -> AIToolResult {
         guard let handler = tools.first(where: { $0.tool.name == call.name }) else {
+            await unavailableTool?()
             return AIToolResult(callID: call.id, parts: [.text("There is no tool named \(call.name).")], isError: true)
         }
         do {

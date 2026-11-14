@@ -35,7 +35,7 @@ import Foundation
     private var runService: AgentRunner?
     public var runs: AgentRunner {
         if let runService { return runService }
-        let runner = AgentRunner(host: host, ai: .shared)
+        let runner = AgentRunner(host: host, ai: .shared, activity: activity)
         runObserver = runner.$isRunning.dropFirst().removeDuplicates().sink { [weak self] _ in self?.objectWillChange.send() }
         runner.startCLI = { [weak self] binding, feature, models, turns, instructions in
             guard let self else { throw AIError.cancelled }
