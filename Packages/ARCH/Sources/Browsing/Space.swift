@@ -50,6 +50,20 @@ public struct TabFolder: Identifiable, Codable, Hashable {
     public var live: LiveFolderConfiguration?
 }
 
+extension TabFolder {
+    /// A live folder's configuration that does not decode, such as one whose source a later build adds, decodes as none, so that the folder loads as an ordinary folder with its tabs instead of making the whole of `session.json` unreadable.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        spaceID = try container.decode(UUID.self, forKey: .spaceID)
+        name = try container.decode(String.self, forKey: .name)
+        isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        isCollapsed = try container.decode(Bool.self, forKey: .isCollapsed)
+        parentID = try container.decodeIfPresent(UUID.self, forKey: .parentID)
+        live = try? container.decodeIfPresent(LiveFolderConfiguration.self, forKey: .live)
+    }
+}
+
 public struct Favorite: Identifiable, Codable, Hashable {
     public var id: UUID
     public var url: URL

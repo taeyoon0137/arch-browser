@@ -218,6 +218,9 @@ final class SessionStore {
         fileURL = directory.appendingPathComponent("session.json")
     }
 
+    /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`LiveFolderService(keepsUnknownFolders:)`).
+    var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
+
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
@@ -226,7 +229,7 @@ final class SessionStore {
             try? data.write(to: directory.appendingPathComponent("session-v\(version).json"), options: .atomic)
         }
         guard let snapshot = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
-            _ = try? FileManager.default.replaceItemAt(directory.appendingPathComponent("session.unreadable.json"), withItemAt: fileURL)
+            _ = try? FileManager.default.replaceItemAt(unreadableFileURL, withItemAt: fileURL)
             return nil
         }
         return snapshot.normalized()

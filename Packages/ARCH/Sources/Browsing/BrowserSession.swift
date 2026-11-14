@@ -117,11 +117,14 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        // The session is created on the main thread, where the live folders' service runs.
-        liveFolderService = MainActor.assumeIsolated { LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName))) }
         permissionAnswers = SitePermissionAnswers(store: sitePermissions)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
+        // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
+        let keepsUnknownLiveFolders = FileManager.default.fileExists(atPath: store.unreadableFileURL.path)
+        liveFolderService = MainActor.assumeIsolated {
+            LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
+        }
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
@@ -268,6 +271,16 @@ public final class BrowserSession: ObservableObject {
     /// The window that shows the tab, as its selected tab or a pane of its split view, or nil while no window shows it.
     func window(showing tab: Tab) -> BrowserWindowModel? {
         windows.first { $0.shows(tab) }
+    }
+
+    /// Whether a window shows the tab or, while no main window is open, a main window that reopens from `windowsToReopen` will show it, as its saved tab or a pane of that tab's split view. A live folder's plan keeps such an item tab, also at launch before the saved session's windows open.
+    func windowShowsOrWillShow(_ tab: Tab) -> Bool {
+        if window(showing: tab) != nil { return true }
+        guard lastMainWindow == nil else { return false }
+        return windowsToReopen.contains { record in
+            guard let selectedID = record.selectedTabID else { return false }
+            return selectedID == tab.id || splitTabIDs.values.contains { $0.contains(selectedID) && $0.contains(tab.id) }
+        }
     }
 
     /// The browser window whose AppKit window is `nsWindow`, or nil for any other window, such as Settings or the developer tools.

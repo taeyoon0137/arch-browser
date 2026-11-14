@@ -314,6 +314,27 @@ import Testing
         #expect(loaded.tabs.allSatisfy { $0.liveItemID == nil })
     }
 
+    @Test func aLiveFolderWhoseConfigurationDoesNotDecodeLoadsAsAnOrdinaryFolder() throws {
+        let folder = try SessionFolder()
+        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false))
+        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, live: feed)
+        let record = SessionSnapshot.TabRecord(id: tab1, spaceID: spaceA, url: URL(string: "https://blog.example.org/a")!, title: "Post", isPinned: true, folderID: docsFolder, liveItemID: "a")
+        let snapshot = SessionSnapshot(version: 15, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: [record], folders: [news])
+        // A source that a later build could add.
+        var file = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        var folders = try #require(file["folders"] as? [[String: Any]])
+        var live = try #require(folders[0]["live"] as? [String: Any])
+        live["source"] = ["laterSource": ["query": "x"]]
+        folders[0]["live"] = live
+        file["folders"] = folders
+        try JSONSerialization.data(withJSONObject: file).write(to: folder.store.fileURL)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.map(\.id) == [docsFolder])
+        #expect(loaded.folders?.map(\.live) == [nil])
+        #expect(loaded.tabs.map(\.id) == [tab1] && loaded.tabs.map(\.folderID) == [docsFolder] && loaded.tabs.map(\.liveItemID) == [nil])
+        #expect(try folder.fileNames() == ["session.json"])
+    }
+
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
         let folder = try SessionFolder()
         let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": [1, 2],"#)

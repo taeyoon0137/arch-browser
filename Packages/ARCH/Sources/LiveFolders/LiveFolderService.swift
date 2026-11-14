@@ -34,7 +34,7 @@ public final class LiveFolderService {
     public let store: LiveFolderStore
     /// Private feed addresses (live folder rule 8), read here; `setPrivateAddress(_:for:folderName:)` writes them.
     public let addresses: any LiveFolderAddressStore
-    /// Called when a folder starts or ends a refresh. The folder's items and read state are in `store`; `isRefreshing(_:)` tells which.
+    /// Called when a folder starts waiting for a free slot, starts a refresh, or ends one. The folder's items and read state are in `store`; `isRefreshing(_:)` tells whether it waits or refreshes.
     public var didChange: ((UUID) -> Void)?
     public private(set) var folders: [UUID: LiveFolderConfiguration] = [:]
 
@@ -49,27 +49,34 @@ public final class LiveFolderService {
     private var addressWork: Task<Void, Never>?
     /// Folders whose address `setPrivateAddress` wrote and that no `register(_:)` has listed as private feeds since; cleanups keep their items.
     private var unregisteredAddresses: Set<UUID> = []
+    /// Whether registering keeps the store entries and Keychain items of folders that no register of this run listed, removing only those of folders that a register listed and a later one leaves out or lists as no private feed's.
+    private let keepsUnknownFolders: Bool
 
+    /// With `keepsUnknownFolders`, as while the session has set aside a file that did not decode, the folders of that file keep their read state and private addresses for a repaired file to bring back.
     public init(store: LiveFolderStore, addresses: any LiveFolderAddressStore = LiveFolderKeychain(), fetchers: any LiveFolderFetching = LiveFolderFetchers(),
-                isLowPowerMode: @escaping () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }, now: @escaping () -> Date = Date.init) {
+                isLowPowerMode: @escaping () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }, now: @escaping () -> Date = Date.init, keepsUnknownFolders: Bool = false) {
         self.store = store
         self.addresses = addresses
         self.fetchers = fetchers
         self.isLowPowerMode = isLowPowerMode
         self.now = now
+        self.keepsUnknownFolders = keepsUnknownFolders
     }
 
-    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items; after a raise, that refresh counts the older items it adds as read. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet.
+    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items; after a raise, that refresh counts the older items it adds as read. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet; with `keepsUnknownFolders`, only those of the folders that the last register listed.
     public func register(_ folders: [UUID: LiveFolderConfiguration]) {
-        for folder in self.folders.keys where folders[folder] == nil {
+        let previous = self.folders
+        let gone = Set(previous.keys).subtracting(folders.keys)
+        for folder in gone {
             cancel(folder)
             // A registered folder that goes takes its address along, also one written for it since.
             unregisteredAddresses.remove(folder)
         }
         self.folders = folders
         unregisteredAddresses.subtract(Self.privateFeeds(in: folders))
-        store.removeFolders(notIn: Set(folders.keys))
-        afterEarlierAddressWork { [weak self] in await self?.removeUnusedAddresses() }
+        store.removeFolders(notIn: keepsUnknownFolders ? Set(store.folders.keys).subtracting(gone) : Set(folders.keys))
+        let candidates = keepsUnknownFolders ? gone.union(Self.privateFeeds(in: previous)) : nil
+        afterEarlierAddressWork { [weak self] in await self?.removeUnusedAddresses(among: candidates) }
         for (folder, configuration) in folders {
             let state = store[folder]
             if state.source != configuration.source {
@@ -179,6 +186,8 @@ public final class LiveFolderService {
         guard running[folder] == nil, !waiting.contains(folder) else { return }
         waiting.append(folder)
         startWaitingFolders()
+        // A folder that starts reports it in `start(_:_:)`; one left waiting reports here, so that its row shows the refresh at once.
+        if waiting.contains(folder) { didChange?(folder) }
     }
 
     /// Starts waiting folders while their kind has a free slot.
@@ -279,9 +288,14 @@ public final class LiveFolderService {
 
     // MARK: Keychain
 
-    /// Removes the Keychain items of folders that are not private feeds' among the folders registered when it runs, apart from addresses written for folders not registered yet.
-    private func removeUnusedAddresses() async {
-        try? await addresses.removeAddresses(except: Self.privateFeeds(in: folders).union(unregisteredAddresses))
+    /// Removes the Keychain items of folders that are not private feeds' among the folders registered when it runs, apart from addresses written for folders not registered yet; with `candidates`, only those of these folders.
+    private func removeUnusedAddresses(among candidates: Set<UUID>?) async {
+        let kept = Self.privateFeeds(in: folders).union(unregisteredAddresses)
+        guard let candidates else {
+            try? await addresses.removeAddresses(except: kept)
+            return
+        }
+        for folder in candidates.subtracting(kept) { try? await addresses.removeAddress(for: folder) }
     }
 
     /// Runs Keychain work once the work asked for before it has ended.

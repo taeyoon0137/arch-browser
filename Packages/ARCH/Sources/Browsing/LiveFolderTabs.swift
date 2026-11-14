@@ -249,13 +249,13 @@ extension BrowserSession {
         planLiveFolder(id)
     }
 
-    /// Brings a live folder's tabs in line with its stored items (`LiveFolderReconciler`): new items get tabs without pages in the default engine, tabs of items the source no longer lists go unless they have their pages or a window shows them, and the tabs take the source's order. A folder that has not fetched since it started over keeps its tabs until it has. Then the tabs take their items' read state, and the row its status.
+    /// Brings a live folder's tabs in line with its stored items (`LiveFolderReconciler`): new items get tabs without pages in the default engine, tabs of items the source no longer lists go unless they have their pages or a window shows them, or will once the saved session's windows open (`windowShowsOrWillShow(_:)`), and the tabs take the source's order. A folder that has not fetched since it started over keeps its tabs until it has. Then the tabs take their items' read state, and the row its status.
     @MainActor func planLiveFolder(_ id: UUID) {
         guard let folder = folders.first(where: { $0.id == id }), folder.live != nil else { return }
         let state = liveFolderService.store[id]
         if state.lastSuccess != nil {
             let itemTabs = LiveFolderTabs.itemTabs(inFolder: id, among: tabs)
-            let plan = LiveFolderReconciler.plan(items: state.items, tabs: LiveFolderTabs.reconcilerTabs(itemTabs) { window(showing: $0) != nil }, dismissed: state.dismissed)
+            let plan = LiveFolderReconciler.plan(items: state.items, tabs: LiveFolderTabs.reconcilerTabs(itemTabs, isShown: windowShowsOrWillShow), dismissed: state.dismissed)
             let personaID = personaID(ofSpace: folder.spaceID)
             let icon = liveFolderIcons[id]?.image
             let result = LiveFolderTabs.applying(plan, toFolder: id, in: tabs) { item in

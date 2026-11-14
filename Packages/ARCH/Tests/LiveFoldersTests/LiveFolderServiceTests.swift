@@ -319,7 +319,11 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         let pulls = UUID(), issues = UUID()
         let configurations = [pulls: LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .myPullRequests))),
                               issues: LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .assignedIssues)))]
+        var changes: [UUID] = []
+        service.didChange = { changes.append($0) }
         service.register(configurations)
+        // The folder left waiting reports it too, so that its row shows the refresh at once.
+        #expect(Set(changes) == [pulls, issues] && changes.count == 2)
         #expect(await waitUntil { fetchers.searches.count == 1 })
         // One `gh` runs while the other folder waits; the running one's folder goes.
         let waiting = fetchers.searches[0].kind == .myPullRequests ? issues : pulls
@@ -327,6 +331,24 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         service.register([waiting: try #require(configurations[waiting])])
         #expect(await waitUntil { service.store[waiting].lastSuccess != nil })
         #expect(!service.isRefreshing(waiting))
+    }
+
+    @Test func aServiceThatKeepsUnknownFoldersRemovesOnlyTheEntriesAndAddressesOfFoldersThatGo() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let unknown = UUID(), mine = UUID()
+        try await keychain.setAddress(URL(string: "https://tracker.example.org/feed.atom?token=abc123")!, for: unknown, folderName: "Set aside")
+        let made = try LiveFolderSource.makeFeed(address: URL(string: "https://tracker.example.org/mine.atom?token=def456")!)
+        try await keychain.setAddress(try #require(made.keychainAddress), for: mine, folderName: "Mine")
+        let store = LiveFolderStore(fileURL: try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName))
+        store.update(unknown) { $0.dismiss("a") }
+        let service = LiveFolderService(store: store, addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false }, keepsUnknownFolders: true)
+        service.register([mine: LiveFolderConfiguration(source: made.source)])
+        #expect(await waitUntil { service.store[mine].lastSuccess != nil })
+        #expect(service.store.folders[unknown] != nil && keychain.folders == [unknown, mine])
+        // The registered private feed goes and takes its entry and address along; the folder no register listed keeps both.
+        service.register([:])
+        #expect(await waitUntil { keychain.folders == [unknown] })
+        #expect(service.store.folders[unknown] != nil && service.store.folders[mine] == nil)
     }
 
     @Test func aFetchThatQuittingCancelsRecordsNoAttempt() async throws {

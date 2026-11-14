@@ -127,7 +127,7 @@ public final class BrowserWindowModel: ObservableObject {
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
     /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
-    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot, and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. A sheet of a tab that left the screen waits, and the next sheet of a tab on screen shows.
     /// 4. The session updates the focused tab.
     /// 5. The docked developer tools follow the tab.
@@ -146,7 +146,8 @@ public final class BrowserWindowModel: ObservableObject {
         if fullscreenTabID != nil, fullscreenTabID != selectedTabID { exitPageFullscreen() }
         selectedTab?.lastActivatedAt = Date()
         recordActivation()
-        if selectedTab?.isUnread == true { selectedTab?.isUnread = false }
+        // An item tab's dot follows its item's read state, which a window marks viewed as it starts showing the tab (`BrowserSession.windowDidChangeShownTabs(from:to:)`), so selecting the tab it shows already keeps a dot from Mark as Unread.
+        if let tab = selectedTab, tab.isUnread, tab.liveItemID == nil { tab.isUnread = false }
         // A favorite's tab belongs to no space, so selecting it keeps the current one.
         if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
         // Only another tab.
