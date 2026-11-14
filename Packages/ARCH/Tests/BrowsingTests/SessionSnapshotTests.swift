@@ -462,6 +462,44 @@ import Testing
     }
 
     @MainActor
+    @Test func sustainedChangesCaptureTheLatestSessionBeforeTheyStop() async throws {
+        let folder = try SessionFolder()
+        let store = folder.store
+        try folder.write(version11File)
+        var snapshot = try #require(store.load())
+        snapshot.tabs[0].isPinned.toggle()
+        let pin = snapshot.tabs[0].isPinned
+        let clock = ContinuousClock()
+        let timeout = clock.now + .seconds(7)
+        var revision = 0
+        var captured: [Int] = []
+        func edit() {
+            revision += 1
+            let scheduled = revision
+            snapshot.tabs[1].title = "Update \(scheduled)"
+            store.scheduleSave {
+                #expect(scheduled == revision)
+                captured.append(scheduled)
+                return snapshot
+            }
+        }
+
+        while captured.isEmpty && clock.now < timeout {
+            edit()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(captured.count == 1)
+        #expect(captured[0] > 1)
+
+        edit()
+        let last = revision
+        try await Task.sleep(for: .seconds(1))
+        #expect(captured == [last - 1, last])
+        let saved = try #require(store.load())
+        #expect(saved.tabs[0].isPinned == pin && saved.tabs[1].title == "Update \(last)")
+    }
+
+    @MainActor
     @Test func aScheduledSaveWritesTheLastSnapshotAndNothingWithoutOne() async throws {
         let folder = try SessionFolder()
         try folder.write(version11File)

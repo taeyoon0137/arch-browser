@@ -252,7 +252,8 @@ extension SessionSnapshot.TabRecord {
 
 final class SessionStore {
     let fileURL: URL
-    private var pendingSave: DispatchWorkItem?
+    private var pendingSave: (work: DispatchWorkItem, deadline: DispatchTime, limit: DispatchTime)?
+    private var latestSnapshot: (() -> SessionSnapshot?)?
     /// Set on the main thread. Replacing the observer discards deliveries for the previous one.
     var didWrite: ((SessionSnapshot) -> Void)? {
         didSet { observerRevision &+= 1 }
@@ -317,24 +318,36 @@ final class SessionStore {
         var version: Int?
     }
 
-    /// Combines rapid changes, such as tab updates, into one file write. Runs the `snapshot` closure on the main thread half a second after the last call, not when scheduling, and writes nothing when it returns nil, as once the session is gone. The file is written on `writeQueue`.
+    /// Capture on the main queue after half a quiet second, or after five seconds of continuous changes. The file is written on the serial writer.
     func scheduleSave(_ snapshot: @escaping () -> SessionSnapshot?) {
-        pendingSave?.cancel()
+        latestSnapshot = snapshot
+        let now = DispatchTime.now()
+        let limit = pendingSave?.limit ?? now + 5
+        // A due capture or one already scheduled at the limit keeps its place on the main queue and uses the newest closure.
+        if let pendingSave, pendingSave.deadline <= now || pendingSave.deadline == limit { return }
+        pendingSave?.work.cancel()
+        let deadline = min(now + 0.5, limit)
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let snapshot = snapshot() else { return }
+            guard let self else { return }
+            let capture = self.latestSnapshot
+            self.latestSnapshot = nil
+            self.pendingSave = nil
+            guard let snapshot = capture?() else { return }
             let notify = self.completion(for: snapshot)
             self.writeQueue.async {
                 if case .success = self.write(snapshot) { notify?() }
             }
         }
-        pendingSave = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        pendingSave = (work, deadline, limit)
+        DispatchQueue.main.asyncAfter(deadline: deadline, execute: work)
     }
 
     /// Saves in place of a scheduled write and waits for all earlier writes. Quitting checks the result.
     @discardableResult
     func saveNow(_ snapshot: SessionSnapshot) -> Result<Void, Error> {
-        pendingSave?.cancel()
+        pendingSave?.work.cancel()
+        pendingSave = nil
+        latestSnapshot = nil
         let notify = completion(for: snapshot)
         return writeQueue.sync {
             let result = write(snapshot)
