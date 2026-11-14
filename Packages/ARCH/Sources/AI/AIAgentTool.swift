@@ -171,6 +171,8 @@ struct AIAgentToolIdentity: Hashable, Sendable {
 /// What the probes found for one version of a tool.
 struct AIAgentProbeResult: Sendable, Equatable {
     var version: String?
+    /// The installed CLI accepts the run-only option Arch checked (Claude Code's turn limit or Codex's ephemeral thread).
+    var supportsRunOption: Bool
     /// Codex: the features Arch turns off (`CodexAgent.disabledFeatures(fromList:)`).
     var disabledFeatures: [String] = []
     /// Codex: each bundled model's effort levels, by slug.
