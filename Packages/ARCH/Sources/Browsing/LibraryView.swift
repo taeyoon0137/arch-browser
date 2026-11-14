@@ -100,7 +100,7 @@ struct LibraryButton: View {
 
     private var accessibilityValue: String {
         if downloads.isDownloading {
-            return downloads.progress.map { "Downloading, " + $0.formatted(.percent.precision(.fractionLength(0))) } ?? "Downloading"
+            return downloads.progressDescription
         }
         let count = session.unseenDownloadIDs.count
         return count == 0 ? "" : count == 1 ? "1 new download" : "\(count) new downloads"

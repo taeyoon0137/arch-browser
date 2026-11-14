@@ -25,6 +25,18 @@ import Testing
         #expect(!summary.isDownloading && summary.progress == nil && summary.hasFinished)
     }
 
+    @Test func accessibilityDescribesAStartedTransferBeforeOnePercent() {
+        let summary = DownloadSummary()
+        let download = StubDownload(completedBytes: 0, totalBytes: 734_000_000)
+        let entries = [entry(download)]
+        for (bytes, value) in [(0, "Downloading, 0%"), (409_600, "Downloading, less than 1%"), (7_340_000, "Downloading, 1%"), (733_999_999, "Downloading, 99%")] {
+            download.completedBytes = Int64(bytes)
+            entries[0].refresh()
+            summary.refresh(from: entries)
+            #expect(summary.progressDescription == value)
+        }
+    }
+
     @Test func onlyAChangeToWhatTheSummaryShowsPublishes() {
         let download = StubDownload(completedBytes: 0, totalBytes: 0)
         let entries = [entry(download)]

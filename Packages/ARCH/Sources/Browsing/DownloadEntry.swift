@@ -186,6 +186,13 @@ final class DownloadSummary: ObservableObject {
     /// Whether a download has finished, so that Clear has a row to remove.
     @Published private(set) var hasFinished = false
 
+    /// VoiceOver's progress for an active download, including one whose size is unknown.
+    var progressDescription: String {
+        guard let progress else { return "Downloading" }
+        if progress > 0, progress < 0.01 { return "Downloading, less than 1%" }
+        return "Downloading, " + progress.formatted(.percent.precision(.fractionLength(0)).rounded(rule: .down))
+    }
+
     func refresh(from entries: [DownloadEntry]) {
         let active = entries.filter { $0.state == .inProgress }
         let sized = active.filter { $0.totalBytes > 0 }
