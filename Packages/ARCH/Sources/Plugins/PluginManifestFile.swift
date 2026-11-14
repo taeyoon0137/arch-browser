@@ -1,5 +1,6 @@
 // `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script from the package file the manifest names.
 import ARCHEngine
+import Events
 import Foundation
 
 /// What a package's `plugin.json` declares.
@@ -33,12 +34,17 @@ struct ScriptManifest {
             return permission
         }
         let sites = try object.strings("sites").map(MatchPattern.init)
+        let events = try object.strings("events").map { name in
+            guard let kind = BrowserEventKind(rawValue: name) else { throw invalidManifest("events lists “\(name)”, which is not an event Arch sends") }
+            return kind
+        }
         let background = try object.optionalString("background")
         if let background { _ = try packageFile(background, in: root, named: "background") }
         let contributions = try object.object("contributes").map { try Self.contributions($0, packageAt: root) } ?? PluginContributions()
         try object.finish()
         guard background != nil || contributions.commands.isEmpty else { throw invalidManifest("commands need a background script") }
-        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: Set(permissions), sites: sites, contributions: contributions)
+        guard background != nil || events.isEmpty else { throw invalidManifest("events need a background script") }
+        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: Set(permissions), sites: sites, contributions: contributions, events: Set(events))
         self.background = background
     }
 

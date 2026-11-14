@@ -41,7 +41,7 @@ enum PluginSandbox {
     }
 }
 
-/// Serves one plugin's package at `arch-plugin://<plugin id>/<package path>`, and at the root the document that runs the background script. Every response carries the sandbox's content security policy; other hosts, and paths that name no file of the package, get 404.
+/// Serves one plugin's package at `arch-plugin://<plugin id>/<package path>`, from its folder or, for a package held in memory, from memory, and at the root the document that runs the background script. Every response carries the sandbox's content security policy; other hosts, and paths that name no file of the package, get 404.
 @MainActor
 final class PluginSchemeHandler: NSObject, WKURLSchemeHandler {
     private let package: PluginPackage
@@ -70,8 +70,15 @@ final class PluginSchemeHandler: NSObject, WKURLSchemeHandler {
         if path.isEmpty {
             return backgroundDocument.map { (200, "text/html; charset=utf-8", $0) } ?? notFound
         }
-        guard let file = PluginPackage.file(path, in: package.rootURL), let body = try? Data(contentsOf: file) else { return notFound }
-        let type = UTType(filenameExtension: file.pathExtension)
+        let body: Data
+        if let memoryFiles = package.memoryFiles {
+            guard let held = memoryFiles[path] else { return notFound }
+            body = held
+        } else {
+            guard let file = PluginPackage.file(path, in: package.rootURL), let read = try? Data(contentsOf: file) else { return notFound }
+            body = read
+        }
+        let type = UTType(filenameExtension: (path as NSString).pathExtension)
         let mimeType = type?.preferredMIMEType ?? "application/octet-stream"
         return (200, type?.conforms(to: .text) == true ? mimeType + "; charset=utf-8" : mimeType, body)
     }

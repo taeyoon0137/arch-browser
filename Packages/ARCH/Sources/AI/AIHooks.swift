@@ -1,10 +1,11 @@
-// Hooks: features subscribe to browser events through the AI interface and answer them with actions. `Browsing` posts the events and, as the center's host, checks and applies the actions. The hooks for one event run one at a time in priority order, a newer event for the same subject replaces an older one, and a hook runs only for an automatic feature that is on, has a model of its own, and is within its budgets.
+// Hooks: features subscribe to browser events through the AI interface and answer them with actions. `Browsing` posts the events and, as the center's host, checks and applies the actions. The hooks for one event run one at a time in priority order on the shared scheduler (`AIHookScheduler`), a newer event for the same subject replaces an older one, and a hook runs only for an automatic feature that is on, has a model of its own, and is within its budgets.
 import Combine
 import Foundation
 
 // MARK: - Events
 
-public enum AIHookEventKind: Hashable, Sendable {
+/// The raw values are the browser event bus's kinds, so the center's steps for a bus event join the chain that other owners' steps for it use.
+public enum AIHookEventKind: String, Hashable, Sendable {
     case pageLoaded
     case tabOpened
     case downloadFinished
@@ -43,6 +44,12 @@ public enum AIHookEvent: Sendable {
         case .tabOpened(let open): return open.url.map { [$0] } ?? []
         case .downloadFinished(let download): return [download.info.sourceURL, download.info.pageURL].compactMap { $0 }
         }
+    }
+
+    /// The page a page load's hooks act on, whose chain ends when the tab commits another document.
+    var document: URL? {
+        guard case .pageLoaded(let load) = self else { return nil }
+        return load.url
     }
 }
 
@@ -170,7 +177,7 @@ extension AIHookError: LocalizedError {
     }
 }
 
-/// Ends a subscription. A hook of the subscription that is running stops, and its actions are dropped.
+/// Ends a subscription. A running hook of the subscription's feature stops, and its actions are dropped.
 @MainActor
 public final class AIHookSubscription {
     private weak var center: AIHookCenter?
@@ -188,38 +195,36 @@ public final class AIHookSubscription {
 
 // MARK: - Center
 
-/// Runs the hooks for each event the host posts. Hook errors never show a sheet: each feature's last one stays here for its row in Settings ▸ AI.
+/// Runs the hooks for each event the host posts, as steps of the shared scheduler under each hook's feature. Hook errors never show a sheet: each feature's last one stays here for its row in Settings ▸ AI.
 @MainActor
 public final class AIHookCenter: ObservableObject {
     /// Each feature's last error: from its hooks' last request that failed, a hook that failed on its own or timed out, or a reached budget. A request that succeeds or a change to the feature's route clears it, and a hook that sends no request leaves it.
     @Published public private(set) var lastErrors: [AIFeatureID: any Error] = [:]
-    /// Features whose hooks paused after consecutive authentication or provider errors, until the user resumes them or changes their route.
+    /// Features whose hooks paused after consecutive authentication or provider errors, until the user resumes them or changes their route: the scheduler's paused owners.
     @Published public private(set) var pausedFeatures: Set<AIFeatureID> = []
     /// Set by `Browsing`. Without a host, posted events reach no hook.
     public weak var host: (any AIHookHost)?
+    /// The scheduler that runs the center's hooks, which plugin hooks and the hook registry share, so one event's hooks from every owner run in one chain (`docs/hooks.md`, The shared scheduler).
+    public let scheduler: AIHookScheduler
 
     /// The consecutive authentication or provider errors that pause a feature's hooks.
-    public static let failuresBeforePause = 3
+    public static let failuresBeforePause = AIHookScheduler.failuresBeforePause
 
     private unowned let service: AIService
     private var registrations: [UUID: AIHookRegistration] = [:]
-    /// The hooks running or waiting for each event, by the event's kind and subject.
-    private var chains: [ChainKey: Chain] = [:]
-    /// Each feature's consecutive authentication and provider errors from its hooks' requests.
-    private var failureCounts: [AIFeatureID: Int] = [:]
     /// The routes as last seen, to notice which features' routes the user changed.
     private var routes: [String: AIRoute]
     private var cancellables: Set<AnyCancellable> = []
 
     init(service: AIService) {
         self.service = service
+        scheduler = AIHookScheduler(service: service)
         routes = service.settings.routes
+        scheduler.$pausedOwners
+            .sink { [weak self] owners in MainActor.assumeIsolated { self?.pausedFeatures = Set(owners.map(AIFeatureID.init(rawValue:))) } }
+            .store(in: &cancellables)
         service.settings.$routes
             .sink { [weak self] routes in MainActor.assumeIsolated { self?.routesWillChange(to: routes) } }
-            .store(in: &cancellables)
-        // The AI module does not link AppKit, so it names the notification. Quitting drops every hook's actions.
-        NotificationCenter.default.publisher(for: Notification.Name("NSApplicationWillTerminateNotification"))
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.cancelAll() } }
             .store(in: &cancellables)
     }
 
@@ -230,208 +235,114 @@ public final class AIHookCenter: ObservableObject {
         return AIHookSubscription(center: self, id: id)
     }
 
+    /// The subscription's feature's running hook stops, and its waiting hooks skip.
     fileprivate func unsubscribe(_ id: UUID) {
-        registrations[id] = nil
-        stopRunningHooks { $0.registration == id }
+        guard let registration = registrations.removeValue(forKey: id) else { return }
+        scheduler.cancel(owner: registration.feature.rawValue)
     }
 
-    /// Runs the hooks that listen for the event's kind, after the hooks of an older event for the same subject have stopped. An event from a site where AI is off reaches no hook.
+    /// Posts the event under a new event identifier.
     public func post(_ event: AIHookEvent) {
-        guard host != nil, reachesHooks(event) else { return }
-        let order = registrations.filter { $0.value.events.contains(event.kind) }
+        post(event, event: UUID())
+    }
+
+    /// Runs the hooks that listen for the event's kind in the chain of the browser event `id`, which other owners' steps for that event join, after the hooks of an older event for the same subject have stopped. An event from a site where AI is off reaches no hook.
+    public func post(_ event: AIHookEvent, event id: UUID) {
+        guard host != nil else { return }
+        let listening = registrations.filter { $0.value.events.contains(event.kind) }
             .sorted { ($0.value.priority, $0.value.feature.rawValue) < ($1.value.priority, $1.value.feature.rawValue) }
-            .map(\.key)
-        guard !order.isEmpty else { return }
-        let key = ChainKey(kind: event.kind, subject: event.subject)
-        let previous = chains[key]
-        previous?.task?.cancel()
-        let chain = Chain()
-        chains[key] = chain
-        let postedAt = ContinuousClock.now
-        chain.task = Task { [weak self] in
-            await previous?.task?.value
-            await self?.run(order, for: event, postedAt: postedAt, in: chain)
-            if self?.chains[key] === chain { self?.chains[key] = nil }
-        }
+        guard !listening.isEmpty else { return }
+        let run = EventRun()
+        let steps = listening.map { step(for: $0.value, registrationID: $0.key, event: event, in: run) }
+        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: id, document: event.document, urls: event.urls)
     }
 
     /// Stops the hooks for a tab that closed or a download the user removed, and drops their actions.
     public func cancel(subject: UUID) {
-        for (key, chain) in chains where key.subject == subject {
-            chain.task?.cancel()
-            chains[key] = nil
-        }
+        scheduler.cancel(subject: subject)
     }
 
     /// Runs the feature's paused hooks again from the next event.
     public func resume(_ feature: AIFeatureID) {
-        pausedFeatures.remove(feature)
-        failureCounts[feature] = nil
+        scheduler.resume(owner: feature.rawValue)
     }
 
     // MARK: Running
 
-    private struct ChainKey: Hashable {
-        var kind: AIHookEventKind
-        var subject: UUID
-    }
-
-    /// The hooks one event runs, one at a time.
+    /// What the center's hooks for one event share: the actions applied so far and whether a hook stopped the rest.
     @MainActor
-    private final class Chain {
-        var task: Task<Void, Never>?
-        /// The hook that runs now, which its subscription's end or a change to its feature's route stops on its own.
-        var running: RunningHook?
-    }
-
-    private struct RunningHook {
-        var registration: UUID
-        var feature: AIFeatureID
-        var task: Task<AIHookResult, any Error>
-    }
-
-    private enum Outcome {
-        case finished(AIHookResult)
-        case failed(any Error)
-        /// The hook was cancelled before it finished: its subscription ended, its feature's route changed, or its chain was cancelled.
-        case stopped
-        case timedOut
-    }
-
-    /// Runs each hook after its delay, applying its allowed actions before the next one starts. A cancelled chain drops the actions of the hook that was running.
-    private func run(_ order: [UUID], for event: AIHookEvent, postedAt: ContinuousClock.Instant, in chain: Chain) async {
+    private final class EventRun {
         var applied: [AIHookAction] = []
-        for id in order {
-            guard let registration = registrations[id] else { continue }
-            do {
-                try await Task.sleep(until: postedAt + registration.delay, clock: .continuous)
-            } catch {
-                return
-            }
-            // The subscription, the feature's route, or the site's exclusion may have changed during the wait.
-            guard registrations[id] != nil, reachesHooks(event), mayRun(registration.feature), let host else { continue }
-            let client = AIHookClient(feature: registration.feature, base: service) { [weak self] error in self?.recordRequest(endingWith: error, of: registration.feature) }
-            let context = AIHookContext(client: client, pages: host.pages, appliedActions: applied)
-            let task = Task { try await registration.handler(event, context) }
-            chain.running = RunningHook(registration: id, feature: registration.feature, task: task)
-            let outcome = await outcome(of: task, timeout: registration.timeout)
-            chain.running = nil
-            if Task.isCancelled { return }
-            // The hook's requests counted as they ended; a hook's own error or its timeout shows without changing the count of consecutive request errors.
-            switch outcome {
-            case .finished(let result):
-                guard case .actions(let actions, let stop) = result else { continue }
-                for action in actions where registration.allowedActions.contains(action.kind) && host.apply(action, for: event) {
-                    applied.append(action)
-                }
-                if stop { return }
-            case .failed(let error):
-                lastErrors[registration.feature] = error
-            case .timedOut:
-                lastErrors[registration.feature] = AIHookError.timedOut
-            case .stopped:
-                continue
-            }
-        }
+        var isStopped = false
     }
 
-    /// Waits for the hook until it returns or its timeout passes, cancelling it at the timeout or when the chain is cancelled. A cancelled chain still waits for its hook to stop, so the next event's hooks start after it, but never past the timeout: a hook that does not stop when cancelled, such as one waiting for a page that does not answer, holds its event's chain no longer than that. A cancelled hook's result counts for nothing, even when the hook returned one, and so does a result that comes after the timeout.
-    private func outcome(of task: Task<AIHookResult, any Error>, timeout: Duration) async -> Outcome {
-        let wait = HookWait()
-        // Neither task inherits the chain's cancellation, so both keep watching the hook after it.
-        let watchdog = Task {
-            try await Task.sleep(for: timeout)
-            let wasStopped = task.isCancelled
-            task.cancel()
-            wait.end(wasStopped ? .stopped : .timedOut)
-        }
-        Task {
-            let result = await task.result
-            watchdog.cancel()
-            if task.isCancelled {
-                wait.end(.stopped)
-                return
-            }
-            switch result {
-            case .success(let value): wait.end(.finished(value))
-            case .failure(let error): wait.end(.failed(error))
-            }
-        }
-        return await withTaskCancellationHandler { await wait.outcome() } onCancel: { task.cancel() }
-    }
-
-    /// The first end of a hook's run that the center takes: its return or its timeout.
+    /// What one hook returned, which counts only once the scheduler takes its end as finished.
     @MainActor
-    private final class HookWait {
-        private var ended: Outcome?
-        private var continuation: CheckedContinuation<Outcome, Never>?
+    private final class HookReturn {
+        var result: AIHookResult?
+    }
 
-        func end(_ outcome: Outcome) {
-            guard ended == nil else { return }
-            ended = outcome
-            continuation?.resume(returning: outcome)
-            continuation = nil
+    /// The hook as a step: it runs while its subscription lasts and no earlier hook stopped the event, sees the actions applied before it, and has its allowed actions applied before the next step starts. A step whose subscription ended counts for nothing.
+    private func step(for registration: AIHookRegistration, registrationID: UUID, event: AIHookEvent, in run: EventRun) -> AIHookStep {
+        let feature = registration.feature
+        let returned = HookReturn()
+        return AIHookStep(owner: feature.rawValue, order: registration.priority, feature: feature, routes: [feature.rawValue],
+                          delay: registration.delay, timeout: registration.timeout,
+                          mayRun: { [weak self] in self?.registrations[registrationID] != nil && self?.host != nil && !run.isStopped },
+                          run: { [weak self] requestDidEnd in
+                              guard let context = await self?.context(for: feature, in: run, requestDidEnd: requestDidEnd) else { return }
+                              let result = try await registration.handler(event, context)
+                              await MainActor.run { returned.result = result }
+                          },
+                          didEnd: { [weak self] outcome in
+                              guard let self, self.registrations[registrationID] != nil else { return }
+                              self.hookDidEnd(outcome, registration: registration, event: event, returned: returned.result, in: run)
+                          })
+    }
+
+    private func context(for feature: AIFeatureID, in run: EventRun, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> AIHookContext? {
+        guard let host else { return nil }
+        let client = AIHookClient(feature: feature, base: service) { [weak self] error in
+            requestDidEnd(error)
+            self?.recordRequest(endingWith: error, of: feature)
         }
+        return AIHookContext(client: client, pages: host.pages, appliedActions: run.applied)
+    }
 
-        func outcome() async -> Outcome {
-            if let ended { return ended }
-            return await withCheckedContinuation { continuation = $0 }
+    /// A finished hook's allowed actions apply while the host takes them; a hook's own error, its timeout, or a reached budget becomes the feature's last error.
+    private func hookDidEnd(_ outcome: AIHookStepOutcome, registration: AIHookRegistration, event: AIHookEvent, returned: AIHookResult?, in run: EventRun) {
+        switch outcome {
+        case .finished:
+            guard case .actions(let actions, let stop)? = returned, let host else { return }
+            for action in actions where registration.allowedActions.contains(action.kind) && host.apply(action, for: event) {
+                run.applied.append(action)
+            }
+            if stop { run.isStopped = true }
+        case .failed(let error):
+            lastErrors[registration.feature] = error
+        case .timedOut:
+            lastErrors[registration.feature] = AIHookError.timedOut
+        case .skipped(.budgetReached(let budget)):
+            lastErrors[registration.feature] = AIError.budgetReached(budget)
+        case .stopped, .skipped:
+            break
         }
     }
 
-    /// Whether every address of the event may reach hooks.
-    private func reachesHooks(_ event: AIHookEvent) -> Bool {
-        event.urls.allSatisfy(service.settings.allowsAI(on:))
-    }
-
-    /// Whether the feature's hooks may run now. Hooks of a feature that is paused, not automatic, off, or without a usable model of its own skip quietly; hooks of one over a budget skip with that budget as their error, so that its row says so.
-    private func mayRun(_ id: AIFeatureID) -> Bool {
-        guard !pausedFeatures.contains(id), let feature = service.features.first(where: { $0.id == id }), feature.trigger == .automatic, service.isAvailable(id) else { return false }
-        if let budget = service.reachedBudget(for: feature) {
-            lastErrors[id] = AIError.budgetReached(budget)
-            return false
-        }
-        return true
-    }
-
-    /// A hook's request that ended with a reply clears the feature's error, and one that failed keeps its error for the feature's row. Consecutive authentication and provider errors pause the feature's hooks, since every further request would fail the same way; any other end of a request starts the count again.
+    /// A hook's request that ended with a reply clears the feature's error, and one that failed keeps its error for the feature's row. The scheduler counts the consecutive authentication and provider errors that pause the feature.
     private func recordRequest(endingWith error: (any Error)?, of feature: AIFeatureID) {
         if let error {
             lastErrors[feature] = error
         } else if lastErrors[feature] != nil {
             lastErrors[feature] = nil
         }
-        switch error as? AIError {
-        case .authentication?, .providerUnavailable?:
-            let count = (failureCounts[feature] ?? 0) + 1
-            failureCounts[feature] = count
-            if count >= Self.failuresBeforePause { pausedFeatures.insert(feature) }
-        default:
-            failureCounts[feature] = nil
-        }
     }
 
-    /// Switching a feature off or changing its models stops its running hooks, resumes its paused ones, and clears its last error, which was about the old route.
+    /// Switching a feature off or changing its models clears its last error, which was about the old route; the scheduler stops its running hooks and resumes it.
     private func routesWillChange(to newRoutes: [String: AIRoute]) {
         let changed = Set(registrations.values.map(\.feature)).filter { routes[$0.rawValue] != newRoutes[$0.rawValue] }
         routes = newRoutes
-        guard !changed.isEmpty else { return }
-        stopRunningHooks { changed.contains($0.feature) }
-        for feature in changed {
-            resume(feature)
-            lastErrors[feature] = nil
-        }
-    }
-
-    private func stopRunningHooks(where matches: (RunningHook) -> Bool) {
-        for chain in chains.values {
-            if let running = chain.running, matches(running) { running.task.cancel() }
-        }
-    }
-
-    private func cancelAll() {
-        chains.values.forEach { $0.task?.cancel() }
-        chains = [:]
+        for feature in changed { lastErrors[feature] = nil }
     }
 }
 

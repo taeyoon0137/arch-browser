@@ -1,23 +1,23 @@
-// The session's side of the AI interface's hooks: posts the tabs' document loads, new tabs, and finished downloads to the hook center, applies the actions hooks return while they still fit their event, and subscribes the built-in hooks. It follows the session's tabs and downloads, so the session only attaches it.
+// The session's side of the AI interface's hooks (`docs/hooks.md`, The AI hook center): turns the bus's page loads, new tabs, and finished downloads into the hook center's events, ends a tab's hooks when it commits another document or closes, applies the actions hooks return while they still fit their event, and subscribes the built-in hooks. It never sees agent tabs. The session only attaches it.
 import AI
 import Combine
+import Events
 import Foundation
-import UniformTypeIdentifiers
+import Plugins
 
 @MainActor
 final class BrowserHooks: AIHookHost {
     /// The longest tab name a hook gives.
-    static let maximumTabNameLength = 60
+    static let maximumTabNameLength = PluginTab.maximumNameLength
+    /// The bus events the center hears of; the filter's empty tab kinds leave agent tabs out.
+    static let events = BrowserEventFilter(kinds: [.pageLoaded, .tabOpened, .downloadFinished, .addressChanged, .tabClosed])
 
     private weak var session: BrowserSession?
     private let pageSource = TabPageSource()
-    private var center: AIHookCenter { AIService.shared.hooks }
-    /// The document loads of each followed tab, by tab.
-    private var tabObservers: [UUID: AnyCancellable] = [:]
-    /// The state of each followed download, by entry.
-    private var downloadObservers: [UUID: AnyCancellable] = [:]
-    /// The tabs whose first document load went out, to mark a restored tab's first load.
-    private var loadedTabIDs: Set<UUID> = []
+    private var center: AIHookCenter?
+    private var subscription: BrowserEventSubscription?
+    /// The downloads in the list, to stop the hooks of one the user removes.
+    private var downloadIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
 
     /// Made with the session, which calls `attach(to:)` once it exists.
@@ -25,79 +25,68 @@ final class BrowserHooks: AIHookHost {
 
     var pages: any AIPageSource { pageSource }
 
-    /// Registers and subscribes the built-in hooks, then follows the session's tabs, the favorites' tabs among them, and its downloads. The tabs open now are the restored ones, so none of them counts as a new tab.
+    /// Hooks the session's bus to the shared AI service's center, and follows the session's downloads.
     func attach(to session: BrowserSession) {
         self.session = session
         pageSource.session = session
-        center.host = self
-        AIService.shared.register(.tabNameHook)
-        AIService.shared.register(.downloadNameHook)
-        center.subscribe(BuiltInHooks.tabName { [weak self] load in await self?.needsName(load) ?? false })
-        center.subscribe(BuiltInHooks.downloadName)
-        follow(session.allTabs, postingNewTabs: false)
-        session.$tabs.combineLatest(session.$favoriteTabs).dropFirst()
-            .sink { [weak self] tabs, favoriteTabs in MainActor.assumeIsolated { self?.follow(tabs + favoriteTabs.values, postingNewTabs: true) } }
-            .store(in: &cancellables)
+        attach(events: session.events, service: AIService.shared)
         session.$downloads
             .sink { [weak self] downloads in MainActor.assumeIsolated { self?.follow(downloads) } }
             .store(in: &cancellables)
     }
 
+    /// Registers and subscribes the built-in hooks on `service`'s center, which this object hosts, and follows `events` for it.
+    func attach(events: BrowserEventBus, service: AIService) {
+        let center = service.hooks
+        self.center = center
+        center.host = self
+        service.register(.tabNameHook)
+        service.register(.downloadNameHook)
+        center.subscribe(BuiltInHooks.tabName { [weak self] load in await self?.needsName(load) ?? false })
+        center.subscribe(BuiltInHooks.downloadName)
+        subscription = events.subscribe(Self.events) { [weak self] event in self?.handle(event) }
+    }
+
     // MARK: Events
 
-    /// Follows each tab's document loads and posts a tab that opens, other than one restored from the saved session or a pinned tab that a browser import opened. A tab that leaves stops its hooks.
-    private func follow(_ tabs: [Tab], postingNewTabs: Bool) {
-        let ids = Set(tabs.map(\.id))
-        for id in tabObservers.keys where !ids.contains(id) {
-            tabObservers[id] = nil
-            loadedTabIDs.remove(id)
-            center.cancel(subject: id)
-        }
-        for tab in tabs where tabObservers[tab.id] == nil {
-            tabObservers[tab.id] = tab.didLoadDocument
-                .sink { [weak self, weak tab] in
-                    MainActor.assumeIsolated {
-                        if let self, let tab { self.tabDidLoadDocument(tab) }
-                    }
-                }
-            if postingNewTabs, !tab.isRestored { center.post(.tabOpened(AITabOpen(tabID: tab.id, url: tab.url))) }
+    /// Posts a page load, new tab, or finished download under the bus event's identifier, so other owners' hooks for it join its chain. A new document ends the tab's hooks for other documents, and a close ends its hooks except the close's own.
+    private func handle(_ event: BrowserEvent) {
+        guard let center else { return }
+        switch event.payload {
+        case .addressChanged(let tab, _):
+            center.scheduler.cancel(subject: tab.id, otherThan: tab.url)
+        case .tabClosed(let tab, _):
+            center.scheduler.cancel(subject: tab.id, except: event.id)
+        case .downloadFinished(let download):
+            let fileURL = session?.downloads.first { $0.id == download.id }?.fileURL
+            if let hookEvent = Self.hookEvent(for: event, fileURL: fileURL) { center.post(hookEvent, event: event.id) }
+        default:
+            if let hookEvent = Self.hookEvent(for: event, fileURL: nil) { center.post(hookEvent, event: event.id) }
         }
     }
 
-    private func tabDidLoadDocument(_ tab: Tab) {
-        guard let url = tab.url else { return }
-        let isFirstLoad = loadedTabIDs.insert(tab.id).inserted
-        center.post(.pageLoaded(AIPageLoad(tabID: tab.id, url: url, isRestore: tab.isRestored && isFirstLoad)))
+    /// The center's event for a bus event: a page load with its tab's address, which a `pageLoaded` always has, a new tab, or a finished download with the file's URL from the session's entry, which the bus event leaves out.
+    static func hookEvent(for event: BrowserEvent, fileURL: URL?) -> AIHookEvent? {
+        switch event.payload {
+        case .pageLoaded(let tab, let isRestore, _):
+            guard let url = tab.url else { return nil }
+            return .pageLoaded(AIPageLoad(tabID: tab.id, url: url, isRestore: isRestore))
+        case .tabOpened(let tab, _):
+            return .tabOpened(AITabOpen(tabID: tab.id, url: tab.url))
+        case .downloadFinished(let download):
+            guard let fileURL else { return nil }
+            let info = AIDownloadInfo(filename: download.filename, mediaType: download.mediaType, byteCount: download.byteCount, sourceURL: download.sourceURL, pageURL: download.pageURL)
+            return .downloadFinished(AIDownloadFinish(downloadID: download.id, fileURL: fileURL, info: info, isNamedByUser: download.isNamedByUser))
+        default:
+            return nil
+        }
     }
 
-    /// Posts each download that finishes from now on. A download the user removes from the list stops its hooks.
+    /// A download the user removes from the list stops its hooks.
     private func follow(_ downloads: [DownloadEntry]) {
         let ids = Set(downloads.map(\.id))
-        for id in downloadObservers.keys where !ids.contains(id) {
-            downloadObservers[id] = nil
-            center.cancel(subject: id)
-        }
-        for entry in downloads where downloadObservers[entry.id] == nil {
-            // A download joins the list as it starts, when Settings decides whether a save panel asks the user for its name.
-            let isNamedByUser = UserDefaults.standard.bool(forKey: BrowserSession.asksWhereToSaveDownloadsKey)
-            // An entry publishes its state before its file's path, so the event waits for the rest of the update.
-            downloadObservers[entry.id] = entry.$state.removeDuplicates().dropFirst().filter { $0 == .completed }
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self, weak entry] _ in
-                    MainActor.assumeIsolated {
-                        if let self, let entry { self.downloadDidFinish(entry, isNamedByUser: isNamedByUser) }
-                    }
-                }
-        }
-    }
-
-    /// Hooks learn the file's name, type, size, and address, and the page it started from, never its contents.
-    private func downloadDidFinish(_ entry: DownloadEntry, isNamedByUser: Bool) {
-        guard let fileURL = entry.fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        let byteCount = max(entry.totalBytes, entry.completedBytes)
-        let info = AIDownloadInfo(filename: fileURL.lastPathComponent, mediaType: UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType,
-                                  byteCount: byteCount > 0 ? byteCount : nil, sourceURL: entry.item.sourceURL, pageURL: entry.item.pageURL)
-        center.post(.downloadFinished(AIDownloadFinish(downloadID: entry.id, fileURL: fileURL, info: info, isNamedByUser: isNamedByUser)))
+        for id in downloadIDs.subtracting(ids) { center?.cancel(subject: id) }
+        downloadIDs = ids
     }
 
     // MARK: Actions
@@ -126,7 +115,7 @@ final class BrowserHooks: AIHookHost {
     /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
         guard let tab = session?.tabs.first(where: { $0.id == load.tabID }),
-              Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.url) else { return nil }
+              Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return nil }
         return tab
     }
 
@@ -138,8 +127,19 @@ final class BrowserHooks: AIHookHost {
 
     /// The first line of a hook's name, trimmed and cut to `maximumTabNameLength` characters, or nil when nothing is left.
     static func tabName(from title: String) -> String? {
-        let line = title.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let name = String(line.trimmingCharacters(in: .whitespaces).prefix(maximumTabNameLength)).trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? nil : name
+        PluginTab.name(from: title)
+    }
+
+    /// Gives the tab the suggested name for the document at `document`, under the rules the AI hooks' names follow (`docs/hooks.md`, hook decision 13), for plugins and hook scripts: the name's first line, trimmed and cut, while the tab still shows the document, the user has not named it, and the user has not turned down a suggested name for the document. Nil removes a suggested name for the document, leaving the user's name and a turned-down name as they are, while the tab shows it and the user has not named it. Returns whether the tab took the change; with `applying` false nothing changes.
+    static func suggest(_ name: String?, for document: URL, to tab: Tab, applying: Bool) -> Bool {
+        guard let name else {
+            guard tab.customTitle == nil, tab.committedURL?.withoutFragment == document.withoutFragment else { return false }
+            if applying, let suggested = tab.suggestedTitle, suggested.title != nil, suggested.isFor(document) { tab.suggestedTitle = nil }
+            return true
+        }
+        guard let shown = tabName(from: name),
+              takesName(for: document, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return false }
+        if applying { tab.suggestedTitle = SuggestedTitle(title: shown, url: document) }
+        return true
     }
 }

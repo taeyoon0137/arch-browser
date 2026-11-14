@@ -4,6 +4,7 @@ import AI
 import AppKit
 import ARCHEngine
 import Browsing
+import Hooks
 import Plugins
 import SwiftUI
 
@@ -49,6 +50,8 @@ public final class PreferencesWindowController: NSWindowController {
     public static var session: BrowserSession?
     /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var agents: AgentService?
+    /// The hook registry whose hooks Settings ▸ AI ▸ Agent Hooks lists. The app shell sets it at launch, before Settings first opens; without it the page is left out.
+    public static var hooks: HookRegistry?
 
     /// Sign In for a Claude Code or Codex provider outside Settings, as from the agent panel: the built-in terminal with the tool's sign-in typed, as the provider's editor types it.
     @MainActor public static func signInToAgentTool(_ providerID: AIProviderID) {
@@ -62,7 +65,7 @@ public final class PreferencesWindowController: NSWindowController {
     }
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
-    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents))
+    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents, hooks: PreferencesWindowController.hooks))
     /// Settings ▸ Plugins, while the app shell has set `session`.
     private var pluginsSection: NSTabViewItem?
 
