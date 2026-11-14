@@ -1735,7 +1735,7 @@ extension BrowserSession: EngineDownloadsDelegate {
 
     /// Asks with a card over the tab whether its page may download more files (`TabPromptContent.pageDownloads`). Only Allow allows; Don't Allow and a card that ended without the user, as when the tab closes, answer no.
     private func askToAllowDownloads(from tab: Tab) {
-        let content = TabPromptContent.pageDownloads(pageURL: tab.url, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        let content = TabPromptContent.pageDownloads(identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         enqueuePrompt(content, for: tab) { [weak tab] response in
             guard let tab else { return }
             let allowed = TabPromptContent.pageDownloadsResult(response)

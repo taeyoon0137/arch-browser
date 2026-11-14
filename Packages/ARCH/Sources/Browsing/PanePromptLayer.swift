@@ -154,10 +154,12 @@ struct PanePromptLayer: View {
                                              isFocusedPane: isFocusedPane, isPageFieldFocused: isPageFieldFocused)
     }
 
+    /// Reads the card as its label does, "<kind>, <who asks>", then its title or the page's words, so that Arch's own notices and questions and an extension's reload are not read as the site's. A card with neither, as for `alert('')`, reads its label alone.
     private func announce(_ state: PromptState) {
         let content = state.content
-        let subject = content.title ?? content.pageText.map { String($0.text.prefix(200)) } ?? content.kind.accessibilityName
-        AccessibilityNotification.Announcement("\(content.identity.name) asks: \(subject)").post()
+        let label = "\(content.kind.accessibilityName), \(content.identity.name)"
+        let subject = content.title ?? content.pageText.map { String($0.text.prefix(200)) }
+        AccessibilityNotification.Announcement(subject.map { "\(label): \($0)" } ?? label).post()
     }
 
     // MARK: Focus

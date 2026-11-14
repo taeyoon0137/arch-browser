@@ -23,7 +23,7 @@ enum PromptKind: Equatable {
         case .openInApp: "Open in Another App"
         case .extensionAccess: "Extension Access"
         case .extensionReload: "Reload Page"
-        case .clearSiteData: "Clear Website Data"
+        case .clearSiteData: "Clear Site Data"
         case .pageDownloads: "Multiple Downloads"
         case .notice: "Notice"
         }
@@ -63,7 +63,7 @@ enum PromptGlyph: Equatable {
 struct PageAuthoredText: Equatable {
     static let maximumLength = 10_000
 
-    /// Arch's words before the text, such as "The site says".
+    /// Arch's words before the text, such as "The website says".
     var caption: String?
     var text: String
 

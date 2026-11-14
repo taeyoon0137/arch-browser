@@ -115,7 +115,7 @@ import Testing
         tab.webContents(tab.webContents, openExternally: link, isUserInitiated: false)
         let content = try #require(prompts.contents.first)
         #expect(prompts.contents.count == 1)
-        #expect(content.kind == .openInApp && content.message?.hasPrefix("This website wants to open a mailto link in ") == true)
+        #expect(content.kind == .openInApp && content.message?.hasPrefix("This website wants to open a link in ") == true)
         #expect(content.buttons.first { $0.id == "open" }?.needsArming == true)
 
         // A card that ended without the user leaves the site free to ask again.

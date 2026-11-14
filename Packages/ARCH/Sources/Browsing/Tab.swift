@@ -361,7 +361,7 @@ extension Tab: EngineWebContentsUIDelegate {
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
         isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
-        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path), scheme: url.scheme ?? "",
+        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path),
                                                  hasHost: self.url?.host?.isEmpty == false, identity: pageIdentity)
         let pageSite = Self.site(of: self.url)
         showPrompt(content) { [weak self] response in

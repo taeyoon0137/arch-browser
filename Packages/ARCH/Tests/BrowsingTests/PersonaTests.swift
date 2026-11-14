@@ -30,7 +30,7 @@ import Testing
         #expect(BrowserWindowModel.sheetName(ofPersona: Persona.defaultID, space: personal, among: [defaultPersona]) == nil)
         let clear = TabPromptContent.clearSiteData(persona: nil, identity: site)
         #expect(clear.identity == site)
-        #expect(clear.message == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
+        #expect(clear.message == "Its cookies and other website data are removed from both engines, which signs you out of the website. Its open tabs load again.")
     }
 
     @Test func twoPersonasNameThePersonaWithTheSpace() {
@@ -43,7 +43,7 @@ import Testing
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
         let clear = TabPromptContent.clearSiteData(persona: persona, identity: site)
         #expect(clear.identity == site)
-        #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
         let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, downloadCount: 2)
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
         #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its 2 downloads in progress stop. Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
@@ -64,7 +64,7 @@ import Testing
         let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: space, among: personas)
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
         #expect(TabPromptContent.clearSiteData(persona: persona, identity: site).message
-            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the website. Its open tabs load again.")
         // Only a tab outside every space of its Persona names the Persona alone.
         #expect(BrowserWindowModel.sheetSpace(ofTabIn: nil, personaID: work.id, spaces: spaces, currentSpace: personal) == nil)
         #expect(BrowserSession.displayedPlace(ofPersona: work.id, space: nil, among: personas) == "Work")
