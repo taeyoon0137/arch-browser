@@ -96,7 +96,9 @@ public final class AgentRunner: ObservableObject {
             usesCLI = cli
         }
         guard running.count < 2 else { return Self.refused("busy", "Two agent runs are already in progress.") }
-        guard reserve(request.feature, request.grant.runsPerDay) else { return Self.refused("dailyRuns", "This hook reached its daily run limit.") }
+        if case .hook = request.origin, !reserve(request.feature, request.grant.runsPerDay) {
+            return Self.refused("dailyRuns", "This hook reached its daily run limit.")
+        }
 
         let id = UUID()
         let execution = Execution(request: request, personaID: personaID, tabs: selected, closed: closed, rename: rename)
