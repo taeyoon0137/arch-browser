@@ -109,8 +109,12 @@ public final class ShortcutSettings: ObservableObject {
         apply(commands.first { $0.id == command.id } ?? command)
     }
 
-    func resetShortcut(for command: ShortcutCommand) {
+    /// Restores the command's default shortcut, unless another command uses it, and returns that command. The user then confirms giving the shortcut up, as when recording one, so that two commands never share it.
+    @discardableResult
+    func resetShortcut(for command: ShortcutCommand) -> ShortcutCommand? {
+        if let shortcut = command.defaultShortcut, let owner = self.command(using: shortcut, except: command) { return owner }
         setShortcut(command.defaultShortcut, for: command)
+        return nil
     }
 
     /// Another command that uses `shortcut`, if any.
