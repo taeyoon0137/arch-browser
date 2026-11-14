@@ -16,6 +16,31 @@ import Testing
         browser = application.createBrowser(context: context)
     }
 
+    @Test(arguments: [false, true]) func reloadingARestoredLocalFileThatHasReturned(_ withoutCache: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let earlier = directory.appendingPathComponent("earlier.html")
+        let file = directory.appendingPathComponent("notes.html")
+        try Data("<title>Earlier</title>".utf8).write(to: earlier)
+        try Data("<title>Original</title>".utf8).write(to: file)
+        let first = try #require(browser.createWebContents(EngineWebContentsConfiguration(initialURL: earlier)) as? WebKitWebContents)
+        try #require(await eventually { first.webView.title == "Earlier" && !first.isLoading })
+        first.navigationController.load(URLRequest(url: file))
+        try #require(await eventually { first.webView.title == "Original" && !first.isLoading })
+        let state = try #require(first.restorableState)
+        browser.closeWebContents(first)
+        try FileManager.default.removeItem(at: file)
+        let restored = try #require(browser.createWebContents(EngineWebContentsConfiguration(initialURL: file, restorableState: state)) as? WebKitWebContents)
+        try #require(await eventually { !restored.webView.isLoading && restored.webView.url == nil && restored.webView.backForwardList.currentItem?.url == file })
+        #expect(restored.url == file)
+        try Data("<title>Returned</title>".utf8).write(to: file)
+        if withoutCache { restored.navigationController.reloadWithoutCache() } else { restored.navigationController.reload() }
+        #expect(await eventually { restored.webView.title == "Returned" && !restored.isLoading })
+        #expect(restored.url == file)
+        #expect(restored.webView.backForwardList.backList.map(\.url) == [earlier])
+    }
+
     @Test func aResearchPopupRefusalPrecedesWindowCreation() async throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         let policy = PopupPolicy()

@@ -346,7 +346,13 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
 
     /// The web view inside a view that also holds the Web Inspector once it attaches.
     public let view: NSView
-    public var url: URL? { webView.url ?? waitingPage?.url }
+    public var url: URL? { webView.url ?? waitingPage?.url ?? localHistoryItemWithoutPage?.url }
+
+    /// A restored file can be missing on disk. Its history entry survives even though WebKit has no page to reload.
+    fileprivate var localHistoryItemWithoutPage: WKBackForwardListItem? {
+        guard webView.url == nil, let item = webView.backForwardList.currentItem, item.url.isFileURL else { return nil }
+        return item
+    }
     public var title: String { webView.title ?? "" }
     public private(set) var favicon: NSImage?
     public var isLoading: Bool { webView.isLoading }
@@ -599,13 +605,19 @@ public final class WebKitNavigationController: EngineNavigationController {
         contents?.appLoadURL = request.url?.absoluteURL
         webView.load(request)
     }
-    public func reload() {
+    public func reload() { reload(ignoringCache: false) }
+    public func reloadWithoutCache() { reload(ignoringCache: true) }
+
+    private func reload(ignoringCache: Bool) {
         contents?.dismissDialogBeforeNavigation()
-        webView.reload()
-    }
-    public func reloadWithoutCache() {
-        contents?.dismissDialogBeforeNavigation()
-        webView.reloadFromOrigin()
+        if let item = contents?.localHistoryItemWithoutPage {
+            // Revisit the existing entry. Loading its address would insert another copy into Back.
+            webView.go(to: item)
+        } else if ignoringCache {
+            webView.reloadFromOrigin()
+        } else {
+            webView.reload()
+        }
     }
     public func stop() { webView.stopLoading() }
     // Without an entry nothing loads, and the dialog would stay suppressed until another load ends.
