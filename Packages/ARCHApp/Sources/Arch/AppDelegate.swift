@@ -9,6 +9,7 @@ import History
 import Import
 import Plugins
 import Preferences
+import Sync
 import Terminal
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
     private var agents: AgentService?
+    private var sync: SyncController?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
@@ -57,6 +59,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             fatalError("The browser session could not start: \(error)")
         }
         self.session = session
+        let sync = SyncController(sidebar: session, directory: supportDirectory)
+        self.sync = sync
+        PreferencesWindowController.syncController = sync
+        session.isSyncing = sync.isEnabled
+        sync.onEnabledChange = { [weak session] enabled in session?.isSyncing = enabled }
+        sync.onRunningChange = { running in
+            if running { NSApp.registerForRemoteNotifications() } else { NSApp.unregisterForRemoteNotifications() }
+        }
+        sync.settings.onApplied = { key in
+            if key == AppearanceSetting.defaultsKey { NSApp.appearance = AppearanceSetting.current.appearance }
+        }
+        Task { await sync.refreshIfRequested() }
         session.showSettings = { PreferencesWindowController.shared.show() }
         session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($2, in: $0, space: $1, installingVersionFor: $3) }
         session.installFromWebStore = { PreferencesWindowController.shared.showWebStoreInstall(of: $2, in: $0, space: $1) }
@@ -74,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
+            Task { @MainActor [weak self] in await self?.sync?.refreshIfRequested() }
         }
         // The sidebar takes the place of window tabs, so AppKit offers no tab bar or tab menu items.
         NSWindow.allowsAutomaticWindowTabbing = false

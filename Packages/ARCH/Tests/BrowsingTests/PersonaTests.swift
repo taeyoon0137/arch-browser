@@ -44,6 +44,8 @@ import Testing
         let clear = TabPromptContent.clearSiteData(persona: persona, identity: site)
         #expect(clear.identity == site)
         #expect(clear.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        let synced = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3, isSyncing: true)
+        #expect(synced.information.hasSuffix("It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too."))
         let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3)
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
         #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")

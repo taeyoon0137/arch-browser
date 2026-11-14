@@ -1,4 +1,4 @@
-// Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+// Settings window with a toolbar of sections in the system's settings layout: General, Sync, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
 import Agent
 import AI
 import AppKit
@@ -6,6 +6,7 @@ import ARCHEngine
 import Browsing
 import Plugins
 import SwiftUI
+import Sync
 
 /// An appearance choice stored as a raw string under `ARCHAppearance`.
 public enum AppearanceSetting: String, CaseIterable {
@@ -47,6 +48,7 @@ public final class PreferencesWindowController: NSWindowController {
     public static var openTerminalTyping: ((String) -> Void)?
     /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
     public static var session: BrowserSession?
+    public static var syncController: SyncController?
     /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var agents: AgentService?
 
@@ -71,6 +73,9 @@ public final class PreferencesWindowController: NSWindowController {
         sections.tabStyle = .toolbar
         let session = Self.session
         sections.addTabViewItem(Self.section("General", symbol: "gearshape", GeneralSection()))
+        if let sync = Self.syncController {
+            sections.addTabViewItem(Self.section("Sync", symbol: "icloud", SyncSection(controller: sync)))
+        }
         if let session {
             sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection(store: session.siteSearch)))
         }

@@ -91,6 +91,25 @@ import Testing
         }
     }
 
+    @Test func launchAndActivationReadNoAccountUntilTheUserRequestsSync() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        var running: [Bool] = []
+        f.controller.onRunningChange = { running.append($0) }
+        await f.controller.refreshIfRequested()
+        await f.controller.refreshIfRequested()
+        #expect(f.checks == 0 && f.engines.isEmpty && running.isEmpty && !f.controller.hasCheckedAvailability)
+        await f.controller.setEnabled(true)
+        #expect(f.checks == 1 && f.engines.count == 1 && running == [true])
+        await f.controller.refreshIfRequested()
+        #expect(f.checks == 2 && running == [true])
+        await f.controller.setEnabled(false)
+        #expect(running == [true, false])
+        f.newController()
+        await f.controller.refreshIfRequested()
+        #expect(f.checks == 2 && f.engines.count == 1)
+    }
+
     @Test func firstSyncJoinsPersonalAndAppliesSettingsOnlyAfterFetch() async throws {
         let f = Fixture()
         defer { f.clean() }

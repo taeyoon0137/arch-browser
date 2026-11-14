@@ -2,22 +2,29 @@
 // and the user's toggle must be on before the controller starts a sync engine.
 import Browsing
 import CloudKit
+import Combine
 import Foundation
 
-@MainActor public final class SyncController {
+@MainActor public final class SyncController: ObservableObject {
     public static let enabledKey = "ARCHSyncEnabled"
-    public private(set) var availability: SyncAvailability.Status = .unavailable(.temporarilyUnavailable)
-    public private(set) var isEnabled: Bool
-    public private(set) var isDeletingCloudData = false
-    public private(set) var offReason: SyncOffReason?
+    @Published public private(set) var availability: SyncAvailability.Status = .unavailable(.temporarilyUnavailable)
+    @Published public private(set) var isEnabled: Bool
+    @Published public private(set) var isDeletingCloudData = false
+    @Published public private(set) var offReason: SyncOffReason?
     public var statusExplanation: String? {
         switch availability {
         case .unavailable(let reason): reason.message
         case .available: offReason?.message
         }
     }
-    public private(set) var lastError: String?
-    public private(set) var lastSync: Date?
+    @Published public private(set) var lastError: String?
+    @Published public private(set) var lastSync: Date?
+    @Published public private(set) var hasCheckedAvailability = false
+    @Published public private(set) var isCheckingAvailability = false
+    /// Platform notification registration follows the engine lifetime. Persona deletion
+    /// messaging follows the saved preference, including edits queued while temporarily offline.
+    public var onRunningChange: ((Bool) -> Void)?
+    public var onEnabledChange: ((Bool) -> Void)?
     public let settings: SyncedSettings
 
     private let sidebar: any SyncedSidebar
@@ -28,9 +35,15 @@ import Foundation
     private let now: () -> Date
     private let notifications: NotificationCenter
     private var observers: [NSObjectProtocol] = []
+    private var accountContainer: (() -> AnyObject?)?
+    private var requestedAccountCheck = false
     private var checkNumber = 0
     private var database: SyncDatabase?
-    private var engine: (any SyncEngineClient)?
+    private var engine: (any SyncEngineClient)? {
+        didSet {
+            if (oldValue == nil) != (engine == nil) { onRunningChange?(engine != nil) }
+        }
+    }
     private var delegate: Delegate?
     private var mirror = SyncMirror()
     private var durableSidebar: SidebarSyncState?
@@ -56,8 +69,10 @@ import Foundation
         self.init(sidebar: sidebar, directory: directory, defaults: defaults, check: availability.check,
                   factory: { CloudKitSyncEngine(database: $0, stateSerialization: $1, delegate: $2) })
         if let entitlement = availability.entitledDatabase() {
-            let container = CKContainer(identifier: entitlement.containerIdentifier)
-            observeAccountChanges(of: container)
+            accountContainer = { CKContainer(identifier: entitlement.containerIdentifier) }
+        } else {
+            self.availability = .unavailable(.notSignedForICloud)
+            hasCheckedAvailability = true
         }
     }
 
@@ -96,9 +111,12 @@ import Foundation
     public func setEnabled(_ enabled: Bool) async {
         guard !isDeletingCloudData else { return }
         if enabled { recordOffReason(nil) }
-        isEnabled = enabled
-        defaults.set(enabled, forKey: Self.enabledKey)
-        if enabled { await refresh() } else { checkNumber += 1; await stop() }
+        updateEnabled(enabled)
+        if enabled { await refresh() } else {
+            checkNumber += 1
+            isCheckingAvailability = false
+            await stop()
+        }
     }
 
     /// Called after the user confirms the deletion. Keep the previous file until the server
@@ -140,12 +158,27 @@ import Foundation
         if self.engine === engine { lastError = message }
     }
 
-    /// Called on launch and activation, and by the entitled container's account notification.
+    /// Launch and activation can read the local toggle and entitlements. The first account
+    /// request comes from an explicit opt-in or an existing enabled preference.
+    public func refreshIfRequested() async {
+        guard isEnabled || requestedAccountCheck else { return }
+        await refresh()
+    }
+
+    /// Refresh after an explicit account request or the observed container's account change.
     public func refresh() async {
+        requestedAccountCheck = true
+        if let makeContainer = accountContainer {
+            accountContainer = nil
+            if let container = makeContainer() { observeAccountChanges(of: container) }
+        }
+        isCheckingAvailability = true
         checkNumber += 1
         let number = checkNumber
         let result = await check()
         guard number == checkNumber else { return }
+        isCheckingAvailability = false
+        hasCheckedAvailability = true
         availability = result
         if case .unavailable(.noAccount) = result, isEnabled {
             // The availability notification can arrive before the engine's sign-out event.
@@ -381,6 +414,13 @@ import Foundation
         }
     }
 
+    private func updateEnabled(_ value: Bool) {
+        guard isEnabled != value else { return }
+        isEnabled = value
+        defaults.set(value, forKey: Self.enabledKey)
+        onEnabledChange?(value)
+    }
+
     private func recordOffReason(_ reason: SyncOffReason?) {
         offReason = reason
         defaults.set(reason?.rawValue, forKey: Self.offReasonKey)
@@ -390,8 +430,8 @@ import Foundation
         recordOffReason(reason)
         lastError = nil
         lastSync = nil
-        isEnabled = false
-        defaults.set(false, forKey: Self.enabledKey)
+        isCheckingAvailability = false
+        updateEnabled(false)
         checkNumber += 1
         let old = detach()
         defaults.set(true, forKey: Self.discardStateKey)

@@ -269,7 +269,7 @@ public final class BrowserWindowModel: ObservableObject {
         let id = space.resolvedPersonaID
         guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
         let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
-                                            tabCount: session.tabs.filter { $0.personaID == id }.count)
+                                            tabCount: session.tabs.filter { $0.personaID == id }.count, isSyncing: session.isSyncing)
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
@@ -281,10 +281,12 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes.
-    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int) -> (message: String, information: String) {
+    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
         let removed = "Its \(spaceCount) \(spaceCount == 1 ? "space" : "spaces") and \(favoriteCount) \(favoriteCount == 1 ? "favorite" : "favorites") are removed"
         let closed = tabCount == 1 ? "its 1 tab closes" : "its \(tabCount) tabs close"
-        return ("Delete \(persona)?", "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
+        var information = "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens."
+        if isSyncing { information += " It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." }
+        return ("Delete \(persona)?", information)
     }
 
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
