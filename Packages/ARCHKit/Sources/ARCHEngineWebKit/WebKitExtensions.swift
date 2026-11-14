@@ -128,6 +128,9 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
     /// The controller runs only the contexts the app loaded in this run.
     func stopUnloadedExtensions() {}
 
+    /// The controller unloads a context before `unload(_:)` returns.
+    func waitForUnloads() async {}
+
     // MARK: Actions
 
     /// Only the profile's own web contents have actions here.

@@ -752,4 +752,63 @@ struct ProofGateTests {
         #expect(await eventually { next.webKit.loaded[unproven.id] != nil })
         next.manager.close()
     }
+
+    @Test func makesTheRunsFirstLinkOnlyOnceChromiumHasSwitchedTheKeptCopyOff() async throws {
+        let unproven = try messenger()
+        let persona = UUID()
+        let earlier = launch([.webKit], persona: persona, links: run())
+        try await earlier.manager.installEverything(from: unproven.package)
+        await earlier.runtime.waitForEngines()
+        earlier.manager.close()
+        try writeHostManifest("org.example.app", into: vendor, app: writeApp(in: folder), allowing: [unproven.id])
+        // Chromium starts the profile with the copy it kept and switches it off only once the profile's extensions have loaded, after the call that asked for it returned.
+        let kept = RecordingEngine()
+        kept.keep(EngineExtension(id: unproven.id, packageURL: unproven.package, permissions: [], sites: []))
+        kept.holdsUnloads = true
+        let links = run()
+        let next = launch([.webKit, .chromium], persona: persona, links: links, engines: [.chromium: kept])
+        let runsAsTheLinkComes = Recorded<Bool>()
+        links.gateWidens = { [runtime = next.runtime, kept, id = unproven.id] in
+            await runtime.takeGatedVersionsOutOfChromium()
+            runsAsTheLinkComes.values.append(kept.loaded[id] != nil)
+        }
+        next.runtime.profileDidStart(with: kept, of: .chromium)
+        #expect(await eventually { kept.waitsForUnloads })
+        #expect(kept.unloads.contains(unproven.id) && kept.loaded[unproven.id] != nil && !linkExists)
+        kept.applyUnloads()
+        #expect(await eventually { linkExists })
+        #expect(runsAsTheLinkComes.values == [false])
+        #expect(await eventually { next.manager.plugins.first?.engineFailures[.chromium] == gateSentence() })
+        next.manager.close()
+    }
+
+    @Test func stopsAKeptCopyThatTheListLacksBeforeTheRunsFirstPassLinksIt() async throws {
+        let listed = try messenger("Listed")
+        let unlisted = try messenger("Unlisted")
+        let persona = UUID()
+        let earlier = launch([.webKit], persona: persona, links: run())
+        try await earlier.manager.installEverything(from: listed.package)
+        await earlier.runtime.waitForEngines()
+        earlier.manager.close()
+        // A native app accepts an extension that the Persona's list lacks, whose copy Chromium kept, as one whose package no longer reads.
+        try writeHostManifest("org.example.app", into: vendor, app: writeApp(in: folder), allowing: [unlisted.id])
+        let kept = RecordingEngine()
+        kept.keep(EngineExtension(id: listed.id, packageURL: listed.package, permissions: [], sites: []))
+        kept.keep(EngineExtension(id: unlisted.id, packageURL: unlisted.package, permissions: [], sites: []))
+        let links = run()
+        let next = launch([.webKit, .chromium], persona: persona, links: links, engines: [.chromium: kept])
+        let runsAsTheLinkComes = Recorded<Bool>()
+        links.gateWidens = { [runtime = next.runtime, kept, id = unlisted.id] in
+            await runtime.takeGatedVersionsOutOfChromium()
+            runsAsTheLinkComes.values.append(kept.loaded[id] != nil)
+        }
+        next.runtime.profileDidStart(with: kept, of: .chromium)
+        #expect(next.manager.plugins.map(\.manifest.name) == ["Listed"])
+        #expect(await eventually { linkExists })
+        #expect(runsAsTheLinkComes.values == [false])
+        // The pass then loads the listed extension again.
+        #expect(await eventually { kept.loaded[listed.id] != nil && next.webKit.loaded[listed.id] != nil })
+        #expect(kept.loaded[unlisted.id] == nil)
+        next.manager.close()
+    }
 }

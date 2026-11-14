@@ -370,13 +370,16 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// The step when the gate of `NativeMessagingHostLinks` comes to refuse more callers (`gateWidens`), before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes out of Chromium the versions that the gate refuses, the links the pass will make included, then waits for a load in Chromium under way and takes it out too if the gate refuses it, so that no such version runs there once the link exists. It does not wait for the runtime's changes to the engines, since its own pass of loads may be the one that asked for the links.
+    /// The step when the gate of `NativeMessagingHostLinks` comes to refuse more callers (`gateWidens`), before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes out of Chromium the versions that the gate refuses, the links the pass will make included, and stops what Chromium runs that the runtime has not loaded: a copy that the profile kept of an extension that the list lacks, whose identifier the gate cannot check, and, before the run's first pass of loads ends, the kept copies that the pass then loads again. It then waits for a load in Chromium under way and takes it out too if the gate refuses it, and waits until Chromium has switched all of it off (`EngineExtensions.waitForUnloads()`), which Chromium does only once the profile's extensions have loaded, after it has started the copies it kept, so that no such version runs there once the link exists. It does not wait for the runtime's changes to the engines, since its own pass of loads may be the one that asked for the links.
     public func takeGatedVersionsOutOfChromium() async {
         guard let chromium = attached?[.chromium] ?? startedProfiles[.chromium] else { return }
         takeGatedVersionsOut(of: chromium)
-        guard let load = chromiumLoad else { return }
-        _ = try? await load.value
-        takeGatedVersionsOut(of: chromium)
+        chromium.stopUnloadedExtensions()
+        if let load = chromiumLoad {
+            _ = try? await load.value
+            takeGatedVersionsOut(of: chromium)
+        }
+        await chromium.waitForUnloads()
     }
 
     /// What the native messages and ports of the Persona's extensions last met on WebKit tabs in this run, by plugin, which Settings ▸ Plugins shows (`NativeAppGuide`).

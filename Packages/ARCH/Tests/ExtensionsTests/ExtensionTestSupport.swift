@@ -122,7 +122,7 @@ final class RecordingHost: WebExtensionHost {
     }
 }
 
-/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab. Its asynchronous calls change its records on the main actor, as the adapters change their state on the main thread, so the tests read them there without a race.
+/// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab. It can start with copies kept from an earlier launch (`keep(_:)`), which it stops when told to stop what it has not loaded, and can hold its unloads and those stops until `applyUnloads()`, as Chromium applies them only once the profile's extensions have loaded. Its asynchronous calls change its records on the main actor, as the adapters change their state on the main thread, so the tests read them there without a race.
 final class RecordingEngine: EngineExtensions {
     weak var delegate: (any EngineExtensionsDelegate)?
     private(set) var loaded: [String: EngineExtension] = [:]
@@ -148,6 +148,32 @@ final class RecordingEngine: EngineExtensions {
     var refused: Set<String> = []
     /// Runs as each check starts, for a test that acts while a package is checked.
     var onCheck: (@MainActor () -> Void)?
+    /// The copies kept from an earlier launch that have not loaded in this run and have not stopped.
+    private var keptCopies: Set<String> = []
+    /// Whether unloads and the stops of kept copies wait for `applyUnloads()`.
+    var holdsUnloads = false
+    private var heldUnloads: [() -> Void] = []
+    private var unloadWaits: [CheckedContinuation<Void, Never>] = []
+    /// Whether a call of `waitForUnloads()` waits for `applyUnloads()`.
+    var waitsForUnloads: Bool { !unloadWaits.isEmpty }
+
+    /// Starts with the extension as a copy that the profile kept from an earlier launch, which runs until it loads in this run or stops.
+    func keep(_ extension: EngineExtension) {
+        loaded[`extension`.id] = `extension`
+        keptCopies.insert(`extension`.id)
+    }
+
+    /// Applies the held unloads and stops in order, ends every wait for them, and from then on applies them at once.
+    @MainActor
+    func applyUnloads() {
+        holdsUnloads = false
+        let unloads = heldUnloads
+        heldUnloads = []
+        for unload in unloads { unload() }
+        let waits = unloadWaits
+        unloadWaits = []
+        for wait in waits { wait.resume() }
+    }
 
     @MainActor
     func check(_ packageURL: URL) async throws {
@@ -161,14 +187,19 @@ final class RecordingEngine: EngineExtensions {
     func load(_ extension: EngineExtension) async throws {
         guard !refused.contains(`extension`.id) else { throw RecordingEngineError.refused }
         loaded[`extension`.id] = `extension`
+        keptCopies.remove(`extension`.id)
         loadCounts[`extension`.id, default: 0] += 1
         loadsAndRemovals.append("load \(`extension`.id)")
     }
 
     func unload(_ id: String) {
-        loaded[id] = nil
         unloads.append(id)
-        onUnload?(id)
+        let unload = { [weak self] in
+            self?.loaded[id] = nil
+            self?.keptCopies.remove(id)
+            self?.onUnload?(id)
+        }
+        if holdsUnloads { heldUnloads.append(unload) } else { unload() }
     }
 
     @MainActor
@@ -179,6 +210,18 @@ final class RecordingEngine: EngineExtensions {
 
     func stopUnloadedExtensions() {
         stopsWhileLoaded.append(Set(loaded.keys))
+        let stop = { [weak self] in
+            guard let self else { return }
+            for id in keptCopies { loaded[id] = nil }
+            keptCopies = []
+        }
+        if holdsUnloads { heldUnloads.append(stop) } else { stop() }
+    }
+
+    @MainActor
+    func waitForUnloads() async {
+        guard !heldUnloads.isEmpty else { return }
+        await withCheckedContinuation { unloadWaits.append($0) }
     }
 
     func action(of id: String, for tab: any EngineWebContents) -> EngineExtensionAction? {

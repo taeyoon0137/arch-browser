@@ -1077,7 +1077,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime, EngineE
     public init(persona: PersonaID, host: any WebExtensionHost, hostLinks: NativeMessagingHostLinks)
     /// Called by the host as each of the Persona's profiles starts, and for those that started before it made the runtime: on Chromium, stops the versions that the native app gate refuses; while no extension is enabled, stops what the profile runs from an earlier launch.
     public func profileDidStart(with extensions: any EngineExtensions, of kind: EngineKind)
-    /// The step when the host links' gate comes to refuse more versions, before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes the versions that the gate refuses out of Chromium.
+    /// The step when the host links' gate comes to refuse more versions, before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes the versions that the gate refuses out of Chromium, stops what Chromium runs that the runtime has not loaded, and returns once Chromium has switched them off.
     public func takeGatedVersionsOutOfChromium() async
     /// The Persona's windows and the focused one, each time they change.
     public func setWindows(_ windows: [EngineExtensionWindow], focusedWindowID: UUID?)
