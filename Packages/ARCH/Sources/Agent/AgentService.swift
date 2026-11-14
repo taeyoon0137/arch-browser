@@ -646,7 +646,7 @@ import Foundation
     func shareableTabs(for session: AgentSession) -> [AgentTabInfo] {
         guard canEditAttachments(of: session) else { return [] }
         return host.userTabs(in: session.personaID).filter { tab in
-            tab.agentOwnerID == nil && !session.handles.sharedTabIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
+            tab.isLoaded && tab.agentOwnerID == nil && !session.handles.sharedTabIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -657,7 +657,7 @@ import Foundation
     /// The composer may offer its detached tab again only while the originally reviewed document is eligible.
     func canReattach(_ choice: AgentTabInfo, in personaID: UUID) -> Bool {
         host.userTabs(in: personaID).contains {
-            $0.showsSameDocument(as: choice) && $0.agentOwnerID == nil && AgentPolicy.showsTitle(of: $0.url, allowsAI: dependencies.allowsAI)
+            $0.isLoaded && $0.showsSameDocument(as: choice) && $0.agentOwnerID == nil && AgentPolicy.showsTitle(of: $0.url, allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -791,6 +791,14 @@ import Foundation
     }
 
     private func configure(_ session: AgentSession) {
+        session.attachmentDidChange = { [weak approvals, id = session.id] tabID in
+            guard let approvals else { return }
+            for card in approvals.pending where card.ownerID == id {
+                if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
+                    approvals.end(card.id, because: "The tabs available to share changed.")
+                }
+            }
+        }
         session.dismissQuestions = { [weak approvals, id = session.id] in
             approvals?.end(owner: id, because: "The session stopped waiting for this answer.")
         }
@@ -1009,7 +1017,9 @@ import Foundation
     }
 
     private func listedTools(for session: AgentSession) -> [String] {
-        AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false)).map(\.name)
+        AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false))
+            .filter { $0.name != "request_tab" || session.origin == .app }
+            .map(\.name)
     }
 
     /// `tools/list` on a session's connection: the tools its mode allows. A list that differs from the last one reported, as after a mode change, reaches the runner, whose start check accepts it in a later `init`.
@@ -1078,9 +1088,9 @@ import Foundation
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
-        case ("ask_user", .ok): decision = .approved
-        case ("ask_user", .denied): decision = .denied
-        case ("ask_user", .timeout): decision = .timedOut
+        case ("ask_user", .ok), ("request_tab", .ok): decision = .approved
+        case ("ask_user", .denied), ("request_tab", .denied): decision = .denied
+        case ("ask_user", .timeout), ("request_tab", .timeout): decision = .timedOut
         case (_, .refused): decision = .refused
         default: decision = .auto
         }
@@ -1101,7 +1111,7 @@ import Foundation
 
         var tools: [AgentTool] {
             guard let service, let session else { return [] }
-            return service.listedTools(for: session).compactMap(AgentToolCatalog.tool(named:))
+            return service.listedTools(for: session).compactMap(AgentToolCatalog.sessionTool(named:))
         }
 
         func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)? {
@@ -1197,8 +1207,13 @@ import Foundation
         toolHost.clientKind = session.isFromOutsideClient ? .outside : .inApp
         toolHost.approvalWindow = sessionQuestionWindow
         let generation = session.takeoverGeneration
-        let result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
-        if call.name == "ask_user", !approvals.pending.contains(where: { $0.ownerID == session.id }) {
+        let result: AgentToolResult
+        if call.name == "request_tab" {
+            result = await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
+        } else {
+            result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
+        }
+        if !approvals.pending.contains(where: { $0.ownerID == session.id }) {
             session.setWaitingForAnswer(false)
         }
         if Task.isCancelled || !isConnected() { return AgentToolHost.ended.result }
@@ -1207,6 +1222,35 @@ import Foundation
             return AgentToolResult(status: .refused, code: "stopped", text: "The user took over while this call was running. Request the step again when the user hands the session back.")
         }
         return result
+    }
+
+    /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
+    private func requestSharedTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
+                                  connectionID: UUID?, isConnected: () -> Bool) async -> AgentToolResult {
+        guard canEditAttachments(of: session) else {
+            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can ask to share a tab here.")
+        }
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.sessionTabRequest) {
+            return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
+        }
+        guard session.acceptsQuestions, session.isTurnRunning else { return AgentToolHost.ended.result }
+        let choices = shareableTabs(for: session)
+        guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        let now = dependencies.now()
+        let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
+                                 kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
+                                 action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
+                                 connectionID: connectionID, createdAt: now, deadline: now.addingTimeInterval(sessionQuestionWindow))
+        let answer = await approvals.request(card)
+        guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
+              session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
+        if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "No tab was shared in time.") }
+        guard case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        guard let choice = choices.first(where: { $0.id == id }), share(choice, with: session) else {
+            return AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared.")
+        }
+        let handle = session.handles.tabs.handle(for: id)
+        return AgentToolResult(status: .ok, text: "The user shared \(handle) for reading.", structured: ["tab": .string(handle), "access": "read"])
     }
 
     private func closeConnection(_ connection: ClientConnection) {
