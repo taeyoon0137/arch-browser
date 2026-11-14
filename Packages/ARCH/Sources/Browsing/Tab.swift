@@ -277,10 +277,10 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: JavaScript dialogs
 
-    /// An agent's tab dismisses its page's alert at once and reports its text (rule P10).
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
+    /// An agent's tab dismisses its page's alert at once and reports its text with the frame's origin (rule P10).
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void) {
         if agentOwnerID != nil {
-            reportToAgent(.alertDismissed(message: message))
+            reportToAgent(.alertDismissed(message: message, frame: frameOrigin))
             return completion()
         }
         let alert = pageAlert(message)
@@ -289,16 +289,16 @@ extension Tab: EngineWebContentsUIDelegate {
     }
 
     /// In an agent's tab, as for `prompt`, the user answers in this sheet and the agent hears that it waits (rule P9).
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
-        reportToAgent(.dialogWaiting(.confirm, message: message))
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void) {
+        reportToAgent(.dialogWaiting(.confirm, message: message, frame: frameOrigin))
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn) }
     }
 
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
-        reportToAgent(.dialogWaiting(.prompt, message: message))
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) {
+        reportToAgent(.dialogWaiting(.prompt, message: message, frame: frameOrigin))
         let alert = pageAlert(message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")

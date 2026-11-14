@@ -622,12 +622,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let word = sender.representedObject as? String else { return }
         browser?.replaceMisspelling(withWord: word)
     }
-    public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
+    /// CEF gives the asking frame's origin as an address, empty when it has none.
+    public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, origin: String, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
         guard let uiDelegate else { return completion(kind == .alert, nil) }
+        let frameOrigin = URL(string: origin).flatMap { $0.host?.isEmpty == false ? $0 : nil }
         switch kind {
-        case .confirm: uiDelegate.webContents(self, runJavaScriptConfirm: message) { completion($0, nil) }
-        case .prompt: uiDelegate.webContents(self, runJavaScriptPrompt: message, defaultText: defaultText) { completion($0 != nil, $0) }
-        default: uiDelegate.webContents(self, runJavaScriptAlert: message) { completion(true, nil) }
+        case .confirm: uiDelegate.webContents(self, runJavaScriptConfirm: message, frameOrigin: frameOrigin) { completion($0, nil) }
+        case .prompt: uiDelegate.webContents(self, runJavaScriptPrompt: message, defaultText: defaultText, frameOrigin: frameOrigin) { completion($0 != nil, $0) }
+        default: uiDelegate.webContents(self, runJavaScriptAlert: message, frameOrigin: frameOrigin) { completion(true, nil) }
         }
     }
     public func cefBrowserRunLeavePageDialog(completion: @escaping (Bool) -> Void) {

@@ -129,11 +129,12 @@ import Foundation
         session.tabsInSidebarOrder.filter { $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info(of:))
     }
 
+    /// Shows a tab by the rule a step's tab button follows (`BrowserWindowModel.showAgentTab(_:)`): a small window's tab brings its small window forward, since the main window selecting it would close that window and leave the tab out of every list; any other tab is selected in the front main window, which comes forward. A tab that has closed shows nothing.
     public func showTab(_ tabID: UUID) {
-        guard session.allTabs.contains(where: { $0.id == tabID }) else { return }
+        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return }
         let window = session.sidebarTarget()
-        window.selectTab(tabID)
-        window.nsWindow?.makeKeyAndOrderFront(nil)
+        window.showAgentTab(tabID)
+        if !tab.isInSmallWindow { window.nsWindow?.makeKeyAndOrderFront(nil) }
     }
 
     public func agentDownloads(of ownerID: UUID) -> [AgentDownloadInfo] {

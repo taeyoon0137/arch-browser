@@ -257,6 +257,12 @@ extension AgentToolHost {
                 return failure
             }
             if let refusal = stillReadable(tab, handle: handle, reportedURL: before.url, grant, state: state) { return refusal }
+            // Chromium's full-page capture (`captureBeyondViewport`) lays the page out again at its full height, where a fixed dialog or a field below a viewport-high banner moves away from the boxes read in the page's own layout, and the page is back before the boxes are read again. So a Chromium page with anything to paint over gets no full-page screenshot.
+            if full, tab.engine == .chromium, !before.boxes.isEmpty {
+                return Outcome(result: AgentToolResult(status: .error, code: "notAvailable",
+                                                       text: "\(handle) has private fields or frames that Arch paints over, and Chromium's full-page capture lays the page out again, which can move them, so Arch gives no full-page screenshot of it. Take screenshots of the viewport while scrolling.",
+                                                       structured: ["tab": .string(handle)]), site: site)
+            }
             guard let answer = await self.capture(tab, fullPage: full) else {
                 return Outcome(result: AgentToolResult(status: .timeout, code: "notResponding", text: "\(handle) does not respond to Arch's capture, so it gives no screenshot. Read it with snapshot.",
                                                        structured: ["tab": .string(handle)]), site: site)
@@ -329,7 +335,9 @@ extension AgentToolHost {
         if Task.isCancelled { return Self.ended }
         let text = tool == "type" ? arguments["text"]?.stringValue : tool == "press" ? arguments["keys"]?.stringValue : nil
         let keys = arguments["keys"]?.stringValue ?? ""
-        let submits = (tool == "click" && facts?.submitsForm == true) || (tool == "type" && arguments["submit"] == .bool(true) && facts?.tag == "input" && facts?.formKey != nil)
+        // Enter or Space on a control is a click on it (`AgentPolicy.pressActivates`).
+        let clicks = tool == "click" || (tool == "press" && facts.map { AgentPolicy.pressActivates(keys, on: $0) } == true)
+        let submits = (clicks && facts?.submitsForm == true) || (tool == "type" && arguments["submit"] == .bool(true) && facts?.tag == "input" && facts?.formKey != nil)
             || (tool == "press" && keys == "Enter" && facts?.tag == "input" && facts?.formKey != nil)
         // The page the policy decides for: its count and address, which must still hold when the step runs after a card.
         let pages = state.activity(of: tab.id).pages

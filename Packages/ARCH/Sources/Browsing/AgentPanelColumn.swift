@@ -104,7 +104,14 @@ struct AgentsIndicator: View {
 
 private struct AgentsIndicatorMenu: View {
     @ObservedObject var agents: AgentService
+    /// The cards that wait, which a client's row names, since a composer or a session in the column does not give way to a client's panel.
+    @ObservedObject var approvals: AgentApprovals
     @EnvironmentObject private var windowModel: BrowserWindowModel
+
+    init(agents: AgentService) {
+        self.agents = agents
+        approvals = agents.approvals
+    }
 
     var body: some View {
         if agents.isAnyAgentActing {
@@ -113,7 +120,8 @@ private struct AgentsIndicatorMenu: View {
                     Button("\(session.title) \u{2014} \(agents.place(of: session))") { windowModel.showAgentSession(session.id) }
                 }
                 ForEach(agents.grants.filter { agents.connectedGrantIDs.contains($0.id) }) { grant in
-                    Text(grant.client.displayName)
+                    let waits = approvals.pending.contains { $0.ownerID == grant.id }
+                    Button(waits ? "\(grant.client.displayName) \u{2014} Waiting for You" : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
                 }
                 Divider()
                 Button("Stop All Agents", action: agents.stopAllAgents)
@@ -125,7 +133,7 @@ private struct AgentsIndicatorMenu: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Agents are working")
+            .help(approvals.pending.isEmpty ? "Agents are working" : "An agent is waiting for you")
             .accessibilityLabel("Agents")
         }
     }

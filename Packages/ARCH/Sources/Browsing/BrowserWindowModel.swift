@@ -763,9 +763,23 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Closing
 
-    /// Shows an outside client's agent panel, with its steps and the cards that wait for the user, in place of the page reader, which hides.
+    /// Shows an outside client's agent panel when its card opens, with its steps and the cards that wait for the user, in place of the page reader, which hides. A composer or a session the column shows stays (`agentPanel(showingClient:over:)`).
     @MainActor public func showAgentPanel(for ownerID: UUID) {
+        guard let content = Self.agentPanel(showingClient: ownerID, over: agentPanel), content != agentPanel else { return }
+        showAgentPanel(content)
+    }
+
+    /// The agents indicator's row for a connected client: its panel, in place of whatever the column shows.
+    @MainActor func showClientPanel(_ ownerID: UUID) {
         showAgentPanel(.client(ownerID))
+    }
+
+    /// What the column shows once an outside client's card opens: the client's panel, unless the composer or a session shows, whose draft and conversation would go with it. The client's cards then wait in the agents indicator's menu, whose row for the client shows its panel.
+    static func agentPanel(showingClient ownerID: UUID, over current: AgentPanelContent?) -> AgentPanelContent? {
+        switch current {
+        case .composer, .session: return current
+        case .client, nil: return .client(ownerID)
+        }
     }
 
     /// The window as `session.json` keeps it. The session also keeps it once the window closes.

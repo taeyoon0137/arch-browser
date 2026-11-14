@@ -18,7 +18,7 @@ import Foundation
     var scriptWait: TimeInterval = 10
     /// The cards that wait for the user, which the service shows in the agent panel.
     var approvals = AgentApprovals()
-    /// Outside clients navigate freely in their own agent tabs; in-app sessions come with plan task VII.17.
+    /// Outside clients navigate freely in their own agent tabs; in-app sessions' agent tabs, with the site scope, come with plan task VII.17.1.
     var clientKind: AgentClientKind = .outside
     /// How long a call waits for the user before it answers `approvalPending`, and how long a card stays open (docs/agents.md, Tools ▸ Limits).
     var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
@@ -788,6 +788,11 @@ import Foundation
         let readable = AgentPolicy.showsTitle(of: pageURL, allowsAI: allowsAI)
         func pageText(_ text: String) -> String? { readable && !text.isEmpty ? AgentUntrusted.wrap(text, url: pageURL) : nil }
         func pageName(_ name: String) -> String? { readable && !name.isEmpty ? Self.pageName(name, url: pageURL) : nil }
+        // A dialog's text comes only from a frame on the page's own site that AI may read, as a snapshot reads no other site's frame; the engine names the frame's origin, and a dialog whose origin it does not name gives no text.
+        func dialogText(_ text: String, frame: URL?) -> String? {
+            guard let frame, let pageURL, let site = AgentSite.of(frame), site == AgentSite.of(pageURL), allowsAI(frame) else { return nil }
+            return pageText(text)
+        }
         var json: [String: AgentJSON] = ["tab": .string(handle)]
         let line: String
         switch event.kind {
@@ -820,22 +825,22 @@ import Foundation
             json["rule"] = "P8"
             json["permissions"] = .array(types.map { .string($0.agentName) })
             line = "\(handle) asked for \(types.map(\.agentName).joined(separator: " and ")), which Arch denied (P8). \(AgentPolicy.permissionSentence)"
-        case .report(.dialogWaiting(let kind, let message)):
+        case .report(.dialogWaiting(let kind, let message, let frame)):
             json["kind"] = "dialogWaiting"
             json["rule"] = "P9"
             json["dialog"] = .string(kind.rawValue)
             // A sign-in names its host only when it is the page's own, so that neither a proxy's host nor another site's, as a frame's on a site excluded from AI, reaches the agent.
-            let text = kind != .signIn ? pageText(message) : message.lowercased() == pageURL?.host?.lowercased() ? pageName(message) : nil
+            let text = kind != .signIn ? dialogText(message, frame: frame) : message.lowercased() == pageURL?.host?.lowercased() ? pageName(message) : nil
             if let text { json["message"] = .string(text) }
             switch kind {
             case .confirm, .prompt: line = "\(handle) shows a \(kind.rawValue) dialog, which waits for the user in Arch (P9)" + (text.map { ": \($0)" } ?? ".")
             case .leavePage: line = "\(handle) asks whether to leave its page, which waits for the user in Arch (P9)."
             case .signIn: line = "\(handle) asks for a user name and password\(text.map { " for \($0)" } ?? ""), which the user answers in Arch (P9)."
             }
-        case .report(.alertDismissed(let message)):
+        case .report(.alertDismissed(let message, let frame)):
             json["kind"] = "alertDismissed"
             json["rule"] = "P10"
-            let text = pageText(message)
+            let text = dialogText(message, frame: frame)
             if let text { json["message"] = .string(text) }
             line = "\(handle) showed an alert, which Arch dismissed (P10)" + (text.map { ": \($0)" } ?? ".")
         case .report(.downloadAsked(let url)):

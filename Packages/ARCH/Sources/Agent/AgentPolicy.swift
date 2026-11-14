@@ -185,7 +185,7 @@ public enum AgentPolicy {
         AgentRuleEntry(rule: .p2, trigger: "Typing into a personal-data field", effect: .asks(sensitive: true), sentence: "Typing into a field for personal data asks the user, who sees the exact text."),
         AgentRuleEntry(rule: .p3, trigger: "Submitting a form that contains password, one-time-code, payment, or personal fields", effect: .asks(sensitive: true),
                        sentence: "Submitting a form with password, code, payment, or personal fields asks the user."),
-        AgentRuleEntry(rule: .p4, trigger: "Clicking a control whose name or value reads as an irreversible step, or submitting by Enter a form whose default button reads so", effect: .asks(sensitive: true),
+        AgentRuleEntry(rule: .p4, trigger: "Clicking a control, or pressing Enter or Space on it, whose name or value reads as an irreversible step, or submitting by Enter a form whose default button reads so", effect: .asks(sensitive: true),
                        sentence: "A control that reads as a step that cannot be undone, such as buying, sending, or deleting, asks the user."),
         AgentRuleEntry(rule: .p5, trigger: "Submitting a form whose action is on a different site from the page, after the session typed into it", effect: .asks(sensitive: true),
                        sentence: "Submitting what the agent typed to another site asks the user."),
@@ -263,12 +263,16 @@ public enum AgentPolicy {
         // Sensitive cards, which no allowance covers.
         var rules: [AgentRule] = []
         if let element = step.element {
+            // Enter or Space on a control is a click on it, and a submit control's click submits its form.
+            let clicks = step.tool == "click" || (step.tool == "press" && pressActivates(step.text, on: element))
+            let submits = step.submits || (clicks && element.submitsForm)
             if step.tool == "type", element.valueClass == .personal { rules.append(.p2) }
-            if step.submits, !Set(element.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]) { rules.append(.p3) }
-            if step.tool == "click", readsAsIrreversible(element.name) || readsAsIrreversible(element.value ?? "") { rules.append(.p4) }
-            // Enter, by `type` with `submit` or by `press`, submits with the form's default button, as a click on it would.
-            if step.tool != "click", step.submits, readsAsIrreversible(element.submitterName ?? "") || readsAsIrreversible(element.submitterValue ?? "") { rules.append(.p4) }
-            if step.submits, step.typedIntoForm, let action = element.formActionHost, let page = step.pageHost, site(ofHost: action) != site(ofHost: page) { rules.append(.p5) }
+            if submits, !Set(element.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]) { rules.append(.p3) }
+            let control = clicks && (readsAsIrreversible(element.name) || readsAsIrreversible(element.value ?? ""))
+            // Enter, by `type` with `submit` or by `press` in a field, submits with the form's default button, as a click on it would.
+            let submitter = step.tool != "click" && step.submits && (readsAsIrreversible(element.submitterName ?? "") || readsAsIrreversible(element.submitterValue ?? ""))
+            if control || submitter { rules.append(.p4) }
+            if submits, step.typedIntoForm, let action = element.formActionHost, let page = step.pageHost, site(ofHost: action) != site(ofHost: page) { rules.append(.p5) }
         }
         if case .shared = step.tab { rules.append(.p12) }
         if !rules.isEmpty { return .ask(AgentAsk(rules: rules, isSensitive: true)) }
@@ -283,6 +287,12 @@ public enum AgentPolicy {
             guard client == .inApp, !step.siteInScope else { return .allow }
             return allowances.site ? .allow : .ask(AgentAsk(rules: step.tool == "type" ? [.p14] : [], isSensitive: false, offersSite: true))
         }
+    }
+
+    /// Whether `press` presses Enter or Space, with or without modifiers, on a control that a click activates: a button, a submit, reset, image, or button input, a link, a checkbox, a radio button, or a switch. A page's own key handlers act on such a key as on a click, untrusted events too, so the step counts as a click on the control for P3, P4, and P5; P7 refuses a file input whatever the tool.
+    static func pressActivates(_ keys: String?, on element: AgentElementFacts) -> Bool {
+        guard let key = keys?.split(separator: "+", omittingEmptySubsequences: false).last, ["Enter", "Space", " "].contains(String(key)) else { return false }
+        return ["button", "link", "checkbox", "radio", "switch"].contains(element.role) || (element.tag == "input" && ["submit", "reset", "image", "button"].contains(element.inputType ?? ""))
     }
 
     // MARK: Addresses
@@ -316,13 +326,9 @@ public enum AgentPolicy {
         mayRead(url, allowsAI: allowsAI) == .allowed
     }
 
-    /// A host's site for comparisons, its last two labels, or three under a two-letter country code whose second label is a short generic one (`example.co.kr`). An approximation of the registrable domain until the site scope (plan task VII.17) computes it.
+    /// A host's site for comparisons: its registrable domain as the site scope counts it (`AgentSite`), in lower case without IPv6 brackets or a trailing dot, so that two customers of a hosting platform, such as `alice.github.io` and `bob.github.io`, and two IP addresses are different sites.
     public static func site(ofHost host: String) -> String {
-        let labels = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")).split(separator: ".").map(String.init)
-        guard labels.count > 2 else { return labels.joined(separator: ".") }
-        let last = labels[labels.count - 1], second = labels[labels.count - 2]
-        let keep = last.count == 2 && ["co", "com", "net", "org", "ac", "go", "or", "ne", "gov", "edu"].contains(second) ? 3 : 2
-        return labels.suffix(keep).joined(separator: ".")
+        AgentSite.registrableDomain(of: host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[].")))
     }
 
     // MARK: Words

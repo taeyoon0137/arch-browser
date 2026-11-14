@@ -49,7 +49,7 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Whose agent tabs these are: an outside client's grant, and in-app sessions with plan task VII.17 (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.
+/// Whose agent tabs these are: an outside client's grant, and in-app sessions with plan task VII.17.1 (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.
 public struct AgentTabOwner: Equatable, Sendable {
     /// The grant's or session's ID, which the agent folder keeps as its `agentSessionID`.
     public var id: UUID
@@ -86,10 +86,10 @@ public enum AgentTabReport: Equatable, Sendable {
     case takenOver
     /// Rule P8 denied a permission request without asking.
     case permissionDenied([EnginePermissionType])
-    /// Rule P9: a dialog waits for the user in Arch's own sheet, with the page's text, or the site for a sign-in.
-    case dialogWaiting(AgentDialogKind, message: String)
-    /// Rule P10 dismissed an alert, with its text.
-    case alertDismissed(message: String)
+    /// Rule P9: a dialog waits for the user in Arch's own sheet, with the page's text and the origin of the frame that shows it, or the site for a sign-in.
+    case dialogWaiting(AgentDialogKind, message: String, frame: URL? = nil)
+    /// Rule P10 dismissed an alert, with its text and the origin of the frame that showed it.
+    case alertDismissed(message: String, frame: URL? = nil)
     /// Rule P6: a page started a download from this address, which waits for the user, since `agentTabMayDownload` did not allow it.
     case downloadAsked(URL)
     /// A download from this address that the user allowed started.

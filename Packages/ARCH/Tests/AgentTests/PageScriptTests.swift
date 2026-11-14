@@ -1,4 +1,4 @@
-// The agents' page script in WebKit web views without a window over a non-persistent store, through the tool host, on the fixture pages (docs/agents.md, Page snapshots and refs; Tests ▸ Page scripts): roles, names, refs and fingerprints, stale refs after a DOM change and a navigation, hidden elements, open shadow roots, same-origin frames, other sites' frames listed, each redaction rule and the personal class, no values in shared tabs, extension frames left out, the boxes and a screenshot with a filled password field painted over, fields and frames inside aria-hidden and inert subtrees painted over, every field painted over in a shared tab, which no step moves before the user decides, annotations, a page that replaced built-ins, actionability and covers, typing into a framework-style controlled input, selects, Enter submission with the form's default button, no user activation in the page's handlers, the element facts the rules read, a search form's hidden input, a page that changes before its document finishes, captures that do not answer, a call stopped before its card, cuts, and the diff.
+// The agents' page script in WebKit web views without a window over a non-persistent store, through the tool host, on the fixture pages (docs/agents.md, Page snapshots and refs; Tests ▸ Page scripts): roles, names, refs and fingerprints, stale refs after a DOM change and a navigation, hidden elements, open shadow roots, same-origin frames, other sites' frames listed, each redaction rule and the personal class, no values in shared tabs, extension frames left out, the boxes and a screenshot with a filled password field painted over, fields and frames inside aria-hidden and inert subtrees painted over, every field painted over in a shared tab, which no step moves before the user decides, annotations, a page that replaced built-ins, actionability and covers, typing into a framework-style controlled input, selects, Enter submission with the form's default button, no user activation in the page's handlers, the element facts the rules read, a search form's hidden input, a page that changes before its document finishes, captures that do not answer, no full-page screenshot of a Chromium page with boxes, a call stopped before its card, cuts, and the diff.
 import AgentControl
 import AppKit
 import Foundation
@@ -163,6 +163,11 @@ import Testing
         fixture.host.captures[blank] = NSImage(size: NSSize(width: 10, height: 10))
         let notVisible = await fixture.call("screenshot", ["tab": .string(handle), "area": "viewport"])
         #expect(notVisible.status == .error && notVisible.code == "notVisible" && notVisible.text == "\(handle) cannot be captured while no window shows it. Read it with snapshot.")
+        // Chromium's full-page capture lays the page out again, which can move what the boxes cover, so a Chromium page with boxes gets none.
+        fixture.host.captures[blank] = nil
+        let chromiumFull = await fixture.call("screenshot", ["tab": .string(handle), "area": "full"])
+        #expect(chromiumFull.status == .error && chromiumFull.code == "notAvailable" && chromiumFull.content.compactMap(\.imageData).isEmpty)
+        #expect(chromiumFull.text.hasPrefix("\(handle) has private fields or frames that Arch paints over"))
     }
 
     @Test func aPageThatReplacedBuiltInsCannotReachWebKitsOwnWorld() async throws {

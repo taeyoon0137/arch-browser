@@ -352,8 +352,9 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidRequestPermissions:(ARCHCEFPermission)permissions
                              fromOrigin:(NSString *)origin
                                decision:(void (^)(BOOL allow))decision;
-/// Asks the app to show a page's `alert`, `confirm`, or `prompt`. Call `completion` once with whether the user accepted and, for a prompt, the text.
+/// Asks the app to show a page's `alert`, `confirm`, or `prompt`. `origin` is the origin of the frame that shows it, as CEF gives it, or empty. Call `completion` once with whether the user accepted and, for a prompt, the text.
 - (void)cefBrowserRunDialog:(ARCHCEFDialogKind)kind
+                     origin:(NSString *)origin
                     message:(NSString *)message
                 defaultText:(NSString *)defaultText
                  completion:(void (^)(BOOL accepted, NSString *_Nullable text))completion;

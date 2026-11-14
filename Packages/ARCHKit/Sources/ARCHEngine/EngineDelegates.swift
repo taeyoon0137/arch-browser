@@ -99,9 +99,10 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents)
     /// The page left the fullscreen that `webContentsDidRequestEnterFullscreen` reported. Only Chromium sends this.
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void)
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void)
+    /// The page's `alert`, `confirm`, and `prompt`, with the origin of the frame that shows it, as an address without a path, or nil when the engine names none or the origin is opaque, so that the app can tell a dialog of another site's frame from the page's own.
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void)
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void)
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void)
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void)
     /// The page's open dialogs no longer apply, as after a navigation.
     func webContentsDidCancelDialogs(_ webContents: any EngineWebContents)
@@ -132,9 +133,9 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) {}
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) { completion() }
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) { completion(false) }
-    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) { completion(nil) }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void) { completion() }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void) { completion(false) }
+    func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) { completion(nil) }
     func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) { completion(true) }
     func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {}
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) { completion(false) }

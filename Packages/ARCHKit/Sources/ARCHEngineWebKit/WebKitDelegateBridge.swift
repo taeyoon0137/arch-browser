@@ -182,17 +182,28 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler() }
         let answer = owner.trackDialog(safeAnswer: ()) { completionHandler() }
-        delegate.webContents(owner, runJavaScriptAlert: message) { answer(()) }
+        delegate.webContents(owner, runJavaScriptAlert: message, frameOrigin: Self.origin(of: frame)) { answer(()) }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(false) }
-        delegate.webContents(owner, runJavaScriptConfirm: message, completion: owner.trackDialog(safeAnswer: false, completion: completionHandler))
+        delegate.webContents(owner, runJavaScriptConfirm: message, frameOrigin: Self.origin(of: frame), completion: owner.trackDialog(safeAnswer: false, completion: completionHandler))
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
         guard let delegate = owner.uiDelegate, !owner.suppressesDialogs else { return completionHandler(nil) }
-        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
+        delegate.webContents(owner, runJavaScriptPrompt: prompt, defaultText: defaultText, frameOrigin: Self.origin(of: frame), completion: owner.trackDialog(safeAnswer: nil, completion: completionHandler))
+    }
+
+    /// The frame's security origin as an address without a path, or nil for an opaque origin, which has no host.
+    static func origin(of frame: WKFrameInfo) -> URL? {
+        let origin = frame.securityOrigin
+        guard !origin.protocol.isEmpty, !origin.host.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = origin.protocol
+        components.host = origin.host
+        if origin.port != 0 { components.port = origin.port }
+        return components.url
     }
 
     /// WebKit on macOS shows no panel of its own, so the UI delegate shows the app's; without one the page gets no file. The page receives the answer once, after the request's rules (`answer(from:)`). The request names the frame that asks and the page: the web view's address and its current back-forward item can be those of a navigation the page started and has not committed, so the page's origin is the main frame's own, or for a frame inside the page that of the address the main frame last committed.

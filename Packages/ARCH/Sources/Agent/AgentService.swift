@@ -459,6 +459,8 @@ import Foundation
         }
         // Outside access, or the Persona chosen, may have gone while the sheet showed.
         guard acceptsOutsideClients, let grant = makeGrant(choice, for: identity) else { return nil }
+        // The client shows as connected now, also when the only call that waited on the sheet was cancelled meanwhile.
+        updateConnectedGrants()
         toolsDidChange(for: identity.key)
         return grant
     }
@@ -1079,6 +1081,7 @@ import Foundation
             return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
         }
         let running = connection.startCall(requestID)
+        if call.name == "approval_wait" { running.waitsOn = call.arguments["approval"]?.stringValue }
         running.task = Task {
             defer { connection.endCall(running) }
             guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
@@ -1108,11 +1111,15 @@ import Foundation
         }
     }
 
-    /// A client's `tools/cancel` for a call on this connection: the call stops waiting, whether on its card, which is withdrawn, on the grant sheet, which stays open for the client's next call, or on an in-app session's gates, runs no further step, ends with status `error` and code `cancelled`, which `arch-mcp` drops, and frees its slot. A call that has ended, or one of another connection, is left alone.
+    /// A client's `tools/cancel` for a call on this connection: the call stops waiting, whether on its card, which is withdrawn, on the grant sheet, which stays open for the client's next call, or on an in-app session's gates, runs no further step, ends with status `error` and code `cancelled`, which `arch-mcp` drops, and frees its slot. An `approval_wait` cancels the call it waits on too, whose card is withdrawn, so that the step never runs once the client stopped waiting for it. A call that has ended, or one of another connection, is left alone.
     private func cancelCall(_ params: AgentJSON?, on connection: ClientConnection) {
         guard let cancel = try? params?.decode(as: AgentToolCancel.self), let running = connection.cancelCall(cancel.call) else { return }
         for state in states.values {
             for card in state.cancelCall(cancel.call, onConnection: connection.id) { approvals.end(card, because: "The client cancelled the call.") }
+        }
+        // Handles are the grant's, so the call waited on is one of this client's.
+        if let handle = running.waitsOn, let grant = connection.identity.flatMap(grant(for:)), let card = states[grant.id]?.cancelPendingCall(handle) {
+            approvals.end(card, because: "The client cancelled the call.")
         }
         reply(connection, .number(cancel.call), Self.json(AgentToolResult(status: .error, code: "cancelled", text: "The client cancelled the call, so Arch stopped it.")))
         running.task?.cancel()
@@ -1249,6 +1256,8 @@ private final class ConnectionCall {
     let callID: Int?
     var task: Task<Void, Never>?
     var isCancelled = false
+    /// For `approval_wait`, the handle of the call it waits on, which the client's `tools/cancel` of it cancels too.
+    var waitsOn: String?
 
     init(requestID: AgentRPCID) {
         if case .number(let number) = requestID { callID = number } else { callID = nil }

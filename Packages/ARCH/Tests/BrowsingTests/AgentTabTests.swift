@@ -137,10 +137,12 @@ import Testing
         #expect(granted == false && asked == 0)
         // P10: an alert is dismissed without a sheet; P9: a confirm waits for the user in a sheet.
         var dismissed = false
-        agentTab.webContents(page, runJavaScriptAlert: "Hello", completion: { dismissed = true })
+        // Each report names the frame's origin, by which the tool host keeps another site's text from the agent.
+        let frame = URL(string: "https://widgets.example.net")!
+        agentTab.webContents(page, runJavaScriptAlert: "Hello", frameOrigin: frame, completion: { dismissed = true })
         #expect(dismissed && sheets == 0)
         var confirmed: Bool?
-        agentTab.webContents(page, runJavaScriptConfirm: "Sure?", completion: { confirmed = $0 })
+        agentTab.webContents(page, runJavaScriptConfirm: "Sure?", frameOrigin: nil, completion: { confirmed = $0 })
         #expect(confirmed == true && sheets == 1)
         // P6 and P11: a download the user has not allowed stops and waits for a card, as a link to another app does; one the user allowed goes ahead.
         #expect(!agentTab.webContents(page, shouldDownload: URL(string: "https://example.org/file.zip")!, hasPage: true))
@@ -153,7 +155,7 @@ import Testing
         monitor.allows = true
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/next")!, disposition: .currentTab, isUserInitiated: true)) == .allow)
         #expect(monitor.asked == [URL(string: "https://excluded.example/")!, URL(string: "https://example.org/next")!])
-        #expect(monitor.reports == [.permissionDenied([.camera]), .alertDismissed(message: "Hello"), .dialogWaiting(.confirm, message: "Sure?"),
+        #expect(monitor.reports == [.permissionDenied([.camera]), .alertDismissed(message: "Hello", frame: frame), .dialogWaiting(.confirm, message: "Sure?"),
                                     .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
                                     .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
         #expect(monitor.owners == Set([owner]))

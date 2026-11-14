@@ -1,4 +1,4 @@
-// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download or link to another app opens, one download card per tab, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
+// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download or link to another app opens, one download card per tab, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, a client's `tools/cancel` of a call and of an `approval_wait`, which withdraws the card of the call it waits on, the connected state of a grant allowed after its only call was cancelled, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
 import AgentControl
 import AppKit
 import Foundation
@@ -389,6 +389,60 @@ import Testing
         try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 99).params))
         #expect(service.approvals.pending.count == 3)
         service.stopAllAgents()
+    }
+
+    @Test func aClientsToolsCancelOfApprovalWaitWithdrawsTheCardOfTheCallItWaitsOn() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        harness.answerWait = 1
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let connection = client.connection
+        let first = try await client.callTool("request_approval", ["summary": "Send the reply", "kind": "send"])
+        #expect(first.status == .approvalPending && first.approval == "a1")
+        let card = try #require(service.approvals.pending.first)
+        // The agent waits on a1, and the user interrupts that wait in the client.
+        try connection.send(.request(id: .number(50), method: "tools/call", params: AgentToolCall(name: "approval_wait", arguments: ["approval": "a1"]).params))
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 50).params))
+        let answer = try await Task.detached {
+            while true {
+                if case .result(.number(50), let result) = try connection.receive(timeout: 5) { return result }
+            }
+        }.value
+        let cancelled = try answer.decode(as: AgentToolResult.self)
+        #expect(cancelled.status == .error && cancelled.code == "cancelled")
+        // The card is withdrawn, so a later Allow runs nothing, and the call it waited on ends and records so.
+        #expect(service.approvals.outcomes[card.id] == .ended("The client cancelled the call."))
+        #expect(service.approvals.pending.isEmpty)
+        #expect(!(await service.approvals.answer(card.id, with: .allowOnce)))
+        try await waitUntil { service.activity.entries.filter { $0.tool == "request_approval" }.count == 2 }
+        #expect(service.activity.entries.last { $0.tool == "request_approval" }?.outcome != "ok")
+    }
+
+    @Test func aGrantAllowedAfterItsOnlyCallWasCancelledShowsItsClientConnected() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.holdsAnswers = true
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let connection = client.connection
+        try connection.send(.request(id: .number(41), method: "tools/call", params: AgentToolCall(name: "session_info").params))
+        try await waitUntil { harness.prompt.requests.count == 1 }
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 41).params))
+        _ = try await Task.detached {
+            while true {
+                if case .result(.number(41), _) = try connection.receive(timeout: 5) { return }
+            }
+        }.value
+        // The user allows the client with no call left waiting: the indicator and Settings show it as connected at once.
+        harness.prompt.release()
+        try await waitUntil { !service.grants.isEmpty }
+        #expect(service.connectedGrantIDs == Set(service.grants.map(\.id)))
+        #expect(service.isAnyAgentActing)
     }
 
     @Test func aCallThatGoesOnAfterApprovalPendingRecordsItsOwnEntryAndStep() async throws {

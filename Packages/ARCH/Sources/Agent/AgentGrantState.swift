@@ -194,6 +194,13 @@ struct AgentTabActivity: Equatable {
         return cards
     }
 
+    /// A client's `tools/cancel` of an `approval_wait`: cancels the call that waits for the user under `handle`, which then runs no further step, and returns the card it waits on, for the service to withdraw. A call that has ended is left alone.
+    func cancelPendingCall(_ handle: String) -> UUID? {
+        guard let call = pendingCalls[handle], call.outcome == nil else { return nil }
+        call.task?.cancel()
+        return call.approvalID
+    }
+
     /// The last event's sequence number, from which a call tells the events it caused.
     var lastSequence: Int { sequence }
 

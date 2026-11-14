@@ -1,4 +1,4 @@
-// The entry points that start an in-app agent session (docs/agents.md, In the browser ▸ Starting a session): the window's place, named "Persona / Space", with its selected tab unless a covered page hides it; the palette's Ask Agent row, offered for two or more words while a model can run a session and starting one with no tab on an excluded site attached; and the question that Continue as Agent Task takes from the page reader and the question popover.
+// The entry points that start an in-app agent session (docs/agents.md, In the browser ▸ Starting a session): the window's place, named "Persona / Space", with its selected tab unless a covered page hides it; the palette's Ask Agent row, offered for two or more words while a model can run a session and starting one with no tab on an excluded site attached; the question that Continue as Agent Task takes from the page reader and the question popover; and the column, where an outside client's card does not replace the composer or a session.
 import Agent
 import ARCHEngine
 import Foundation
@@ -77,6 +77,18 @@ import Testing
         #expect(ContinueAsAgentTaskButton.task(draft: "", exchanges: [first, summary]) == "Which plan is cheaper?")
         #expect(ContinueAsAgentTaskButton.task(draft: "", exchanges: [summary]).isEmpty)
         #expect(ContinueAsAgentTaskButton.task(draft: "", exchanges: []).isEmpty)
+    }
+
+    @Test func aClientsCardLeavesTheComposerAndASessionInTheColumn() {
+        let client = UUID(), other = UUID()
+        // A card shows its client's panel where the column is closed or shows another client's.
+        #expect(BrowserWindowModel.agentPanel(showingClient: client, over: nil) == .client(client))
+        #expect(BrowserWindowModel.agentPanel(showingClient: client, over: .client(other)) == .client(client))
+        // The composer and a session stay, so that a draft and a conversation are not lost; the indicator's menu names the waiting client.
+        let composer = AgentPanelContent.composer(Self.context(tab: nil))
+        #expect(BrowserWindowModel.agentPanel(showingClient: client, over: composer) == composer)
+        let session = UUID()
+        #expect(BrowserWindowModel.agentPanel(showingClient: client, over: .session(session)) == .session(session))
     }
 
     private static func context(tab: AgentTabInfo?) -> AgentComposerContext {

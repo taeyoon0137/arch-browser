@@ -1,4 +1,4 @@
-// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, the allowances that cover the mode's cards and never a sensitive one, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
+// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on a control as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
 import AgentControl
 import Foundation
 import Testing
@@ -137,6 +137,14 @@ import Testing
         // P5 compares sites: a form posting to another host of the same site does not ask.
         let sameSite = Self.click(Self.button("Continue", submits: true, action: "checkout.shop.example"), typed: true)
         #expect(AgentPolicy.decide(sameSite, client: .outside, mode: .actInAgentTabs) == .allow)
+        // Sites are registrable domains as the site scope counts them: two customers of a hosting platform, and two IP addresses, are different sites.
+        func submission(from page: String, to action: String) -> AgentPolicyStep {
+            .interaction(AgentInteraction(tool: "click", element: Self.button("Continue", submits: true, action: action), submits: true, typedIntoForm: true, pageHost: page))
+        }
+        #expect(Expected(AgentPolicy.decide(submission(from: "alice.github.io", to: "attacker.github.io"), client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p5]))
+        #expect(Expected(AgentPolicy.decide(submission(from: "203.0.113.5", to: "198.51.113.5"), client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p5]))
+        #expect(AgentPolicy.decide(submission(from: "203.0.113.5", to: "203.0.113.5"), client: .outside, mode: .actInAgentTabs) == .allow)
+        #expect(AgentPolicy.decide(submission(from: "www.example.co.uk", to: "pay.example.co.uk"), client: .outside, mode: .actInAgentTabs) == .allow)
         // Enter, by type with submit or by press, submits with the form's default button, whose name P4 reads as a click on it would, and whose formaction P5 reads.
         var comment = Self.field(name: "Comment", action: "post.other.example")
         comment.submitterName = "Post comment"
@@ -146,6 +154,33 @@ import Testing
             let plain = AgentPolicyStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "a", pageHost: "shop.example"))
             #expect(AgentPolicy.decide(plain, client: .outside, mode: .actInAgentTabs) == .allow, "\(tool)")
         }
+    }
+
+    @Test func enterOrSpaceOnAControlCountsAsAClickOnIt() {
+        func press(_ keys: String, on element: AgentElementFacts, typed: Bool = false, mode: AgentAccessLevel = .actInAgentTabs) -> Expected {
+            Expected(AgentPolicy.decide(.interaction(AgentInteraction(tool: "press", element: element, text: keys, typedIntoForm: typed, pageHost: "shop.example")), client: .outside, mode: mode))
+        }
+        // A script's button that places an order on its key handler asks as a click on it would (P4), by Enter or Space, with a modifier too, and whatever the allowances.
+        let order = AgentElementFacts(tag: "div", role: "button", name: "Place order")
+        for keys in ["Enter", "Space", " ", "Shift+Enter"] { #expect(press(keys, on: order) == .asksSensitive([.p4]), "\(keys)") }
+        let allowed = AgentInteraction(tool: "press", element: order, text: "Enter", pageHost: "shop.example")
+        #expect(Expected(AgentPolicy.decide(.interaction(allowed), client: .outside, mode: .askBeforeActing, allowances: AgentAllowances(page: true, site: true))) == .asksSensitive([.p4]))
+        // Other keys are no click.
+        for keys in ["a", "Tab", "ArrowDown", "Escape"] { #expect(press(keys, on: order) == .allow, "\(keys)") }
+        // A link, a checkbox, a radio button, and a switch, and a submit input by its value.
+        for role in ["link", "checkbox", "radio", "switch"] {
+            #expect(press("Space", on: AgentElementFacts(tag: "div", role: role, name: "I agree to the terms")) == .asksSensitive([.p4]), "\(role)")
+        }
+        #expect(press("Enter", on: AgentElementFacts(tag: "input", role: "button", name: "", inputType: "submit", value: "Buy now", submitsForm: true, formKey: "0:0")) == .asksSensitive([.p4]))
+        // A submit control submits its form: P3 for the form's fields, and P5 for another site once the session typed into it.
+        #expect(press("Enter", on: Self.button("Continue", submits: true, formFields: [.password])) == .asksSensitive([.p3]))
+        #expect(press("Space", on: Self.button("Continue", submits: true, action: "collect.other.example"), typed: true) == .asksSensitive([.p5]))
+        // A control that reads as no irreversible step asks only as the mode does; a file input refuses (P7).
+        #expect(press("Enter", on: Self.button("Next")) == .allow)
+        #expect(press("Enter", on: Self.button("Next"), mode: .askBeforeActing) == .asks([]))
+        #expect(press("Space", on: AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)) == .refused(.p7))
+        // A text field is no control: Enter there is P3's and P4's submission by the default button, which `submits` carries.
+        #expect(press("Enter", on: Self.field(name: "Place order")) == .allow)
     }
 
     @Test func writtenAddressesAndRedirectHopsInTheScope() {
@@ -189,6 +224,10 @@ import Testing
         #expect(AgentPolicy.site(ofHost: "checkout.shop.example") == "shop.example")
         #expect(AgentPolicy.site(ofHost: "www.example.co.kr") == "example.co.kr")
         #expect(AgentPolicy.site(ofHost: "Example.ORG.") == "example.org")
+        #expect(AgentPolicy.site(ofHost: "alice.github.io") == "alice.github.io")
+        #expect(AgentPolicy.site(ofHost: "shop.alice.vercel.app") == "alice.vercel.app")
+        #expect(AgentPolicy.site(ofHost: "203.0.113.5") == "203.0.113.5")
+        #expect(AgentPolicy.site(ofHost: "[::1]") == "::1")
         // The warning line on cards whose agent text names a secret.
         #expect(AgentPolicy.cardTextNamesSecret("What is your password for this site?"))
         #expect(AgentPolicy.cardTextNamesSecret("인증번호를 알려 주세요"))

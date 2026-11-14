@@ -709,8 +709,8 @@ enum AgentPageScripts {
       const proceed = el.dispatchEvent(new win.KeyboardEvent("keydown", init));
       if (proceed && (key.length === 1 || key === "Enter")) el.dispatchEvent(new win.KeyboardEvent("keypress", init));
       el.dispatchEvent(new win.KeyboardEvent("keyup", init));
-      // Enter submits with the form's default button, the one whose name and `formaction` the policy read.
-      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) el.form.requestSubmit(defaultSubmitterOf(el.form) || undefined);
+      // Enter submits with the form's default button, or on a submit input with that input, as a click on it would: the one whose name and `formaction` the policy read.
+      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) el.form.requestSubmit((submitsForm(el) ? el : defaultSubmitterOf(el.form)) || undefined);
     }
 
     function typeInto(el, text, replace) {

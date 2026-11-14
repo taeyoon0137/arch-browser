@@ -277,7 +277,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser;
 - (void)handleDoClose;
 - (void)handleDevToolsClosed;
-- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
+- (void)handleDialog:(ARCHCEFDialogKind)kind origin:(NSString *)origin message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
 - (void)handleLeavePageDialog:(void (^)(BOOL))completion;
 - (void)handleResetDialogs;
 - (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
@@ -496,7 +496,7 @@ public:
                                  : dialog_type == JSDIALOGTYPE_PROMPT ? ARCHCEFDialogKindPrompt
                                                                       : ARCHCEFDialogKindAlert;
         CefRefPtr<CefJSDialogCallback> continuation = callback;
-        [owner_ handleDialog:kind message:ToNSString(message_text) defaultText:ToNSString(default_prompt_text) completion:^(BOOL accepted, NSString *text) {
+        [owner_ handleDialog:kind origin:ToNSString(origin_url) message:ToNSString(message_text) defaultText:ToNSString(default_prompt_text) completion:^(BOOL accepted, NSString *text) {
             continuation->Continue(accepted, CefString(text ? text.UTF8String : ""));
         }];
         return true;
@@ -1201,7 +1201,7 @@ private:
     }
 }
 
-- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion {
+- (void)handleDialog:(ARCHCEFDialogKind)kind origin:(NSString *)origin message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
     if (!delegate) {
         completion(kind == ARCHCEFDialogKindAlert, nil);
@@ -1222,7 +1222,7 @@ private:
         completion(accepted, text);
     };
     _pendingDialog = answer;
-    [delegate cefBrowserRunDialog:kind message:message defaultText:defaultText completion:answer];
+    [delegate cefBrowserRunDialog:kind origin:origin message:message defaultText:defaultText completion:answer];
 }
 
 // The page stops while its dialog waits, so a navigation the user starts would never commit. Dismiss the dialog first, as other browsers do on reload or going back.
