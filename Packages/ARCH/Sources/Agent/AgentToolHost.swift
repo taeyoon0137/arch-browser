@@ -1027,7 +1027,9 @@ extension AgentToolHost {
         switch tool.name {
         case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
         case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
-        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles)
+        case "list_tabs":
+            let hidden = Set(host.agentTabs(of: session.id).filter { !session.permitsResearchTab($0, host: host, allowsAI: allowsAI) }.map(\.id))
+            return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles, hidden: hidden)
         case "read_text", "snapshot":
             let handle = call.arguments["tab"]?.stringValue ?? ""
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
@@ -1038,7 +1040,9 @@ extension AgentToolHost {
             func mayRead(_ current: AgentTabInfo) -> Bool {
                 guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.takeoverGeneration == generation,
                       current.agentOwnerID == tab.agentOwnerID, session.handles.tabs.id(for: handle) == id else { return false }
-                if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
+                if current.agentOwnerID == session.id {
+                    return host.agentTabs(of: session.id).contains { $0.id == id } && session.permitsResearchTab(current, host: host, allowsAI: allowsAI)
+                }
                 return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
             guard !Task.isCancelled else { return Self.ended.result }
@@ -1050,7 +1054,7 @@ extension AgentToolHost {
             defer { session.finishedReading(reading) }
             if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
             let snapshots = session.snapshots
-            let shared = tab.agentOwnerID == nil
+            let shared = tab.agentOwnerID == nil || session.researchPages[tab.id] != nil
             return await snapshot(call.arguments, tab: tab, handle: handle, shared: shared, store: snapshots, pages: 0) { current in
                 session.snapshots === snapshots && mayRead(current)
             }.result
@@ -1128,14 +1132,14 @@ extension AgentToolHost {
     }
 
     /// The session's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI, or on a page agents do not read, is listed without its title or address (rule P16).
-    private func listTabs(shared: Bool, ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
+    private func listTabs(shared: Bool, ofSession client: AgentToolClient, handles: inout AgentGrantHandles, hidden: Set<UUID>) -> AgentToolResult {
         let sharedIDs = Set(handles.sharedTabIDs)
         let tabs = shared ? host.userTabs(in: client.personaID).filter { sharedIDs.contains($0.id) } : host.agentTabs(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for tab in tabs {
             let handle = handles.tabs.handle(for: tab.id)
-            let excluded = !AgentPolicy.showsTitle(of: tab.url, allowsAI: allowsAI)
+            let excluded = hidden.contains(tab.id) || !AgentPolicy.showsTitle(of: tab.url, allowsAI: allowsAI)
             var row: [String: AgentJSON] = ["handle": .string(handle), "excluded": .bool(excluded)]
             var line = handle
             if excluded {

@@ -159,7 +159,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     // MARK: WKUIDelegate
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard let delegate = owner.uiDelegate else { return nil }
+        guard let delegate = owner.uiDelegate, delegate.webContentsMayCreatePopup(owner) else { return nil }
         // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
         if let url = navigationAction.request.url, Self.opensExternally(url) {
             delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)

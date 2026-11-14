@@ -82,6 +82,14 @@ import Foundation
         return Self.info(of: tab)
     }
 
+    public func openResearchTab(at url: URL, for owner: AgentTabOwner, mayLoad: @escaping @MainActor (URL) -> Bool) -> AgentTabInfo? {
+        guard let tab = session.openAgentTab(url: url, engine: nil, owner: owner.id, folderName: owner.folderName, in: owner.spaceID, researchLoad: { address in
+            MainActor.assumeIsolated { mayLoad(address) }
+        }) else { return nil }
+        follow(tab, owner: owner.id)
+        return Self.info(of: tab)
+    }
+
     public func navigate(_ tabID: UUID, _ navigation: AgentNavigation) {
         guard let tab = agentTab(tabID) else { return }
         let controller = tab.webContents.navigationController

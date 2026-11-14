@@ -145,6 +145,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     func agentTabs(of ownerID: UUID) -> [AgentTabInfo]
     /// Opens a tab at `url` in the background, in `engine` or the default engine, in the owner's agent folder, which it makes among the open tabs of the owner's space when there is none. It selects nothing and switches no window's space. Nil when the space is gone.
     func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo?
+    /// Opens a background session tab. Before its first page request the host installs the one-use, main-frame address check. While owned it accepts no popups or downloads.
+    func openResearchTab(at url: URL, for owner: AgentTabOwner, mayLoad: @escaping @MainActor (URL) -> Bool) -> AgentTabInfo?
     func navigate(_ tabID: UUID, _ navigation: AgentNavigation)
     /// Closes an agent tab without asking its page; it joins neither the closed list nor the tab close log, and reports nothing.
     func closeAgentTab(_ tabID: UUID)
