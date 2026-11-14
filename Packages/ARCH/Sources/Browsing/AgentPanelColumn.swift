@@ -24,7 +24,7 @@ struct AgentPanelColumn: View {
                 .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
                 .transition(.move(edge: .trailing))
         } else if let content = windowModel.agentPanel, let agents = session.agents {
-            AgentPanelFrame(agents: agents, content: content, actions: actions)
+            AgentPanelFrame(agents: agents, permissions: session.sitePermissions, content: content, actions: actions)
                 .frame(width: PageReaderColumn.width)
                 // The page's own margin separates it from the panel.
                 .padding(EdgeInsets(top: BrowserWindowView.pageMargin, leading: 0, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin))
@@ -47,6 +47,7 @@ struct AgentPanelColumn: View {
 
 private struct AgentPanelFrame: View {
     @ObservedObject var agents: AgentService
+    @ObservedObject var permissions: SitePermissionStore
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let content: AgentPanelContent
     let actions: AgentPanelActions
@@ -68,9 +69,12 @@ private struct AgentPanelFrame: View {
             Divider()
             switch content {
             case .composer(let context):
-                AgentComposer(service: agents, context: context, actions: actions) { windowModel.agentTaskDidStart($0.id, from: context) }
-                    // A new context, as from New Agent Task with another tab selected, starts a new draft.
-                    .id(context.id)
+                let note = permissions.agentPermissionNote(for: context.personaID, agentOnlyPersonaID: windowModel.session.agentOnlyPersonaID)
+                AgentComposer(service: agents, context: context, actions: actions, permissionNote: note) {
+                    windowModel.agentTaskDidStart($0.id, from: context)
+                }
+                // A new context, as from New Agent Task with another tab selected, starts a new draft.
+                .id(context.id)
             case .client:
                 // The column shows an outside client's panel on its own.
                 EmptyView()

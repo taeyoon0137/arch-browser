@@ -71,6 +71,31 @@ import UserNotifications
         await service.deleteSession(session.id)
     }
 
+    @Test func theAgentsPersonaPreviewOmitsSitePermissionsWithoutCreatingAPersona() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        harness.agentModels = [.init(provider: AIProviderID(), model: "fixture")]
+        let service = try await harness.makeOpenService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: nil)
+        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let message = "Sites previously allowed to use camera may keep that access in Chromium agent tabs."
+        let composer = AgentComposer(service: service, context: context, actions: actions, permissionNote: message) { _ in }
+        let personas = harness.host.personas.map(\.id)
+        let host = NSHostingController(rootView: composer)
+        let window = NSWindow(contentViewController: host)
+        window.setContentSize(NSSize(width: 380, height: 560))
+        host.view.layoutSubtreeIfNeeded()
+        #expect(composer.selectedPermissionNote == message)
+        context.usesAgentsPersona = true
+        host.view.layoutSubtreeIfNeeded()
+        #expect(composer.selectedPermissionNote == nil && service.agentsPersonaPlace == "Agents / Personal")
+        context.usesAgentsPersona = false
+        #expect(composer.selectedPermissionNote == message)
+        #expect(harness.host.personas.map(\.id) == personas && service.sessions.isEmpty && !window.isVisible)
+    }
+
     @Test(arguments: [false, true]) func openingLongConversationShowsFirstQuestionOrLatestReply(hasQuestions: Bool) async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

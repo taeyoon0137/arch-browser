@@ -9,6 +9,27 @@ import Testing
     private static let site = URL(string: "https://example.com/page")!
     private static let origin = "https://example.com"
 
+    @Test func theDraftSummarizesSensitiveWebsiteAnswersForOrdinaryPersonas() throws {
+        let folder = try Folder()
+        let store = SitePermissionStore(directory: folder.url)
+        let agents = UUID(), ordinary = UUID()
+        func note(_ persona: UUID) -> String? {
+            store.agentPermissionNote(for: persona, agentOnlyPersonaID: agents)
+        }
+        store.set(.allow, for: [.notifications, .clipboard], origin: Self.origin)
+        #expect(note(ordinary) == nil)
+        store.set(.deny, for: [.microphone], origin: Self.origin)
+        #expect(note(ordinary) == "Sites previously denied access to microphone remain blocked for those permissions.")
+        store.set(.allow, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
+        let mixed = try #require(note(ordinary))
+        for name in ["camera", "microphone", "location", "Chromium agent tabs"] { #expect(mixed.contains(name)) }
+        #expect(mixed.contains("previously denied") && !mixed.contains("example"))
+        #expect(note(Persona.defaultID) == mixed && note(agents) == nil)
+        store.set(nil, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
+        store.set(nil, for: [.microphone], origin: Self.origin)
+        #expect(note(ordinary) == nil)
+    }
+
     @Test func theAgentsPersonaTakesNoRememberedAnswersUntilItIsOrdinary() throws {
         let folder = try Folder()
         let store = SitePermissionStore(directory: folder.url)

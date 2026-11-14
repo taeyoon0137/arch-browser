@@ -117,16 +117,20 @@ public struct AgentComposer: View {
     @ObservedObject private var settings = AIService.shared.settings
     @ObservedObject private var context: AgentComposerContext
     let actions: AgentPanelActions
+    private let permissionNote: String?
     let didStart: (AgentSession) -> Void
     @FocusState private var isTaskFocused: Bool
     @State private var loadedEffort: (source: EffortSource, levels: [String])?
 
-    public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, didStart: @escaping (AgentSession) -> Void) {
+    public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, permissionNote: String? = nil, didStart: @escaping (AgentSession) -> Void) {
         self.service = service
         self.context = context
         self.actions = actions
+        self.permissionNote = permissionNote
         self.didStart = didStart
     }
+
+    var selectedPermissionNote: String? { context.usesAgentsPersona ? nil : permissionNote }
 
     private var models: [AIModelRef] { service.agentModels() }
 
@@ -180,6 +184,7 @@ public struct AgentComposer: View {
                 .controlSize(.small)
             }
             Divider()
+            if let selectedPermissionNote { note(selectedPermissionNote) }
             if models.isEmpty {
                 modelSetup
             } else {

@@ -42,6 +42,26 @@ public final class SitePermissionStore: ObservableObject {
         decisions[origin]?[type]
     }
 
+    /// A draft shows only permission types, never the sites whose answers an ordinary Persona inherits.
+    func agentPermissionNote(for personaID: UUID, agentOnlyPersonaID: UUID?) -> String? {
+        guard personaID != agentOnlyPersonaID else { return nil }
+        let types: [(EnginePermissionType, String)] = [(.camera, "camera"), (.microphone, "microphone"), (.geolocation, "location")]
+        var allowed: [String] = []
+        var blocked: [String] = []
+        for (type, name) in types {
+            if decisions.values.contains(where: { $0[type] == .allow }) { allowed.append(name) }
+            if decisions.values.contains(where: { $0[type] == .deny }) { blocked.append(name) }
+        }
+        var sentences: [String] = []
+        if !allowed.isEmpty {
+            sentences.append("Sites previously allowed to use \(allowed.formatted(.list(type: .or))) may keep that access in Chromium agent tabs.")
+        }
+        if !blocked.isEmpty {
+            sentences.append("Sites previously denied access to \(blocked.formatted(.list(type: .or))) remain blocked for those permissions.")
+        }
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+    }
+
     /// Remembers `decision` for each of `types`, or forgets their answers when it is `nil` and lists them in `removed`, and saves the file.
     public func set(_ decision: Decision?, for types: [EnginePermissionType], origin: String) {
         var answers = decisions[origin] ?? [:]
