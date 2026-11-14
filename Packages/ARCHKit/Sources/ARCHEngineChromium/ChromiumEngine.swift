@@ -9,6 +9,8 @@ public final class ChromiumEngine: Engine {
     public let capabilities: Set<EngineCapability> = [.extensions]
     /// Arch's engine runs Chromium's own extension system in every Alloy style browser (VI.1), so the CEF version, which the bridge builds with, names it.
     public var extensionRuntimeVersion: String? { ARCHCEFRuntime.cefVersion }
+    /// The system folder of host manifests that Chromium reads itself for a name that `NativeMessagingHosts` in its user data directory lacks, following links: Chromium's `DIR_NATIVE_MESSAGING` on the Mac, which the pinned framework names. No link of Arch's decides what Chromium finds there.
+    public var systemNativeMessagingHosts: URL { URL(fileURLWithPath: "/Library/Application Support/Chromium/NativeMessagingHosts", isDirectory: true) }
     let frameworkPath: String
     let helperPath: String?
     private let accessibility = MainActor.assumeIsolated { ChromiumAccessibility() }

@@ -86,7 +86,7 @@ APP="$DESTINATION/Arch.app"
 [ -d "$DESTINATION" ] || { echo "missing $DESTINATION" >&2; exit 1; }
 # `codesign -dv` writes to standard error, and only `signed_with_team` reads it.
 if ! codesign -dv "$SOURCE" 2>&1 | signed_with_team; then
-  echo "1Password connects only to signed browsers. Set up an Apple Development identity or set ARCH_SIGN_IDENTITY, then run scripts/bundle_app.sh again." >&2
+  echo "1Password connects only to signed browsers. Set up a Developer ID Application or Apple Development identity, or set ARCH_SIGN_IDENTITY, then run scripts/bundle_app.sh again." >&2
   exit 1
 fi
 if ps -axo comm= | grep -Fqx "$APP/Contents/MacOS/Arch"; then

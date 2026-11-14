@@ -1,4 +1,4 @@
-// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery and Proof gate). Native app vendors install host manifests only for browsers they know, so Arch reads the folders where they install them for other browsers, without changing anything there, and links each valid manifest into its own `NativeMessagingHosts/` folder, which both engines read: a link follows the vendor's changes. The user's own files in that folder take precedence, and a host whose native app macOS does not start for Arch gets no link. A version of an extension reaches a native app through one of Arch's links only when Arch has proof of its identifier, since a package can copy another extension's public key and the native app trusts the identifier the browser passes it.
+// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery and Proof gate). Native app vendors install host manifests only for browsers they know, so Arch reads the folders where they install them for other browsers, without changing anything there, and links each valid manifest into its own `NativeMessagingHosts/` folder, which both engines read: a link follows the vendor's changes. The user's own files in that folder take precedence, and a host whose native app macOS does not start for Arch gets no link. A version of an extension reaches a native app through one of Arch's links only when Arch has proof of its identifier, since a package can copy another extension's public key and the native app trusts the identifier the browser passes it. On Chromium the gate also covers Chromium's own system folder, which Chromium reads itself under a name that Arch's folder lacks.
 import Combine
 import Foundation
 import Plugins
@@ -24,11 +24,11 @@ public struct NativeMessagingHost: Hashable, Sendable {
     public let held: HeldReason?
 }
 
-/// The manifest behind one of Arch's links, as the gate reads it.
+/// A manifest that the gate reads: behind one of Arch's links, or in the system folder that Chromium reads itself.
 public struct NativeMessagingLinkedHost: Hashable, Sendable {
     /// The manifest's `description`, or its name without one.
     public let description: String
-    /// The manifest's `allowed_origins`, or nil when the manifest behind the link does not read, as while its vendor writes it, which the gate counts as allowing every caller until a pass reads it.
+    /// The manifest's `allowed_origins`, or nil when the manifest does not read, as while its vendor writes it, which the gate counts as allowing every caller until a pass reads it.
     public let allowedOrigins: [String]?
 }
 
@@ -69,6 +69,8 @@ public final class NativeMessagingHostLinks: ObservableObject {
     public let directory: URL
     /// The folders a pass reads, in order: for each name, the first with a valid manifest wins.
     public let folders: [URL]
+    /// The system folder that Chromium reads host manifests from itself, under a name that Arch's folder lacks, which Arch's links do not decide (`ChromiumEngine.systemNativeMessagingHosts`); nil without Arch's Chromium engine. The gate counts what it holds.
+    public let chromiumFolder: URL?
     /// The winners of the run's last pass by name, with whether each is held and why.
     @Published public private(set) var hosts: [String: NativeMessagingHost] = [:]
     /// The user's valid manifests in Arch's folder by name, as the run's last pass read them: the files there that are not Arch's links, which both engines read under their names. None is held, and `folder` is Arch's folder.
@@ -79,41 +81,47 @@ public final class NativeMessagingHostLinks: ObservableObject {
     @Published public private(set) var hasLooked = false
     /// Whether Arch's signature meets the parent launch constraints of each helper that a pass asked about in this run, by the helper's path as its manifest names it: nil for constraints that do not read, and no entry for a helper not asked about. Passes ask about the manifests of `HelperLaunchConstraints.constrainedHosts` among the winners, to hold them, and among the user's manifests in Arch's folder, for Settings, at most once per helper and run. Arch's team stays out of it.
     @Published public private(set) var launchConstraintAnswers: [String: Bool?] = [:]
-    /// Set by the session: called when the gate comes to refuse more callers, so that every Persona's runtime takes the versions it refuses out of Chromium. A pass calls it before it creates a link or changes a link's destination, once the gate counts the links the pass will make (`gatingHosts`), and changes the links only once it returns; and again after the change, when its reading of the manifests behind Arch's links refuses a caller that the gate did not count, as when a vendor adds an origin to a manifest behind a link that stays or a manifest no longer reads. Removing a link refuses no one more.
+    /// Set by the session: called when the gate comes to refuse more callers, so that every Persona's runtime takes the versions it refuses out of Chromium. A pass calls it before it creates a link or changes a link's destination, once the gate counts the links the pass will make (`gatingHosts`), and changes the links only once it returns; and again after the change, when its reading of the manifests behind Arch's links and in `chromiumFolder` refuses a caller that the gate did not count, as when a vendor adds an origin to a manifest behind a link that stays or in Chromium's folder, or a manifest no longer reads. Removing a link refuses no one more, since the gate counts Chromium's folder under Arch's links too.
     public var gateWidens: (@MainActor () async -> Void)?
 
     /// Whether Arch's signature meets the parent launch constraints of the helper at a path, or nil when they do not read. Called off the main thread, at most once per helper and run (`launchConstraintAnswers`).
     private let launchConstraintCheck: @Sendable (URL) -> Bool?
     /// The run's last pass, which `update()` waits for instead of starting another.
     private var pass: Task<Void, Never>?
-    /// The names under Arch's links with their manifests: as the last pass left them, or as read from Arch's folder before the run's first pass.
-    private var linked: [String: NativeMessagingLinkedHost]?
+    /// What the gate read: as the last pass left it, or as read from Arch's folder and `chromiumFolder` before the run's first pass.
+    private var lastReading: GateReading?
     /// The links a pass is about to make, which the gate counts from before `gateWidens` until they exist.
     private var announced: [String: NativeMessagingLinkedHost] = [:]
 
     /// Reads a held host's launch constraints with `HelperLaunchConstraints.admitArch(toHelperAt:)`.
-    public convenience init(directory: URL, folders: [URL]) {
-        self.init(directory: directory, folders: folders) { HelperLaunchConstraints.admitArch(toHelperAt: $0) }
+    public convenience init(directory: URL, folders: [URL], chromiumFolder: URL? = nil) {
+        self.init(directory: directory, folders: folders, chromiumFolder: chromiumFolder) { HelperLaunchConstraints.admitArch(toHelperAt: $0) }
     }
 
     /// `admitsArch` answers in place of the helpers' launch constraints, for tests.
-    init(directory: URL, folders: [URL], admitsArch: @escaping @Sendable (URL) -> Bool?) {
+    init(directory: URL, folders: [URL], chromiumFolder: URL? = nil, admitsArch: @escaping @Sendable (URL) -> Bool?) {
         self.directory = directory
         self.folders = folders
+        self.chromiumFolder = chromiumFolder
         launchConstraintCheck = admitsArch
     }
 
-    /// The names under Arch's own links, with the manifests behind them, read from Arch's folder and those manifests until the run's first pass ends; a manifest that does not read has no origins. The gate covers only these names: a user's file under a name is what both engines read, so it gates nothing.
+    /// The names under Arch's own links, with the manifests behind them, read from Arch's folder and those manifests until the run's first pass ends; a manifest that does not read has no origins. A user's file under a name is what both engines read, so it gates nothing.
     public var linkedHosts: [String: NativeMessagingLinkedHost] {
-        if let linked { return linked }
-        let read = Self.readLinkedHosts(in: directory, folders: folders)
-        linked = read
-        return read
+        reading.links
     }
 
-    /// What the gate counts: `linkedHosts`, and the links a pass is about to make.
-    var gatingHosts: [String: NativeMessagingLinkedHost] {
-        linkedHosts.merging(announced) { $1 }
+    /// What the gate counts, in the order its sentence looks for a manifest: `linkedHosts` with the links a pass is about to make, by name, then the manifests in `chromiumFolder`, by name.
+    var gatingHosts: [NativeMessagingLinkedHost] {
+        [linkedHosts.merging(announced) { $1 }, reading.chromiumFolder].flatMap { $0.sorted { $0.key < $1.key }.map(\.value) }
+    }
+
+    /// The last reading, or one read now before the run's first pass ends.
+    private var reading: GateReading {
+        if let lastReading { return lastReading }
+        let read = Self.readGate(in: directory, folders: folders, chromiumFolder: chromiumFolder)
+        lastReading = read
+        return read
     }
 
     /// Runs a pass only if none has run in this run, and otherwise waits for the run's last one.
@@ -133,9 +141,9 @@ public final class NativeMessagingHostLinks: ObservableObject {
         await next.value
     }
 
-    /// Reads the listed folders, holds the hosts whose helpers macOS does not start for Arch, and brings Arch's links in line with the winners: it creates a link for each winner whose name has nothing in Arch's folder, replaces its own link when the winner moved, and removes its own links whose names have no winner or a held one. A link that would be created or change first waits for `gateWidens`, which the pass calls again once the gate reads the manifests behind the links, when they refuse a caller that it did not count. It also reads the user's manifests in Arch's folder, and asks about the launch constraints of a helper that one of them names, for Settings.
+    /// Reads the listed folders, holds the hosts whose helpers macOS does not start for Arch, and brings Arch's links in line with the winners: it creates a link for each winner whose name has nothing in Arch's folder, replaces its own link when the winner moved, and removes its own links whose names have no winner or a held one. A link that would be created or change first waits for `gateWidens`, which the pass calls again once the gate reads the manifests behind the links and in `chromiumFolder`, when they refuse a caller that it did not count. It also reads the user's manifests in Arch's folder, and asks about the launch constraints of a helper that one of them names, for Settings.
     private func runPass() async {
-        let (directory, folders) = (self.directory, self.folders)
+        let (directory, folders, chromiumFolder) = (self.directory, self.folders, self.chromiumFolder)
         let found = await Task.detached { Self.discover(in: folders) }.value
         var hosts: [String: NativeMessagingHost] = [:]
         for (name, manifest) in found.winners {
@@ -164,19 +172,20 @@ public final class NativeMessagingHostLinks: ObservableObject {
             announced = hosts.filter { wanted[$0.key] != nil }.mapValues { NativeMessagingLinkedHost(description: $0.description, allowedOrigins: $0.allowedOrigins) }
             await gateWidens?()
         }
-        let linked = await Task.detached {
+        let reading = await Task.detached {
             Self.change(directory, removing: removals, linking: changes)
-            return Self.readLinkedHosts(in: directory, folders: folders)
+            return Self.readGate(in: directory, folders: folders, chromiumFolder: chromiumFolder)
         }.value
-        // What the gate counted until now; before anything read the links, the gate counted nothing that the new reading could widen.
-        let counted = (self.linked ?? linked).merging(announced) { $1 }
-        self.linked = linked
+        // What the gate counted until now; before anything read the folders, the gate counted nothing that the new reading could widen.
+        let previous = lastReading ?? reading
+        let counted = previous.links.merging(announced) { $1 }
+        lastReading = reading
         announced = [:]
         self.hosts = hosts
         self.userHosts = userHosts
         unreadableFolders = found.unreadable
         hasLooked = true
-        if Self.widens(linked, beyond: counted) { await gateWidens?() }
+        if Self.widens(reading.links, beyond: counted) || Self.widens(reading.chromiumFolder, beyond: previous.chromiumFolder) { await gateWidens?() }
     }
 
     /// Whether the gate under `new` refuses a caller that it did not under `old`: under a name that `old` lacks, a manifest that allows an origin it did not, or one that no longer reads.
@@ -200,11 +209,11 @@ public final class NativeMessagingHostLinks: ObservableObject {
 
     // MARK: The gate
 
-    /// The gate's sentence for the caller under the first of Arch's links by name whose manifest allows it, else under the first whose manifest does not read: nil for a caller with proof, and for one that every such manifest reads and refuses.
+    /// The gate's sentence for the caller under the first manifest that the gate counts (`gatingHosts`) that allows it, else under the first that does not read: nil for a caller with proof, and for one that every such manifest reads and refuses.
     func refusal(of caller: NativeMessagingCaller) -> String? {
         guard !caller.isProven else { return nil }
         let origin = NativeMessaging.origin(of: caller.extensionID)
-        let hosts = gatingHosts.sorted { $0.key < $1.key }.map(\.value)
+        let hosts = gatingHosts
         guard let host = hosts.first(where: { $0.allowedOrigins?.contains(origin) == true }) ?? hosts.first(where: { $0.allowedOrigins == nil }) else { return nil }
         return Self.gateSentence(naming: host.description, predatesProof: caller.predatesProof)
     }
@@ -317,14 +326,37 @@ public final class NativeMessagingHostLinks: ObservableObject {
         return folderPaths.contains(target.deletingLastPathComponent().standardizedFileURL.path) ? target.standardizedFileURL.path : nil
     }
 
-    /// The manifests behind Arch's links by name. A manifest that does not read, as while its vendor writes it or after it is gone, gets no origins, so that the gate refuses every caller without proof under it rather than none while an engine may read it a moment later.
-    private nonisolated static func readLinkedHosts(in directory: URL, folders: [URL]) -> [String: NativeMessagingLinkedHost] {
-        var hosts: [String: NativeMessagingLinkedHost] = [:]
-        for (name, destination) in readFolder(directory, folders: folders).links {
-            let manifest = readManifest(URL(fileURLWithPath: destination))
-            hosts[name] = NativeMessagingLinkedHost(description: manifest?.description ?? name, allowedOrigins: manifest?.allowedOrigins)
+    /// What the gate reads from the folders that Chromium reads itself.
+    private struct GateReading: Sendable {
+        /// The manifests behind Arch's links by name.
+        let links: [String: NativeMessagingLinkedHost]
+        /// The manifests in `chromiumFolder` by name, except under a name whose file in Arch's folder is the user's and exists.
+        let chromiumFolder: [String: NativeMessagingLinkedHost]
+    }
+
+    /// The manifests behind Arch's links, and those in `chromiumFolder` under each name for which Chromium may read there: every `<name>.json` with a valid name, whether a pass would find it valid or not, since Chromium reads it by its own rules. Chromium reads its folder under a name only while Arch's folder has nothing there, following links; a name under one of Arch's links counts too, since removing the link leaves it to Chromium's folder, but the user's file under a name is what Chromium reads. A manifest that does not read, as while its vendor writes it or after it is gone, gets no origins, so that the gate refuses every caller without proof under it rather than none while an engine may read it a moment later.
+    private nonisolated static func readGate(in directory: URL, folders: [URL], chromiumFolder: URL?) -> GateReading {
+        let current = readFolder(directory, folders: folders)
+        var links: [String: NativeMessagingLinkedHost] = [:]
+        for (name, destination) in current.links {
+            links[name] = gatedHost(named: name, at: URL(fileURLWithPath: destination))
         }
-        return hosts
+        var chromiumHosts: [String: NativeMessagingLinkedHost] = [:]
+        if let chromiumFolder {
+            for file in (try? FileManager.default.contentsOfDirectory(atPath: chromiumFolder.path)) ?? [] where file.hasSuffix(".json") {
+                let name = String(file.dropLast(".json".count))
+                guard NativeMessaging.isValidName(name),
+                      !(current.userNames.contains(name) && FileManager.default.fileExists(atPath: directory.appendingPathComponent(file).path)) else { continue }
+                chromiumHosts[name] = gatedHost(named: name, at: chromiumFolder.appendingPathComponent(file))
+            }
+        }
+        return GateReading(links: links, chromiumFolder: chromiumHosts)
+    }
+
+    /// The manifest at `url` for the name as the gate counts it, without origins when it does not read.
+    private nonisolated static func gatedHost(named name: String, at url: URL) -> NativeMessagingLinkedHost {
+        let manifest = readManifest(url)
+        return NativeMessagingLinkedHost(description: manifest?.description ?? name, allowedOrigins: manifest?.allowedOrigins)
     }
 
     /// Removes Arch's links under `removing` and points the names of `linking` at their destinations, each through a new link that replaces the name at once. Creates Arch's folder when it has a link to make. A change that fails leaves that name as it was.

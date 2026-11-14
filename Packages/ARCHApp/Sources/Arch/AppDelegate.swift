@@ -41,11 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let chromium {
             registry.register(chromium)
         }
-        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app. The Web Store asks for the Chromium version of Arch's engine, which its CEF version names, read without starting CEF. Web extensions reach native apps whose vendors install host manifests only for other browsers through links to those manifests.
+        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app. The Web Store asks for the Chromium version of Arch's engine, which its CEF version names, read without starting CEF. Web extensions reach native apps whose vendors install host manifests only for other browsers through links to those manifests, and the proof gate also counts the system folder that Chromium reads itself.
         let session: BrowserSession
         do {
             session = try BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self],
-                                         cefVersion: chromium?.extensionRuntimeVersion, nativeMessagingHostFolders: BrowserSource.nativeMessagingHostFolders)
+                                         cefVersion: chromium?.extensionRuntimeVersion, nativeMessagingHostFolders: BrowserSource.nativeMessagingHostFolders,
+                                         chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts)
         } catch {
             fatalError("The browser session could not start: \(error)")
         }

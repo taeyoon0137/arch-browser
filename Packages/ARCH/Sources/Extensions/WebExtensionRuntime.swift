@@ -143,7 +143,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         changeEngines { await $0.loadEnabledExtensions() }
     }
 
-    /// Answers the engine for a profile of the Persona that has just started. The runtime becomes the profile's delegate at once, before any extension attaches it, so that the store's own install button, which asks before the Persona has an extension, reaches it. On Chromium, which reads Arch's links itself, it then stops each version that the gate refuses by `NativeMessagingHostLinks.linkedHosts`, also one the profile kept from an earlier launch, before any pass of loads ends. Then, while no extension is enabled, it stops what the profile runs from an earlier launch: no pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
+    /// Answers the engine for a profile of the Persona that has just started. The runtime becomes the profile's delegate at once, before any extension attaches it, so that the store's own install button, which asks before the Persona has an extension, reaches it. On Chromium, which reads Arch's links and its own system folder itself, it then stops each version that the gate refuses by what `NativeMessagingHostLinks` reads there, also one the profile kept from an earlier launch, before any pass of loads ends. Then, while no extension is enabled, it stops what the profile runs from an earlier launch: no pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
     public func profileDidStart(with extensions: any EngineExtensions, of kind: EngineKind) {
         extensions.delegate = self
         startedProfiles[kind] = extensions
@@ -350,7 +350,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// The gate's sentence for the version on Chromium, which reads Arch's links itself: for a version whose grant has `nativeMessaging`, whose identifier Arch cannot prove, and which a manifest behind one of Arch's links, or one that a pass is about to make, allows, as a manifest behind a link that does not read counts. Nil lets it run there.
+    /// The gate's sentence for the version on Chromium, which reads Arch's links and its own system folder itself: for a version whose grant has `nativeMessaging`, whose identifier Arch cannot prove, and which a manifest behind one of Arch's links, one that a pass is about to make, or one in Chromium's folder allows, as a manifest that does not read counts. Nil lets it run there.
     private func gateRefusal(of installed: InstalledPlugin) -> String? {
         guard installed.grant.permissions.contains(.nativeMessaging) else { return nil }
         return hostLinks.refusal(of: NativeMessagingCaller(installed))

@@ -56,7 +56,7 @@ Built in IV.18; the store page entry points find no store page until IV.27 (Purp
 
 Built in IV.19; it finds no store page until IV.27 (Purpose and scope).
 
-`EngineExtensionPrompt.Kind` has `install`, which the Chromium adapter reports with the extension's identifier and the prompt's tab. The runtime answers false, so Chromium never installs an extension outside Arch's plugin list, and, when the tab shows a store page (`WebStore.extensionID(in:)`) and the identifier reads as one, asks the host to start Arch's store install for it in the Persona, with the tab for its space (`WebExtensionHost.installFromWebStore(_:persona:tab:)`). A prompt without a tab, from a tab off a store page, or with text that is not an identifier is refused and starts nothing. The store's button asks before the Persona may have any extension, while the runtime attaches the engines only for the first extension it checks, loads, or removes, so the runtime becomes the delegate of each of the Persona's profiles as the profile starts (`profileDidStart(with:)`). The session's host opens the store sheet through `BrowserSession.installFromWebStore` with the tab's space, or for a favorite's tab the space of the window that shows it, as the site settings popover's Web Store row does, so the review names the Persona by Decision 7. WebKit has no store install prompt.
+`EngineExtensionPrompt.Kind` has `install`, which the Chromium adapter reports with the extension's identifier and the prompt's tab. The runtime answers false, so Chromium never installs an extension outside Arch's plugin list, and, when the tab shows a store page (`WebStore.extensionID(in:)`) and the identifier reads as one, asks the host to start Arch's store install for it in the Persona, with the tab for its space (`WebExtensionHost.installFromWebStore(_:persona:tab:)`). A prompt without a tab, from a tab off a store page, or with text that is not an identifier is refused and starts nothing. The store's button asks before the Persona may have any extension, while the runtime attaches the engines only for the first extension it checks, loads, or removes, so the runtime becomes the delegate of each of the Persona's profiles as the profile starts (`profileDidStart(with:of:)`). The session's host opens the store sheet through `BrowserSession.installFromWebStore` with the tab's space, or for a favorite's tab the space of the window that shows it, as the site settings popover's Web Store row does, so the review names the Persona by Decision 7. WebKit has no store install prompt.
 
 ## Package proof
 
@@ -196,9 +196,10 @@ func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebCon
 // WebExtensionRuntime, internal: reads store pages, on hosts that stand in for the store's in the tests.
 var storePageReader: (URL) -> String?
 
-// Browsing, BrowserSession, built in IV.17: the app shell passes `ChromiumEngine.extensionRuntimeVersion`, the CEF version, read without starting CEF.
+// Browsing, BrowserSession, built in IV.17: the app shell passes `ChromiumEngine.extensionRuntimeVersion`, the CEF version, read without starting CEF, and for the native app links and their gate `BrowserSource.nativeMessagingHostFolders` and `ChromiumEngine.systemNativeMessagingHosts` (`docs/password-managers.md`, Host discovery and Proof gate).
 public let webStore: WebStoreInstaller
-public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?) throws
+public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
+            chromiumNativeMessagingHosts: URL? = nil) throws
 /// Built in IV.18. Set by the app shell: opens Settings ▸ Plugins at the Persona with the store sheet started for the identifier, and a review that names the Persona with the space, if any. `installEngineVersion` passes the tab's space too.
 public var installFromWebStore: ((Persona.ID, Space.ID?, String) -> Void)?
 public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) -> Void)?

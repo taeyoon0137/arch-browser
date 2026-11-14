@@ -170,7 +170,7 @@ private struct ShellRun {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let empty = try shell(#"sh "$SCRIPT""#, install)
         #expect(empty.status != 0 && destinationNames.isEmpty)
-        #expect(empty.output == "1Password connects only to signed browsers. Set up an Apple Development identity or set ARCH_SIGN_IDENTITY, then run scripts/bundle_app.sh again.\n")
+        #expect(empty.output == "1Password connects only to signed browsers. Set up a Developer ID Application or Apple Development identity, or set ARCH_SIGN_IDENTITY, then run scripts/bundle_app.sh again.\n")
         try writeBundle(at: destination.appendingPathComponent("Arch.app"), identifier: "org.example.other", marker: "other")
         #expect(try shell(#"sh "$SCRIPT""#, install).status != 0)
         #expect(destinationNames == ["Arch.app"] && marker(at: destination.appendingPathComponent("Arch.app")) == "other")

@@ -1,4 +1,4 @@
-// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery, Proof gate, and Tests): the links a pass makes, keeps, replaces, and removes in Arch's folder from manifests in temporary folders that stand for other browsers' host folders, the manifests it skips, the folders it cannot read, the user's files it leaves, one pass per run unless forced, held hosts, the launch constraints in `codesign` output written for the tests, and the gate on WebKit, on Chromium, at a Chromium profile's start, in the review, for pairs, in the order of a pass that links a native app while another Persona runs an unproven version, after a vendor changes a manifest behind a link, and under a link whose manifest does not read. Shell scripts stand for native apps, recording engines for the engines' runtimes, and no test reads a real browser's folder or runs `codesign`.
+// Host discovery and the proof gate (`docs/password-managers.md`, Host discovery, Proof gate, and Tests): the links a pass makes, keeps, replaces, and removes in Arch's folder from manifests in temporary folders that stand for other browsers' host folders, the manifests it skips, the folders it cannot read, the user's files it leaves, one pass per run unless forced, held hosts, the launch constraints in `codesign` output written for the tests, and the gate on WebKit, on Chromium, at a Chromium profile's start, in the review, for pairs, in the order of a pass that links a native app while another Persona runs an unproven version, after a vendor changes a manifest behind a link, under a link whose manifest does not read, and in the system folder that Chromium reads itself. Shell scripts stand for native apps, recording engines for the engines' runtimes, and no test reads a real browser's folder or runs `codesign`.
 import ARCHEngine
 @testable import Extensions
 import Foundation
@@ -271,6 +271,33 @@ private final class LaunchConstraintAnswers: @unchecked Sendable {
         #expect(links.linkedHosts == ["org.example.app": NativeMessagingLinkedHost(description: "org.example.app", allowedOrigins: nil)])
         #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: false)) == gateSentence("org.example.app"))
         #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: true)) == nil)
+    }
+
+    @Test func gatesWhatChromiumReadsInItsOwnFolderUnlessTheUsersFileTakesTheName() async throws {
+        let app = try writeApp(in: folder)
+        let chromium = folder.url.appendingPathComponent("Chromium/NativeMessagingHosts", isDirectory: true)
+        // Discovery skips the manifest, whose `path` names no file, so no link appears; Chromium reads it itself by its own rules.
+        try writeHostManifest("org.example.app", into: chromium, app: folder.url.appendingPathComponent("Apps/missing"), allowing: [extensionID])
+        let links = NativeMessagingHostLinks(directory: arch, folders: [chromium], chromiumFolder: chromium) { _ in nil }
+        let asked = Recorded<Bool>()
+        links.gateWidens = { asked.values.append(true) }
+        let caller = NativeMessagingCaller(extensionID: extensionID, isProven: false)
+        // Before the run's first pass, as at a Chromium profile's start.
+        #expect(links.refusal(of: caller) == gateSentence())
+        #expect(links.refusal(of: NativeMessagingCaller(extensionID: extensionID, isProven: true)) == nil)
+        #expect(links.refusal(of: NativeMessagingCaller(extensionID: String(repeating: "b", count: 32), isProven: false)) == nil)
+        await links.update()
+        #expect(links.hosts.isEmpty && links.linkedHosts.isEmpty && destination(of: "org.example.app") == nil && links.refusal(of: caller) == gateSentence())
+        #expect(asked.values.isEmpty)
+        // A manifest that a vendor adds there during the run counts after the next pass, which asks the runtimes, as Chromium may already read it.
+        let other = String(repeating: "c", count: 32)
+        try writeHostManifest("org.example.other", into: chromium, app: folder.url.appendingPathComponent("Apps/missing"), description: "Other", allowing: [other])
+        await links.update(force: true)
+        #expect(asked.values.count == 1 && links.refusal(of: NativeMessagingCaller(extensionID: other, isProven: false)) == gateSentence("Other"))
+        // The user's file under the name is what Chromium reads instead.
+        try writeHostManifest("org.example.app", into: arch, app: app, description: "Mine", allowing: [extensionID])
+        await links.update(force: true)
+        #expect(links.refusal(of: caller) == nil && asked.values.count == 1)
     }
 }
 
@@ -554,6 +581,27 @@ struct ProofGateTests {
         let next = launch([.webKit, .chromium], persona: persona, links: run(), engines: [.chromium: kept])
         next.runtime.profileDidStart(with: kept, of: .chromium)
         #expect(kept.unloads == [unproven.id] && kept.loaded.isEmpty)
+        #expect(await eventually { next.manager.plugins.first?.engineFailures[.chromium] == gateSentence() })
+        #expect(kept.loadCounts[unproven.id] == 1)
+        next.manager.close()
+    }
+
+    @Test func stopsAnUnprovenVersionThatChromiumsOwnFolderAllowsAsAProfileStarts() async throws {
+        let unproven = try messenger()
+        let chromiumFolder = folder.url.appendingPathComponent("Chromium/NativeMessagingHosts", isDirectory: true)
+        // A vendor's manifest in the system folder that Chromium reads itself, which discovery skips, so Arch has no link under its name.
+        try writeHostManifest("org.example.app", into: chromiumFolder, app: folder.url.appendingPathComponent("Apps/missing"), allowing: [unproven.id])
+        let persona = UUID()
+        let earlier = launch([.webKit], persona: persona, links: run())
+        try await earlier.manager.installEverything(from: unproven.package)
+        earlier.manager.close()
+        // The next launch: Chromium starts the Persona's profile with the copy it kept, before any pass of loads.
+        let kept = RecordingEngine()
+        try await kept.load(EngineExtension(id: unproven.id, packageURL: unproven.package, permissions: [], sites: []))
+        let links = NativeMessagingHostLinks(directory: arch, folders: [vendor, chromiumFolder], chromiumFolder: chromiumFolder) { _ in nil }
+        let next = launch([.webKit, .chromium], persona: persona, links: links, engines: [.chromium: kept])
+        next.runtime.profileDidStart(with: kept, of: .chromium)
+        #expect(kept.unloads == [unproven.id] && kept.loaded.isEmpty && !linkExists)
         #expect(await eventually { next.manager.plugins.first?.engineFailures[.chromium] == gateSentence() })
         #expect(kept.loadCounts[unproven.id] == 1)
         next.manager.close()
