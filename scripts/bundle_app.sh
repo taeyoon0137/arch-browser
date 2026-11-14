@@ -123,9 +123,112 @@ print(best[1] if best else "")
 }
 IDENTITY="${ARCH_SIGN_IDENTITY:-$(individual_identity)}"
 IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}"
-if ! SIGN_OUTPUT="$(codesign --force --deep --sign "${IDENTITY:--}" "$APP" 2>&1)"; then
+
+# iCloud (CloudKit) and push need entitlements that only a provisioning profile grants (`docs/sync.md`, Requirements); `scripts/provision_app.sh` gets the profiles. A profile suits the signing identity when it is for `xyz.taeyoon.arch` on macOS, has not expired, lists the identity's certificate, and matches its kind: a Developer ID profile for a Developer ID Application identity, and a development profile that lists this Mac for an Apple Development identity. The newest suitable profile in Xcode's profile folder is used, or the one at `ARCH_PROVISIONING_PROFILE`, which must suit. The script embeds it as `Contents/embedded.provisionprofile` and signs the app with entitlements written to `build/Arch.entitlements` from the ones the profile grants: the application and team identifiers, the iCloud containers with CloudKit and their environment (Production for Developer ID, as Xcode's export chooses, and Development otherwise), and the push environment. The bundle has no other entitlements. Without a suitable profile, the app is signed as before, with none.
+PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+ENTITLEMENTS="$ROOT/build/Arch.entitlements"
+
+# Arguments: `$1` is the SHA-1 hash of the identity's certificate, `$2` the identity's kind, `$3` this Mac's provisioning UDID, `$4` 1 to say on standard error why a profile does not suit, and the rest the profiles to consider. Prints the newest suitable profile's path.
+matching_profile() {
+  python3 -I -c '
+import datetime, hashlib, plistlib, subprocess, sys
+sha, kind, udid, explain = sys.argv[1:5]
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+best = None
+for path in sys.argv[5:]:
+    try:
+        profile = plistlib.loads(subprocess.run(["security", "cms", "-D", "-i", path], capture_output=True).stdout)
+    except Exception:
+        profile = {}
+    granted = profile.get("Entitlements", {})
+    team = granted.get("com.apple.developer.team-identifier", "")
+    certificates = {hashlib.sha1(c).hexdigest().upper() for c in profile.get("DeveloperCertificates", [])}
+    everywhere = profile.get("ProvisionsAllDevices", False)
+    if not profile:
+        problem = "it is not a provisioning profile"
+    elif not team or granted.get("com.apple.application-identifier") != team + ".xyz.taeyoon.arch" or "OSX" not in profile.get("Platform", []):
+        problem = "it is not for xyz.taeyoon.arch on macOS"
+    elif profile.get("ExpirationDate", now) <= now:
+        problem = "it has expired"
+    elif sha not in certificates:
+        problem = "it does not list the signing certificate"
+    elif everywhere != (kind == "Developer ID Application"):
+        problem = "it is a " + ("Developer ID" if everywhere else "development") + " profile, and the identity is " + kind
+    elif not everywhere and udid not in profile.get("ProvisionedDevices", []):
+        problem = "it does not list this Mac"
+    else:
+        problem = None
+    if problem:
+        if explain == "1":
+            print("the provisioning profile does not suit the signing identity: " + problem, file=sys.stderr)
+        continue
+    if best is None or profile.get("CreationDate", now) > best[0]:
+        best = (profile.get("CreationDate", now), path)
+print(best[1] if best else "")
+' "$@"
+}
+
+# Prints the app's entitlements, as a property list, from the ones the profile at `$1` grants, for an identity of kind `$2`. A profile grants patterns, such as `*` for every iCloud service; the app names the values it uses.
+profile_entitlements() {
+  security cms -D -i "$1" 2>/dev/null | python3 -I -c '
+import plistlib, sys
+kind = sys.argv[1]
+granted = plistlib.loads(sys.stdin.buffer.read())["Entitlements"]
+entitlements = {key: granted[key] for key in ("com.apple.application-identifier", "com.apple.developer.team-identifier")}
+services = granted.get("com.apple.developer.icloud-services", [])
+containers = sorted((c for c in granted.get("com.apple.developer.icloud-container-identifiers", []) if "*" not in c), key=lambda c: c != "iCloud.xyz.taeyoon.arch")
+if containers and (services == "*" or "CloudKit" in services):
+    entitlements["com.apple.developer.icloud-container-identifiers"] = containers
+    entitlements["com.apple.developer.icloud-services"] = ["CloudKit"]
+    environments = granted.get("com.apple.developer.icloud-container-environment", [])
+    environments = [environments] if isinstance(environments, str) else environments
+    wanted = "Production" if kind == "Developer ID Application" else "Development"
+    if environments:
+        entitlements["com.apple.developer.icloud-container-environment"] = wanted if wanted in environments else environments[0]
+if "com.apple.developer.aps-environment" in granted:
+    entitlements["com.apple.developer.aps-environment"] = granted["com.apple.developer.aps-environment"]
+sys.stdout.buffer.write(plistlib.dumps(entitlements))
+' "$2"
+}
+
+PROFILE=""
+CERT_KIND=""
+rm -f "$ENTITLEMENTS"
+if [ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ]; then
+  # The identity is a certificate's SHA-1 hash or part of its name, as `codesign` takes it.
+  case "$IDENTITY" in
+    *[!0-9A-Fa-f]*) LOOKUP="$IDENTITY" ;;
+    *) LOOKUP="$(printf '%s' "$IDENTITY" | tr 'a-f' 'A-F')" ;;
+  esac
+  IDENTITY_LINE="$(security find-identity -v -p codesigning 2>/dev/null | grep -F -- "$LOOKUP" | head -n 1 || true)"
+  CERT_SHA="$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) ".*/\1/p')"
+  CERT_KIND="$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/^[^"]*"\([^:"]*\):.*/\1/p')"
+  UDID=""
+  [ "$CERT_KIND" = "Developer ID Application" ] || UDID="$(system_profiler SPHardwareDataType 2>/dev/null | sed -n 's/^ *Provisioning UDID: //p')"
+  if [ -n "${ARCH_PROVISIONING_PROFILE:-}" ]; then
+    PROFILE="$(matching_profile "$CERT_SHA" "$CERT_KIND" "$UDID" 1 "$ARCH_PROVISIONING_PROFILE")"
+  else
+    PROFILE="$(matching_profile "$CERT_SHA" "$CERT_KIND" "$UDID" 0 "$PROFILE_DIR"/*.provisionprofile)"
+  fi
+fi
+if [ -n "${ARCH_PROVISIONING_PROFILE:-}" ] && [ -z "$PROFILE" ]; then
+  echo "ARCH_PROVISIONING_PROFILE is set, but its profile cannot be used with the signing identity; the app is not signed" >&2
+  exit 1
+fi
+if [ -n "$PROFILE" ]; then
+  cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
+  profile_entitlements "$PROFILE" "$CERT_KIND" > "$ENTITLEMENTS"
+  echo "embedding the provisioning profile for the $CERT_KIND identity, with the iCloud and push entitlements it grants" >&2
+elif [ -n "$CERT_KIND" ]; then
+  echo "no provisioning profile suits the $CERT_KIND identity, so the app has no iCloud or push entitlements; scripts/provision_app.sh gets one" >&2
+fi
+
+# With a profile, `--deep` signs the helper apps and the framework without its entitlements, and the second signing gives them to the app alone.
+if ! SIGN_OUTPUT="$(codesign --force --deep --sign "${IDENTITY:--}" "$APP" 2>&1)" ||
+  { [ -n "$PROFILE" ] && ! SIGN_OUTPUT="$(codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS" "$APP" 2>&1)"; }; then
   printf '%s\n' "$SIGN_OUTPUT" >&2
-  echo "signing failed; signing ad hoc instead, so the Keychain items Chromium created under the identity may ask for access" >&2
+  echo "signing failed; signing ad hoc instead, without the provisioning profile, so the Keychain items Chromium created under the identity may ask for access" >&2
+  rm -f "$APP/Contents/embedded.provisionprofile" "$ENTITLEMENTS"
   codesign --force --deep --sign - "$APP"
 fi
 echo "$APP"
