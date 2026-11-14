@@ -12,8 +12,8 @@ struct SmallWindowView: View {
         windowModel = window
     }
 
-    /// The page keeps the main window's margin on every side, below the row at the top.
-    private static let pageMargins = EdgeInsets(top: BrowserWindowView.pageMargin, leading: BrowserWindowView.pageMargin, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin)
+    /// The page keeps the main window's margin on its sides and bottom, and half of it below the row at the top, which keeps the small window's bar thin.
+    private static let pageMargins = EdgeInsets(top: BrowserWindowView.pageMargin / 2, leading: BrowserWindowView.pageMargin, bottom: BrowserWindowView.pageMargin, trailing: BrowserWindowView.pageMargin)
 
     var body: some View {
         ZStack {

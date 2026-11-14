@@ -23,9 +23,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
                               backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the line of the sidebar's top row or the small window's row.
+        // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the line of the sidebar's top row. A small window's toolbar is compact, as in the system's small windows, so its title bar and row stay thin.
         window.toolbar = NSToolbar(identifier: "Main")
-        window.toolbarStyle = .unified
+        window.toolbarStyle = model.kind == .small ? .unifiedCompact : .unified
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         // The sidebar takes the place of window tabs, and the session, not AppKit, decides what windows open at launch.
