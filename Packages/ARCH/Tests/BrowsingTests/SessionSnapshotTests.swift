@@ -493,7 +493,14 @@ import Testing
 
         edit()
         let last = revision
-        try await Task.sleep(for: .seconds(1))
+        // Taking the snapshot runs on main. The file becomes readable at its new revision after the serial writer finishes.
+        var wroteLast = false
+        store.didWrite = { wroteLast = $0.tabs[1].title == "Update \(last)" }
+        let writeDeadline = clock.now + .seconds(5)
+        while !wroteLast && clock.now < writeDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(wroteLast)
         #expect(captured == [last - 1, last])
         let saved = try #require(store.load())
         #expect(saved.tabs[0].isPinned == pin && saved.tabs[1].title == "Update \(last)")
