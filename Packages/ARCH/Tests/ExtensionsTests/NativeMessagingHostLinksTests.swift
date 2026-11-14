@@ -729,9 +729,10 @@ struct ProofGateTests {
     @Test func takesAKeptCopyOutOfChromiumBeforeTheRunsFirstPassLinksIt() async throws {
         let unproven = try messenger()
         let persona = UUID()
-        // An earlier launch, which found no native app, installed the extension.
+        // An earlier launch, which found no native app, installed the extension. It ends with the pass that its install asked for, as a launch ends before the next one starts: a later pass of its links, which this run's runtimes do not follow, would make the link to this run's manifest.
         let earlier = launch([.webKit], persona: persona, links: run())
         try await earlier.manager.installEverything(from: unproven.package)
+        await earlier.runtime.waitForEngines()
         earlier.manager.close()
         try writeHostManifest("org.example.app", into: vendor, app: writeApp(in: folder), allowing: [unproven.id])
         // In this run, Chromium starts the Persona's profile with the copy it kept, before Arch has looked for native apps.
