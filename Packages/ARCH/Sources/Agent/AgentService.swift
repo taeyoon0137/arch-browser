@@ -664,8 +664,7 @@ import Foundation
         let owned = Set(host.agentTabs(of: session.id).map(\.id))
         for id in copies where owned.contains(id) {
             host.closeAgentTab(id)
-            session.researchPages.removeValue(forKey: id)
-            session.snapshots.remove(id)
+            session.forgetResearchTab(id)
         }
     }
 
@@ -1366,7 +1365,7 @@ import Foundation
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
-        if report == .closed || report == .takenOver { session(withID: ownerID)?.researchPages.removeValue(forKey: tabID) }
+        if report == .closed || report == .takenOver { session(withID: ownerID)?.forgetResearchTab(tabID) }
         let client = grants.first { $0.id == ownerID }?.client.displayName ?? ""
         toolHost().tab(tabID, of: ownerID, didReport: report, state: states[ownerID], client: client)
     }

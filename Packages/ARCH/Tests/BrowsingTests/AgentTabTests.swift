@@ -147,6 +147,51 @@ import Testing
         #expect(BrowserSession.emptyAgentFolderIDs(in: [agentFolder, child], tabs: []).isEmpty)
     }
 
+    @Test func keepingMovingClosingAndReopeningReleaseTheOriginalResearchNavigation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchResearchLifetime-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let host = BrowserAgentHost(session: session)
+        let persona = session.addPersona(named: "Temporary")
+        let space = try #require(session.spaces(in: persona.id).first)
+        let owner = AgentTabOwner(id: UUID(), spaceID: space.id, folderName: "Research")
+        let address = URL(string: "https://research.example/article")!
+        let other = URL(string: "https://notes.example/next")!
+        var takeovers: [UUID] = []
+        host.agentTabDidReport = { _, tabID, event in if event == .takenOver { takeovers.append(tabID) } }
+        func open() throws -> Tab {
+            let info = try #require(host.openResearchTab(at: address, for: owner) { _ in false })
+            return try #require(session.tabs.first { $0.id == info.id })
+        }
+        let kept = try open()
+        let folder = try #require(kept.folderID)
+        session.keepTabs(ofFolder: folder)
+        let moved = try open()
+        session.moveOutOfFolder(moved)
+        let closed = try open()
+        host.closeAgentTab(closed.id)
+        #expect(closed.researchLoad == nil && !session.hasClosedTabs)
+        for tab in [kept, moved] {
+            #expect(tab.agentOwnerID == nil)
+            #expect(tab.webContents(tab.webContents, decidePolicyFor: .init(url: other, disposition: .currentTab, isUserInitiated: true)) == .allow)
+            #expect(tab.webContents(tab.webContents, shouldDownload: other, hasPage: true))
+            #expect(tab.webContentsMayCreatePopup(tab.webContents))
+        }
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(Set(takeovers) == [kept.id, moved.id])
+        #expect(kept.researchLoad == nil && moved.researchLoad == nil)
+        let oldDocument = kept.documentID
+        session.requestCloseTab(kept)
+        session.reopenLastClosedTab()
+        let reopened = try #require(session.tabs.first { $0.id == kept.id })
+        #expect(reopened !== kept && reopened.documentID != oldDocument && reopened.agentOwnerID == nil && reopened.researchLoad == nil)
+        #expect(reopened.webContents(reopened.webContents, decidePolicyFor: .init(url: other, disposition: .currentTab, isUserInitiated: true)) == .allow)
+    }
+
     @Test func sessionProtectsAgentTabsUntilTakeoverOrClose() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentSessionTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
