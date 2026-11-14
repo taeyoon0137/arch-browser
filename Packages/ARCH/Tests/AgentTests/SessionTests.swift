@@ -71,6 +71,52 @@ import UserNotifications
         await service.deleteSession(session.id)
     }
 
+    @Test(arguments: [false, true]) func openingLongConversationShowsFirstQuestionOrLatestReply(hasQuestions: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        for line in 1...32 { runner.emit(.notice("Step \(line)")) }
+        try await waitUntil { session.items.last?.kind == .notice("Step 32") }
+        if hasQuestions {
+            for index in 1...5 {
+                let now = Date()
+                let card = AgentApproval(ownerID: session.id, clientName: "Fixture", isOutsideClient: false,
+                                         kind: .question([]), isSensitive: false, offers: [.cancel("")],
+                                         action: "Question \(index)", createdAt: now, deadline: now.addingTimeInterval(600))
+                service.approvals.open(card) { _ in }
+                service.approvals.setDraftAnswer("Draft \(index)", to: card.id)
+            }
+        } else {
+            runner.emit(.text("Final answer"))
+            runner.emit(.turnFinished(.completed))
+            try await waitUntil { !session.isTurnRunning && session.items.contains { $0.kind == .reply("Final answer") } }
+        }
+
+        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let host = NSHostingController(rootView: AgentSessionPanel(service: service, session: session, actions: actions))
+        let window = NSWindow(contentViewController: host)
+        window.setContentSize(NSSize(width: 360, height: 430))
+        host.view.layoutSubtreeIfNeeded()
+
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let scroll = try #require(descendants(host.view).compactMap { $0 as? NSScrollView }.first { scroll in
+            (scroll.documentView?.bounds.height ?? 0) > scroll.contentSize.height * 2
+        })
+        let document = try #require(scroll.documentView)
+        try await waitUntil {
+            let visible = scroll.documentVisibleRect
+            if hasQuestions {
+                guard let firstAnswer = descendants(document).compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue == "Draft 1" }) else { return false }
+                return visible.contains(firstAnswer.convert(firstAnswer.bounds, to: document))
+            }
+            let bottomGap = document.isFlipped ? document.bounds.maxY - visible.maxY : visible.minY - document.bounds.minY
+            return bottomGap < 32
+        }
+        #expect(!window.isVisible)
+        await service.deleteSession(session.id)
+    }
+
     @Test func draftEffortFollowsTheSelectedCLIPresetAndItsExecutable() throws {
         let one = URL(fileURLWithPath: "/fixture/one/codex"), two = URL(fileURLWithPath: "/fixture/two/codex")
         var provider = AIProviderConfiguration(name: "Fixture", kind: .commandLine(.init(executable: one, agent: .codex)), models: [.init(name: "model")])

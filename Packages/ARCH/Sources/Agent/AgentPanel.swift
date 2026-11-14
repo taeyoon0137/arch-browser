@@ -248,7 +248,16 @@ public struct AgentSessionPanel: View {
                 }
                 .padding(14)
             }
-            .onChange(of: cards.first?.id, initial: true) {
+            // Row IDs become scroll targets after the transcript has a viewport.
+            .onGeometryChange(for: Bool.self) { $0.size.height > 0 } action: { ready in
+                guard ready else { return }
+                if let card = cards.first {
+                    proxy.scrollTo(card.id, anchor: .top)
+                } else if let last = session.items.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+            .onChange(of: cards.first?.id) {
                 if let card = cards.first { proxy.scrollTo(card.id, anchor: .top) }
             }
             .onChange(of: session.items.last) {
