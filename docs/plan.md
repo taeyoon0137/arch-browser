@@ -676,6 +676,8 @@ At `7713521`, `swift build` and 1,812 tests across 18 targets passed. The manual
 
 At `74ec311d`, `swift build` and 1,813 tests across 18 targets passed. Keep Tabs in the conversation's session menu returns the reviewed folder to ordinary browsing, keeps the selected tab in place and leaves the conversation open. An inactive native menu dispatched the production action against a mock engine. Reusing the menu after a folder replacement or space switch preserved the other folder.
 
+At `144d620`, `swift build` and 1,814 tests across 18 targets passed. The real-renderer restore check passed with both clean and interrupted launches. It now supplies a temporary session encryption key and an in-memory store for private feed addresses. The temporary-profile browser and sync tests supply their own stores as well.
+
 To check the main workflow, right-click a normal tab or a loaded favorite, choose Ask Agent About This Tab…, and review the tab and model before starting. After changing Allow AI on This Site, reopening either menu shows the command only while the site is allowed. The native Retry check used a loopback HTTP model. The CLI setup and Settings checks used the installed clients with disposable configuration. See `docs/agents.md` for the individual results. Keep the signed-in subscription, Touch ID and two-Mac iCloud checks open until they run with those prerequisites. Two local profiles exercised sync recovery against a shared test store.
 
 The engine repository keeps an unfinished start of VI.10 on its local branch `wip/writing-tools-in-place` (see that row).
