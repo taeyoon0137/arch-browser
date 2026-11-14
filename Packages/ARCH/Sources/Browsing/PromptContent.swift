@@ -106,9 +106,11 @@ struct PromptButton: Equatable, Identifiable {
     var isDestructive = false
     /// Stays dimmed for `PromptArming.delay` after the card shows, so that a key pressed for the page does not grant anything.
     var needsArming = false
+    /// Does something other than answer the question, such as Open System Settings, so the card sets it apart at the leading edge.
+    var isAlternative = false
 }
 
-/// One prompt as a card shows it. Buttons go left to right, the default one last.
+/// One prompt as a card shows it. Buttons go left to right, the default one last; an alternative one goes first.
 struct PromptContent: Equatable {
     /// How the card shows `message`: as sentences, or as a file path that truncates in the middle and shows whole in its tooltip.
     enum MessageStyle: Equatable {

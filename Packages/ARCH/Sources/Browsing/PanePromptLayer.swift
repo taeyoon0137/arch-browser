@@ -1,5 +1,6 @@
 // Shows a tab's oldest prompt as a card over the tab's pane, in either kind of window and in each pane of a split view. The card hangs from 3 points above the page frame, in the window's margin, which a page cannot draw in, and comes down from behind that line; the dimming takes the page's events while the rest of the window works on. The tab's next prompt follows once the card has left, under the same dimming. A card that shows again, as after the user comes back to its tab, shows at once with its page.
 import AppKit
+import Combine
 import SwiftUI
 
 struct PanePromptLayer: View {
@@ -86,6 +87,10 @@ struct PanePromptLayer: View {
             guard let displayed, notification.object as? NSWindow === windowModel.nsWindow else { return }
             displayed.arming.restart(at: Date())
         }
+        // A card whose content follows Arch's notification permission takes it again when the permission changes while it shows, as after the user turns notifications on in System Settings. `@Published` reports a change before the value changes, so the card takes it on the next turn of the main queue.
+        .onReceive(windowModel.session.notificationAuthorization.$status.removeDuplicates().dropFirst().receive(on: DispatchQueue.main)) { _ in
+            displayed?.remake()
+        }
         .onDisappear {
             pendingShow?.cancel()
             focusDidChange(false)
@@ -124,7 +129,7 @@ struct PanePromptLayer: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + departure, execute: work)
     }
 
-    /// Shows a card: the first time with its motion, after its page leaves fullscreen and the pane's region capture ends, and later at once. A prompt with a maker takes its content again each time, from what is true then, and the buttons that grant something arm again each time. The card takes the focus as the focus rules allow, or after the tab's card that had it, and VoiceOver announces one that shows without it.
+    /// Shows a card: the first time with its motion, after its page leaves fullscreen and the pane's region capture ends, and later at once. A prompt with a maker takes its content again each time, from what is true then, and again while it shows when Arch's notification permission changes, and the buttons that grant something arm again each time. The card takes the focus as the focus rules allow, or after the tab's card that had it, and VoiceOver announces one that shows without it.
     private func show(_ state: PromptState?, afterFocusedCard: Bool) {
         guard let state, prompts.isAccepting else { return }
         let isFirst = PromptPresentation.markAppeared(state)

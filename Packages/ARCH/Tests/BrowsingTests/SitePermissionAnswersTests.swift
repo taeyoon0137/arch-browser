@@ -118,7 +118,7 @@ import Testing
         var granted: [Bool] = []
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.show())
-        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "After you allow, macOS asks whether Arch may show notifications."])
+        #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "After you click Allow, macOS asks whether Arch can send you notifications."])
         #expect(content.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"])
         #expect(system.requests == 0)
 

@@ -58,7 +58,14 @@ struct PromptCard: View {
         .modifier(PromptShake(animatableData: shakes))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(content.kind.accessibilityName), \(content.identity.name)")
-        .onChange(of: focus) { onFocusChange($1 != nil) }
+        .onChange(of: focus) { previous, current in
+            // A button that goes while it has the focus, as Open System Settings once Arch's notifications are on, leaves the focus on the card.
+            if current == nil, case let .button(id)? = previous, !content.buttons.contains(where: { $0.id == id }) {
+                focus = .card
+                return
+            }
+            onFocusChange(current != nil)
+        }
         .onChange(of: focusRequests) { takeFocus() }
         .onAppear {
             if takesFocusOnAppear { DispatchQueue.main.async { takeFocus() } }

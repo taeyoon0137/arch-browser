@@ -5,7 +5,7 @@ import Foundation
 final class PromptState: ObservableObject, Identifiable {
     let id = UUID()
     let tabID: UUID
-    /// What the card shows. A prompt with `makeContent` takes it again each time a card shows it (`remake()`).
+    /// What the card shows. A prompt with `makeContent` takes it again each time a card shows it, and while a card shows it when Arch's notification permission changes (`remake()`).
     @Published private(set) var content: PromptContent
     /// Makes the content again each time a card shows the prompt, for a prompt whose notes and buttons follow what can change while it waits, such as Arch's notification permission on a website's notification card. Nil keeps `content`.
     let makeContent: (() -> PromptContent)?
@@ -23,7 +23,7 @@ final class PromptState: ObservableObject, Identifiable {
         arming = PromptArming(shownAt: now)
     }
 
-    /// Takes the content as `makeContent` makes it now, as a card shows the prompt. The fields keep what the user typed.
+    /// Takes the content as `makeContent` makes it now, as a card shows the prompt or as what it follows changes while the card shows. The fields keep what the user typed.
     func remake() {
         guard let makeContent else { return }
         content = makeContent()

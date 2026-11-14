@@ -19,7 +19,7 @@ final class SitePermissionAnswers {
 
     /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card whose maker it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
     ///
-    /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and the answer acts on the permission the card showed last.
+    /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and again when the permission changes while a card shows it, and the answer acts on the permission the card showed last.
     func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
                 ask: (@escaping () -> PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
         let store = store
@@ -91,7 +91,7 @@ final class SitePermissionAnswers {
             .store(in: &cancellables)
     }
 
-    /// The card that asks, under the site that asks, with the symbol of the first of its types in the order screen, camera, microphone, location, notifications, clipboard, and MIDI. The engine asks from inside its own message loop, so the card never blocks, and the answer reaches the engine once. Allow waits for the card to arm. `notificationStatus`, Arch's notification permission for a request for notifications, adds a note on what macOS does with them, and while the permission is off a third button, Open System Settings, which takes no key, opens it there.
+    /// The card that asks, under the site that asks, with the symbol of the first of its types in the order screen, camera, microphone, location, notifications, clipboard, and MIDI. The engine asks from inside its own message loop, so the card never blocks, and the answer reaches the engine once. Allow waits for the card to arm. `notificationStatus`, Arch's notification permission for a request for notifications, adds a note on what macOS does with them, and while the permission is off a third button, Open System Settings, apart from the answers at the leading edge, which takes no key, opens it there.
     static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity, notificationStatus: NotificationAuthorization.Status? = nil) -> PromptContent {
         var notes: [PromptNote] = []
         if remembersAnswer {
@@ -99,9 +99,9 @@ final class SitePermissionAnswers {
         }
         switch notificationStatus {
         case .notDetermined:
-            notes.append(PromptNote(id: "asksMacOS", symbol: "bell", text: "After you allow, macOS asks whether Arch may show notifications.", tone: .info))
+            notes.append(PromptNote(id: "asksMacOS", symbol: "bell", text: "After you click Allow, macOS asks whether Arch can send you notifications.", tone: .info))
         case .denied:
-            notes.append(PromptNote(id: "notificationsOff", symbol: "bell.slash", text: "Notifications for Arch are off in System Settings, so this website\u{2019}s notifications won\u{2019}t show until you turn them on.", tone: .info))
+            notes.append(PromptNote(id: "notificationsOff", symbol: "bell.slash", text: "Notifications for Arch are off in System Settings, so this website\u{2019}s notifications won\u{2019}t show.", tone: .info))
         case .unavailable:
             notes.append(PromptNote(id: "noNotifications", symbol: "bell.slash", text: "This copy of Arch runs without its app bundle, so it can\u{2019}t show notifications.", tone: .info))
         case .allowed, nil:
@@ -109,7 +109,7 @@ final class SitePermissionAnswers {
         }
         var buttons = [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)]
         if notificationStatus == .denied {
-            buttons.insert(PromptButton(id: "openSystemSettings", title: "Open System Settings"), at: 0)
+            buttons.insert(PromptButton(id: "openSystemSettings", title: "Open System Settings", isAlternative: true), at: 0)
         }
         let asker = request.origin.host?.isEmpty == false ? "this website" : "this page"
         return PromptContent(kind: .sitePermission, identity: identity, glyph: glyph(for: request.types),

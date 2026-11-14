@@ -97,13 +97,15 @@ struct WebsitesSection: View {
             LabeledContent {
                 Button("Open System Settings") { notifications.openSystemSettings() }
             } label: {
-                Text("Notifications for Arch are off in System Settings, so the websites you allow can\u{2019}t show notifications.")
+                Text("Notifications for Arch are off")
+                Text("The websites you allow can\u{2019}t show notifications.")
             }
         case .turnOn:
             LabeledContent {
                 Button("Turn On Notifications\u{2026}") { notifications.request { _ in } }
             } label: {
-                Text("macOS hasn\u{2019}t asked yet whether Arch may show notifications, which the websites you allow need.")
+                Text("Notifications for Arch aren\u{2019}t turned on")
+                Text("The websites you allow can\u{2019}t show notifications.")
             }
         }
     }
