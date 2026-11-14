@@ -87,6 +87,69 @@ import Testing
         }
     }
 
+    @Test func sourceSelectionRevealsOnlyItsDestinationWindow() throws {
+        try withWindows { session, main, small, home, _ in
+            let source = try #require(main.selectedTab), popup = try #require(small.selectedTab)
+            let address = URL(string: "about:blank#preview")!
+            let mainConversation = UUID(), smallConversation = UUID()
+            main.showAgentSession(mainConversation)
+            small.showAgentSession(smallConversation)
+            main.showPreview(of: address, engine: .webKit, in: main.personaID)
+            small.showPreview(of: address, engine: .webKit, in: small.personaID)
+            let original = source.webContents, document = source.documentID, count = session.allTabs.count
+            small.submitCommandPalette("flags://")
+            small.showCommandPalette(.newTab)
+            main.showReadTab(popup.id)
+            #expect(small.selectedTab === popup && small.preview == nil && small.internalPage == nil && small.commandPaletteMode == nil)
+            #expect(main.preview != nil && main.selectedTab === source)
+            main.showCommandPalette(.editCurrent)
+            main.showReadTab(source.id)
+            #expect(main.preview == nil && main.commandPaletteMode == nil && source.webContents === original && source.documentID == document)
+            #expect(main.agentPanel == .session(mainConversation) && small.agentPanel == .session(smallConversation))
+            #expect(session.allTabs.count == count)
+
+            let next = session.openTab(url: URL(string: "about:blank#unshown"), in: home.id, select: false, engine: .webKit)
+            let nextDocument = next.documentID
+            main.showPreview(of: address, engine: .webKit, in: main.personaID)
+            small.showReadTab(next.id)
+            #expect(main.selectedTab === next && main.preview == nil && next.documentID == nextDocument)
+            #expect(main.agentPanel == .session(mainConversation) && small.agentPanel == .session(smallConversation))
+        }
+    }
+
+    @Test func revealingAnInactiveSplitSourcePreservesBothPanes() throws {
+        try withWindows { session, main, small, home, _ in
+            let source = try #require(main.selectedTab)
+            let other = session.openTab(url: URL(string: "about:blank#split"), in: home.id, select: false, engine: .webKit)
+            main.openInSplitView(other)
+            let contents = source.webContents, document = source.documentID
+            let panes = main.paneTabs.map(\.id), count = session.allTabs.count
+            #expect(panes.contains(source.id) && panes.contains(other.id) && main.selectedTab === other)
+            main.showPreview(of: URL(string: "about:blank#preview")!, engine: .webKit, in: main.personaID)
+            small.showReadTab(source.id)
+            #expect(main.selectedTab === source && main.preview == nil && main.paneTabs.map(\.id) == panes)
+            #expect(source.webContents === contents && source.documentID == document && session.allTabs.count == count)
+        }
+    }
+
+    @Test func revealingASourceWhileAPreviewPromotesItsPopupKeepsBothAdoptedPages() throws {
+        try withWindows { session, main, _, _, _ in
+            let source = try #require(main.selectedTab)
+            let contents = source.webContents, document = source.documentID
+            main.showPreview(of: URL(string: "about:blank#related")!, engine: .webKit, in: main.personaID)
+            let preview = try #require(main.preview)
+            let popup = PageStub(engine: .webKit, url: URL(string: "about:blank#popup"))
+            preview.webContents(preview.webContents, didCreateNewWebContents: popup, targetURL: popup.url, disposition: .newWindow)
+            let opener = try #require(session.tabs.first { $0.webContents === preview.webContents })
+            let opened = try #require(main.selectedTab)
+            let count = session.allTabs.count
+            main.showReadTab(source.id)
+            #expect(main.preview == nil && main.selectedTab === source && source.webContents === contents && source.documentID == document)
+            #expect(session.tabs.contains { $0 === opener } && opened.webContents === popup && opened.opener === opener.webContents)
+            #expect(opener.webContents.uiDelegate === opener && session.allTabs.count == count)
+        }
+    }
+
     @Test func tabsCreatedDuringAPersonaEngineOutageRecoverTheirRequestedEngine() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

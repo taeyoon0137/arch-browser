@@ -909,12 +909,17 @@ public enum BrowserWindowKind {
     /// A page read this turn can already be on screen in another window, including a split pane.
     func showReadTab(_ id: UUID) {
         guard let tab = session.allTabs.first(where: { $0.id == id }), tab.isLoaded else { return }
+        let destination: BrowserWindowModel
         if let owner = session.window(showing: tab) {
-            if owner.selectedTabID != id || owner.internalPage != nil { owner.selectTab(id) }
-            if owner !== self { owner.nsWindow?.makeKeyAndOrderFront(nil) }
+            destination = owner
         } else {
-            showAgentTab(id)
+            guard !tab.isInSmallWindow else { return }
+            destination = kind == .main ? self : session.sidebarTarget()
         }
+        destination.closePreview()
+        destination.commandPaletteMode = nil
+        if destination.selectedTabID != id || destination.internalPage != nil { destination.selectTab(id) }
+        if destination !== self { destination.nsWindow?.makeKeyAndOrderFront(nil) }
     }
 
     /// A reply link opens in the invoking Persona, in the current space or a small window of its own.
