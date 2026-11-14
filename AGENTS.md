@@ -62,6 +62,11 @@ Items higher in the list take precedence. Ask if a conflict is unclear.
 
 - Write code comments, documents, commit messages, and the README in English.
 - Use only ARCH prefixes: `ARCH*` for packages, `Arch` for the app module, and `ARCHKit` for the core layer.
+- Write Markdown so that GitHub shows what the text says:
+  - Outside code, escape an angle-bracket placeholder as `\<Engine>`. GitHub drops an unknown tag such as `<Engine>` from the rendered page.
+  - Inside a table cell, escape a pipe as `\|`, also within a code span.
+  - Do not leave paired `~` or `$` in prose. GitHub renders them as strikethrough or math.
+  - `./scripts/check_markdown.py` finds all of these, and `--fix` escapes placeholders.
 
 ## Verification
 
@@ -69,6 +74,7 @@ After a change, run the applicable checks:
 
 - For source changes, run `swift build` and `swift test`. `swift test --filter <Module>Tests` runs one module's tests; the Build section of `docs/plan.md` Current State describes each test target's checks.
 - For README or hero changes, run `./scripts/readme_update.sh`, then check the output.
+- For changes to Markdown documents, run `./scripts/check_markdown.py`.
 - Run `git diff --check` and `git status --short`.
 - When relevant, check the symbolic link with `ls -l CLAUDE.md`.
 

@@ -110,6 +110,7 @@ git config core.hooksPath .githooks
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, the app icon, and the scripting definition. It runs `scripts/opaque_icon.swift` to prepare the icon. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
+| `./scripts/check_markdown.py` | Finds Markdown that GitHub renders differently from the text in `README.md`, `AGENTS.md`, the README preset, and `docs/`: angle-bracket placeholders outside code, pipes inside code spans in table cells, and paired tildes or dollar signs in prose. `--fix` escapes the placeholders. |
 
 <a id="repository-structure"></a>
 
