@@ -422,6 +422,86 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         await service.deleteSession(session.id)
     }
 
+    enum ConsentQueueAction: CaseIterable { case finish, stopQuestion, stopTabPicker, takeOver, stopDuringTakeOver }
+
+    @Test(arguments: ConsentQueueAction.allCases)
+    func queuedDraftFollowsTheTurnThatWaitsForTwoConsentCalls(_ action: ConsentQueueAction) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            if round == 0 {
+                return roundSteps([toolCall("ask-first", "ask_user", #"{"question":"Choose a fixture color"}"#),
+                                   toolCall("share-second", "request_tab", #"{"access":"read","reason":"Choose a fixture page"}"#)])
+            }
+            return roundSteps(text: "Done.")
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Source", url: URL(string: "https://source.invalid"), isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let start = AgentService.SessionStart(task: "Prepare a note", personaID: persona, spaceID: space.id, attachedTabIDs: [], mode: .readOnly, model: model, effort: nil)
+        let session = try service.startSession(start)
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let first = try #require(service.approvals.pending.first)
+        #expect(service.approvals.pending.count == 1 && first.kind == .question([]))
+        let followup = "A follow-up for the next turn"
+        session.messageDraft = followup
+        try session.sendDraft()
+        try session.sendDraft()
+        session.messageDraft = "An unfinished draft"
+        #expect(session.queuedMessages == [followup] && session.state == .waitingForUser && client.requests.count == 1)
+
+        if action == .stopQuestion {
+            session.stop()
+        } else if action == .takeOver || action == .stopDuringTakeOver {
+            session.takeOver()
+            #expect(service.approvals.pending.isEmpty && session.isTakenOver && session.queuedMessages == [followup])
+            #expect(await !service.approvals.answer(first.id, with: .answer("Too late")))
+            if action == .stopDuringTakeOver { session.stop() }
+            session.handBack()
+        } else {
+            #expect(await service.approvals.answer(first.id, with: .answer("Indigo")))
+        }
+        if action != .stopQuestion && action != .stopDuringTakeOver {
+            try await waitUntil { service.approvals.pending.first?.kind == .shareSessionTab([tab]) }
+            let second = try #require(service.approvals.pending.first)
+            #expect(service.approvals.pending.count == 1 && session.queuedMessages == [followup] && client.requests.count == 1)
+            if action == .stopTabPicker {
+                session.stop()
+            } else {
+                #expect(await service.approvals.answer(second.id, with: .tab(tab.id)))
+            }
+        }
+
+        let stopped = action != .finish && action != .takeOver
+        if stopped {
+            try await waitUntil { session.state == .stopped && service.approvals.pending.isEmpty }
+            #expect(client.requests.count == 1 && session.queuedMessages.isEmpty && session.handles.sharedTabIDs.isEmpty)
+            try session.send("Continue after stopping")
+        }
+        try await waitUntil { session.state == .done && client.requests.count == (stopped ? 2 : 3) }
+        #expect(session.queuedMessages.isEmpty && session.messageDraft == "An unfinished draft")
+        let latest = try #require(client.requests.last)
+        let plainUserMessages = latest.messages.filter { $0.role == .user }.flatMap(\.parts).compactMap { if case .text(let text) = $0 { return text }; return nil }
+        #expect(plainUserMessages.filter { $0 == followup }.count == (stopped ? 0 : 1))
+        #expect(plainUserMessages.last == (stopped ? "Continue after stopping" : followup))
+        let calling = latest.messages.filter { $0.role == .assistant }.flatMap(\.parts).compactMap { if case .toolCall(let call) = $0 { return call.id }; return nil }
+        let resultMessages = latest.messages.filter { !toolResults(in: $0).isEmpty }
+        let results = resultMessages.flatMap { toolResults(in: $0) }
+        let expectedIDs = stopped ? [] : ["ask-first", "share-second"]
+        #expect(calling == expectedIDs && results.map(\.callID) == expectedIDs)
+        #expect(resultMessages.allSatisfy { $0.role == .user })
+        if !stopped {
+            #expect(results.map(\.isError) == [action == .takeOver, false])
+            #expect(session.handles.sharedTabIDs == [tab.id])
+        }
+        await service.deleteSession(session.id)
+    }
+
     enum HistoryAccessChange: CaseIterable { case stopSharing, shareAgain, reload, takeOver }
 
     @Test(arguments: HistoryAccessChange.allCases)
