@@ -24,9 +24,6 @@ import SwiftUI
     private var personasSubscription: AnyCancellable?
     private var icons: [BrowserSource.ID: NSImage] = [:]
 
-    /// Each imported pinned tab loads whenever Arch opens, so the parts that bring pinned tabs start checked only up to this many in all.
-    static let pinnedTabLimit = 50
-
     /// Whether a profile is included, where it goes, and which of its parts are checked.
     struct Choice: Equatable {
         var isIncluded = true
@@ -62,11 +59,6 @@ import SwiftUI
     /// The browsers to read again when Arch becomes active: those whose setting the user went to change and that are still blocked.
     var browsersToReread: [ImportedBrowser] {
         (browsers ?? []).filter { askedBrowserIDs.contains($0.id) && $0.isBlockedByPrivacy }
-    }
-
-    /// The pinned tabs that the checked parts of the included profiles open, before duplicates are left out.
-    var checkedPinnedTabCount: Int {
-        includedProfiles.reduce(0) { total, included in total + included.choice.parts.reduce(0) { $0 + included.profile.pinnedTabCount(of: $1) } }
     }
 
     /// Import needs a checked item: a part of an included profile, or the search engine.
@@ -165,20 +157,14 @@ import SwiftUI
         engineChoices.contains { $0.engine == chosenEngine } ? chosenEngine : nil
     }
 
-    /// Includes each of the browser's profiles with its default destination and its readable parts checked, except that a part that brings pinned tabs starts checked only when, with the parts checked before it in sheet order, it adds at most `pinnedTabLimit` of them.
+    /// Includes each profile with its readable parts checked and its default destination.
     private func setDefaultChoices(for browser: ImportedBrowser) {
         guard case .success(let profiles) = browser.profiles else { return }
-        profiles.forEach { choices[$0.id] = nil }
-        var pinnedTabCount = checkedPinnedTabCount
         for profile in profiles {
-            var parts: Set<ImportedProfile.Part> = []
-            for part in ImportedProfile.Part.allCases {
-                guard case .success? = profile.count(of: part) else { continue }
-                let partPinnedTabCount = profile.pinnedTabCount(of: part)
-                guard partPinnedTabCount == 0 || pinnedTabCount + partPinnedTabCount <= Self.pinnedTabLimit else { continue }
-                pinnedTabCount += partPinnedTabCount
-                parts.insert(part)
-            }
+            let parts = Set(ImportedProfile.Part.allCases.filter { part in
+                if case .success? = profile.count(of: part) { return true }
+                return false
+            })
             let destination = profile.sidebarImport(of: [], browserName: browser.source.name)
                 .defaultDestination(record: record, personas: personas, currentPersonaID: currentPersonaID, isFirstProfile: profile.isFirst)
             choices[profile.id] = Choice(destination: destination, parts: parts)
@@ -232,16 +218,6 @@ struct BrowserImportSheet: View {
                     Text("Looking for browsers\u{2026}")
                         .foregroundStyle(.secondary)
                 }
-            }
-            // An orange triangle beside text in the primary color, as the plugin install sheet's warnings show: orange text falls below the contrast that body text needs.
-            if model.checkedPinnedTabCount > BrowserImportModel.pinnedTabLimit {
-                Label {
-                    Text("The checked items add \(model.checkedPinnedTabCount.formatted()) pinned tabs, which load whenever Arch opens.")
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
-                .font(.callout)
             }
             buttons
         }
@@ -415,8 +391,8 @@ private struct ProfileRow: View {
             note = error.localizedDescription
         } else {
             switch part {
-            case .spaces: note = "Each pinned tab loads whenever Arch opens."
-            case .bookmarkFolders: note = "Each bookmark becomes a pinned tab, which loads whenever Arch opens."
+            case .spaces: note = "Pinned tabs load when you open them."
+            case .bookmarkFolders: note = "Each bookmark becomes a pinned tab. It loads when you open it."
             case .history, .searchShortcuts: note = "Applies to every Persona."
             case .favorites: note = nil
             }

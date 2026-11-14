@@ -1842,13 +1842,14 @@ final class EngineRuntime {
         }
         folders += plan.folders
         addFavorites(plan.favorites, in: plan.personaID)
-        for pinned in plan.pinnedTabs {
-            let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
-            tab.preferredEngine = defaultEngine
-            // It opens as a restored tab does, so it is marked before it joins the list that the hooks follow.
+        let engine = defaultEngine
+        let importedTabs = plan.pinnedTabs.map { pinned in
+            let page = UnloadedWebContents(url: pinned.url, title: pinned.title, engine: engine, state: nil)
+            let tab = makeTab(page, id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
             tab.takeImport(pinned)
-            tabs.append(tab)
+            return tab
         }
+        if !importedTabs.isEmpty { tabs.append(contentsOf: importedTabs) }
         record.update(plan.entry)
         record.removeGoneItems(in: importSidebar)
         return plan.counts

@@ -57,7 +57,7 @@ import Testing
             try #require(folders.map(\.name) == ["Reference", "Reference ▸ Notes"])
             func path(_ tab: Tab) -> String? { tab.savedPage?.url.lastPathComponent }
             let pins = session.tabs.filter { $0.personaID == owner.id }
-            #expect(pins.allSatisfy { $0.isPinned })
+            #expect(pins.allSatisfy { $0.isPinned && !$0.isLoaded })
             #expect(pins.filter { $0.folderID == nil && $0.spaceID == spaces[0].id }.compactMap(path) == ["one", "five"])
             #expect(pins.filter { $0.folderID == folders[0].id }.compactMap(path) == ["two"])
             #expect(pins.filter { $0.folderID == folders[1].id }.compactMap(path) == ["three"])
@@ -66,6 +66,8 @@ import Testing
             #expect(favorites.map(\.title) == ["Favorite B", "Favorite A"])
 
             let pin = try #require(pins.first { path($0) == "two" })
+            session.loadPage(of: pin)
+            #expect(pins.filter(\.isLoaded).map(\.id) == [pin.id])
             let contents = try #require(pin.webContents as? PageDouble)
             contents.load(nextPage, in: pin)
             #expect(pin.url == nextPage && path(pin) == "two")

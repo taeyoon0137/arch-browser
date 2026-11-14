@@ -56,7 +56,7 @@ import Testing
         return try SearchKeywords.read(at: file, preferences: nil)
     }
 
-    @Test func partsWithPinnedTabsStartCheckedUpToTheLimitInSheetOrder() throws {
+    @Test func readableSpacesAndBookmarkFoldersStartCheckedAcrossLargeProfiles() throws {
         let browser = ImportedBrowser(source: Self.source, profiles: .success([
             Self.profile("Default", isFirst: true, favorites: 2, spaces: [Self.space("home", pinnedTabs: 30)]),
             Self.profile("Profile 2", bookmarkFolders: [Self.folder("docs", bookmarks: 30)], history: [HistoryEntry(url: URL(string: "https://h.example/")!, title: "", visitCount: 1, lastVisit: Date())]),
@@ -67,18 +67,9 @@ import Testing
             model.choices[SidebarImport.Profile(source: Self.source.id, folder: folder)]?.parts
         }
         #expect(parts("Default") == [.favorites, .spaces])
-        // Its 30 pinned tabs would pass the limit, but a later part that fits still starts checked.
-        #expect(parts("Profile 2") == [.history])
+        #expect(parts("Profile 2") == [.bookmarkFolders, .history])
         #expect(parts("Profile 3") == [.spaces])
-        #expect(model.checkedPinnedTabCount == 40)
         #expect(model.canImport)
-
-        let second = SidebarImport.Profile(source: Self.source.id, folder: "Profile 2")
-        model.choices[second]?.parts.insert(.bookmarkFolders)
-        #expect(model.checkedPinnedTabCount == 70)
-        // An excluded profile's parts do not count.
-        model.choices[second]?.isIncluded = false
-        #expect(model.checkedPinnedTabCount == 40)
     }
 
     @Test func profilesGoToTheirRecordedOrSameNamedPersonaAndADeletedOneGivesWayToANewPersona() throws {
