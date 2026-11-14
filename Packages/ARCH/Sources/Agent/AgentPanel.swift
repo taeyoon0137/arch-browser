@@ -1,4 +1,4 @@
-// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, questions for the user, errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
+// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, questions and tab-sharing requests for the user, errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
 import AgentControl
 import AI
 import SwiftUI
@@ -221,9 +221,12 @@ public struct AgentSessionPanel: View {
     // MARK: Transcript
 
     private var transcript: some View {
-        let questions = approvals.pending.filter {
-            guard $0.ownerID == session.id, case .question = $0.kind else { return false }
-            return true
+        let cards = approvals.pending.filter { card in
+            guard card.ownerID == session.id else { return false }
+            switch card.kind {
+            case .question, .shareSessionTab: return true
+            default: return false
+            }
         }
         return ScrollViewReader { proxy in
             ScrollView {
@@ -236,20 +239,20 @@ public struct AgentSessionPanel: View {
                     if session.isTakenOver {
                         note("You took over. The agent waits until you hand the session back.")
                     }
-                    ForEach(questions) { question in
-                        AgentApprovalCard(approval: question, approvals: approvals) {
-                            if let tabID = question.tabID { actions.showTab(tabID) }
+                    ForEach(cards) { card in
+                        AgentApprovalCard(approval: card, approvals: approvals) {
+                            if let tabID = card.tabID { actions.showTab(tabID) }
                         }
-                        .id(question.id)
+                        .id(card.id)
                     }
                 }
                 .padding(14)
             }
-            .onChange(of: questions.first?.id, initial: true) {
-                if let question = questions.first { proxy.scrollTo(question.id, anchor: .top) }
+            .onChange(of: cards.first?.id, initial: true) {
+                if let card = cards.first { proxy.scrollTo(card.id, anchor: .top) }
             }
             .onChange(of: session.items.last) {
-                if questions.isEmpty, let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                if cards.isEmpty, let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
     }

@@ -84,6 +84,23 @@ struct AgentApprovalCard: View {
                 .foregroundStyle(.secondary)
             TextField("A note for the agent (optional)", text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
+        case .shareSessionTab(let tabs):
+            if tabs.isEmpty {
+                Text("No eligible tabs to share in this Persona.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                let labels = AgentTabInfo.attachmentLabels(for: tabs)
+                Picker("Tab to share", selection: $chosenTab) {
+                    Text("Choose a tab").tag(UUID?.none)
+                    ForEach(tabs) { tab in
+                        Text(verbatim: labels[tab.id] ?? tab.attachmentLabel).tag(Optional(tab.id))
+                    }
+                }
+                if let selected = tabs.first(where: { $0.id == chosenTab }) {
+                    AgentAttachmentLabel(tab: selected)
+                }
+            }
         case .requestTab(let tabs, _):
             if tabs.isEmpty {
                 Text("You have no open tab in this Persona.")
@@ -116,8 +133,12 @@ struct AgentApprovalCard: View {
             case .handToUser:
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
                 AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
-            case .requestTab:
-                AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
+            case .shareSessionTab, .requestTab:
+                if case .shareSessionTab = approval.kind {
+                    Button("Don\u{2019}t Share") { answer(.deny) }
+                } else {
+                    AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
+                }
                 AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
                     .disabled(chosenTab == nil)
             default:
