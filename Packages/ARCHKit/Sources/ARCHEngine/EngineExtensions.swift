@@ -72,6 +72,8 @@ public struct EngineExtensionPrompt {
         case permissions([String])
         /// A reload of the tab, so that the actions that the named extensions were kept from running there run.
         case reload([String])
+        /// An install of the extension that asks, as the engine's own store install flow asks for it from the store page in the tab. An accepted install would put the extension in the profile outside the app's installed list.
+        case install
     }
 
     public var kind: Kind

@@ -79,6 +79,8 @@ final class RecordingHost: WebExtensionHost {
     /// Each window request: the addresses, engine, and whether focused.
     private(set) var openedWindows: [(urls: [URL], engine: EngineKind, focused: Bool)] = []
     var openedWindow: UUID?
+    /// Each store install that the runtime started: the identifier, the Persona, and the tab.
+    private(set) var storeInstalls: [(id: String, persona: PersonaID, tab: any EngineWebContents)] = []
 
     var extensionRuntimeVersions: [EngineKind: String] {
         Dictionary(uniqueKeysWithValues: engines.keys.map { ($0, versions[$0] ?? "1") })
@@ -113,6 +115,10 @@ final class RecordingHost: WebExtensionHost {
         sheets.append(alert)
         completion(sheetAnswer)
     }
+
+    func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebContents) {
+        storeInstalls.append((id, persona, tab))
+    }
 }
 
 /// An engine that records what the runtime checks, loads, unloads, deletes, and runs the actions of, and when it is told to stop what it has not loaded, refuses in its check the packages whose manifests give a name in `refusedNames`, and refuses to load the identifiers in `refused`. Every extension it loaded has an action for every tab. Its asynchronous calls change its records on the main actor, as the adapters change their state on the main thread, so the tests read them there without a race.
@@ -129,16 +135,23 @@ final class RecordingEngine: EngineExtensions {
     private(set) var performed: [String] = []
     /// The identifiers that the user allowed on a tab's site, in order.
     private(set) var grantedSiteAccess: [String] = []
+    /// The identifiers unloaded, in order, whether or not they were loaded.
+    private(set) var unloads: [String] = []
+    /// Called with each identifier as it unloads, for a test that checks what is true at that moment.
+    var onUnload: ((String) -> Void)?
     /// For each call of `stopUnloadedExtensions()`, the identifiers loaded at that moment.
     private(set) var stopsWhileLoaded: [Set<String>] = []
     /// Whether the actions say that the engine kept the extension from the tab's site.
     var actionsWantSiteAccess = false
     var refusedNames: Set<String> = []
     var refused: Set<String> = []
+    /// Runs as each check starts, for a test that acts while a package is checked.
+    var onCheck: (@MainActor () -> Void)?
 
     @MainActor
     func check(_ packageURL: URL) async throws {
         checkCount += 1
+        onCheck?()
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: packageURL.appendingPathComponent("manifest.json"))) as? [String: Any]
         if let name = manifest?["name"] as? String, refusedNames.contains(name) { throw RecordingEngineError.refused }
     }
@@ -153,6 +166,8 @@ final class RecordingEngine: EngineExtensions {
 
     func unload(_ id: String) {
         loaded[id] = nil
+        unloads.append(id)
+        onUnload?(id)
     }
 
     @MainActor

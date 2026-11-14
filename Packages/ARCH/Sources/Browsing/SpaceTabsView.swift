@@ -246,7 +246,7 @@ private struct TabRowFramesKey: PreferenceKey {
     }
 }
 
-/// The space's symbol and name above its tabs, with a button for the space menu, and with several Personas the space's Persona above them. Double-clicking the name renames the space in place.
+/// The space's symbol and name above its tabs, with a button for the space menu. With several Personas, the name follows the space's Persona on one line, as "Work / Research" (Persona rule 7), with "Work /" in small secondary text, which truncates first in a narrow sidebar. Double-clicking the name renames the space in place; the Persona's name is not part of the field.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -256,19 +256,11 @@ struct SpaceHeaderView: View {
     @Environment(\.spaceTheme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
-                Text(personaName)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        nameRow
+            // Another space's page takes over the keyboard, so the name in this one is kept.
+            .onChange(of: windowModel.currentSpaceID) { _, id in
+                if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
             }
-            nameRow
-        }
-        // Another space's page takes over the keyboard, so the name in this one is kept.
-        .onChange(of: windowModel.currentSpaceID) { _, id in
-            if id != space.id, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-        }
     }
 
     private var nameRow: some View {
@@ -276,30 +268,14 @@ struct SpaceHeaderView: View {
             Image(systemName: space.symbol)
                 .font(.system(size: 10))
                 .foregroundStyle(theme.symbolColor(for: space.tint))
-            if windowModel.renamingSpaceID == space.id {
-                TextField("Space Name", text: $draftName)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold))
-                    .focused($isNameFocused)
-                    .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
-                    .onExitCommand { windowModel.renamingSpaceID = nil }
-                    .onChange(of: isNameFocused) { _, focused in
-                        if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                    }
-                    .onAppear {
-                        draftName = space.name
-                        DispatchQueue.main.async { isNameFocused = true }
-                    }
-                    // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
-                    .onDisappear {
-                        if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
-                    }
-            } else {
-                Text(space.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .onTapGesture(count: 2) { windowModel.renamingSpaceID = space.id }
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
+                    Text("\(personaName) /")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                spaceName
             }
             Spacer(minLength: 0)
             Menu {
@@ -319,6 +295,37 @@ struct SpaceHeaderView: View {
             .accessibilityLabel("Space Options")
         }
         .frame(height: 22)
+    }
+
+    /// The space's name, or the field that renames it.
+    @ViewBuilder private var spaceName: some View {
+        if windowModel.renamingSpaceID == space.id {
+            TextField("Space Name", text: $draftName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .focused($isNameFocused)
+                .onSubmit { windowModel.renameSpace(space.id, to: draftName) }
+                .onExitCommand { windowModel.renamingSpaceID = nil }
+                .onChange(of: isNameFocused) { _, focused in
+                    if !focused, windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                }
+                .onAppear {
+                    draftName = space.name
+                    DispatchQueue.main.async { isNameFocused = true }
+                }
+                // Opening the library or hiding the sidebar removes the field without moving focus, so the name is kept here.
+                .onDisappear {
+                    if windowModel.renamingSpaceID == space.id { windowModel.renameSpace(space.id, to: draftName) }
+                }
+        } else {
+            Text(space.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                // The space's name keeps its width, so the Persona's name truncates before it.
+                .layoutPriority(1)
+                .onTapGesture(count: 2) { windowModel.renamingSpaceID = space.id }
+        }
     }
 }
 
@@ -366,7 +373,7 @@ struct SpaceMenuItems: View {
         Divider()
         Button("New Persona\u{2026}", action: windowModel.promptForNewPersona)
         Button("Rename Persona\u{2026}") { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
-        Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(space.resolvedPersonaID) }
+        Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(ofSpace: space) }
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
         PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
     }

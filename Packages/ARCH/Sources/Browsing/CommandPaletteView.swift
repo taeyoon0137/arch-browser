@@ -1,4 +1,5 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists matching plugin commands, Ask About This Page when the words begin its name, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Install from the Web Store for an extension that the text names, matching plugin commands, Ask About This Page when the words begin its name, Install Extension from This Page on a Web Store page, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+import Extensions
 import History
 import Plugins
 import SwiftUI
@@ -63,6 +64,24 @@ struct CommandPaletteView: View {
         return !words.isEmpty && "ask about this page".hasPrefix(words) && windowModel.canAskAboutPage
     }
 
+    /// The Web Store rows for the text and the selected tab's page, which no internal page or preview panel covers, while the app shell can start a store install.
+    private var webStoreRows: PaletteWebStoreRows {
+        guard session.installFromWebStore != nil else { return PaletteWebStoreRows() }
+        let isPageCovered = windowModel.internalPage != nil || windowModel.preview != nil
+        return PaletteWebStoreRows(text: text, pageURL: isPageCovered ? nil : windowModel.selectedTab?.url)
+    }
+
+    /// Closes the palette and opens the store sheet in Settings ▸ Plugins for the extension, in the selected tab's Persona and space for its page, else in the window's.
+    private func installFromWebStore(_ id: String, fromPage: Bool) {
+        windowModel.dismissCommandPalette()
+        if fromPage, let tab = windowModel.selectedTab {
+            let space = BrowserWindowModel.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: session.spaces, currentSpace: windowModel.currentSpace)
+            session.installFromWebStore?(tab.personaID, space?.id, id)
+        } else {
+            session.installFromWebStore?(windowModel.personaID, windowModel.currentSpace.id, id)
+        }
+    }
+
     /// The palette's distance from the window's top.
     static let top: CGFloat = 120
     /// The height of the search field.
@@ -93,9 +112,14 @@ struct CommandPaletteView: View {
             .frame(height: Self.fieldHeight)
             .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
             if showsResults {
+                let storeRows = webStoreRows
                 VStack(spacing: 2) {
                     PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true)
                         .paletteAction { windowModel.submitCommandPalette(text) }
+                    if let id = storeRows.typedExtension {
+                        PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle)
+                            .paletteAction { installFromWebStore(id, fromPage: false) }
+                    }
                     ForEach(pluginCommands, id: \.ref) { command in
                         PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName)
                             .paletteAction {
@@ -109,6 +133,10 @@ struct CommandPaletteView: View {
                                 windowModel.dismissCommandPalette()
                                 windowModel.askAboutPage()
                             }
+                    }
+                    if let id = storeRows.pageExtension {
+                        PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle)
+                            .paletteAction { installFromWebStore(id, fromPage: true) }
                     }
                     ForEach(matchingTabs) { tab in
                         PaletteTabRow(tab: tab)
@@ -146,6 +174,31 @@ struct CommandPaletteView: View {
             DispatchQueue.main.async { isFocused = true }
         }
         .task(id: text) { await loadHistorySuggestions() }
+    }
+}
+
+/// The palette's Web Store rows (`docs/web-store.md`, Entry points), each with the identifier of the extension it installs, which name no Persona.
+struct PaletteWebStoreRows: Equatable {
+    static let pageTitle = "Install Extension from This Page"
+    static let typedTitle = "Install from the Web Store"
+    /// Install Extension from This Page: the extension of the store page that the selected tab shows, once the typed words begin the row's name or the text names that extension, as the page's address does, which the palette starts with when it edits the current address.
+    var pageExtension: String?
+    /// Install from the Web Store, below the primary row: another extension that the text names, as a store page's address or a bare identifier.
+    var typedExtension: String?
+
+    init(pageExtension: String? = nil, typedExtension: String? = nil) {
+        self.pageExtension = pageExtension
+        self.typedExtension = typedExtension
+    }
+
+    /// The rows for the typed text and the address of the selected tab's page, nil while no tab shows a page.
+    init(text: String, pageURL: URL?, reader: WebStoreReader = .store) {
+        let typed = reader.text(text)
+        let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if let page = pageURL.flatMap(reader.page), typed == page || (!words.isEmpty && Self.pageTitle.lowercased().hasPrefix(words)) {
+            pageExtension = page
+        }
+        typedExtension = typed == pageExtension ? nil : typed
     }
 }
 

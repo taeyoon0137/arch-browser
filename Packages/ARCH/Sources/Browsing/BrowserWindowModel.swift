@@ -260,22 +260,33 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    /// Asks with a sheet on the window before deleting a Persona other than the default one, saying what goes with it.
-    public func confirmDeletePersona(_ id: Persona.ID) {
-        guard canShowPersonaSheet, session.canDeletePersona(id), let persona = session.persona(withID: id), let nsWindow else { return }
-        let spaceCount = session.spaces(in: id).count
-        let favoriteCount = session.favorites(in: id).count
-        let tabCount = session.tabs.filter { $0.personaID == id }.count
-        let removed = "Its \(spaceCount) \(spaceCount == 1 ? "space" : "spaces") and \(favoriteCount) \(favoriteCount == 1 ? "favorite" : "favorites") are removed"
-        let closed = tabCount == 1 ? "its 1 tab closes" : "its \(tabCount) tabs close"
+    /// Asks with a sheet on the window before deleting the Persona of `space`, the space menu's space or the window's current space, unless it is the default Persona, saying what goes with it.
+    public func confirmDeletePersona(ofSpace space: Space) {
+        let id = space.resolvedPersonaID
+        guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
+        let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
+                                            tabCount: session.tabs.filter { $0.personaID == id }.count)
         let alert = NSAlert()
-        alert.messageText = "Delete the Persona \u{201C}\(persona.name)\u{201D}?"
-        alert.informativeText = "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens."
+        alert.messageText = texts.message
+        alert.informativeText = texts.information
         alert.addButton(withTitle: "Delete").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: nsWindow) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.session.deletePersona(id) }
         }
+    }
+
+    /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes.
+    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int) -> (message: String, information: String) {
+        let removed = "Its \(spaceCount) \(spaceCount == 1 ? "space" : "spaces") and \(favoriteCount) \(favoriteCount == 1 ? "favorite" : "favorites") are removed"
+        let closed = tabCount == 1 ? "its 1 tab closes" : "its \(tabCount) tabs close"
+        return ("Delete \(persona)?", "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
+    }
+
+    /// How a sheet about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
+    static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+        guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
+        return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
     }
 
     /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels or leaves it empty.
@@ -1023,17 +1034,30 @@ public final class BrowserWindowModel: ObservableObject {
     /// Asks with a sheet on the selected tab before clearing the data of its page's host.
     public func confirmClearSiteData() {
         guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
-        // With several Personas, the sheet names the one whose data goes.
-        let inPersona = session.displayedName(ofPersona: tab.personaID).map { " in the Persona \u{201C}\($0)\u{201D}" } ?? ""
+        // With several Personas, the sheet names the one whose data goes, from the tab's place.
+        let space = Self.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: session.spaces, currentSpace: currentSpace)
+        let texts = Self.clearSiteDataTexts(site: site.displayName, persona: Self.sheetName(ofPersona: tab.personaID, space: space, among: session.personas))
         let alert = NSAlert()
-        alert.messageText = "Clear the data stored by \u{201C}\(site.displayName)\u{201D}?"
-        alert.informativeText = "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again."
+        alert.messageText = texts.message
+        alert.informativeText = texts.information
         alert.addButton(withTitle: "Clear").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         let personaID = tab.personaID
         session.enqueueSheet(alert, for: tab) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.session.clearSiteData(of: site, in: personaID) }
         }
+    }
+
+    /// The space a sheet about a tab's Persona names with it (Persona rule 7): the tab's space, or for a favorite's tab, which belongs to no space and shows in the window's current space, that space while it belongs to the tab's Persona, as the window title names it.
+    static func sheetSpace(ofTabIn spaceID: UUID?, personaID: Persona.ID, spaces: [Space], currentSpace: Space) -> Space? {
+        if let space = spaces.first(where: { $0.id == spaceID }) { return space }
+        return currentSpace.resolvedPersonaID == personaID ? currentSpace : nil
+    }
+
+    /// The Clear Site Data sheet's question and explanation for the site, naming with several Personas the Persona whose data goes, as `sheetName(ofPersona:space:among:)` names it.
+    static func clearSiteDataTexts(site: String, persona: String?) -> (message: String, information: String) {
+        let inPersona = persona.map { " in \($0)" } ?? ""
+        return ("Clear the data stored by \u{201C}\(site)\u{201D}?", "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again.")
     }
 
     // MARK: Folders

@@ -1,4 +1,4 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, deletes a removed extension's storage in each engine, in a later launch for an engine that did not run at the removal, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
+// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, deletes a removed extension's storage in each engine, in a later launch for an engine that did not run at the removal, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. It has Arch look for native apps before it loads an extension that may reach one, and keeps out of Chromium, which reads Arch's links to other browsers' host manifests itself, each version whose identifier Arch cannot prove while a linked native app accepts it (`NativeMessagingHostLinks`). The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
 import AppKit
 import ARCHEngine
 import Plugins
@@ -24,6 +24,8 @@ public protocol WebExtensionHost: AnyObject {
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
     /// Shows the alert as a sheet for the tab, or for the front window's tab for no tab, and answers with the button the user chose.
     func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
+    /// Starts Arch's install of the extension `id` from the Web Store in the Persona, as the store's own install button on the tab's store page asks: the store sheet in Settings ▸ Plugins, whose review names the Persona with the tab's space (`docs/web-store.md`, Chromium's store button).
+    func installFromWebStore(_ id: String, persona: PersonaID, tab: any EngineWebContents)
 }
 
 /// An enabled extension's action for one tab, as the site settings popover lists it: one for each plugin, and one for a pair, whose identifier and name are those of its version installed first. An extension without an action in its manifest has one only while the tab's engine keeps it from the tab's site.
@@ -54,6 +56,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     private let persona: PersonaID
     private weak var host: (any WebExtensionHost)?
     private let nativeMessaging: NativeMessaging
+    /// Arch's links to other browsers' host manifests, which every Persona's runtime shares: the runtime asks for their passes and applies their gate on Chromium.
+    private let hostLinks: NativeMessagingHostLinks
     /// The Persona's profiles in the engines that run extensions, from the first extension that is checked, loads, or goes.
     private var attached: [EngineKind: any EngineExtensions]?
     /// The installed extensions, on or off, in the order the user installed them, as the manager last listed them.
@@ -69,12 +73,28 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     private var keyedPackages: [PluginID: Date] = [:]
     /// The removals whose storage an engine still keeps because it did not run for the Persona when the user removed the extension, in the order they happened, as `runtimeFile` keeps them.
     private var missedRemovals: [MissedRemoval] = []
+    /// The identifier of the extension whose store page an address is, or nil for another address, which decides where the store's own install button may start a store install. The tests read store pages on hosts that stand in for the store's.
+    var storePageReader: (URL) -> String? = WebStore.extensionID(in:)
+    /// The install date of each extension as `run(_:)` last listed them, nil before its first call, which tells an install or an update in this run.
+    private var installDates: [PluginID: Date]?
+    /// Whether an install or an update in this run of an extension whose grant has `nativeMessaging` waits for Arch to look for native apps again.
+    private var looksForNativeAppsAgain = false
+    /// The Persona's profiles by engine as the host reported their start, which the gate reaches before the runtime attaches them.
+    private var startedProfiles: [EngineKind: any EngineExtensions] = [:]
+    /// The load in Chromium under way, which the step before a link changes waits for.
+    private var chromiumLoad: Task<Void, any Error>?
 
-    /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach.
-    public init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL) {
+    /// `hostLinks` holds Arch's folder of host manifests, which name the native apps extensions may reach, with its links to other browsers' manifests.
+    public init(persona: PersonaID, host: any WebExtensionHost, hostLinks: NativeMessagingHostLinks) {
         self.persona = persona
         self.host = host
-        nativeMessaging = NativeMessaging(directory: nativeMessagingHosts)
+        self.hostLinks = hostLinks
+        nativeMessaging = NativeMessaging(links: hostLinks)
+    }
+
+    /// `nativeMessagingHosts` is the folder of the host manifests that name the native apps extensions may reach, without links to other browsers' manifests.
+    convenience init(persona: PersonaID, host: any WebExtensionHost, nativeMessagingHosts: URL) {
+        self.init(persona: persona, host: host, hostLinks: NativeMessagingHostLinks(directory: nativeMessagingHosts, folders: []))
     }
 
     public nonisolated func manifest(forPackageAt root: URL, source: URL) throws -> PluginManifest {
@@ -115,12 +135,19 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     }
 
     public func run(_ installed: [InstalledPlugin]) {
+        if let installDates, installed.contains(where: { $0.grant.permissions.contains(.nativeMessaging) && installDates[$0.id] != $0.installedAt }) {
+            looksForNativeAppsAgain = true
+        }
+        installDates = Dictionary(installed.compactMap { plugin in plugin.installedAt.map { (plugin.id, $0) } }) { first, _ in first }
         plugins = installed
         changeEngines { await $0.loadEnabledExtensions() }
     }
 
-    /// While no extension is enabled, stops what a profile of the Persona that has just started runs from an earlier launch. No pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
-    public func profileDidStart(with extensions: any EngineExtensions) {
+    /// Answers the engine for a profile of the Persona that has just started. The runtime becomes the profile's delegate at once, before any extension attaches it, so that the store's own install button, which asks before the Persona has an extension, reaches it. On Chromium, which reads Arch's links and its own system folder itself, it then stops each version that the gate refuses by what `NativeMessagingHostLinks` reads there, also one the profile kept from an earlier launch, before any pass of loads ends. Then, while no extension is enabled, it stops what the profile runs from an earlier launch: no pass of loads reaches the profile then, since switched-off extensions alone start no engine, so an extension that the engine kept in the profile, such as one switched off just before the app ended and before the engine wrote that down, would keep running. With an extension enabled, the pass that loads it stops the rest once its loads end. The host calls it as each of the Persona's profiles starts and, when it makes the runtime, for the profiles that started before.
+    public func profileDidStart(with extensions: any EngineExtensions, of kind: EngineKind) {
+        extensions.delegate = self
+        startedProfiles[kind] = extensions
+        if kind == .chromium { takeGatedVersionsOut(of: extensions) }
         guard !plugins.contains(where: \.isEnabled) else { return }
         extensions.stopUnloadedExtensions()
     }
@@ -239,8 +266,9 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
-    /// First deletes in each engine the storage of the extensions removed in an earlier launch in which the engine did not run (`removeMissedData(in:)`). Then, in each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, or whose pair gives the engine to the other version. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Once every load has ended, each engine stops what it runs from an earlier launch and the pass did not load. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension, a staging, or a removal that waits for an engine the host lists.
+    /// First has Arch look for native apps where the extensions need it (`lookForNativeApps()`). Then deletes in each engine the storage of the extensions removed in an earlier launch in which the engine did not run (`removeMissedData(in:)`). Then, in each engine, unloads the extensions that are no longer enabled, whose install changed, that no longer run there, whose pair gives the engine to the other version, or that the gate keeps out of Chromium. Then, for each installed extension, on or off, the engines check its package where it has no current answer and is not loaded, and every engine checks again the package of an enabled extension that no engine runs by its current answers, so that the manager, which records each answer, switches it off with why. Each enabled extension then loads in each engine that runs it where it is not loaded, a version of a pair only in the engine its record gives it, and no engine loads two extensions with one engine identifier; Chromium does not load a version that the gate refuses, which the manager keeps the gate's sentence for as a failure to start there. An extension that an engine cannot start goes out of that engine, and the manager keeps why. Once every load has ended, each engine stops what it runs from an earlier launch and the pass did not load. Switched-off extensions alone start no engine: their packages are checked once the engines run for an enabled extension, a staging, or a removal that waits for an engine the host lists.
     private func loadEnabledExtensions() async {
+        await lookForNativeApps()
         let plugins = plugins
         guard plugins.contains(where: \.isEnabled) || attached != nil || hasMissedRemovalsForListedEngines else { return }
         let engines = orderedEngines()
@@ -255,10 +283,15 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
         for (kind, engine) in engines {
             for (id, load) in loaded[kind] ?? [:] {
+                var refusal: String?
                 // A loaded copy stays until its engine answers that it does not run the package; a load needs the engine's answer that it does.
-                if let wanted = extensions[id], wanted.installed.isEnabled, load.matches(wanted.engineExtension), Self.runs(wanted.installed, on: kind, keepingUnanswered: true) { continue }
+                if let wanted = extensions[id], wanted.installed.isEnabled, load.matches(wanted.engineExtension), Self.runs(wanted.installed, on: kind, keepingUnanswered: true) {
+                    refusal = kind == .chromium ? gateRefusal(of: wanted.installed) : nil
+                    if refusal == nil { continue }
+                }
                 engine.unload(load.engineExtension.id)
                 loaded[kind]?[id] = nil
+                if let refusal { onEngineFailure?(id, kind, refusal) }
             }
         }
         for installed in plugins {
@@ -275,9 +308,14 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
             for (kind, engine) in engines where loaded[kind]?[installed.id] == nil {
                 guard Self.runs(installed, on: kind, checks: checks),
                       !(loaded[kind] ?? [:]).values.contains(where: { $0.engineExtension.id == engineExtension.id }) else { continue }
+                if kind == .chromium, let refusal = gateRefusal(of: installed) {
+                    // Stops a copy that the profile kept from an earlier launch.
+                    engine.unload(engineExtension.id)
+                    onEngineFailure?(installed.id, kind, refusal)
+                    continue
+                }
                 do {
-                    try await engine.load(engineExtension)
-                    loaded[kind, default: [:]][installed.id] = LoadedExtension(installed: installed, engineExtension: engineExtension)
+                    try await load(engineExtension, of: installed, into: engine, of: kind)
                 } catch {
                     engine.unload(engineExtension.id)
                     onEngineFailure?(installed.id, kind, "Arch could not start it on \(kind.displayName) tabs: \(error.localizedDescription)")
@@ -287,6 +325,62 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         for (_, engine) in engines { engine.stopUnloadedExtensions() }
         objectWillChange.send()
     }
+
+    /// Loads the extension in the engine and records what it loaded. A load in Chromium stays in `chromiumLoad` until it ends, so that the step before a link changes can wait for it and find it recorded.
+    private func load(_ engineExtension: EngineExtension, of installed: InstalledPlugin, into engine: any EngineExtensions, of kind: EngineKind) async throws {
+        let load = Task {
+            try await engine.load(engineExtension)
+            loaded[kind, default: [:]][installed.id] = LoadedExtension(installed: installed, engineExtension: engineExtension)
+        }
+        guard kind == .chromium else { return try await load.value }
+        chromiumLoad = load
+        defer { if chromiumLoad == load { chromiumLoad = nil } }
+        try await load.value
+    }
+
+    // MARK: Native apps
+
+    /// Has Arch look for native apps before the loads: again after an install or an update in this run of an extension whose grant has `nativeMessaging`, and otherwise once per run while an enabled extension's grant has it, so that the gate knows Arch's links before such an extension loads.
+    private func lookForNativeApps() async {
+        if looksForNativeAppsAgain {
+            looksForNativeAppsAgain = false
+            await hostLinks.update(force: true)
+        } else if plugins.contains(where: { $0.isEnabled && $0.grant.permissions.contains(.nativeMessaging) }) {
+            await hostLinks.update()
+        }
+    }
+
+    /// The gate's sentence for the version on Chromium, which reads Arch's links and its own system folder itself: for a version whose grant has `nativeMessaging`, whose identifier Arch cannot prove, and which a manifest behind one of Arch's links, one that a pass is about to make, or one in Chromium's folder allows, as a manifest that does not read counts. Nil lets it run there.
+    private func gateRefusal(of installed: InstalledPlugin) -> String? {
+        guard installed.grant.permissions.contains(.nativeMessaging) else { return nil }
+        return hostLinks.refusal(of: NativeMessagingCaller(installed))
+    }
+
+    /// Takes out of the Chromium profile each version that may run there, outside a pair or as its pair's Chromium version, and that the gate refuses: one the runtime loaded leaves with the gate's sentence as its failure on Chromium, and a copy that the profile kept from an earlier launch stops.
+    private func takeGatedVersionsOut(of chromium: any EngineExtensions) {
+        for installed in plugins where installed.pairEngine == nil || installed.pairEngine == .chromium {
+            guard let refusal = gateRefusal(of: installed) else { continue }
+            let id = Self.extensionID(of: installed)
+            if let load = loaded[.chromium]?.removeValue(forKey: installed.id) {
+                chromium.unload(load.engineExtension.id)
+                onEngineFailure?(installed.id, .chromium, refusal)
+            } else if !(loaded[.chromium] ?? [:]).values.contains(where: { $0.engineExtension.id == id }) {
+                chromium.unload(id)
+            }
+        }
+    }
+
+    /// The step when the gate of `NativeMessagingHostLinks` comes to refuse more callers (`gateWidens`), before a pass creates or changes a link and after one reads more origins behind a link it keeps, which the session asks of every Persona's runtime: takes out of Chromium the versions that the gate refuses, the links the pass will make included, then waits for a load in Chromium under way and takes it out too if the gate refuses it, so that no such version runs there once the link exists. It does not wait for the runtime's changes to the engines, since its own pass of loads may be the one that asked for the links.
+    public func takeGatedVersionsOutOfChromium() async {
+        guard let chromium = attached?[.chromium] ?? startedProfiles[.chromium] else { return }
+        takeGatedVersionsOut(of: chromium)
+        guard let load = chromiumLoad else { return }
+        _ = try? await load.value
+        takeGatedVersionsOut(of: chromium)
+    }
+
+    /// What the native messages and ports of the Persona's extensions last met on WebKit tabs in this run, by plugin, which Settings ▸ Plugins shows (`NativeAppGuide`).
+    public var nativeAppOutcomes: NativeAppOutcomes { nativeMessaging.outcomes }
 
     /// Whether the extension runs on the engine of `kind` by the rule Settings shows (`InstalledPlugin.engines`), with the engine's answer in this pass, `checks`, where it checked the package, and, while the engine has no answer, the answer `keepingUnanswered`.
     private static func runs(_ installed: InstalledPlugin, on kind: EngineKind, checks: [EngineKind: PluginEngineCheck] = [:], keepingUnanswered: Bool = false) -> Bool {
@@ -428,10 +522,14 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)
     }
 
-    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for.
+    /// A reload asks with a sheet on its tab, whose Reload the engine follows. More access in the engine's own sentences asks as access does, naming the version of a pair, for the version that the calling engine loaded: Touch ID or the login password confirm it when what the extension may ask for at run time, its optional access and the sites its install left out, includes every website, and an extension that may ask for native messaging at run time without the install's grant, or whose optional access does not read, is refused, as Arch never grants native messaging at run time and the engine's sentences do not say which permissions they stand for. An install is refused, so that the engine installs nothing outside the plugin list; from a tab on a store page, it starts Arch's store install of the identifier in the Persona with the tab instead, whose review comes before anything installs.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, asks prompt: EngineExtensionPrompt, completion: @escaping (Bool) -> Void) {
         guard let host else { return completion(false) }
         switch prompt.kind {
+        case .install:
+            completion(false)
+            guard let tab = prompt.tab, let page = tab.url, storePageReader(page) != nil, let storeID = WebStore.identifier(id) else { return }
+            host.installFromWebStore(storeID, persona: persona, tab: tab)
         case let .reload(names):
             host.presentSheet(WebExtensionEnginePrompt.reloadAlert(names: names), for: prompt.tab) { completion($0 == .alertFirstButtonReturn) }
         case let .permissions(messages):
@@ -463,15 +561,17 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         }
     }
 
+    /// Needs the version's `nativeMessaging` grant, and under one of Arch's links the proof of its identifier.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, sendNativeMessage message: Data, toApplication application: String?,
                            reply: @escaping (Result<Data, any Error>) -> Void) {
-        guard loadedExtension(id, in: extensions, granted: .nativeMessaging) != nil else { return reply(.failure(PluginError.permissionDenied(.nativeMessaging))) }
-        nativeMessaging.send(message, to: application, from: id, reply: reply)
+        guard let installed = loadedExtension(id, in: extensions, granted: .nativeMessaging) else { return reply(.failure(PluginError.permissionDenied(.nativeMessaging))) }
+        nativeMessaging.send(message, to: application, from: NativeMessagingCaller(installed), reply: reply)
     }
 
+    /// Needs the version's `nativeMessaging` grant, and under one of Arch's links the proof of its identifier.
     public func extensions(_ extensions: any EngineExtensions, extension id: String, connect port: any EngineNativeMessagingPort) throws {
-        guard loadedExtension(id, in: extensions, granted: .nativeMessaging) != nil else { throw PluginError.permissionDenied(.nativeMessaging) }
-        try nativeMessaging.connect(port, from: id)
+        guard let installed = loadedExtension(id, in: extensions, granted: .nativeMessaging) else { throw PluginError.permissionDenied(.nativeMessaging) }
+        try nativeMessaging.connect(port, from: NativeMessagingCaller(installed))
     }
 }
 

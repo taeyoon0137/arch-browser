@@ -1,8 +1,8 @@
 // The browsers File ▸ Import from Browser… reads, where each keeps its data, and the checks that find them. As `AGENTS.md` allows, only this file names browser products in code: other code and the tests read names, identifiers, and locations from these definitions.
 import Foundation
 
-/// A browser Arch imports from, with the places and formats of its data.
-struct BrowserSource: Hashable, Identifiable {
+/// A browser Arch imports from, with the places and formats of its data, and the folders where native app vendors install host manifests for other browsers.
+public struct BrowserSource: Hashable, Identifiable {
     /// The name the import sheet shows.
     let name: String
     /// Identifies the source in the import record and gives the sheet the app's icon.
@@ -11,7 +11,23 @@ struct BrowserSource: Hashable, Identifiable {
     /// The setting that lets Arch read the browser's files when macOS privacy protection blocks them.
     let privacySetting: PrivacySetting
 
-    var id: String { bundleIdentifier }
+    public var id: String { bundleIdentifier }
+
+    /// The folders where native app vendors install host manifests for other browsers, in the order that `NativeMessagingHostLinks` reads them, which the app shell passes to the session (`docs/import-browsers.md`, Native messaging hosts). The system folders come first, since root owns them and they are no app's data; the user folders follow, the protected one of an installed browser first. The import does not use them.
+    public static let nativeMessagingHostFolders: [URL] = {
+        let system = URL(fileURLWithPath: "/Library", isDirectory: true)
+        let support = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Application Support", isDirectory: true)
+        return [
+            system.appendingPathComponent("Google/Chrome/NativeMessagingHosts", isDirectory: true),
+            system.appendingPathComponent("Application Support/Chromium/NativeMessagingHosts", isDirectory: true),
+            system.appendingPathComponent("Microsoft/Edge/NativeMessagingHosts", isDirectory: true),
+            support.appendingPathComponent("Google/Chrome/NativeMessagingHosts", isDirectory: true),
+            support.appendingPathComponent("Chromium/NativeMessagingHosts", isDirectory: true),
+            support.appendingPathComponent("Microsoft Edge/NativeMessagingHosts", isDirectory: true),
+            support.appendingPathComponent("BraveSoftware/Brave-Browser/NativeMessagingHosts", isDirectory: true),
+            support.appendingPathComponent("Vivaldi/NativeMessagingHosts", isDirectory: true),
+        ]
+    }()
 
     /// Where a browser keeps the data Arch reads, by format.
     enum Layout: Hashable {
