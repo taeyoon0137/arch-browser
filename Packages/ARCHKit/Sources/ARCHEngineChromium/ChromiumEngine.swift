@@ -486,6 +486,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.canGoForward = canGoForward
         uiDelegate?.webContentsDidChangeLoadingState(self)
     }
+    public func cefBrowserDidCommitDocument(_ url: String) { uiDelegate?.webContents(self, didCommitDocumentAt: URL(string: url)) }
     public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }

@@ -324,6 +324,7 @@ public final class BrowserWindowModel: ObservableObject {
             return
         }
         tab.forgetExternalAppDecline()
+        tab.userDidNavigate()
         tab.webContents.navigationController.load(URLRequest(url: url))
     }
 
@@ -492,6 +493,7 @@ public final class BrowserWindowModel: ObservableObject {
         guard let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         if let tab = selectedTab {
             tab.forgetExternalAppDecline()
+            tab.userDidNavigate()
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
             openTab(url: url)
@@ -755,16 +757,20 @@ public final class BrowserWindowModel: ObservableObject {
 
     // MARK: Navigation
 
-    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it.
+    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to.
     public func goBack() {
         if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
-        selectedTab?.webContents.navigationController.goBack()
+        guard let tab = selectedTab else { return }
+        if tab.webContents.canGoBack { tab.userDidNavigate() }
+        tab.webContents.navigationController.goBack()
     }
     public func goForward() {
         if let preview { return preview.webContents.navigationController.goForward() }
         internalPage = nil
-        selectedTab?.webContents.navigationController.goForward()
+        guard let tab = selectedTab else { return }
+        if tab.webContents.canGoForward { tab.userDidNavigate() }
+        tab.webContents.navigationController.goForward()
     }
     /// The selected tab's earlier pages, most recent first, for the History menu.
     public func recentBackItems(limit: Int) -> [any EngineBackForwardListItem] {
@@ -776,12 +782,14 @@ public final class BrowserWindowModel: ObservableObject {
         guard let tab = selectedTab, tab.id == tabID else { return }
         closePreview()
         internalPage = nil
+        tab.userDidNavigate()
         tab.webContents.navigationController.go(to: item)
     }
     public func reload() {
         if let preview { return preview.webContents.navigationController.reload() }
-        guard internalPage == nil else { return }
-        selectedTab?.webContents.navigationController.reload()
+        guard internalPage == nil, let tab = selectedTab else { return }
+        tab.userDidNavigate()
+        tab.webContents.navigationController.reload()
     }
     public func stopLoading() { selectedTab?.webContents.navigationController.stop() }
 
@@ -1139,6 +1147,14 @@ public final class BrowserWindowModel: ObservableObject {
         guard let selected = selectedTab, shows(selected) else { return [] }
         if fullscreenTabID == selected.id { return [selected] }
         return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
+    }
+
+    /// The tab of `tabsOnScreen` whose page lies under the event's place in the window, as for a click in a pane of the split view that the click is about to select.
+    public func tabOnScreen(at event: NSEvent) -> Tab? {
+        tabsOnScreen.first { tab in
+            let view = tab.webContents.view
+            return view.window === event.window && view.bounds.contains(view.convert(event.locationInWindow, from: nil))
+        }
     }
 
     /// Whether `tab` can open as a pane: it belongs to the selected tab's space, the page area does not show it yet, and the panes it joins have room.

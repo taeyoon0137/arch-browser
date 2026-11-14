@@ -287,6 +287,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleFrameCreated:(CefRefPtr<CefFrame>)frame;
 - (void)handleURL:(NSString *)url;
 - (void)handleLoadingState:(BOOL)isLoading canGoBack:(BOOL)canGoBack canGoForward:(BOOL)canGoForward;
+- (void)handleDocumentCommit:(NSString *)url;
 - (void)handleDocumentLoadEnd;
 - (void)handleFaviconURLs:(NSArray<NSString *> *)urls;
 - (void)handleFindResult:(int)count activeMatchOrdinal:(int)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
@@ -699,10 +700,11 @@ public:
         [owner_ handleLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
     }
 
-    // CEF calls this once a navigation commits.
+    // CEF calls this once a navigation commits a new document, before it reports the main frame's new address, and not for navigations within the document or loads that fail.
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override {
         if (frame->IsMain()) {
             [owner_ handleMainFrameNavigationPending:NO];
+            [owner_ handleDocumentCommit:ToNSString(frame->GetURL())];
         }
     }
 
@@ -1077,6 +1079,10 @@ private:
     _canGoBack = canGoBack;
     _canGoForward = canGoForward;
     [_delegate cefBrowserDidChangeLoadingState:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+}
+
+- (void)handleDocumentCommit:(NSString *)url {
+    [_delegate cefBrowserDidCommitDocument:url];
 }
 
 - (void)handleDocumentLoadEnd {

@@ -1667,12 +1667,15 @@ extension BrowserSession: EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a sheet on the tab, and a refused one ends; a tab that only pointed at the file, or a page without a tab, has nothing to ask about. The others go on as `chooseDestination` says.
+    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a sheet on the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         let choose = { [weak self] in self?.chooseDestination(in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
         guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, !admittedDownloads.contains(item) else { return choose() }
         let decide = { [weak self] (allowed: Bool) in
-            guard allowed else { return completion(nil) }
+            guard allowed else {
+                completion(nil)
+                return item.remove()
+            }
             self?.admittedDownloads.add(item)
             choose()
         }
@@ -1684,10 +1687,18 @@ extension BrowserSession: EngineDownloadsDelegate {
         }
     }
 
-    /// Asks whether the tab's page may download more files. Closing the tab answers no.
+    /// Asks whether the tab's page may download more files. Closing the tab answers no. The question names the page's host, a file's name for a page without one, or else this page, never the page's own title.
     private func askToAllowDownloads(from tab: Tab) {
+        let page: String
+        if let host = tab.url?.host, !host.isEmpty {
+            page = "\u{201C}\(host)\u{201D}"
+        } else if let url = tab.url, url.isFileURL, !url.lastPathComponent.isEmpty {
+            page = "\u{201C}\(url.lastPathComponent)\u{201D}"
+        } else {
+            page = "this page"
+        }
         let alert = NSAlert()
-        alert.messageText = "Allow \u{201C}\(tab.url?.host ?? tab.title)\u{201D} to download multiple files?"
+        alert.messageText = "Allow \(page) to download multiple files?"
         alert.informativeText = "The page started another download without a click in it. If you allow it, it can download files until it loads another page."
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don\u{2019}t Allow")

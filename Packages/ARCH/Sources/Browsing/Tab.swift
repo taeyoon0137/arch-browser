@@ -86,7 +86,7 @@ public final class Tab: ObservableObject, Identifiable {
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private(set) var isDownloadOnly = false
-    /// Whether the current document may start downloads without asking (`BrowserSession`'s download delegate).
+    /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
 
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
@@ -155,6 +155,11 @@ public final class Tab: ObservableObject, Identifiable {
     public func userDidClickInPage() {
         pageDownloads.userDidClick()
     }
+
+    /// Arch loads a page in the tab for the user, as an address typed in the palette, Back, or Reload, so a download it starts is not the page's (`PageDownloadGate`).
+    func userDidNavigate() {
+        pageDownloads.userDidNavigate()
+    }
 }
 
 extension Tab: EngineWebContentsUIDelegate {
@@ -183,8 +188,10 @@ extension Tab: EngineWebContentsUIDelegate {
             recordVisit?(url, webContents.title)
         }
     }
+    public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        pageDownloads.documentDidCommit(site: Self.site(of: url))
+    }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
-        pageDownloads.documentDidLoad()
         didLoadDocument.send()
     }
 
@@ -233,6 +240,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     /// Loads the crashed page's address again, which starts a new page process.
     public func reloadAfterCrash() {
+        userDidNavigate()
         guard let url else { return webContents.navigationController.reload() }
         webContents.navigationController.load(URLRequest(url: url))
     }

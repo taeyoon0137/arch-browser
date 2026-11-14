@@ -84,6 +84,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents)
     func webContentsDidChangeURL(_ webContents: any EngineWebContents)
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents)
+    /// The main frame committed a new document at `url`, which then loads. It can come before `webContentsDidChangeURL` reports `url`. Navigations within the document and loads that fail report nothing.
+    func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?)
     /// The main frame finished loading a document, whose frames may still be loading. Navigations within the document report nothing.
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents)
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
@@ -121,6 +123,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeURL(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {}
+    func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {}
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
