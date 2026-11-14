@@ -58,6 +58,10 @@ struct PluginInstallSheet: View {
         return space == nil ? "Installs in \u{201C}\(place)\u{201D} for all its spaces." : "Installs in the Persona of \u{201C}\(place)\u{201D} for all its spaces."
     }
 
+    /// The review's height, which keeps the sheet within Settings ▸ Plugins: its form scrolls between the header and the buttons.
+    static let reviewHeight: CGFloat = 520
+
+    /// Each step gives the sheet a height of its own, never an open one: the store sheet and the last step the height of what they show, and every review, also one that the store sheet staged, the same fixed height, so that its buttons stay at the bottom within the window.
     var body: some View {
         Group {
             switch step {
@@ -65,6 +69,7 @@ struct PluginInstallSheet: View {
                 if let webStore {
                     WebStoreInstallSheet(plugins: plugins, installer: webStore, start: start, close: { dismiss() }) { step = .review($0) }
                         .padding(20)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             case let .review(review):
                 PluginReviewView(plugins: plugins, review: review, personaSentence: personaSentence, askForChanges: askForChanges, close: { dismiss() }) { id, isNewPlugin in
@@ -76,25 +81,17 @@ struct PluginInstallSheet: View {
                 }
                 // A review that takes the last step's place starts with its own sites and choice.
                 .id(review.id)
+                .frame(height: Self.reviewHeight)
             case let .installed(id, engine):
                 VersionLastStep(plugins: plugins, plugin: id, engine: engine, offersWebStore: webStore != nil, close: { dismiss() },
                                 review: { step = .review($0) }, storeSheet: { step = .webStore($0) })
                     .padding(20)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        // A plugin that AI wrote shows its sources wider, as wide as the Settings window, so the sheet stays within it. The review, whose form scrolls, is no taller than Settings ▸ Plugins, and the store sheet and the last step take the height of what they show.
-        .frame(width: isWrittenByAI ? sectionWidth : 480, height: isStoreSheet || isLastStep ? nil : 520)
+        // A plugin that AI wrote shows its sources wider, as wide as the Settings window, so the sheet stays within it.
+        .frame(width: isWrittenByAI ? sectionWidth : 480)
         .interactiveDismissDisabled()
-    }
-
-    private var isStoreSheet: Bool {
-        guard case .webStore = step else { return false }
-        return true
-    }
-
-    private var isLastStep: Bool {
-        guard case .installed = step else { return false }
-        return true
     }
 
     /// Whether the sheet reviews a plugin that AI wrote.
