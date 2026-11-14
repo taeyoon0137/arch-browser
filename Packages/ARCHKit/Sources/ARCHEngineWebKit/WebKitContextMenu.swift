@@ -1,4 +1,4 @@
-// Shows the app's context menu on the WebKit engine. WebKit builds its own menu for each click; the adapter keeps only the editing and spelling items WebKit runs itself, marks them for the UI delegate, and learns the clicked link, image, and selection from a script in its own content world.
+// Shows the app's context menu on the WebKit engine. WebKit builds its own menu for each click; the adapter keeps only the editing and spelling items WebKit runs itself, marks them for the UI delegate, adds macOS's text items that `EngineTextMenuItems` builds for both engines, and learns the clicked link, image, selection, and password field from a script in its own content world.
 import AppKit
 import ARCHEngine
 import WebKit
@@ -31,7 +31,9 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         }
         if (!media && node instanceof HTMLMediaElement) media = node.currentSrc || null;
       }
-      window.webkit.messageHandlers.\(handlerName).postMessage({ link, image, media, selection: String(window.getSelection() ?? '') });
+      const target = event.composedPath()[0];
+      const password = target instanceof HTMLInputElement && target.type === 'password';
+      window.webkit.messageHandlers.\(handlerName).postMessage({ link, image, media, password, selection: String(window.getSelection() ?? '') });
     }, true);
     """
 
@@ -47,7 +49,8 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         func url(_ key: String) -> URL? { (body[key] as? String).flatMap(URL.init(engineString:)) }
         let selection = body["selection"] as? String
         webView.pendingElement = EngineContextMenuElement(linkURL: url("link"), imageURL: url("image"), mediaURL: url("media"),
-                                                          selectedText: selection?.isEmpty == false ? selection : nil, isInMainFrame: message.frameInfo.isMainFrame)
+                                                          selectedText: selection?.isEmpty == false ? selection : nil, isInMainFrame: message.frameInfo.isMainFrame,
+                                                          isPasswordField: body["password"] as? Bool == true)
     }
 }
 
@@ -56,8 +59,9 @@ extension WebKitWebContents {
         WebKitContextMenuScript.install(in: webView.configuration.userContentController)
     }
 
-    /// Keeps WebKit's editing and spelling items, which WebKit runs itself, and lets the UI delegate build the rest. The menu is changed in place, because WebKit tracks the one it passed in. AppKit adds its own items, such as AutoFill and Services, because WebKit shows the menu as a context menu for the web view; they appear on Chromium's menu the same way.
-    func prepareContextMenu(_ menu: NSMenu, for element: EngineContextMenuElement) {
+    /// Keeps WebKit's editing and spelling items, which WebKit runs itself, adds macOS's text items aimed at `pageView` (the web view unless a test names another), opening at `location` in the tab's view, with `panels` (the system's unless a test names them), and lets the UI delegate build the rest. The text items take the place of WebKit's own Look Up, Translate, submenus, and Share…, and the tab adds Search with in the place of WebKit's, so that both engines show the same items. The menu is changed in place, because WebKit tracks the one it passed in. AppKit adds its own items, such as AutoFill and Services, because WebKit shows the menu as a context menu for the web view; they appear on Chromium's menu the same way.
+    func prepareContextMenu(_ menu: NSMenu, for element: EngineContextMenuElement, at location: NSPoint = .zero, pageView: NSView? = nil,
+                            panels: EngineTextMenuItems.Panels? = nil) {
         guard let uiDelegate, let kept = Self.keptContextMenuItems(of: menu, for: element) else { return }
         menu.removeAllItems()
         for item in kept {
@@ -75,13 +79,15 @@ extension WebKitWebContents {
             item.isEnabled = true
             menu.addItem(item)
         }
+        EngineTextMenuItems.items(for: element, pageView: pageView ?? webView, anchor: view, at: location, panels: panels).forEach(menu.addItem)
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
     }
 
-    /// The roles of the items WebKit runs itself, by tag. WebKit's tags are WebCore's menu actions; on macOS they equal the deprecated WebMenuItemTag values in the SDK's WebUIDelegate.h.
+    /// The roles of the items WebKit runs itself, by tag. WebKit's tags are WebCore's menu actions; on macOS they equal the deprecated WebMenuItemTag values in the SDK's WebUIDelegate.h. Ignore Spelling (17) and Learn Spelling (18) are WebKit's own, which clear the word's marks; Ignore Spelling also keeps WebKit from marking the word again in the page.
     static let contextMenuRoles: [Int: NSUserInterfaceItemIdentifier] = [
         8: EngineContextMenuItem.copy, 13: EngineContextMenuItem.cut, 14: EngineContextMenuItem.paste,
         15: EngineContextMenuItem.spellingSuggestion, 16: EngineContextMenuItem.noSpellingSuggestions,
+        17: EngineContextMenuItem.ignoreSpelling, 18: EngineContextMenuItem.learnSpelling,
     ]
 
     /// The items of WebKit's menu that the app's menu keeps: WebKit's own items with a role, in WebKit's order. Nil when WebKit's menu stays as it is: a menu without WebKit's own items, one with items a page element provides, and one whose element the script could not see.

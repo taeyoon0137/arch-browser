@@ -45,15 +45,33 @@ public struct EnginePermissionRequest: Sendable {
     }
 }
 
-/// Identifiers an engine gives the context menu items it runs itself.
+/// Identifiers of the items an engine hands its UI delegate in the page context menu: the spelling and editing items it runs itself, and macOS's text items, which `EngineTextMenuItems` builds alike for both engines.
 public enum EngineContextMenuItem {
     /// A replacement for the misspelled word. Its title is the replacement, so it keeps its title.
     public static let spellingSuggestion = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.spellingSuggestion")
     public static let noSpellingSuggestions = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.noSpellingSuggestions")
+    /// Clears the misspelled word's marks where it was clicked.
+    public static let ignoreSpelling = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.ignoreSpelling")
+    /// Adds the misspelled word to the system's spelling dictionary.
+    public static let learnSpelling = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.learnSpelling")
     public static let cut = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.cut")
     public static let copy = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.copy")
     public static let paste = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.paste")
     public static let selectAll = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.selectAll")
+    /// Look Up “…”, which shows the selection's definition at the click. Its title quotes the selection, so it keeps its title, as do the other text items.
+    public static let lookUp = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.lookUp")
+    /// Translate “…”, which shows the system's translation of the selection at the click.
+    public static let translate = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.translate")
+    /// The Spelling and Grammar submenu of a field.
+    public static let spellingAndGrammar = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.spellingAndGrammar")
+    /// The Substitutions submenu of a field.
+    public static let substitutions = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.substitutions")
+    /// The Transformations submenu of a field with a selection.
+    public static let transformations = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.transformations")
+    /// The Speech submenu, in a field and for a selection outside one.
+    public static let speech = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.speech")
+    /// Share…, the system's share item for the link, image, media, and selection.
+    public static let share = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.share")
 }
 
 public struct EngineContextMenuElement: Sendable {
@@ -64,13 +82,17 @@ public struct EngineContextMenuElement: Sendable {
     public var isEditable: Bool
     /// Whether the menu opened in the page's main frame, not in a frame inside the page, which can show another site. False when the engine could not tell.
     public var isInMainFrame: Bool
-    public init(linkURL: URL? = nil, imageURL: URL? = nil, mediaURL: URL? = nil, selectedText: String? = nil, isEditable: Bool = false, isInMainFrame: Bool = false) {
+    /// Whether the field holds a password, whose text no item may read, speak, search, or share. WebKit's script finds a password input under the click; Chromium's page view has no text input context in a password field or in one that has been one.
+    public var isPasswordField: Bool
+    public init(linkURL: URL? = nil, imageURL: URL? = nil, mediaURL: URL? = nil, selectedText: String? = nil, isEditable: Bool = false, isInMainFrame: Bool = false,
+                isPasswordField: Bool = false) {
         self.linkURL = linkURL
         self.imageURL = imageURL
         self.mediaURL = mediaURL
         self.selectedText = selectedText
         self.isEditable = isEditable
         self.isInMainFrame = isInMainFrame
+        self.isPasswordField = isPasswordField
     }
 }
 
@@ -110,7 +132,7 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void)
     /// Asks whether a download that `url` starts may proceed. `hasPage` is false when the web contents never showed a page, as when a tab opens straight onto a file.
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool
-    /// Builds the page's context menu. On entry `menu` holds only the spelling and editing items the engine runs itself, marked with `EngineContextMenuItem` identifiers, and they carry their enabled state. The delegate may retitle, reorder, or remove them, except that a spelling suggestion keeps its title, and sets `isEnabled` on every item it adds. The engine shows the menu after this returns, unless it is empty, as a context menu for the page, so that AppKit adds its own items, such as AutoFill and Services, which never appear in `menu`.
+    /// Builds the page's context menu. On entry `menu` holds only the spelling and editing items the engine runs itself and macOS's text items that `EngineTextMenuItems` builds alike for both engines, marked with `EngineContextMenuItem` identifiers, and they carry their enabled state. The delegate may retitle, reorder, or remove them, except that a spelling suggestion and a text item keep their titles, and sets `isEnabled` on every item it adds. The engine shows the menu after this returns, unless it is empty, as a context menu for the page, so that AppKit adds its own items, such as AutoFill and Services, which never appear in `menu`.
     func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu)
     /// Offers a link that belongs to another app. The engines call this instead of loading a scheme they do not handle. `isUserInitiated` is true when the user clicked the link.
     func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool)

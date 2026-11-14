@@ -466,6 +466,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
 /// Replaces the selected misspelled word with `word`.
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
+/// Adds `word` to the profile's custom dictionary and to the system's spelling dictionary, which clears its marks in the page (`CefBrowserHost::AddWordToDictionary`).
+- (void)addWordToDictionary:(NSString *)word NS_SWIFT_NAME(addWordToDictionary(_:));
 @end
 
 NS_ASSUME_NONNULL_END

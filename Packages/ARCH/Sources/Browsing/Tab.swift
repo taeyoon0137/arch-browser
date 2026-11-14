@@ -62,6 +62,8 @@ public final class Tab: ObservableObject, Identifiable {
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
+    /// The session sets this callback to show the search engine's results for text selected in the page in a new tab, for the context menu's Search with.
+    var searchInNewTab: ((String) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
     var askAboutSelection: ((String) -> Void)?
     /// The session's plugins set this callback to pass a value one of the page's scripts sent to the plugin it belongs to, with the reply. Without it, the script's promise settles with nothing.
@@ -272,15 +274,18 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Context menus
 
-    /// Builds the same menu on both engines: spelling suggestions, then the link, the image, editing or Copy, and Ask About Selection, separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow. The engine's own items keep their actions and enabled state.
+    /// Builds the same menu on both engines, in the order of WebKit's own menu: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, then the link, the image, editing or Copy, Ask About Selection, the field's text submenus, and Share… (with Speech outside a field), separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow. The engine's own items keep their actions and enabled state, and macOS's text items (`EngineTextMenuItems`) also keep their titles.
     public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
         let engineItems = menu.items
         menu.removeAllItems()
         menu.autoenablesItems = false
         func engineItem(_ identifier: NSUserInterfaceItemIdentifier, _ title: String) -> NSMenuItem? {
-            guard let item = engineItems.first(where: { $0.identifier == identifier }) else { return nil }
+            guard let item = handedItem(identifier) else { return nil }
             item.title = title
             return item
+        }
+        func handedItem(_ identifier: NSUserInterfaceItemIdentifier) -> NSMenuItem? {
+            engineItems.first { $0.identifier == identifier }
         }
         var sections: [[NSMenuItem]] = []
         let suggestions = engineItems.filter { $0.identifier == EngineContextMenuItem.spellingSuggestion }
@@ -289,6 +294,12 @@ extension Tab: EngineWebContentsUIDelegate {
         } else if let noGuesses = engineItem(EngineContextMenuItem.noSpellingSuggestions, "No Guesses Found") {
             noGuesses.isEnabled = false
             sections.append([noGuesses])
+        }
+        sections.append([engineItem(EngineContextMenuItem.ignoreSpelling, "Ignore Spelling"), engineItem(EngineContextMenuItem.learnSpelling, "Learn Spelling")]
+            .compactMap { $0 })
+        sections.append([handedItem(EngineContextMenuItem.lookUp), handedItem(EngineContextMenuItem.translate)].compactMap { $0 })
+        if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
+            sections.append([ActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
         }
         if let link = element.linkURL {
             sections.append([newTabItem("Open Link in New Tab", for: link), ActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
@@ -308,6 +319,11 @@ extension Tab: EngineWebContentsUIDelegate {
            let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
             sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
         }
+        // WebKit puts Speech among a field's submenus, and after Share… outside a field.
+        let fieldSubmenus = [EngineContextMenuItem.spellingAndGrammar, EngineContextMenuItem.substitutions, EngineContextMenuItem.transformations]
+            + (element.isEditable ? [EngineContextMenuItem.speech] : [])
+        sections.append(fieldSubmenus.compactMap(handedItem))
+        sections.append(([EngineContextMenuItem.share] + (element.isEditable ? [] : [EngineContextMenuItem.speech])).compactMap(handedItem))
         sections.removeAll { $0.isEmpty }
         if sections.isEmpty {
             sections.append([

@@ -865,6 +865,15 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.engineKind).isUnread = true
         }
+        // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
+        tab.searchInNewTab = { [weak self, weak tab] text in
+            guard let self, let tab else { return }
+            let url = Self.searchResultsURL(for: text)
+            if let window = self.window(showing: tab) {
+                return window.showOpenedPage(self.makeWebContents(url: url, engine: tab.engineKind, state: nil, in: tab.personaID), personaID: tab.personaID)
+            }
+            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.engineKind).isUnread = true
+        }
         // A web link the user clicks with Shift opens in the preview panel of the page's window, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
             guard let self, let tab else { return }
@@ -1114,6 +1123,11 @@ public final class BrowserSession: ObservableObject {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         if let url = url(forInput: text) { return url }
+        return searchResultsURL(for: text)
+    }
+
+    /// The results page of the search engine chosen in Settings for `text`.
+    static func searchResultsURL(for text: String) -> URL {
         var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "q", value: text)]
         return components.url!
