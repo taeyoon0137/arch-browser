@@ -70,6 +70,24 @@ import Testing
         #expect(restored.script == Data(AgentHookTemplate.script(for: .tabSelected).utf8) && restored.hook.grant.permissions == [.agent])
     }
 
+    @Test func thePresetOpensAsANewEditableDraftAndTheTabNamesWarningFollowsTheTwoLoadEvents() throws {
+        let preset = HookPresets.tidyTabNames
+        var draft = ScriptHookDraft(editing: preset, script: AgentHookTemplate.script(for: .pageLoaded), places: places, reviewing: false, isNew: true)
+        #expect(draft.stored == nil && draft.guided && draft.generated && !draft.startsEnabled)
+        #expect(draft.agentModel == .tier(.fast) && draft.agentRenamesTabs && !draft.readsPageText)
+        #expect(try draft.makeHook().hook.state == .paused(.user))
+        draft.startsEnabled = true
+        let saved = try draft.makeHook().hook
+        #expect(saved.id == preset.id && saved.origin == .preset("tidyTabNames") && saved.state == .active)
+        #expect(saved.trigger == preset.trigger && saved.filter.tabKinds == [.open, .pinned] && saved.agent == preset.agent)
+        for kind in BrowserEventKind.allCases {
+            let applies = TabNamesWarning.applies(renames: true, kind: kind, tabNames: AIRoute(isEnabled: true))
+            #expect(applies == (kind == .pageLoaded || kind == .tabOpened))
+            #expect(!TabNamesWarning.applies(renames: true, kind: kind, tabNames: AIRoute(isEnabled: false)))
+            #expect(!TabNamesWarning.applies(renames: false, kind: kind, tabNames: AIRoute(isEnabled: true)))
+        }
+    }
+
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
         let filter = BrowserEventFilter(scope: .places([.persona(persona), .space(work), .space(UUID())]), sites: [AISitePattern("example.org")])
         let hook = Hook(name: "Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false), filter: filter)

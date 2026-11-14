@@ -847,6 +847,31 @@ import Testing
         #expect(runner.invocations.count == 1)
     }
 
+    @Test func tidyTabNamesIsAnInactiveOrdinaryHookUntilEnabledAndMatchesOnlyTheFirstLiveLoad() async throws {
+        defer { harness.cleanUp() }
+        let registry = try await harness.start()
+        let preset = HookPresets.tidyTabNames
+        #expect(preset.id != HookPresets.tidyTabNames.id && registry.hooks.isEmpty)
+        #expect(preset.state == .paused(.user) && preset.origin == .preset("tidyTabNames"))
+        #expect(preset.filter.scope == .everywhere && preset.filter.sites.isEmpty && preset.filter.exceptSites.isEmpty && preset.filter.engines.isEmpty)
+        #expect(preset.filter.tabKinds == [.open, .pinned] && preset.grant.permissions == [.agent])
+        #expect(preset.agent?.model == .tier(.fast) && preset.agent?.tabAccess == .title && preset.record == .none)
+        #expect(preset.grant.agent?.tools == ["rename_tab"] && preset.agent?.tools == ["rename_tab"])
+        #expect(preset.agent?.limits == AgentRunLimits(timeout: .seconds(20), rounds: 1, toolCalls: 2))
+        #expect(preset.timing.delay == .milliseconds(1500) && preset.timing.runsPerDay == 300 && preset.grant.agent?.runsPerDay == 300)
+        #expect(preset.agent?.prompt.contains("at most four words, in the language of its title") == true)
+        let tab = harness.tab()
+        func loads(restore: Bool, first: Bool) -> BrowserEvent {
+            BrowserEvent(id: UUID(), sequence: 1, date: .now, payload: .pageLoaded(tab: tab, isRestore: restore, isFirstLoadAfterOpen: first), cause: nil)
+        }
+        #expect(preset.trigger.matches(loads(restore: false, first: true)))
+        #expect(!preset.trigger.matches(loads(restore: true, first: true)) && !preset.trigger.matches(loads(restore: false, first: false)))
+        try registry.add(preset, script: Data(AgentHookTemplate.script(for: .pageLoaded).utf8))
+        #expect(registry.hooks.first?.state == .paused(.user))
+        registry.resume(preset.id)
+        #expect(registry.hooks.first?.state == .active)
+    }
+
     @Test func savingAgentOptionsChecksTheUsersGrant() throws {
         var hook = agentHook("Short titles", .tabOpened)
         #expect(try HookRegistry.checked(hook).agent == hook.agent)

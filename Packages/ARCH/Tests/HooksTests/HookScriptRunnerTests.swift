@@ -168,6 +168,33 @@ extension PluginValue {
                               documents: documents ?? [tab.id: tab.url!], closedTab: nil, knownProviders: [:], requestDidEnd: { _ in })
     }
 
+    @Test func theEnabledTidyPresetRunsItsGeneratedFirstLoadScriptOncePerEngine() async throws {
+        defer { harness.cleanUp() }
+        var requests: [AgentRunRequest] = []
+        let real = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { request, _ in
+            requests.append(request)
+            guard let tab = request.tabs.first else { return AgentRunResult(status: .refused) }
+            return AgentRunResult(status: .completed, actions: [.renamedTab(tab: tab, name: "Fixture title")], reply: "Done")
+        }
+        let recording = RecordingRunner(real)
+        harness.javaScriptRunner = recording
+        let registry = try await harness.start()
+        let preset = try harness.add(HookPresets.tidyTabNames, script: AgentHookTemplate.script(for: .pageLoaded))
+        registry.resume(preset.id)
+        let web = harness.tab("/web")
+        var chromium = harness.tab("/chromium", kind: .pinned)
+        chromium.engine = .chromium
+        harness.load(harness.tab("/restored"), restore: true)
+        harness.load(harness.tab("/revisited"), first: false)
+        harness.load(web)
+        harness.load(chromium)
+        try #require(await eventually(within: .seconds(20)) { recording.outcomes.count == 2 })
+        #expect(Set(requests.flatMap(\.tabs)) == [web.id, chromium.id])
+        #expect(requests.allSatisfy { $0.options == preset.agent && $0.knownProviders?[harness.provider.id] == HookKnownProvider(harness.provider).destination })
+        #expect(recording.outcomes.allSatisfy { $0.actions?.count == 1 })
+        #expect(harness.entries(of: preset.id).isEmpty)
+    }
+
     @Test func theGeneratedCloseScriptPreviewsOnlyTheTabsLeftInTheSpace() async throws {
         defer { harness.cleanUp() }
         var call: AgentRunRequest?
