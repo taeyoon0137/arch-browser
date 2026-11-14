@@ -161,6 +161,19 @@ import Testing
         #expect(lines.contains("  - button \u{201C}Remove item\u{201D} [e27] (asks the user)"))
     }
 
+    @Test func sharingATakenOverDocumentCannotDiffTheEarlierUnredactedOutline() async throws {
+        let fixture = try await PageFixture()
+        let owned = await fixture.call("snapshot", ["tab": "t1"])
+        #expect(owned.text.contains("Alex Kim"))
+        fixture.host.tabs[0].agentOwnerID = nil
+        fixture.host.userTabIDs.insert(fixture.tabID)
+        fixture.state.handles.sharedTabIDs.append(fixture.tabID)
+        let storedRef = await fixture.call("snapshot", ["tab": "t1", "ref": "e6"])
+        #expect(storedRef.status == .stale)
+        let shared = await fixture.call("snapshot", ["tab": "t1", "diff": true])
+        #expect(shared.status == .ok && shared.text.contains("first snapshot") && !shared.text.contains("Alex Kim"))
+    }
+
     @Test func aTabTheUserSharedShowsNoValues() async throws {
         let fixture = try await PageFixture(shared: true)
         let result = await fixture.call("snapshot", ["tab": "t1"])

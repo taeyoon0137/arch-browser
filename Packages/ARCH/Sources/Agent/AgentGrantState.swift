@@ -21,6 +21,7 @@ struct AgentSnapshotRecord {
 
     var url: URL
     var documentID: UUID
+    var ownerID: UUID?
     var document: Int
     var refs: [String: Ref]
     var lines: [String]
@@ -32,7 +33,8 @@ struct AgentSnapshotRecord {
     var counts: [UUID: Int] = [:]
 
     func current(_ tab: AgentTabInfo, pages: Int) -> AgentSnapshotRecord? {
-        guard let record = records[tab.id], record.documentID == tab.documentID, record.url == tab.url, record.document == pages else { return nil }
+        guard let record = records[tab.id], record.documentID == tab.documentID, record.ownerID == tab.agentOwnerID,
+              record.url == tab.url, record.document == pages else { return nil }
         return record
     }
 
