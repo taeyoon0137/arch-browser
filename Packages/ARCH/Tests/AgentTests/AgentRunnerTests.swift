@@ -54,6 +54,16 @@ import Testing
         #expect(pageParts.count == 1 && pageParts[0].url.absoluteString == "https://example.org/path" && pageParts[0].title == "Title" && pageParts[0].text.isEmpty)
     }
 
+    @Test func anEditorTestReportsUsageWithoutSpendingTheHooksAutomaticAllowance() async {
+        var req = request()
+        req.origin = .test(hook: hook)
+        let usage = AIUsage(inputTokens: 3, outputTokens: 1)
+        let client = ScriptedClient { _ in [.event(.usage(usage)), .event(.finished(.completed))] }
+        let runner = runner(client) { Issue.record("A manual test reserved an automatic run."); return false }
+        let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        #expect(result.status == .completed && result.usage == usage && client.requests.count == 1)
+    }
+
     @Test func refusedSourcesRoutesAndLimitsNeverReachAModel() async {
         let client = ScriptedClient { _ in [] }
         var reserves = 0
