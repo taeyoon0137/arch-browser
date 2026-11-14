@@ -8,6 +8,14 @@ import Foundation
     public static let enabledKey = "ARCHSyncEnabled"
     public private(set) var availability: SyncAvailability.Status = .unavailable(.temporarilyUnavailable)
     public private(set) var isEnabled: Bool
+    public private(set) var isDeletingCloudData = false
+    public private(set) var offReason: SyncOffReason?
+    public var statusExplanation: String? {
+        switch availability {
+        case .unavailable(let reason): reason.message
+        case .available: offReason?.message
+        }
+    }
     public private(set) var lastError: String?
     public private(set) var lastSync: Date?
     public let settings: SyncedSettings
@@ -27,6 +35,7 @@ import Foundation
     private var mirror = SyncMirror()
     private var durableSidebar: SidebarSyncState?
     private var refusedSaves: [String: SyncRecord] = [:]
+    private static let offReasonKey = "ARCHSyncOffReason"
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
     private var first = false
     private var fetching = false
@@ -40,6 +49,7 @@ import Foundation
     private var pendingState: Data?
     private var fetchTask: Task<Void, Never>?
     private var needsRecoveryFetch = false
+    private var deletionSendInFlight = false
 
     public convenience init(sidebar: any SyncedSidebar, directory: URL, defaults: UserDefaults = .standard) {
         let availability = SyncAvailability()
@@ -63,6 +73,7 @@ import Foundation
         url = directory.appendingPathComponent(SyncMirror.fileName)
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
+        offReason = defaults.string(forKey: Self.offReasonKey).flatMap(SyncOffReason.init(rawValue:))
         observeSidebarSaves()
         observers.append(notifications.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
@@ -83,9 +94,50 @@ import Foundation
     deinit { for observer in observers { notifications.removeObserver(observer) } }
 
     public func setEnabled(_ enabled: Bool) async {
+        guard !isDeletingCloudData else { return }
+        if enabled { recordOffReason(nil) }
         isEnabled = enabled
         defaults.set(enabled, forKey: Self.enabledKey)
         if enabled { await refresh() } else { checkNumber += 1; await stop() }
+    }
+
+    /// Called after the user confirms the deletion. Keep the previous file until the server
+    /// confirms the zone is gone. Interrupted or refused requests can be retried explicitly.
+    public func deleteCloudData() async {
+        guard let engine, isEnabled, !isDeletingCloudData else { return }
+        isDeletingCloudData = true
+        lastError = nil
+        engine.add([.deleteZone])
+        await sendZoneDeletion(on: engine)
+    }
+
+    private func sendZoneDeletion(on engine: any SyncEngineClient) async {
+        guard !deletionSendInFlight else { return }
+        lastError = nil
+        deletionSendInFlight = true
+        defer { if self.engine === engine { deletionSendInFlight = false } }
+        do { try await engine.sendChanges() }
+        catch {
+            if self.engine === engine, !engine.pendingChanges.contains(.deleteZone) {
+                lastError = "Arch could not delete its iCloud data."
+            }
+        }
+        guard self.engine === engine, isDeletingCloudData else { return }
+        if engine.pendingChanges.contains(.deleteZone), lastError == nil {
+            // CloudKit owns retries for offline and temporarily unavailable accounts. Keep the
+            // live request scoped to this engine. A relaunch starts from the pre-deletion file.
+            lastError = "Arch is waiting to delete its iCloud data."
+            return
+        }
+        await resumeAfterDeleteFailure(on: engine,
+            message: lastError ?? "Arch could not delete its iCloud data. Try again when connected.")
+    }
+
+    private func resumeAfterDeleteFailure(on engine: any SyncEngineClient, message: String) async {
+        engine.remove([.deleteZone])
+        isDeletingCloudData = false
+        await requestFetch()
+        if self.engine === engine { lastError = message }
     }
 
     /// Called on launch and activation, and by the entitled container's account notification.
@@ -95,6 +147,12 @@ import Foundation
         let result = await check()
         guard number == checkNumber else { return }
         availability = result
+        if case .unavailable(.noAccount) = result, isEnabled {
+            // The availability notification can arrive before the engine's sign-out event.
+            // Invalidate its token now so a subsequent account cannot resume it.
+            disableAfterLoss(.accountChanged)
+            return
+        }
         guard isEnabled, case .available(let target) = result else { await stop(); return }
         if database != target || engine == nil {
             await stop()
@@ -114,6 +172,10 @@ import Foundation
             self.delegate = delegate
             engine = factory(target, mirror.engineState, delegate)
         }
+        if isDeletingCloudData {
+            if let engine { await sendZoneDeletion(on: engine) }
+            return
+        }
         refusedSaves.removeAll()
         if awaitingZoneSave { engine?.add([.saveZone]) }
         await requestFetch()
@@ -127,6 +189,8 @@ import Foundation
         let previous = engine
         engine = nil
         delegate = nil
+        isDeletingCloudData = false
+        deletionSendInFlight = false
         database = nil
         needsRecoveryFetch = false
         fetchTask?.cancel()
@@ -166,7 +230,7 @@ import Foundation
         await task.value
     }
 
-    public var canSendRecords: Bool { engine != nil && !first && !fetching && !applying }
+    public var canSendRecords: Bool { engine != nil && !first && !fetching && !applying && !isDeletingCloudData }
     public func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
         let base = mirror.records[name]
@@ -226,6 +290,12 @@ import Foundation
 
     private func handle(_ event: SyncEvent) {
         guard engine != nil else { return }
+        if isDeletingCloudData {
+            switch event {
+            case .accountChange, .zoneDeleted, .sentZoneChanges: break
+            default: return
+            }
+        }
         switch event {
         case .fetchStarted: fetching = true
         case .stateUpdate(let state):
@@ -239,29 +309,60 @@ import Foundation
             if error == .zoneNotFound {
                 if mirror.records.isEmpty {
                     finishFetch()
-                } else { disableAfterLoss() }
+                } else { disableAfterLoss(.zoneDeleted) }
                 return
             }
             if let error {
                 lastError = "The sync fetch did not finish (\(error.rawValue))."
                 return
             }
-            if missingZone { disableAfterLoss(); return }
+            if missingZone { disableAfterLoss(.zoneDeleted); return }
             finishFetch()
         case .sentChanges(let sent): didSend(sent)
         case .sentZoneChanges(let sent):
+            if isDeletingCloudData {
+                if sent.deletedZone || sent.failedDelete == .zoneNotFound {
+                    disableAfterLoss(.zoneDeleted)
+                } else if let refusal = sent.failedDelete {
+                    let message = "Arch could not delete its iCloud data (\(refusal.rawValue))."
+                    lastError = message
+                    if let engine {
+                        // A retry can finish after the original send operation already returned.
+                        Task { @MainActor [weak self] in
+                            guard let self, self.engine === engine, isDeletingCloudData else { return }
+                            await resumeAfterDeleteFailure(on: engine, message: message)
+                        }
+                    }
+                }
+                return
+            }
             if sent.savedZone { awaitingZoneSave = false }
             if sent.failedSave != nil { awaitingZoneSave = true }
             if let code = sent.failedSave ?? sent.failedDelete { lastError = "The sync zone change failed (\(code.rawValue))." }
         case .accountChange(let account):
-            if account != .signIn { disableAfterLoss() }
+            if account == .signIn {
+                if isEnabled && !isDeletingCloudData && fetchTask == nil {
+                    let active = engine
+                    Task { @MainActor [weak self] in
+                        guard let self, self.engine === active else { return }
+                        await refresh()
+                    }
+                }
+            } else {
+                disableAfterLoss(.accountChanged)
+                let generation = checkNumber
+                Task { @MainActor [weak self] in
+                    guard let self, checkNumber == generation else { return }
+                    await refresh()
+                }
+            }
         case .zoneDeleted(let id, let reason):
             guard id == SyncCloudKitRecords.zoneID else { return }
             if reason == .encryptedDataReset {
                 fetched.removeAll(); deleted.removeAll(); deletedNames.removeAll()
                 mirror.records.removeAll()
                 unknown.removeAll(); missingZone = false; first = true
-            } else { disableAfterLoss() }
+            } else { disableAfterLoss(.zoneDeleted) }
         }
     }
 
@@ -280,7 +381,15 @@ import Foundation
         }
     }
 
-    private func disableAfterLoss() {
+    private func recordOffReason(_ reason: SyncOffReason?) {
+        offReason = reason
+        defaults.set(reason?.rawValue, forKey: Self.offReasonKey)
+    }
+
+    private func disableAfterLoss(_ reason: SyncOffReason) {
+        recordOffReason(reason)
+        lastError = nil
+        lastSync = nil
         isEnabled = false
         defaults.set(false, forKey: Self.enabledKey)
         checkNumber += 1
