@@ -1025,8 +1025,9 @@ extension AgentToolHost {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
             let read = await readText(call.arguments, tab: tab, handle: handle) { current in
+                guard session.handles.tabs.id(for: handle) == id else { return false }
                 if current.agentOwnerID == session.id { return true }
-                return session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
+                return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
             return read.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")

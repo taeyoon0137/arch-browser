@@ -74,6 +74,11 @@ struct AgentHandleTable {
         return handle
     }
 
+    /// A removed handle stays invalid even if the same tab is shared again later.
+    mutating func remove(_ id: UUID) {
+        if let handle = handles.removeValue(forKey: id) { ids.removeValue(forKey: handle) }
+    }
+
     /// The ID behind a handle this table gave; a handle from elsewhere reads as not found.
     func id(for handle: String) -> UUID? {
         ids[handle]
