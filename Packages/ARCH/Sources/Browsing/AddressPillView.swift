@@ -192,7 +192,12 @@ struct TabEngineSection: View {
 
     /// WebKit gives the app no public way to let a page show notifications: a page's request is refused without asking the app, so Arch cannot tell whether a page asked, and a WebKit tab's note always says so.
     private var note: String {
-        let switching = "Switching loads the page again in the other engine."
+        let switching: String
+        if tab.preferredEngine == tab.engineKind {
+            switching = "Switching loads the page again in the other engine."
+        } else {
+            switching = "This tab is using \(tab.engineKind.displayName) because its saved engine, \(tab.preferredEngine.displayName), was unavailable."
+        }
         return tab.engineKind == .webKit ? switching + " Websites can\u{2019}t show notifications in WebKit tabs." : switching
     }
 
@@ -200,6 +205,11 @@ struct TabEngineSection: View {
         SiteSettingsSection(title: "This Tab", note: note) {
             Picker("This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
                 ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+            }
+            if tab.preferredEngine != tab.engineKind {
+                Button("Keep Using \(tab.engineKind.displayName)") {
+                    session.switchEngine(of: tab, to: tab.engineKind)
+                }
             }
         }
     }
