@@ -57,8 +57,6 @@ final class EngineRuntime {
     private var personaEngines: [Persona.ID: PersonaEngines] = [:]
     /// The runtimes of Personas deleted since launch, kept without tabs until quit, because the download items in their rows refer to their download lists and profiles unowned.
     private var retiredPersonaEngines: [PersonaEngines] = []
-    /// The engine that started with the session. Tabs fall back to it when another engine cannot start.
-    private let primaryEngine: EngineKind
     /// The deleted Personas whose stored data is still on disk.
     private let personaDataRemoval: PersonaDataRemoval
     /// The spaces' tabs. Favorites keep their own tabs in `favoriteTabs`.
@@ -168,7 +166,6 @@ final class EngineRuntime {
             if primary == nil { enginesThatDidNotStart.insert(kind) }
         }
         guard let primary else { throw SessionError.noEngineStarted }
-        primaryEngine = primary.engineKind
         // The windows open once the app has built its menus (`restoreWindows()`). Normalizing gives every snapshot a window.
         windowsToReopen = snapshot.windows ?? []
         personas = snapshot.personas ?? []
@@ -180,7 +177,7 @@ final class EngineRuntime {
         start(primary)
         nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
-        _ = runtime(for: primaryEngine, in: Persona.defaultID)
+        _ = runtime(for: primary.engineKind, in: Persona.defaultID)
         restoreTabs(snapshot)
         restoreFavoriteTabs(snapshot)
         observeChanges()
@@ -501,15 +498,14 @@ final class EngineRuntime {
         return engines
     }
 
-    /// The Persona's runtime for `kind`, started on first use. Falls back to the Persona's runtime of the primary engine when `kind` cannot start, so a page never leaves its Persona's profile.
+    /// Uses the requested engine when its profile opens, otherwise another registered engine in the same Persona.
     func runtime(for kind: EngineKind, in personaID: Persona.ID) -> EngineRuntime {
         let engines = engines(of: personaID)
         if let runtime = engines.runtimes[kind] ?? startRuntime(kind, in: engines) { return runtime }
-        // Every Persona that pages use is listed, the primary engine runs from launch, and both engines create profiles without failing.
-        guard let runtime = engines.runtimes[primaryEngine] ?? startRuntime(primaryEngine, in: engines) else {
-            preconditionFailure("No profile for the Persona \(personaID)")
+        for fallback in registry.registeredKinds where fallback != kind {
+            if let runtime = engines.runtimes[fallback] ?? startRuntime(fallback, in: engines) { return runtime }
         }
-        return runtime
+        preconditionFailure("No engine could open a profile for the Persona \(personaID)")
     }
 
     /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.

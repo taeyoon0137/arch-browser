@@ -497,6 +497,7 @@ private final class NavigationDouble: EngineNavigationController, EngineBackForw
 /// The session's in-memory engine. Each call for a profile gets its own context, and pages report only the initial address.
 final class SessionTestEngine: Engine, EngineApplication {
     let kind: EngineKind
+    var unavailableStorageID: UUID?
     init(kind: EngineKind = .webKit) { self.kind = kind }
     var engineKind: EngineKind { kind }
     let capabilities: Set<EngineCapability> = []
@@ -504,7 +505,13 @@ final class SessionTestEngine: Engine, EngineApplication {
     weak var delegate: (any EngineApplicationDelegate)?
     func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication { self }
     func removeStoredData(forStorage identifier: UUID, configuration: EngineApplicationConfiguration, completion: @escaping (Bool) -> Void) { completion(true) }
-    func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) { completion(.success(Context())) }
+    func createBrowserContext(storageIdentifier: UUID?, completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+        if let unavailableStorageID, unavailableStorageID == storageIdentifier {
+            completion(.failure(CocoaError(.fileReadUnknown)))
+        } else {
+            completion(.success(Context()))
+        }
+    }
     func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser { Browser(kind: kind) }
 
     private final class Context: EngineBrowserContext {

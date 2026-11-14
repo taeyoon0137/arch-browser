@@ -17,6 +17,31 @@ import Testing
         try await body(session, directory)
     }
 
+    @Test func anUnavailableChromiumProfileFallsBackOnlyForThatPersonaAndRecovers() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let registry = EngineRegistry(defaults: defaults)
+        let chromium = SessionTestEngine(kind: .chromium)
+        registry.register(chromium)
+        registry.register(SessionTestEngine(kind: .webKit))
+        registry.defaultKind = .chromium
+        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let persona = session.addPersona(named: "Work")
+        chromium.unavailableStorageID = persona.id
+
+        let fallback = session.runtime(for: .chromium, in: persona.id)
+        #expect(fallback.kind == .webKit)
+        #expect(fallback.personaID == persona.id)
+        #expect(fallback === session.runtime(for: .webKit, in: persona.id))
+        #expect(session.runtime(for: .chromium, in: Persona.defaultID).kind == .chromium)
+        chromium.unavailableStorageID = nil
+        #expect(session.runtime(for: .chromium, in: persona.id).kind == .chromium)
+    }
+
     @Test func aNewPinStaysUnloadedWhileAnExistingPageKeepsItsCurrentAddressAndReplayClosesOnlyOnce() async throws {
         try await temporarySession { session, directory in
             let current = session.sidebarSyncState
