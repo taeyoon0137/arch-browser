@@ -1,14 +1,14 @@
-// Whether this Mac can sync (`docs/sync.md`, Requirements, Accounts and removed data, and User interface; sync decision 13): first the app's own iCloud entitlements, then the account status of the container they name. `CKContainer` raises an exception for a container the app is not entitled to, so without the entitlements, as in an ad hoc signed build or the test runner, the check creates no CloudKit object.
+// Whether this Mac can sync (`docs/sync.md`, Requirements, Accounts and removed data, and User interface; sync decisions 6 and 13): first the app's own iCloud entitlements, then the account status of the container they name. `CKContainer` raises an exception for a container the app is not entitled to, so without the entitlements, as in an ad hoc signed build or the test runner, the check creates no CloudKit object.
 import CloudKit
 import Foundation
 import Security
 
-/// Checks whether sync can run on this Mac. The controller checks before it creates the sync engine and again when the app becomes active, and Settings ▸ Sync shows the reason while sync cannot run.
+/// Checks whether sync can run on this Mac. The controller checks before it creates the sync engine, again when the app becomes active and when the container reports an account change, and Settings ▸ Sync shows the reason while sync cannot run.
 public struct SyncAvailability: Sendable {
     /// What a check found.
     public enum Status: Hashable, Sendable {
-        /// Sync can run with this container, the first that the app's entitlement lists. The identifier belongs to the user's team, so it goes only to `CKContainer(identifier:)` and is never logged or shown (Working Rule 8 of `docs/plan.md`).
-        case available(containerIdentifier: String)
+        /// Sync can run with this database: the first container that the app's entitlement lists, in the environment its entitlement names.
+        case available(SyncDatabase)
         case unavailable(Reason)
     }
 
@@ -32,13 +32,14 @@ public struct SyncAvailability: Sendable {
         }
     }
 
-    /// Reads an entitlement of the app's own process as a list of strings. Nil when the app lacks it or its value is not a list of strings.
-    typealias EntitlementReader = @Sendable (_ key: String) -> [String]?
+    /// Reads an entitlement of the app's own process: a list of strings or a string. Nil when the app lacks it or its value is neither.
+    typealias EntitlementReader = @Sendable (_ key: String) -> (any Sendable)?
     /// Asks the container with this identifier for the status of the Mac's iCloud account.
     typealias AccountStatusProvider = @Sendable (_ containerIdentifier: String) async throws -> CKAccountStatus
 
     static let servicesKey = "com.apple.developer.icloud-services"
     static let containersKey = "com.apple.developer.icloud-container-identifiers"
+    static let environmentKey = "com.apple.developer.icloud-container-environment"
 
     private let readEntitlement: EntitlementReader
     private let accountStatus: AccountStatusProvider
@@ -56,25 +57,25 @@ public struct SyncAvailability: Sendable {
 
     /// Whether sync can run now. It asks for the account status only when the entitlements name a container.
     public func check() async -> Status {
-        guard let containerIdentifier = entitledContainer() else { return .unavailable(.notSignedForICloud) }
+        guard let database = entitledDatabase() else { return .unavailable(.notSignedForICloud) }
         do {
-            return Self.status(of: try await accountStatus(containerIdentifier), containerIdentifier: containerIdentifier)
+            return Self.status(of: try await accountStatus(database.containerIdentifier), database: database)
         } catch {
             return .unavailable(Self.reason(for: error))
         }
     }
 
-    /// The container sync opens: the first entry of the container identifiers entitlement, when the iCloud services entitlement lists CloudKit (sync decision 13). Nil otherwise, including for an empty first entry.
-    func entitledContainer() -> String? {
-        guard readEntitlement(Self.servicesKey)?.contains("CloudKit") == true,
-              let first = readEntitlement(Self.containersKey)?.first, !first.isEmpty else { return nil }
-        return first
+    /// The database sync opens: the first entry of the container identifiers entitlement, when the iCloud services entitlement lists CloudKit (sync decision 13), with the container environment entitlement's value, nil when it is missing or not a string (sync decision 6). Nil without a container, including for an empty first entry.
+    func entitledDatabase() -> SyncDatabase? {
+        guard (readEntitlement(Self.servicesKey) as? [String])?.contains("CloudKit") == true,
+              let first = (readEntitlement(Self.containersKey) as? [String])?.first, !first.isEmpty else { return nil }
+        return SyncDatabase(containerIdentifier: first, environment: readEntitlement(Self.environmentKey) as? String)
     }
 
-    /// The status for an account status that CloudKit reported for the container.
-    static func status(of accountStatus: CKAccountStatus, containerIdentifier: String) -> Status {
+    /// The status for an account status that CloudKit reported for the database's container.
+    static func status(of accountStatus: CKAccountStatus, database: SyncDatabase) -> Status {
         switch accountStatus {
-        case .available: .available(containerIdentifier: containerIdentifier)
+        case .available: .available(database)
         case .noAccount: .unavailable(.noAccount)
         case .restricted: .unavailable(.restricted)
         case .temporarilyUnavailable, .couldNotDetermine: .unavailable(.temporarilyUnavailable)
@@ -93,7 +94,9 @@ public struct SyncAvailability: Sendable {
     /// Reads the entitlement from this process's code signature.
     static let ownEntitlement: EntitlementReader = { key in
         guard let task = SecTaskCreateFromSelf(nil) else { return nil }
-        return SecTaskCopyValueForEntitlement(task, key as CFString, nil) as? [String]
+        let value = SecTaskCopyValueForEntitlement(task, key as CFString, nil)
+        if let list = value as? [String] { return list }
+        return value as? String
     }
 
     private static let containerAccountStatus: AccountStatusProvider = { containerIdentifier in

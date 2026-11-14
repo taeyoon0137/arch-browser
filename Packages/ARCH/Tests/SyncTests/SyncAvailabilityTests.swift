@@ -1,4 +1,4 @@
-// Whether this Mac can sync (docs/sync.md, Requirements and User interface; sync decision 13): the entitlements read before any CloudKit call, the container that the account check asks, the reason for each account status and failure, and the wording Settings shows.
+// Whether this Mac can sync (docs/sync.md, Requirements and User interface; sync decisions 6 and 13): the entitlements read before any CloudKit call, the container that the account check asks and the environment that comes with it, the reason for each account status and failure, and the wording Settings shows.
 import CloudKit
 import Foundation
 import Testing
@@ -19,9 +19,13 @@ import Testing
     }
 
     /// An availability with these entitlement values, nil for a missing entitlement, whose account check records its container and gives `result`.
-    private func availability(services: [String]?, containers: [String]?, calls: Calls, result: @escaping @Sendable () throws -> CKAccountStatus = { .available }) -> SyncAvailability {
-        let entitlements = [SyncAvailability.servicesKey: services, SyncAvailability.containersKey: containers]
-        return SyncAvailability(readEntitlement: { entitlements[$0] ?? nil }, accountStatus: { container in
+    private func availability(services: [String]?, containers: [String]?, environment: (any Sendable)? = "Production", calls: Calls, result: @escaping @Sendable () throws -> CKAccountStatus = { .available }) -> SyncAvailability {
+        var values: [String: any Sendable] = [:]
+        values[SyncAvailability.servicesKey] = services
+        values[SyncAvailability.containersKey] = containers
+        values[SyncAvailability.environmentKey] = environment
+        let entitlements = values
+        return SyncAvailability(readEntitlement: { entitlements[$0] }, accountStatus: { container in
             await calls.record(container)
             return try result()
         })
@@ -47,14 +51,28 @@ import Testing
     @Test func asksForTheEntitlementsFirstContainer() async {
         let calls = Calls()
         let status = await availability(services: ["CloudDocuments", "CloudKit"], containers: [first, second], calls: calls).check()
-        #expect(status == .available(containerIdentifier: first))
+        #expect(status == .available(SyncDatabase(containerIdentifier: first, environment: "Production")))
         #expect(await calls.containers == [first])
+    }
+
+    /// The environment tells the database apart for `sync.json` (sync decision 6); without the entitlement, or with a value that is not a string, CloudKit picks it.
+    @Test func givesTheEntitlementsEnvironmentWithTheContainer() async {
+        let cases: [((any Sendable)?, String?)] = [
+            ("Development", "Development"),
+            ("Production", "Production"),
+            (nil, nil),
+            (["Production"], nil),
+        ]
+        for (entitlement, environment) in cases {
+            let calls = Calls()
+            #expect(await availability(services: ["CloudKit"], containers: [first], environment: entitlement, calls: calls).check() == .available(SyncDatabase(containerIdentifier: first, environment: environment)))
+        }
     }
 
     @Test func mapsEachAccountStatusToItsReason() async throws {
         let unknown = try #require(CKAccountStatus(rawValue: 99))
         let cases: [(CKAccountStatus, SyncAvailability.Status)] = [
-            (.available, .available(containerIdentifier: first)),
+            (.available, .available(SyncDatabase(containerIdentifier: first, environment: "Production"))),
             (.noAccount, .unavailable(.noAccount)),
             (.restricted, .unavailable(.restricted)),
             (.temporarilyUnavailable, .unavailable(.temporarilyUnavailable)),
@@ -90,10 +108,13 @@ import Testing
         #expect(SyncAvailability.Reason.temporarilyUnavailable.message == "iCloud isn\u{2019}t available right now. Arch checks again when it becomes active.")
     }
 
-    /// The test runner has no iCloud entitlements, so the app's own reader finds neither and the check never reaches CloudKit, where `CKContainer` would raise an exception.
-    @Test func theTestRunnerIsNotSignedForICloud() async {
-        #expect(SyncAvailability.ownEntitlement(SyncAvailability.servicesKey) == nil)
-        #expect(SyncAvailability.ownEntitlement(SyncAvailability.containersKey) == nil)
+    /// The test runner has no iCloud entitlements, so the app's own reader finds none and the check never reaches CloudKit, where `CKContainer` would raise an exception. The public initializer, which the controller uses, returns before it creates a container too.
+    @Test func theTestRunnerIsNotSignedForICloud() async throws {
+        // Stop before the public initializer's check if the runner ever had the entitlements, since its container would be real.
+        try #require(SyncAvailability.ownEntitlement(SyncAvailability.servicesKey) == nil)
+        try #require(SyncAvailability.ownEntitlement(SyncAvailability.containersKey) == nil)
+        #expect(SyncAvailability.ownEntitlement(SyncAvailability.environmentKey) == nil)
+        #expect(await SyncAvailability().check() == .unavailable(.notSignedForICloud))
         let calls = Calls()
         let availability = SyncAvailability(readEntitlement: SyncAvailability.ownEntitlement, accountStatus: { container in
             await calls.record(container)

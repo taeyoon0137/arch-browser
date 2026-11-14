@@ -5,6 +5,9 @@ import Testing
 @testable import Sync
 
 @Suite struct SyncMirrorTests {
+    /// A placeholder database; no real container identifier appears in the repository.
+    private let database = SyncDatabase(containerIdentifier: "iCloud.example.first", environment: "Production")
+
     private func date(_ seconds: TimeInterval) -> Date {
         Date(timeIntervalSinceReferenceDate: seconds)
     }
@@ -43,9 +46,9 @@ import Testing
             unusable.recordName = "space-2"
             unusable[.order] = .number(.infinity)
             let engineState = Data("engine state".utf8)
-            try SyncMirror(engineState: engineState, records: ["space-1": mirrored, "theme-1": theme], pendingSaves: [pendingTab, renamed, unusable]).write(to: url)
+            try SyncMirror(engineState: engineState, records: ["space-1": mirrored, "theme-1": theme], pendingSaves: [pendingTab, renamed, unusable]).write(to: url, database: database)
 
-            let read = SyncMirror.read(from: url)
+            let read = SyncMirror.read(from: url, database: database)
             #expect(read.engineState == engineState)
             #expect(read.pendingSaves == [pendingTab, renamed, unusable])
             #expect(Set(read.records.keys) == ["space-1", "theme-1"])
@@ -59,8 +62,8 @@ import Testing
             #expect(readTheme["reviewedAt"] as? Date == date(7))
 
             // Writing again replaces the file.
-            try SyncMirror().write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
+            try SyncMirror().write(to: url, database: database)
+            #expect(SyncMirror.read(from: url, database: database).isEmpty)
         }
     }
 
@@ -72,7 +75,7 @@ import Testing
     @Test func readsAMissingFileAsEmptyAndLeavesNoCopy() throws {
         try withFolder { folder in
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            #expect(SyncMirror.read(from: folder.appendingPathComponent(SyncMirror.fileName)).isEmpty)
+            #expect(SyncMirror.read(from: folder.appendingPathComponent(SyncMirror.fileName), database: database).isEmpty)
             #expect(try fileNames(in: folder).isEmpty)
         }
     }
@@ -83,27 +86,61 @@ import Testing
             let copy = folder.appendingPathComponent("sync.unreadable.json")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data("not JSON".utf8).write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(SyncMirror.read(from: url, database: database).isEmpty)
             #expect(try fileNames(in: folder) == ["sync.unreadable.json"])
             #expect(try Data(contentsOf: copy) == Data("not JSON".utf8))
 
             // A file whose records do not unarchive replaces the older copy.
             let base64 = Data("not an archive".utf8).base64EncodedString()
-            let unarchivable = Data(#"{"version":1,"engineState":"\#(base64)","records":"\#(base64)","pendingSaves":[]}"#.utf8)
+            let unarchivable = Data(#"{"version":1,"database":"\#(database.digest)","engineState":"\#(base64)","records":"\#(base64)","pendingSaves":[]}"#.utf8)
             try unarchivable.write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(SyncMirror.read(from: url, database: database).isEmpty)
             #expect(try fileNames(in: folder) == ["sync.unreadable.json"])
             #expect(try Data(contentsOf: copy) == unarchivable)
+        }
+    }
+
+    @Test func readsAnotherDatabasesFileAsEmptyAndMovesItAside() throws {
+        try withFolder { folder in
+            let url = folder.appendingPathComponent(SyncMirror.fileName)
+            let copy = folder.appendingPathComponent("sync.other-database.json")
+            let mirror = SyncMirror(engineState: Data("state".utf8), records: ["space-1": SyncCloudKitRecords.ckRecord(from: space)], pendingSaves: [space])
+            // The file names the database only by its digest.
+            try mirror.write(to: url, database: database)
+            let written = try Data(contentsOf: url)
+            #expect(!String(decoding: written, as: UTF8.self).contains(database.containerIdentifier))
+            #expect(String(decoding: written, as: UTF8.self).contains(database.digest))
+
+            // A build for the Development environment, another container, or without the environment entitlement uses another database.
+            let others = [
+                SyncDatabase(containerIdentifier: database.containerIdentifier, environment: "Development"),
+                SyncDatabase(containerIdentifier: "iCloud.example.second", environment: "Production"),
+                SyncDatabase(containerIdentifier: database.containerIdentifier, environment: nil),
+            ]
+            for other in others {
+                #expect(other.digest != database.digest)
+                try written.write(to: url)
+                #expect(SyncMirror.read(from: url, database: other).isEmpty)
+                #expect(try fileNames(in: folder) == ["sync.other-database.json"])
+                #expect(try Data(contentsOf: copy) == written)
+            }
+
+            // The same database reads the file back.
+            try written.write(to: url)
+            let read = SyncMirror.read(from: url, database: SyncDatabase(containerIdentifier: database.containerIdentifier, environment: "Production"))
+            #expect(read.engineState == mirror.engineState)
+            #expect(read.pendingSaves == [space])
+            #expect(Set(read.records.keys) == ["space-1"])
         }
     }
 
     @Test func readsANewerFormatAsEmptyAndKeepsACopy() throws {
         try withFolder { folder in
             let url = folder.appendingPathComponent(SyncMirror.fileName)
-            try SyncMirror(engineState: Data("state".utf8), pendingSaves: [space]).write(to: url)
+            try SyncMirror(engineState: Data("state".utf8), pendingSaves: [space]).write(to: url, database: database)
             let newer = Data(try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: #""version":1"#, with: #""version":2"#).utf8)
             try newer.write(to: url)
-            #expect(SyncMirror.read(from: url).isEmpty)
+            #expect(SyncMirror.read(from: url, database: database).isEmpty)
             #expect(try fileNames(in: folder) == ["sync-v2.json", "sync.json"])
             #expect(try Data(contentsOf: folder.appendingPathComponent("sync-v2.json")) == newer)
         }
@@ -120,7 +157,7 @@ import Testing
             newType.recordName = "theme-1"
             let newValue = SyncRecord(recordType: .tab, recordName: "tab-1", fields: ["persona": .reference("default"), "reviewedAt": .text("placeholder")], modifiedAt: date(23))
             let engineState = Data("engine state".utf8)
-            try SyncMirror(engineState: engineState, records: ["space-1": SyncCloudKitRecords.ckRecord(from: space)], pendingSaves: [renamed, newType, newValue]).write(to: url)
+            try SyncMirror(engineState: engineState, records: ["space-1": SyncCloudKitRecords.ckRecord(from: space)], pendingSaves: [renamed, newType, newValue]).write(to: url, database: database)
             let written = try String(contentsOf: url, encoding: .utf8)
             let newer = written
                 .replacingOccurrences(of: #""recordName":"theme-1","recordType":"Space""#, with: #""recordName":"theme-1","recordType":"Theme""#)
@@ -128,7 +165,7 @@ import Testing
             #expect(newer != written)
             try Data(newer.utf8).write(to: url)
 
-            let read = SyncMirror.read(from: url)
+            let read = SyncMirror.read(from: url, database: database)
             #expect(read.engineState == engineState)
             #expect(Set(read.records.keys) == ["space-1"])
             #expect(read.pendingSaves == [renamed])
@@ -145,9 +182,9 @@ import Testing
             laterSpace.encryptedValues["name"] = "From the later zone"
             let laterOnly = CKRecord(recordType: "Space", recordID: CKRecord.ID(recordName: "space-2", zoneID: laterZone))
             let defaultZone = CKRecord(recordType: "Space", recordID: CKRecord.ID(recordName: "space-3"))
-            try SyncMirror(records: ["a": laterSpace, "b": laterOnly, "c": defaultZone, "space-1": SyncCloudKitRecords.ckRecord(from: space)]).write(to: url)
+            try SyncMirror(records: ["a": laterSpace, "b": laterOnly, "c": defaultZone, "space-1": SyncCloudKitRecords.ckRecord(from: space)]).write(to: url, database: database)
 
-            let read = SyncMirror.read(from: url)
+            let read = SyncMirror.read(from: url, database: database)
             #expect(Set(read.records.keys) == ["space-1"])
             let readSpace = try #require(read.records["space-1"])
             #expect(readSpace.recordID.zoneID == SyncCloudKitRecords.zoneID)
