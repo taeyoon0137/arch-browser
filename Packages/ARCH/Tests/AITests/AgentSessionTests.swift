@@ -928,11 +928,16 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(try service.agentSessionRoute(for: haiku) == .commandLine)
         settings.providers = [api]
         #expect(try candidates() == [apiModel])
+        #expect(throws: AIError.self) { try service.agentSessionRoute(for: haiku) }
         settings.setRoute(AIRoute(isEnabled: true), for: .agent)
         #expect(try service.agentSessionRoute(for: nil) == .http(pinnedModel: apiModel))
         settings.setRoute(AIRoute(isEnabled: false, models: [apiModel]), for: .agent)
         #expect(service.agentSessionModels().isEmpty)
         #expect(throws: AIError.self) { try service.agentSessionRoute(for: apiModel) }
+        settings.providers = []
+        settings.setRoute(AIRoute(isEnabled: true), for: .agent)
+        #expect(service.agentSessionModels().isEmpty)
+        #expect(throws: AIError.self) { try service.agentSessionRoute(for: nil) }
     }
 
     @Test func aPresetsOrdinaryRequestGetsPageDataAndRunsWithoutTools() async throws {

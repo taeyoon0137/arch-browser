@@ -66,8 +66,9 @@ public final class PreferencesWindowController: NSWindowController {
         }
     }
 
+    private let aiNavigation: AISettingsView.Navigation
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
-    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents, hooks: PreferencesWindowController.hooks))
+    private let aiSection: NSTabViewItem
     /// Settings ▸ Plugins, while the app shell has set `session`.
     private var pluginsSection: NSTabViewItem?
 
@@ -93,6 +94,9 @@ public final class PreferencesWindowController: NSWindowController {
             pluginsSection = plugins
             sections.addTabViewItem(plugins)
         }
+        let navigation = AISettingsView.Navigation()
+        aiNavigation = navigation
+        aiSection = Self.section("AI", symbol: "sparkles", AISettingsView(agents: Self.agents, hooks: Self.hooks, navigation: navigation))
         sections.addTabViewItem(aiSection)
         let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]
@@ -129,6 +133,11 @@ public final class PreferencesWindowController: NSWindowController {
     public func showAISection() {
         aiSection.tabView?.selectTabViewItem(aiSection)
         show()
+    }
+
+    public func showAgentModelSettings(_ page: AgentModelSettingsPage) {
+        aiNavigation.page = page == .features ? .features : .providers
+        showAISection()
     }
 
     /// Brings the Settings window to the front on Plugins at the plugin in the Persona, with the open panel for the plugin's version for the engine, for Install <Engine> Version… in the site settings popover. The review names the Persona with `space`, the tab's.

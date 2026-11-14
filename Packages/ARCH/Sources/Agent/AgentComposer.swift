@@ -3,6 +3,9 @@ import AgentControl
 import AI
 import SwiftUI
 
+/// The settings page that can make a model available to a draft.
+public enum AgentModelSettingsPage { case features, providers }
+
 /// What the browser gives the panel: how replies render as the page reader renders them, and the actions that leave the panel.
 public struct AgentPanelActions {
     /// Inline Markdown without images, each link showing its full address.
@@ -11,15 +14,18 @@ public struct AgentPanelActions {
     /// Selects a tab of the session's, as a step's button does.
     public var showTab: (UUID) -> Void
     public var openAISettings: () -> Void
+    public var openModelSettings: (AgentModelSettingsPage) -> Void
     /// Opens the built-in terminal with the tool's sign-in typed but not run.
     public var signIn: (AIProviderID) -> Void
 
     public init(formatReply: @escaping (String) -> AttributedString, openLink: @escaping (URL) -> Void, showTab: @escaping (UUID) -> Void,
-                openAISettings: @escaping () -> Void, signIn: @escaping (AIProviderID) -> Void) {
+                openAISettings: @escaping () -> Void, signIn: @escaping (AIProviderID) -> Void,
+                openModelSettings: ((AgentModelSettingsPage) -> Void)? = nil) {
         self.formatReply = formatReply
         self.openLink = openLink
         self.showTab = showTab
         self.openAISettings = openAISettings
+        self.openModelSettings = openModelSettings ?? { _ in openAISettings() }
         self.signIn = signIn
     }
 }
@@ -132,13 +138,16 @@ public struct AgentComposer: View {
 
     public var body: some View {
         if models.isEmpty {
+            let isEnabled = settings.route(for: .agent).isEnabled
             VStack(alignment: .leading, spacing: 8) {
-                Text("Connect an agent model in Settings \u{25B8} AI")
+                Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
                     .font(.system(size: 13, weight: .medium))
-                Text("Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch\u{2019}s terminal.")
+                Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Button("Open AI Settings", action: actions.openAISettings)
+                Button(isEnabled ? "Open Providers" : "Open Features") {
+                    actions.openModelSettings(isEnabled ? .providers : .features)
+                }
                     .controlSize(.small)
             }
             .padding(14)
@@ -173,6 +182,9 @@ public struct AgentComposer: View {
                 }
                 Divider()
                 options
+                if selectedModel == nil {
+                    note("The selected model is no longer available. Choose another model to continue.")
+                }
                 if let warning = codexInstructionsWarning {
                     note(warning)
                 }
@@ -186,7 +198,7 @@ public struct AgentComposer: View {
                     Spacer()
                     Button("Start", action: start)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(selectedModel == nil || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding(14)
@@ -218,6 +230,7 @@ public struct AgentComposer: View {
             GridRow {
                 label("Model")
                 Picker("Model", selection: Binding(get: { selectedModel }, set: { model = $0; effort = nil })) {
+                    if selectedModel == nil { Text("Choose a model…").tag(nil as AIModelRef?).disabled(true) }
                     ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
                 }
                 .labelsHidden()
@@ -260,12 +273,15 @@ public struct AgentComposer: View {
 
     /// The route's first model until the user picks another.
     private var selectedModel: AIModelRef? {
-        model ?? models.first
+        if let model { return models.contains(model) ? model : nil }
+        return models.first
     }
 
     private func loadEffortLevels() async {
         guard let selectedModel else { return effortLevels = [] }
-        effortLevels = await AIService.shared.agentEffortLevels(for: selectedModel)
+        let levels = await AIService.shared.agentEffortLevels(for: selectedModel)
+        guard !Task.isCancelled, selectedModel == self.selectedModel else { return }
+        effortLevels = levels
         if let effort, !effortLevels.contains(effort) { self.effort = nil }
     }
 
@@ -286,7 +302,7 @@ public struct AgentComposer: View {
 
     private func start() {
         let task = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !task.isEmpty else { return }
+        guard !task.isEmpty, selectedModel != nil else { return }
         let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
         var start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
                                               mode: chosenMode, model: model, effort: effort, usesAgentsPersona: usesAgentsPersona)

@@ -85,6 +85,7 @@ final class EngineRuntime {
     public var agents: AgentService?
     /// The app sets this to open the built-in terminal with a Claude Code or Codex provider's sign-in typed, for the agent panel's Sign In.
     public var signInToAgentTool: ((AIProviderID) -> Void)?
+    public var showAgentModelSettings: ((AgentModelSettingsPage) -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover, with the tab's space, which the review names with the Persona.
     public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a Persona with the store sheet started for an extension identifier, for the Web Store's entry points in the site settings popover and the palette (`docs/web-store.md`, Entry points), with the space of the tab or the window, which the review names with the Persona.
