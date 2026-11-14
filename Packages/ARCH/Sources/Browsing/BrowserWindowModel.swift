@@ -150,8 +150,11 @@ public enum BrowserWindowKind {
         recordActivation()
         // An item tab's dot follows its item's read state, which a window marks viewed as it starts showing the tab (`BrowserSession.windowDidChangeShownTabs(from:to:)`), so selecting the tab it shows already keeps a dot from Mark as Unread.
         if let tab = selectedTab, tab.isUnread, tab.liveItemID == nil { tab.isUnread = false }
-        // A favorite's tab belongs to no space, so selecting it keeps the current one.
-        if let spaceID = selectedTab?.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
+        // A favorite can be shown in any space of its Persona, including when a session in another Persona links to it.
+        if let tab = selectedTab {
+            if let spaceID = tab.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
+            else if tab.spaceID == nil && personaID != tab.personaID { currentSpaceID = session.preferredSpace(in: tab.personaID).id }
+        }
         // Only another tab.
         if previousID != selectedTabID {
             // Another tab takes the focus, so a palette left open over the old page closes, as when a link from another app or Move to Main Window selects a tab.
