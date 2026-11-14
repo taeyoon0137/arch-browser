@@ -32,7 +32,7 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
-    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission sheet and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
+    /// Whether macOS lets Arch show notifications, which the download notifier, the permission sheet, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
@@ -120,7 +120,7 @@ public final class BrowserSession: ObservableObject {
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
-        permissionAnswers = SitePermissionAnswers(store: sitePermissions)
+        permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization)
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
@@ -451,6 +451,7 @@ public final class BrowserSession: ObservableObject {
         engines.runtimes[kind] = runtime
         if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions, of: kind) } }
         context.downloads.delegate = self
+        context.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context)
         downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
@@ -844,8 +845,8 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
-                self.enqueueSheet(alert, for: tab, completion: response)
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { makeAlert, response in
+                self.enqueueSheet(making: makeAlert, for: tab, completion: response)
             }, completion: completion)
         }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
@@ -1190,6 +1191,12 @@ public final class BrowserSession: ObservableObject {
     func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         guard !isQuitting else { return completion(.cancel) }
         sheets.enqueue(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
+    }
+
+    /// Queues a sheet whose alert `makeAlert` makes again each time the sheet shows, from what is true then.
+    func enqueueSheet(making makeAlert: @escaping () -> NSAlert, for tab: Tab, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard !isQuitting else { return completion(.cancel) }
+        sheets.enqueue(makeAlert(), for: tab, isPageDialog: false, makeAlert: makeAlert, completion: completion)
     }
 
     // MARK: Zoom
@@ -1576,6 +1583,19 @@ public enum CommandPaletteOrigin {
 
 extension BrowserSession: EngineApplicationDelegate {
     public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
+}
+
+extension BrowserSession: EngineBrowserContextDelegate {
+    /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A quit opens none.
+    public func browserContext(_ context: any EngineBrowserContext, openTabWith url: URL, completion: @escaping ((any EngineWebContents)?) -> Void) {
+        guard !isQuitting,
+              let runtime = personaEngines.values.lazy.flatMap(\.runtimes.values).first(where: { ($0.context as AnyObject) === (context as AnyObject) }) else {
+            return completion(nil)
+        }
+        let tab = openTab(url: url, in: preferredSpace(in: runtime.personaID).id, select: false, engine: runtime.kind)
+        tab.requestActivation?()
+        completion(tab.webContents)
+    }
 }
 
 // MARK: Downloads

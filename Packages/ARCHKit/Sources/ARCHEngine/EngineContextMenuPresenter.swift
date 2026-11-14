@@ -9,7 +9,7 @@ public final class EngineContextMenuPresenter {
         case textInput(NSView)
         /// A clicked link outside a field, offered to Services the way WebKit offers a clicked link.
         case link(URL)
-        /// The container, which offers AppKit nothing: WebKit's view gets none of AppKit's items on the page background, a selection outside a field, an image, or a video. A field whose text input view has no text input context gets it too, so that no service reads or replaces a password.
+        /// The container, which offers AppKit nothing: WebKit's view gets none of AppKit's items on the page background, a selection outside a field, an image, or a video. A field whose text input view has no text input context gets it too, as a password field of an engine without the password AutoFill call does, so that no service reads or replaces a password.
         case container
     }
 
@@ -18,13 +18,29 @@ public final class EngineContextMenuPresenter {
     public init() {}
 
     /// Shows `menu` at `location`, in `container`'s coordinates, and returns once it closes. Without a window the menu still shows, without AppKit's items.
-    public func show(_ menu: NSMenu, at location: NSPoint, in container: NSView, for element: EngineContextMenuElement) {
+    ///
+    /// `passwordAutoFill` is the engine's call for a page view that gives a password field a text input context only while the engine's context menu shows, as Chromium's does through Arch's engine (VI.9): it gets true right before a field's menu shows and false once the menu closes, around the choice of the view as well, so that a password field goes to AppKit as the page's text input view and gets AutoFill. The engine's view then offers the password to no service itself, so the presenter needs no other sign of a password field and ignores the call's answer, whether the field is one.
+    public func show(_ menu: NSMenu, at location: NSPoint, in container: NSView, for element: EngineContextMenuElement, passwordAutoFill: ((Bool) -> Bool)? = nil) {
         guard let window = container.window,
               let event = Self.menuEvent(current: NSApp.currentEvent, locationInWindow: container.convert(location, to: nil), windowNumber: window.windowNumber,
                                          timestamp: ProcessInfo.processInfo.systemUptime) else {
             menu.popUp(positioning: nil, at: location, in: container)
             return
         }
+        Self.withPasswordAutoFill(passwordAutoFill, for: element) {
+            popUp(menu, with: event, at: location, in: container, for: element)
+        }
+    }
+
+    /// Runs `body` with the engine's password AutoFill call on, for a field only: the call gets true before `body` and false after it.
+    static func withPasswordAutoFill(_ passwordAutoFill: ((Bool) -> Bool)?, for element: EngineContextMenuElement, _ body: () -> Void) {
+        guard element.isEditable, let passwordAutoFill else { return body() }
+        _ = passwordAutoFill(true)
+        defer { _ = passwordAutoFill(false) }
+        body()
+    }
+
+    private func popUp(_ menu: NSMenu, with event: NSEvent, at location: NSPoint, in container: NSView, for element: EngineContextMenuElement) {
         let view: NSView
         switch Self.subject(for: element, textInputView: Self.textInputView(at: location, in: container)) {
         case .textInput(let textInputView):
@@ -44,7 +60,7 @@ public final class EngineContextMenuPresenter {
         NSMenu.popUpContextMenu(menu, with: event, for: view)
     }
 
-    /// A field goes to AppKit as the page's text input view while that view has a text input context, which Chromium's withholds in a password field and in one that has been one; a link outside a field as the link, also when the click selected the link's text, as a right click on a text link does on both engines; anything else as the container.
+    /// A field goes to AppKit as the page's text input view while that view has a text input context, which Chromium's withholds in a password field and in one that has been one except while the password AutoFill call is on; a link outside a field as the link, also when the click selected the link's text, as a right click on a text link does on both engines; anything else as the container.
     public static func subject(for element: EngineContextMenuElement, textInputView: NSView?) -> Subject {
         if element.isEditable {
             guard let textInputView, textInputView.inputContext != nil else { return .container }

@@ -1,4 +1,4 @@
-// How an engine's page context menu is shown so that AppKit adds its own items: which view AppKit is asked about, how the page's text input view is found under the click, the event the menu opens at, and what a clicked link hands Services. AppKit's items themselves appear only in a menu on the screen, which the running app shows (the page context menu check in `docs/plan.md` Regression checks).
+// How an engine's page context menu is shown so that AppKit adds its own items: which view AppKit is asked about, the engine's password AutoFill call around the choice and the menu, how the page's text input view is found under the click, the event the menu opens at, and what a clicked link hands Services. AppKit's items themselves appear only in a menu on the screen, which the running app shows (the page context menu check in `docs/plan.md` Regression checks).
 import AppKit
 @testable import ARCHEngine
 import Foundation
@@ -39,6 +39,37 @@ import Testing
             #expect(EngineContextMenuPresenter.subject(for: element, textInputView: PasswordFieldView()) == .container)
             #expect(EngineContextMenuPresenter.subject(for: element, textInputView: nil) == .container)
         }
+    }
+
+    /// Chromium's page view in a password field with Arch's engine, which has a text input context only while the engine's call is on.
+    private final class AutoFillPasswordFieldView: TextInputView {
+        var allowsAutoFill = false
+        override var inputContext: NSTextInputContext? { allowsAutoFill ? super.inputContext : nil }
+    }
+
+    @Test func aPasswordFieldGoesToThePagesTextInputViewWhileTheEnginesAutoFillCallIsOn() {
+        let page = AutoFillPasswordFieldView()
+        let field = EngineContextMenuElement(isEditable: true)
+        var calls: [Bool] = []
+        var subject: EngineContextMenuPresenter.Subject?
+        EngineContextMenuPresenter.withPasswordAutoFill({ enabled in
+            calls.append(enabled)
+            page.allowsAutoFill = enabled
+            return true
+        }, for: field) {
+            subject = EngineContextMenuPresenter.subject(for: field, textInputView: page)
+            #expect(calls == [true])
+        }
+        #expect(subject == .textInput(page))
+        #expect(calls == [true, false])
+        #expect(EngineContextMenuPresenter.subject(for: field, textInputView: page) == .container)
+
+        // Outside a field the call stays off, and without the call the body still runs.
+        var ran = 0
+        EngineContextMenuPresenter.withPasswordAutoFill({ calls.append($0); return false }, for: EngineContextMenuElement(linkURL: link)) { ran += 1 }
+        EngineContextMenuPresenter.withPasswordAutoFill(nil, for: field) { ran += 1 }
+        #expect(ran == 2)
+        #expect(calls == [true, false])
     }
 
     @Test func aLinkOutsideAFieldGoesToServicesAsTheLink() {

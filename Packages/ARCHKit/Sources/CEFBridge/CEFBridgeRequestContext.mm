@@ -266,14 +266,39 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 - (instancetype)initWithoutContext;
 /// Runs the calls that waited for Chromium to initialize the context, in order. Later calls run at once.
 - (void)runWaitingCalls;
+/// Asks the delegate for the tab that a service worker of the context asks for, and answers `callback` with it. Returns NO without a delegate, so that Chromium handles the request.
+- (BOOL)handleOpenTabWithURL:(NSString *)url callback:(CefRefPtr<CefOpenTabCallback>)callback;
 @end
 
 namespace {
 
-// Tells its context object on the main queue once Chromium has initialized both the context and its cookie store. CEF keeps the handler until every object of the context is gone.
-class ContextReadiness : public CefRequestContextHandler, public CefCompletionCallback {
+// Passes a service worker's request for a new tab, which `clients.openWindow()` makes after a click on its notification, to its context object. CEF calls it on the UI thread, which is the main thread, with the handler of a context that shares the worker's storage.
+class TabRequestHandler : public CefRequestContextHandler {
   public:
-    explicit ContextReadiness(ARCHCEFRequestContext *owner) : owner_(owner) {}
+    explicit TabRequestHandler(ARCHCEFRequestContext *owner) : owner_(owner) {}
+
+    bool OnOpenTab(CefRefPtr<CefRequestContext> request_context, const CefString &url, CefRefPtr<CefOpenTabCallback> callback) override {
+        ARCHCEFRequestContext *owner = owner_;
+        return owner && [owner handleOpenTabWithURL:ToNSString(url) callback:callback];
+    }
+
+  protected:
+    __weak ARCHCEFRequestContext *owner_;
+};
+
+// The handler of the context that shares the global context's storage, which has no handler of its own.
+class SharedContextHandler : public TabRequestHandler {
+  public:
+    using TabRequestHandler::TabRequestHandler;
+
+  private:
+    IMPLEMENT_REFCOUNTING(SharedContextHandler);
+};
+
+// Tells its context object on the main queue once Chromium has initialized both the context and its cookie store, and passes the context's requests for new tabs on. CEF keeps the handler until every object of the context is gone.
+class ContextReadiness : public TabRequestHandler, public CefCompletionCallback {
+  public:
+    explicit ContextReadiness(ARCHCEFRequestContext *owner) : TabRequestHandler(owner) {}
 
     void OnRequestContextInitialized(CefRefPtr<CefRequestContext> request_context) override { Arrive(); }
 
@@ -288,7 +313,6 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
         }
     }
 
-    __weak ARCHCEFRequestContext *owner_;
     std::atomic<int> remaining_{2};
     IMPLEMENT_REFCOUNTING(ContextReadiness);
 };
@@ -297,6 +321,8 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
 
 @implementation ARCHCEFRequestContext {
     CefRefPtr<CefRequestContext> _context;
+    /// For the global context, a context that shares its storage with a handler, which CEF asks for the storage's service workers.
+    CefRefPtr<CefRequestContext> _handlerContext;
     CefRefPtr<CefCookieManager> _cookieManager;
     /// The calls made before Chromium reported the context and its cookie store initialized, oldest first. Nil once calls run at once.
     NSMutableArray<dispatch_block_t> *_waitingCalls;
@@ -343,8 +369,15 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
     _cookieManager = context ? context->GetCookieManager(nullptr) : nullptr;
 }
 
+- (void)attachHandlerContext {
+    if (gInitialized && _context && !_handlerContext) {
+        _handlerContext = CefRequestContext::CreateContext(_context, new SharedContextHandler(self));
+    }
+}
+
 - (void)detachContext {
     _cookieManager = nullptr;
+    _handlerContext = nullptr;
     _context = nullptr;
     [self runWaitingCalls];
     [self detachExtensions];
@@ -368,6 +401,27 @@ class ContextReadiness : public CefRequestContextHandler, public CefCompletionCa
 
 - (CefRefPtr<CefRequestContext>)cefContext {
     return _context;
+}
+
+- (BOOL)handleOpenTabWithURL:(NSString *)url callback:(CefRefPtr<CefOpenTabCallback>)callback {
+    id<ARCHCEFRequestContextDelegate> delegate = _delegate;
+    if (!delegate || !gInitialized) {
+        return NO;
+    }
+    CefRefPtr<CefOpenTabCallback> answer = callback;
+    __block BOOL answered = NO;
+    return [delegate cefRequestContextOpenTabWithURL:url
+                                          completion:^(ARCHCEFBrowser *browser) {
+                                              if (answered) {
+                                                  return;
+                                              }
+                                              answered = YES;
+                                              if (browser) {
+                                                  [browser continueOpenTab:answer];
+                                              } else {
+                                                  answer->Continue(nullptr);
+                                              }
+                                          }];
 }
 
 - (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *))completion {

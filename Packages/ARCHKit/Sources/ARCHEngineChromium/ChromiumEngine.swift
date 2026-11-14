@@ -146,14 +146,18 @@ public final class ChromiumApplication: EngineApplication {
 }
 
 /// One profile, whose request context keeps its cookies, site storage, caches, and permission answers for the app's lifetime.
-public final class ChromiumBrowserContext: EngineBrowserContext {
+public final class ChromiumBrowserContext: NSObject, EngineBrowserContext, ARCHCEFRequestContextDelegate {
     public var preferences = EnginePreferences()
+    public weak var delegate: (any EngineBrowserContextDelegate)?
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
     let requestContext: ARCHCEFRequestContext
 
+    /// The context hears the requests of the profile's service workers. A request context that two contexts share, as the global one would be, reaches the one made last.
     init(requestContext: ARCHCEFRequestContext) {
         self.requestContext = requestContext
+        super.init()
+        requestContext.delegate = self
     }
 
     public var downloads: any EngineDownloads { chromiumDownloads }
@@ -177,6 +181,15 @@ public final class ChromiumBrowserContext: EngineBrowserContext {
         case nil: .ask
         }
         requestContext.setPermissionSetting(setting, forPermissions: permission, origin: origin.absoluteString)
+    }
+
+    /// A service worker's `clients.openWindow()`, as after a click on its notification, opens a tab through the delegate, whose browser the bridge hands to Chromium so that the worker's promise resolves with its window. Without a delegate, or for an address the app cannot read, Chromium handles it, which opens nothing that the app shows.
+    public func cefRequestContextOpenTab(withURL url: String, completion: @escaping (ARCHCEFBrowser?) -> Void) -> Bool {
+        guard let delegate, let address = URL(engineString: url) else { return false }
+        delegate.browserContext(self, openTabWith: address) { webContents in
+            completion((webContents as? ChromiumWebContents)?.browser)
+        }
+        return true
     }
 }
 
@@ -583,7 +596,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu
-        contextMenuPresenter.show(menu, at: params.location, in: view, for: element)
+        // Chromium's page view gives a password field a text input context only while the bridge's call is on, so that AppKit adds AutoFill there (VI.9).
+        contextMenuPresenter.show(menu, at: params.location, in: view, for: element) { [weak browser] enabled in
+            browser?.setContextMenuPasswordAutoFill(enabled) ?? false
+        }
         contextMenu = nil
         completion()
     }
@@ -697,6 +713,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
 
     public func cefBrowserDevToolsDidClose() {
         (devTools as? ChromiumDevTools)?.setView(nil)
+    }
+
+    /// The page asks to be shown, as `window.focus()` and a service worker's `client.focus()` do after a click on its notification.
+    public func cefBrowserDidRequestActivation() {
+        uiDelegate?.webContentsDidRequestActivation(self)
     }
 
     public func cefBrowserDidChangeAudible(_ isAudible: Bool) {

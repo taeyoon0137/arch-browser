@@ -4,10 +4,19 @@ import AppKit
 /// A sheet a tab asked for.
 struct TabSheet {
     let tabID: UUID
-    let alert: NSAlert
+    private(set) var alert: NSAlert
+    /// Makes the alert again each time the sheet shows, for a sheet whose text and buttons follow what can change while it waits, such as Arch's notification permission. Nil keeps `alert`.
+    let makeAlert: (() -> NSAlert)?
     /// An `alert`, `confirm`, or `prompt` from the page, which the engine can cancel.
     let isPageDialog: Bool
     let completion: (NSApplication.ModalResponse) -> Void
+
+    /// The sheet as it shows now.
+    func remade() -> TabSheet {
+        var sheet = self
+        if let makeAlert { sheet.alert = makeAlert() }
+        return sheet
+    }
 }
 
 /// Sheets that tabs asked for, oldest first per tab. A window shows one of them at a time (`BrowserWindowModel.visibleSheet`), for a tab on its screen.
@@ -20,8 +29,9 @@ final class TabSheetQueue {
     /// Ends a sheet without answering it, so that it can show again.
     private static let deferredResponse = NSApplication.ModalResponse(rawValue: -1_100)
 
-    func enqueue(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        pending[tab.id, default: []].append(TabSheet(tabID: tab.id, alert: alert, isPageDialog: isPageDialog, completion: completion))
+    /// Queues `alert` for the tab, or, with `makeAlert`, the alert that it makes when the sheet shows.
+    func enqueue(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool, makeAlert: (() -> NSAlert)? = nil, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        pending[tab.id, default: []].append(TabSheet(tabID: tab.id, alert: alert, makeAlert: makeAlert, isPageDialog: isPageDialog, completion: completion))
         showNext()
     }
 
@@ -30,7 +40,7 @@ final class TabSheetQueue {
         for window in windows() where window.visibleSheet == nil {
             guard let nsWindow = window.nsWindow, nsWindow.attachedSheet == nil,
                   let tab = window.tabsOnScreen.first(where: { pending[$0.id]?.isEmpty == false }), var queue = pending[tab.id] else { continue }
-            let sheet = queue.removeFirst()
+            let sheet = queue.removeFirst().remade()
             pending[tab.id] = queue.isEmpty ? nil : queue
             window.visibleSheet = sheet
             sheet.alert.beginSheetModal(for: nsWindow) { [weak self, weak window] response in
