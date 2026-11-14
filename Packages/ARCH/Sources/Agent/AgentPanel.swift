@@ -8,7 +8,6 @@ public struct AgentSessionPanel: View {
     @ObservedObject var session: AgentSession
     @ObservedObject private var settings = AIService.shared.settings
     let actions: AgentPanelActions
-    @State private var draft = ""
     @State private var problem: String?
     @State private var showsResearchPages = false
     @State private var researchChoice: AgentResearchPage?
@@ -275,22 +274,24 @@ public struct AgentSessionPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(alignment: .bottom, spacing: 4) {
-                TextField(session.isTurnRunning ? "Queue a message" : "Message the agent", text: $draft, axis: .vertical)
+                TextField(session.isTurnRunning ? "Queue a message" : "Message the agent", text: $session.messageDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .lineLimit(1...5)
                     .onSubmit(send)
                     .padding(.vertical, 6)
                     .disabled(session.hasEnded)
-                if session.isTurnRunning, draft.isEmpty {
+                if session.isTurnRunning, session.messageDraft.isEmpty {
                     Button(action: session.stop) { Image(systemName: "stop.circle") }
                         .buttonStyle(.plain)
                         .help("Stop")
+                        .accessibilityLabel("Stop")
                 } else {
                     Button(action: send) { Image(systemName: "arrow.up.circle") }
                         .buttonStyle(.plain)
                         .help("Send")
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.hasEnded)
+                        .accessibilityLabel("Send")
+                        .disabled(session.messageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.hasEnded)
                 }
             }
         }
@@ -302,8 +303,7 @@ public struct AgentSessionPanel: View {
     /// A refused message, such as one that starts with `/` while Claude Code loads Arch's skills, stays in the field.
     private func send() {
         do {
-            try session.send(draft)
-            draft = ""
+            try session.sendDraft()
             problem = nil
         } catch {
             problem = error.localizedDescription

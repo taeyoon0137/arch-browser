@@ -85,7 +85,9 @@ extension AgentAPISession: AgentSessionRunning {
     @Published public private(set) var model: AIModelRef?
     @Published public private(set) var state = State.starting
     @Published private(set) var transcript = AgentTranscript()
-    /// Messages typed during a turn, which go in order when it ends.
+    /// Unsent text shared by the windows showing this conversation, held only for the session's lifetime.
+    @Published var messageDraft = ""
+    /// Messages submitted during a turn, which go in order when it ends.
     @Published public private(set) var queuedMessages: [String] = []
     @Published public private(set) var isTurnRunning = false
     /// Take Over: the session's calls wait until Hand Back.
@@ -300,6 +302,12 @@ extension AgentAPISession: AgentSessionRunning {
         }
     }
 
+    func sendDraft() throws {
+        guard !messageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !hasEnded, runner != nil else { return }
+        try send(messageDraft)
+        messageDraft = ""
+    }
+
     public func removeQueuedMessage(at index: Int) {
         guard queuedMessages.indices.contains(index) else { return }
         queuedMessages.remove(at: index)
@@ -458,6 +466,7 @@ extension AgentAPISession: AgentSessionRunning {
         for id in researchPages.keys { forgetResearchTab(id) }
         snapshots = AgentSnapshotStore()
         readerExcerpt = nil
+        messageDraft = ""
         queuedMessages = []
         callEpoch += 1
         taskEvent?(.failed, reason)

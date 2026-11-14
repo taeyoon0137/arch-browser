@@ -26,6 +26,35 @@ import Testing
         runner.startProcess(Self.cliProcess)
     }
 
+    @Test func followupDraftBelongsToOneSessionUntilSubmittedOrDeleted() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (first, runner) = try start(service, harness)
+        let (other, otherRunner) = try start(service, harness, task: "Other conversation")
+
+        first.messageDraft = "Unsent follow-up"
+        other.messageDraft = "Separate draft"
+        #expect(service.session(withID: first.id)?.messageDraft == "Unsent follow-up")
+        #expect(runner.sent.count == 1 && otherRunner.sent.count == 1)
+        #expect(first.queuedMessages.isEmpty && first.transcript.lastUserMessage == "Summarize this tab")
+
+        first.messageDraft = "/help"
+        #expect(throws: AIError.self) { try first.sendDraft() }
+        #expect(first.messageDraft == "/help" && first.queuedMessages.isEmpty)
+        first.messageDraft = "Send this follow-up"
+        try first.sendDraft()
+        try first.sendDraft()
+        #expect(first.messageDraft.isEmpty && first.queuedMessages == ["Send this follow-up"])
+        runner.emit(.turnFinished(.completed))
+        try await waitUntil { runner.sent.count == 2 }
+        #expect(runner.sent[1] == "Send this follow-up")
+        first.messageDraft = "Unsent at deletion"
+        await service.deleteSession(first.id)
+        #expect(first.messageDraft.isEmpty && other.messageDraft == "Separate draft")
+        #expect(otherRunner.sent.count == 1)
+    }
+
     @Test func researchPagesOpenOnlyTheReviewedAddressAndRefuseEverySubsequentNavigation() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
