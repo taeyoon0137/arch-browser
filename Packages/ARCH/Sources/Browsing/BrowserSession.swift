@@ -1570,7 +1570,7 @@ public enum CommandPaletteOrigin {
     case keyboard
     /// A control in the sidebar: the palette comes in from the sidebar's side.
     case sidebar
-    /// The address pill: the palette comes out of the pill, and the pill's contents move toward it.
+    /// The address pill, clicked or through Open Location (⌘L): the palette comes out of the pill, and the pill's contents move toward it. Without the pill on screen, as in a small window or with the sidebar hidden, the palette opens as from the keyboard.
     case addressPill
 }
 

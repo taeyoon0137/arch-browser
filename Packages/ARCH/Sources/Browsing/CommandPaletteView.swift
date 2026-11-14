@@ -253,9 +253,11 @@ struct CommandPaletteLayer: View {
         .onChange(of: windowModel.commandPaletteMode) { _, mode in
             guard mode == nil else {
                 isPaletteLeaving = false
-                paletteMotion = PaletteMotion(origin: windowModel.commandPaletteOrigin, pill: addressPillFrame, windowWidth: windowWidth)
+                // Open Location asks for the pill, which a hidden sidebar or a small window does not show; the palette then opens as other shortcuts open it.
+                let origin = windowModel.commandPaletteOrigin == .addressPill && addressPillFrame == nil ? .keyboard : windowModel.commandPaletteOrigin
+                paletteMotion = PaletteMotion(origin: origin, pill: addressPillFrame, windowWidth: windowWidth)
                 if paletteMotion.pull == .zero { withAnimation(.paletteIn(from: .addressPill)) { addressPillPull = .zero } }
-                return withAnimation(.paletteIn(from: windowModel.commandPaletteOrigin)) { shownPaletteMode = mode }
+                return withAnimation(.paletteIn(from: origin)) { shownPaletteMode = mode }
             }
             withAnimation(.paletteOut) { isPaletteLeaving = true }
             // The pill returns as the palette leaves.

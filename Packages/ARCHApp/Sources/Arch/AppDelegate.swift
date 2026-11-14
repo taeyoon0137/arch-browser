@@ -346,7 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func moveTabDown() { frontSidebarTarget().moveSelectedTab(up: false) }
     @objc private func selectTab(_ sender: NSMenuItem) { frontSidebarTarget().selectTab(at: sender.tag - 1) }
     @objc private func selectLastTab() { frontSidebarTarget().selectLastTab() }
-    @objc private func openLocation() { session.activeWindow?.focusCommandBar() }
+    /// Open Location edits the address where the window shows it, so the palette comes out of the address pill as a click on it does.
+    @objc private func openLocation() { session.activeWindow?.focusCommandBar(from: .addressPill) }
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
     @objc private func printPage() { session.activeWindow?.printPage() }
     @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
