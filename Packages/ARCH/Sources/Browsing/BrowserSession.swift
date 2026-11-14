@@ -545,7 +545,7 @@ final class EngineRuntime {
         context.delegate = self
         followDownloadSettings(of: context)
         permissionAnswers.follow(context, of: persona.id)
-        downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id) }
+        downloads += context.downloads.items.map { DownloadEntry(item: $0, personaID: persona.id, session: self) }
         browser.cookiesDidChange = { [weak engines] in engines?.cookieSync.scheduleCopy(from: kind) }
         // An engine that starts after another in the Persona takes what the running engine changed since the two stores last agreed. This first copy of a launch reads the Persona's record of that agreement, so it also carries what one engine changed while the other was not running (`CookieSync`).
         if let source = engines.runtimes.values.first(where: { $0.kind != kind }) {
@@ -2317,24 +2317,10 @@ extension BrowserSession {
         downloads.count { !$0.isFinished }
     }
 
-    /// The downloads folder saved in Settings, falling back to the user's Downloads folder, then the temporary folder.
-    private var downloadsDirectory: URL {
-        Self.savedDownloadsFolder
-            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-    }
-
-    /// Adds a counter to `filename` until the name is unused in `directory`.
-    nonisolated static func uniqueDestination(for filename: String, in directory: URL) -> URL {
-        let base = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        var candidate = directory.appendingPathComponent(filename)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            counter += 1
-            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
-        }
-        return candidate
+    /// Checks again for a folder removed since the engine's preferences last changed.
+    private func downloadsDirectory(for preferences: EnginePreferences) -> URL {
+        if let url = preferences.downloadFilePath, (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { return url }
+        return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
     }
 
     // MARK: Download settings
@@ -2382,7 +2368,7 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
     /// The library button shows a new download's progress, so the library itself stays as it is. The tab that only pointed at the file closes; another such tab waits for its own download, which closing it first would cancel.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         guard let personaID = runtime(owning: downloads)?.personaID else { return }
-        self.downloads.append(DownloadEntry(item: item, personaID: personaID))
+        self.downloads.append(DownloadEntry(item: item, personaID: personaID, session: self))
         guard let tab = allTabs.first(where: { downloadOnlyTabIDs.contains($0.id) && $0.webContents === item.webContents }) else { return }
         downloadOnlyTabIDs.remove(tab.id)
         // The engine is still choosing the file's destination, so the tab closes once that callback returns.
@@ -2410,7 +2396,7 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
 
     /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about, and an agent tab's download has had the user's answer on the agent's card (rule P6), so no card over a tab that the user may not be looking at holds it. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
-        let choose = { [weak self] in self?.chooseDestination(in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
+        let choose = { [weak self] in self?.chooseDestination(for: item, in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
         guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, tab.agentOwnerID == nil, !admittedDownloads.contains(item) else { return choose() }
         let decide = { [weak self] (allowed: Bool) in
             guard allowed else {
@@ -2439,14 +2425,32 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
     }
 
     /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
-    private func chooseDestination(in downloads: any EngineDownloads, defaultFilename: String, completion: @escaping (URL?) -> Void) {
-        guard runtime(owning: downloads)?.context.preferences.promptForDownloadPath == true else {
-            return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
+    private func chooseDestination(for item: any EngineDownloadItem, in downloads: any EngineDownloads, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+        guard let entry = entry(for: item), let preferences = runtime(owning: downloads)?.context.preferences else { return completion(nil) }
+        // A restarted transfer keeps its accepted name unless a file now occupies it.
+        if let url = entry.chosenDestination, !FileManager.default.fileExists(atPath: url.path), entry.reserveDestination(url) {
+            return completion(url)
         }
+        let directory = downloadsDirectory(for: preferences)
+        guard preferences.promptForDownloadPath else {
+            let url = entry.unusedDestination(for: defaultFilename, in: directory)
+            return completion(entry.reserveDestination(url) ? url : nil)
+        }
+        showDownloadPanel(for: entry, suggested: directory.appendingPathComponent(defaultFilename), completion: completion)
+    }
+
+    private func showDownloadPanel(for entry: DownloadEntry, suggested: URL, message: String? = nil, completion: @escaping (URL?) -> Void) {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = defaultFilename
-        panel.directoryURL = downloadsDirectory
-        let finish = { (response: NSApplication.ModalResponse) in completion(response == .OK ? panel.url : nil) }
+        panel.nameFieldStringValue = suggested.lastPathComponent
+        panel.directoryURL = suggested.deletingLastPathComponent()
+        if let message { panel.message = message }
+        let finish = { [weak self] (response: NSApplication.ModalResponse) in
+            guard let self, response == .OK, let url = panel.url, self.entry(for: entry.item) === entry,
+                  entry.item.state != .completed, entry.item.state != .cancelled else { return completion(nil) }
+            if entry.reserveDestination(url) { return completion(url) }
+            let suggested = entry.unusedDestination(for: url.lastPathComponent, in: url.deletingLastPathComponent())
+            self.showDownloadPanel(for: entry, suggested: suggested, message: "Another download is saving to that name. Choose a different name.", completion: completion)
+        }
         if let window = NSApp.keyWindow, self.window(for: window)?.kind != .small {
             panel.beginSheetModal(for: window, completionHandler: finish)
         } else {

@@ -8,6 +8,9 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     /// Unique among the downloads of every Persona. An engine numbers downloads within one profile, so its item IDs can repeat across Personas, and the session finds an entry by its item.
     public let id = UUID()
     let item: any EngineDownloadItem
+    private weak var session: BrowserSession?
+    /// The destination accepted before the engine reports a path or creates its file.
+    private(set) var chosenDestination: URL?
     /// The Persona whose profile in the engine keeps the download.
     let personaID: Persona.ID
     @Published public private(set) var state: EngineDownloadState
@@ -17,7 +20,8 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     /// Where a rename moved the finished file; nil while the file keeps the name the engine gave it.
     @Published public private(set) var renamedPath: URL?
 
-    init(item: any EngineDownloadItem, personaID: Persona.ID) {
+    init(item: any EngineDownloadItem, personaID: Persona.ID, session: BrowserSession? = nil) {
+        self.session = session
         self.item = item
         self.personaID = personaID
         state = item.state
@@ -46,24 +50,69 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         state == .completed || state == .cancelled || state == .failed
     }
 
+    /// A paused or failed download can still resume into its partial file.
+    private var reservedDestination: URL? {
+        switch item.state {
+        case .inProgress, .paused, .failed: return chosenDestination ?? item.targetPath
+        case .completed, .cancelled: return nil
+        }
+    }
+
+    /// Two spellings in the same folder can name the same future file on a case-insensitive volume.
+    @MainActor
+    private func isReserved(_ url: URL) -> Bool {
+        let others = session?.downloads.compactMap { $0 === self ? nil : $0.reservedDestination } ?? []
+        guard !others.isEmpty else { return false }
+        let directory = url.deletingLastPathComponent().resolvingSymlinksInPath()
+        let caseSensitive = (try? directory.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?.volumeSupportsCaseSensitiveNames ?? true
+        let path = directory.appendingPathComponent(url.lastPathComponent).path
+        return others.contains {
+            let otherPath = $0.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent($0.lastPathComponent).path
+            return caseSensitive ? path == otherPath : path.caseInsensitiveCompare(otherPath) == .orderedSame
+        }
+    }
+
+    /// A save panel may replace an existing file with the user's consent. Every accepted name belongs to one transfer.
+    @MainActor
+    func reserveDestination(_ url: URL) -> Bool {
+        guard item.state != .completed, item.state != .cancelled, !isReserved(url) else { return false }
+        chosenDestination = url
+        return true
+    }
+
+    @MainActor
+    func unusedDestination(for filename: String, in directory: URL, keeping current: URL? = nil) -> URL {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var counter = 1
+        while isReserved(candidate) || (candidate != current && FileManager.default.fileExists(atPath: candidate.path)) {
+            counter += 1
+            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+        }
+        return candidate
+    }
+
     // MARK: Renaming
 
     /// The longest file name a rename gives, extension included.
     static let maximumFilenameLength = 80
 
     /// Renames the finished file in its folder to `name` with the file's own extension, made safe by `safeFilename(_:keepingExtensionOf:)` and unused in the folder. Fails when the file is no longer where the entry put it, the name leaves nothing, or the file has that name already.
+    @MainActor
     @discardableResult
     func rename(to name: String) -> Bool {
         guard state == .completed, let current = fileURL, let filename = Self.safeFilename(name, keepingExtensionOf: current.lastPathComponent),
               filename != current.lastPathComponent else { return false }
-        return move(current, to: BrowserSession.uniqueDestination(for: filename, in: current.deletingLastPathComponent()))
+        return move(current, to: unusedDestination(for: filename, in: current.deletingLastPathComponent()))
     }
 
     /// Gives the renamed file back the name the engine saved it under, or the nearest unused one.
+    @MainActor
     func restoreOriginalName() {
         guard let current = renamedPath, let original = targetPath else { return }
-        let destination = FileManager.default.fileExists(atPath: original.path) ? BrowserSession.uniqueDestination(for: original.lastPathComponent, in: current.deletingLastPathComponent()) : original
-        move(current, to: destination)
+        let destination = unusedDestination(for: original.lastPathComponent, in: original.deletingLastPathComponent(), keeping: current)
+        if destination != current { move(current, to: destination) }
     }
 
     @discardableResult

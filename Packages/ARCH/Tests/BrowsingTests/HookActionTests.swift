@@ -19,7 +19,7 @@ import Testing
         #expect(long?.hasSuffix("a.pdf") == true)
     }
 
-    @Test func renamingPicksAnUnusedNameAndRestoringPutsTheOriginalBack() throws {
+    @Test @MainActor func renamingPicksAnUnusedNameAndRestoringPutsTheOriginalBack() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ArchBrowsingTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
