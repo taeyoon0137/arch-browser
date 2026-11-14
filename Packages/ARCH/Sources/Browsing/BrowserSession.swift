@@ -989,21 +989,22 @@ final class EngineRuntime {
         // A link opened from a page's context menu opens behind the current tab, in the page's space (its Persona's preferred space for a favorite's page) and engine, marked unread.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.engineKind).isUnread = true
+            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.preferredEngine).isUnread = true
         }
         // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
         tab.searchInNewTab = { [weak self, weak tab] text in
             guard let self, let tab else { return }
             let url = Self.searchResultsURL(for: text)
             if let window = self.window(showing: tab) {
-                return window.showOpenedPage(self.makeWebContents(url: url, engine: tab.engineKind, state: nil, in: tab.personaID), personaID: tab.personaID)
+                let page = self.makeWebContents(url: url, engine: tab.preferredEngine, state: nil, in: tab.personaID)
+                return window.showOpenedPage(page, personaID: tab.personaID, preferredEngine: tab.preferredEngine)
             }
-            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.engineKind).isUnread = true
+            self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.preferredEngine).isUnread = true
         }
         // A web link the user clicks with Shift opens in the preview panel of the page's window, in the page's engine and Persona.
         tab.previewLink = { [weak self, weak tab] url in
             guard let self, let tab else { return }
-            self.window(showing: tab)?.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
+            self.window(showing: tab)?.showPreview(of: url, engine: tab.preferredEngine, in: tab.personaID)
         }
         tab.presentPrompt = { [weak self, weak tab] content, completion in
             guard let self, let tab else { return completion(.dismissed) }
