@@ -305,12 +305,18 @@ public final class AIAgentSession {
         turnTask = Task { await run(message) }
     }
 
-    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error.
+    /// Runs one message on the session's model, or, before `ready`, on each model in turn until one produces output (start-only fallbacks). A model that fails before its first output, such as at a usage limit, gives way to the next, and a Codex thread it began is deleted; with none left, the session ends with the last error. A turn of an automatic feature is one of its automatic requests: it fails with `budgetReached` at the daily limit for automatic requests or the monthly spending limit before any model, and otherwise counts once toward the daily limit, whichever models it tries.
     private func run(_ message: String) async {
         transcript.append((.user, message))
         var outcome: TurnOutcome = .failed(.notConfigured(.noUsableModel))
         var reply = ""
-        while let candidate = candidates.first, !hasEnded {
+        let budget = feature.trigger == .automatic ? service.reachedBudget(for: feature) : nil
+        if let budget {
+            outcome = .failed(.budgetReached(budget))
+        } else if feature.trigger == .automatic {
+            service.usage.countAutomaticRequest(for: feature.id)
+        }
+        while budget == nil, let candidate = candidates.first, !hasEnded {
             (outcome, reply) = await attempt(message, on: candidate)
             guard model == nil, !hasEnded, candidates.count > 1 else { break }
             if case .finished = outcome { break }
@@ -343,8 +349,9 @@ public final class AIAgentSession {
             self.turn = nil
             return (.failed(.rateLimited(candidate.provider.id, until: until)), "")
         }
+        // An automatic feature's turn waits behind the user's requests and gives up after the limiter's wait limit, as its other requests do.
         do {
-            try await limiter.acquire(isUser: true) { _ in }
+            try await limiter.acquire(isUser: feature.trigger == .user) { _ in }
         } catch {
             self.turn = nil
             // Stop and `end` cancel the wait for a slot.
