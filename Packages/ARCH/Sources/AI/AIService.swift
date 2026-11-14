@@ -193,6 +193,7 @@ public final class AIService: ObservableObject, AIClient {
     /// One attempt on one model: rate limiting, page access checks for the model's limit, the provider's stream, and usage.
     private func send(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, attempt: inout AIAttempt, entry: inout AIActivityEntry) async throws -> AIFinishReason {
         entry.model = candidate.ref
+        try checkDestination(of: candidate.provider, known: request.knownProviders)
         // A part the checks refuse ends the attempt before it waits.
         _ = try prepare(request, feature: feature, on: candidate, entry: &entry)
         let limiter = limiter(for: candidate.provider.id)
@@ -206,6 +207,7 @@ public final class AIService: ObservableObject, AIClient {
             key = try await storedKey(for: candidate.provider)
             // The waits for the slot, a cool-down, and the Keychain can last minutes. Meanwhile the request may have been cancelled, the user may have moved the provider to another base URL with that server's key, which the read by the provider's ID gave, switched AI off for the page's site, or the request ahead of it may have reached the spending limit, so each is checked again just before the request goes out.
             try Task.checkCancellation()
+            try checkDestination(of: candidate.provider, known: request.knownProviders)
             if key != nil, settings.providers.first(where: { $0.id == candidate.provider.id })?.keepsItsKey(in: candidate.provider) != true {
                 throw AIError.providerUnavailable(candidate.provider.id, detail: "The provider's settings changed while the request waited.")
             }
@@ -260,6 +262,15 @@ public final class AIService: ObservableObject, AIClient {
             await limiter.release(after: .other)
         }
         return try outcome.get()
+    }
+
+    /// Checks both the captured route candidate and the current settings, also when a queued request has no Keychain key.
+    func checkDestination(of provider: AIProviderConfiguration, known: [AIProviderID: String]?) throws {
+        guard let known else { return }
+        guard let approved = known[provider.id], provider.hookDestination == approved,
+              settings.providers.first(where: { $0.id == provider.id })?.hookDestination == approved else {
+            throw AIError.blockedByPolicy(.unknownProvider)
+        }
     }
 
     /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts, and its content unless the request records none.

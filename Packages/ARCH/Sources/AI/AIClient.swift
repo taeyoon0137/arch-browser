@@ -41,6 +41,8 @@ public struct AIRequest: Sendable {
     public var route: AIRouteChoice?
     /// false leaves the request's Activity entry without content, so Show Content has nothing to show; its part kinds and sizes, model, result, and usage stay.
     public var recordsContent: Bool
+    /// Provider destinations approved for a hook, checked again before dispatch. Other features leave this nil.
+    public var knownProviders: [AIProviderID: String]? = nil
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
                 tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil,

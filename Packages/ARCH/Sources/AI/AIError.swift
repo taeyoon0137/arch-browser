@@ -37,6 +37,8 @@ public enum AIPolicyReason: Sendable {
     case agentUsedOwnTools(String)
     /// A message that starts with `/` in a session where Claude Code loads Arch's skills, which Claude Code would run as one of its own commands.
     case agentMessageIsCommand
+    /// The hook's approved provider destination no longer matches its route or settings.
+    case unknownProvider
     /// A request or session named a route or a model for a stored automatic feature, which keeps the models the user chose for it.
     case routeNotAllowed
 }
@@ -96,6 +98,8 @@ extension AIError: LocalizedError {
             return detail
         case .blockedByPolicy(.agentMessageIsCommand):
             return "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it."
+        case .blockedByPolicy(.unknownProvider):
+            return "The provider destination changed. Review it before running this hook."
         case .blockedByPolicy(.routeNotAllowed):
             return "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own."
         case .budgetReached(.automaticRequestsPerDay):

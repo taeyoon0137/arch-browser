@@ -1,4 +1,5 @@
 // The providers the user connects, as stored in `ai.json`, and the internal protocol that each provider kind implements. Provider types other than the configurations stay internal to this module, so no feature calls a provider directly.
+import CryptoKit
 import Foundation
 
 public struct AIProviderID: RawRepresentable, Hashable, Codable, Sendable {
@@ -47,6 +48,24 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
             limits = .commandLine
         } else {
             limits = .http
+        }
+    }
+
+    /// The destination sealed with a user-approved hook. Includes the CLI invocation's preset, arguments and environment.
+    public var hookDestination: String {
+        switch kind {
+        case .http(let http):
+            return http.baseURL.absoluteString
+        case .commandLine(let tool):
+            struct Invocation: Encodable {
+                var agent: AIAgentKind?
+                var arguments: [String]
+                var environment: [String: String]
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = (try? encoder.encode(Invocation(agent: tool.agent, arguments: tool.arguments, environment: tool.environment))) ?? Data()
+            return tool.executable.path + " sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         }
     }
 

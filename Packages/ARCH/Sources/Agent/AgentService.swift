@@ -835,8 +835,9 @@ import Foundation
     func startHookCLI(_ binding: AgentHookCLIRun, feature: AIFeatureID, models: [AIModelRef], turns: Int, instructions: String) throws -> any AgentSessionRunning {
         let server = AIAgentToolServer(executable: dependencies.mcpExecutable, arguments: ["--session"],
                                       environment: [AgentMCPServer.ticketVariable: binding.ticket.text], tools: binding.tools.map(\.name))
-        let request = AIAgentSessionRequest(feature: feature, route: .models(models), instructions: instructions, toolServer: server, id: binding.id,
+        var request = AIAgentSessionRequest(feature: feature, route: .models(models), instructions: instructions, toolServer: server, id: binding.id,
                                             folder: dependencies.sessionFolder(binding.id), maxTurns: turns, ephemeral: true)
+        request.knownProviders = binding.knownProviders
         hookCLIs[binding.id] = binding
         if endpoint == nil { updateListening() }
         do {
