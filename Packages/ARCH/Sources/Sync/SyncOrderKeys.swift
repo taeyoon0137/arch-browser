@@ -52,36 +52,61 @@ public enum SyncOrderKeys {
 
     /// The order keys of one sibling list after this Mac has put `names` in this order, one for each name.
     ///
-    /// `existing` holds the keys the siblings had before, by record name. The largest set of siblings whose keys are already in the list's order keeps its keys; equal keys count as in order when their record names are. Each other sibling gets a key between its nearest neighbors that keep theirs: the midpoint for one sibling between two, evenly spaced keys for several, and steps of 1 past either end of the list. When no `Double` fits between two neighbors, every sibling is renumbered 1, 2, 3, and so on.
-    public static func keys(for names: [String], existing: [String: Double]) -> [Double] {
-        let positions = names.map { name in existing[name].flatMap { $0.isFinite ? Position(key: $0, recordName: name) : nil } }
-        let kept = longestIncreasingRun(positions)
-        var result: [Double] = []
+    /// `existing` holds the keys the siblings have on the server, by record name. The largest set of siblings whose existing keys are already in the list's order keeps them; equal keys count as in order when their record names are. `pending` holds keys that this Mac gave siblings in saves it has not sent. Between two siblings that keep their existing keys, the largest set of siblings whose pending keys still fit there, in order, keeps those, so a sibling moved twice before sending changes from its server key once. Each other sibling gets a key between its nearest neighbors that keep theirs: the midpoint for one sibling between two, evenly spaced keys for several, and steps of 1 past either end of the list. When no `Double` fits between two neighbors, every sibling is renumbered 1, 2, 3, and so on.
+    public static func keys(for names: [String], existing: [String: Double], pending: [String: Double] = [:]) -> [Double] {
+        let current = names.map { Position(key: existing[$0], recordName: $0) }
+        var kept: [Int: Position] = [:]
+        for index in longestIncreasingRun(current) { kept[index] = current[index] }
+        if !pending.isEmpty {
+            for gap in gaps(count: names.count, kept: kept) {
+                let lower = kept[gap.lowerBound - 1]
+                let upper = kept[gap.upperBound]
+                let fitting = gap.map { index -> Position? in
+                    guard let position = Position(key: pending[names[index]], recordName: names[index]) else { return nil }
+                    let fits = (lower.map { $0 < position } ?? true) && (upper.map { position < $0 } ?? true)
+                    return fits ? position : nil
+                }
+                for offset in longestIncreasingRun(fitting) { kept[gap.lowerBound + offset] = fitting[offset] }
+            }
+        }
+        var result = names.indices.map { kept[$0]?.key ?? 0 }
+        for gap in gaps(count: names.count, kept: kept) {
+            guard let keys = gapKeys(between: kept[gap.lowerBound - 1]?.key, and: kept[gap.upperBound]?.key, count: gap.count) else {
+                return names.indices.map { Double($0 + 1) }
+            }
+            for (index, key) in zip(gap, keys) { result[index] = key }
+        }
+        return result
+    }
+
+    /// The runs of consecutive indices below `count` that `kept` lacks.
+    private static func gaps(count: Int, kept: [Int: Position]) -> [Range<Int>] {
+        var gaps: [Range<Int>] = []
         var index = 0
-        while index < names.count {
-            if kept.contains(index), let position = positions[index] {
-                result.append(position.key)
+        while index < count {
+            guard kept[index] == nil else {
                 index += 1
                 continue
             }
-            // The siblings from `index` up to the next kept one take keys between the kept neighbors.
             var end = index
-            while end < names.count, !kept.contains(end) { end += 1 }
-            let lower = index > 0 ? result.last : nil
-            let upper = end < names.count ? positions[end]?.key : nil
-            guard let gap = gapKeys(between: lower, and: upper, count: end - index) else {
-                return names.indices.map { Double($0 + 1) }
-            }
-            result += gap
+            while end < count, kept[end] == nil { end += 1 }
+            gaps.append(index..<end)
             index = end
         }
-        return result
+        return gaps
     }
 
     /// A sibling's place in its list: its key, then its record name for equal keys.
     private struct Position: Comparable {
         var key: Double
         var recordName: String
+
+        /// The position of a usable key, or nil for a missing or unusable one.
+        init?(key: Double?, recordName: String) {
+            guard let key, key.isFinite else { return nil }
+            self.key = key
+            self.recordName = recordName
+        }
 
         static func < (first: Position, second: Position) -> Bool {
             (first.key, first.recordName) < (second.key, second.recordName)

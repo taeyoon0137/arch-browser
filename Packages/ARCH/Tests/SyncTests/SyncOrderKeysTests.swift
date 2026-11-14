@@ -32,7 +32,20 @@ import Testing
         #expect(SyncOrderKeys.keys(for: ["a", "f", "b", "g", "c", "d", "e"], existing: existing) == [1, 1.5, 2, 2.5, 3, 4, 5])
     }
 
-    @Test func renumbersOnlyWhenTheMidpointEqualsANeighborsKey() {
+    @Test func pendingKeysHoldOnlyWhereTheyFitBetweenExistingKeys() {
+        // A save not sent yet moved `d` between `a` and `b`.
+        let pending: [String: Double] = ["d": 1.5]
+        // Moved on between `b` and `c`, `d` takes a new key, and `b` keeps its own.
+        #expect(SyncOrderKeys.keys(for: ["a", "b", "d", "c"], existing: fourInOrder, pending: pending) == [1, 2, 2.5, 3])
+        // Left in place while `c` moves to the front, `d` keeps its pending key.
+        #expect(SyncOrderKeys.keys(for: ["c", "a", "d", "b"], existing: fourInOrder, pending: pending) == [0, 1, 1.5, 2])
+        // Moved back, `d` takes its existing key again.
+        #expect(SyncOrderKeys.keys(for: ["a", "b", "c", "d"], existing: fourInOrder, pending: pending) == [1, 2, 3, 4])
+        // A sibling without an existing key in the list keeps a pending key that fits.
+        #expect(SyncOrderKeys.keys(for: ["a", "x", "b"], existing: ["a": 1, "b": 2], pending: ["x": 1.25]) == [1, 1.25, 2])
+    }
+
+        @Test func renumbersOnlyWhenTheMidpointEqualsANeighborsKey() {
         // `c` moves between `a` and `b`, whose keys have no `Double` between them.
         let crowded: [String: Double] = ["a": 1, "b": 1.0.nextUp, "d": 2, "c": 3]
         let midpoint = 1 + (1.0.nextUp - 1) / 2
