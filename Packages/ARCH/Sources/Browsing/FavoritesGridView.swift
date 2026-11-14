@@ -118,7 +118,8 @@ struct FavoritesGridView: View {
 
     /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
     private func reorder(_ favorite: Favorite, at location: CGPoint) {
-        guard sidebarDrag.item == .favorite(favorite.id), personaID == windowModel.personaID, reorderHover.canMove(at: location),
+        guard sidebarDrag.item == .favorite(favorite.id), personaID == windowModel.personaID,
+              sidebarDrag.favoriteBarFrames[windowModel.currentSpaceID]?.contains(location) == true, reorderHover.canMove(at: location),
               let target = session.favorites(in: personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }),
               let frame = tileFrames[target.id] else { return }
         reorderHover.moved(into: frame)

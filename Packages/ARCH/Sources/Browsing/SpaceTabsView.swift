@@ -42,6 +42,7 @@ struct SpacePagesView: View {
 /// Measures the existing grid, or the space header while it offers the first favorite.
 private struct FavoriteDropArea: ViewModifier {
     let spaceID: UUID
+    let viewport: CGRect
     @EnvironmentObject private var sidebarDrag: SidebarDragState
 
     func body(content: Content) -> some View {
@@ -53,7 +54,8 @@ private struct FavoriteDropArea: ViewModifier {
                 }
             }
             .background(GeometryReader { proxy in
-                Color.clear.preference(key: FavoriteBarFramesKey.self, value: [spaceID: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
+                let visible = viewport.intersection(proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))
+                Color.clear.preference(key: FavoriteBarFramesKey.self, value: visible.isEmpty ? [:] : [spaceID: visible])
             })
     }
 }
@@ -132,7 +134,7 @@ struct SpaceTabsView: View {
                             .font(.callout)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                            .modifier(FavoriteDropArea(spaceID: space.id))
+                            .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
                             .allowsHitTesting(false)
                     }
                 }
@@ -179,7 +181,7 @@ struct SpaceTabsView: View {
             VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
                 if !session.favorites(in: space.resolvedPersonaID).isEmpty {
                     FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
-                        .modifier(FavoriteDropArea(spaceID: space.id))
+                        .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
                 }
                 if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
                     PluginSidebarItemsView(plugins: plugins)
