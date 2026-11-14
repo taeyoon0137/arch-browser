@@ -1,6 +1,7 @@
 // Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. New Agent Hook…, the presets, and Allow Shell Scripts come with the tasks that build them.
 import Agent
 import AI
+import Browsing
 import Events
 import Hooks
 import SwiftUI
@@ -76,10 +77,10 @@ struct AgentHooksPage: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(hook.name).fontWeight(.medium)
                     ForEach(HookSummary.lines(for: hook, places: registry.places, lastRun: registry.lastRuns[hook.id]?.last), id: \.self) { line in
-                        Text(line).font(.callout).foregroundStyle(.secondary)
+                        Text(line).font(.caption).foregroundStyle(.secondary)
                     }
                     if let reason = hook.state.pauseReason {
                         pauseRow(for: hook, reason: reason)
@@ -93,7 +94,7 @@ struct AgentHooksPage: View {
 
     private func pauseRow(for hook: Hook, reason: HookPauseReason) -> some View {
         HStack {
-            Text(HookSummary.sentence(for: reason)).font(.callout).foregroundStyle(.orange)
+            Text(HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
             switch reason {
             case .scriptChanged:
                 Button("Review") { edit(hook, reviewing: true) }
@@ -130,11 +131,11 @@ struct AgentHooksPage: View {
     private func lastRuns(of hook: Hook) -> some View {
         let runs = (registry.lastRuns[hook.id] ?? []).reversed()
         if runs.isEmpty {
-            Text("No runs since Arch started.").font(.callout).foregroundStyle(.secondary)
+            Text("No runs since Arch started.").foregroundStyle(.secondary)
         }
         ForEach(Array(runs)) { run in
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(run.date.formatted(date: .omitted, time: .standard)) · \(HookSummary.description(of: run))").font(.callout)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(run.date.formatted(date: .omitted, time: .standard)) · \(HookSummary.description(of: run))")
                 if let message = run.message {
                     Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
@@ -237,20 +238,23 @@ enum HookSummary {
         }
     }
 
-    /// "Everywhere", or each place as "Persona" or "Persona / Space".
+    /// "Everywhere", or each place as `name(of:places:)` names it.
     static func scope(of scope: BrowserEventScope, places: [HookPersonaPlaces]) -> String {
         guard case .places(let chosen) = scope else { return "Everywhere" }
         guard !chosen.isEmpty else { return "Nowhere" }
         return chosen.map { name(of: $0, places: places) }.joined(separator: ", ")
     }
 
+    /// A place as Persona rule 7 names it (`BrowserSession.displayedPlace(ofPersona:space:among:)`): a space as "Persona / Space" and a whole Persona by its name, while the default Persona is the only one a space by its name alone and the Persona, which then covers every place, as Everywhere.
     static func name(of place: BrowserPlace, places: [HookPersonaPlaces]) -> String {
+        let personas = places.map { Persona(id: $0.id, name: $0.name) }
         switch place {
         case .persona(let id):
-            return places.first { $0.id == id }?.name ?? "A deleted Persona"
+            guard places.contains(where: { $0.id == id }) else { return "Deleted Persona" }
+            return BrowserSession.displayedPlace(ofPersona: id, space: nil, among: personas) ?? "Everywhere"
         case .space(let id):
-            guard let persona = places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return "A deleted space" }
-            return "\(persona.name) / \(space.name)"
+            guard let persona = places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return "Deleted Space" }
+            return BrowserSession.displayedPlace(ofPersona: persona.id, space: Space(id: space.id, name: space.name, personaID: persona.id), among: personas) ?? space.name
         }
     }
 

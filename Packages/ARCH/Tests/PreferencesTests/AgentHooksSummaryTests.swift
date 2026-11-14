@@ -1,4 +1,4 @@
-// The texts of Settings ▸ AI ▸ Agent Hooks: a hook's situation, its places as "Persona" and "Persona / Space", its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
+// The texts of Settings ▸ AI ▸ Agent Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
 import AI
 import Events
 import Foundation
@@ -17,8 +17,13 @@ import Testing
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
         let filter = BrowserEventFilter(scope: .places([.persona(persona), .space(work), .space(UUID())]), sites: [AISitePattern("example.org")])
         let hook = Hook(name: "Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false), filter: filter)
+        // With one Persona nothing names it (Persona rule 7), so its place covers every place; a second Persona names both.
         #expect(HookSummary.lines(for: hook, places: places, lastRun: nil)
-                == ["When a new tab loads its first page · Personal, Personal / Work, A deleted space · Only example.org"])
+                == ["When a new tab loads its first page · Everywhere, Work, Deleted Space · Only example.org"])
+        let twoPersonas = places + [HookPersonaPlaces(id: UUID(), name: "Work", spaces: [HookSpace(id: UUID(), name: "Research")])]
+        #expect(HookSummary.lines(for: hook, places: twoPersonas, lastRun: nil)
+                == ["When a new tab loads its first page · Personal, Personal / Work, Deleted Space · Only example.org"])
+        #expect(HookSummary.name(of: .persona(UUID()), places: twoPersonas) == "Deleted Persona")
         #expect(HookSummary.scope(of: .everywhere, places: places) == "Everywhere")
         #expect(HookSummary.situation(of: .tabClosed(reasons: [.user])) == "When you close a tab")
         #expect(HookSummary.sentence(for: .scriptChanged) == "Its script changed outside Arch.")
@@ -31,6 +36,9 @@ import Testing
         #expect(draft.trigger == hook.trigger)
         #expect(draft.filter == filter)
         #expect(draft.renamesTabs && !draft.readsTabs)
+        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same.
+        let personaWide = Hook(name: "Persona", trigger: .tabOpened, filter: BrowserEventFilter(scope: .places([.persona(persona)])))
+        #expect(ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false).filter.scope == .everywhere)
         var new = ScriptHookDraft(new: places)
         #expect(new.script == ScriptHookDraft.template(for: .pageLoaded))
         new.siteChoice = .only

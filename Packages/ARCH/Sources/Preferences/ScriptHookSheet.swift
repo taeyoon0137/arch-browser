@@ -73,6 +73,11 @@ struct ScriptHookDraft: Identifiable {
         if case .places(let chosen) = hook.filter.scope {
             isEverywhere = false
             chosenPlaces = Set(chosen)
+            // With one Persona, Where names no Persona (Persona rule 7), and the Persona's place covers every place, as Everywhere does.
+            if places.count == 1, let only = places.first, chosenPlaces.contains(.persona(only.id)) {
+                isEverywhere = true
+                chosenPlaces = []
+            }
         }
         if !hook.filter.sites.isEmpty {
             siteChoice = .only
@@ -218,7 +223,7 @@ struct ScriptHookSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Save") { save() }
+                Button(draft.stored == nil ? "Add" : "Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -273,11 +278,15 @@ struct ScriptHookSheet: View {
         Section("Where") {
             Toggle("Everywhere", isOn: $draft.isEverywhere)
             if !draft.isEverywhere {
+                // Places read as Persona rule 7 names them; with one Persona, Where lists its spaces alone.
+                let namesPersonas = draft.places.count > 1
                 ForEach(draft.places, id: \.id) { persona in
-                    setToggle(persona.name, .persona(persona.id), in: $draft.chosenPlaces)
+                    if namesPersonas {
+                        setToggle(HookSummary.name(of: .persona(persona.id), places: draft.places), .persona(persona.id), in: $draft.chosenPlaces)
+                    }
                     ForEach(persona.spaces, id: \.id) { space in
-                        setToggle("\(persona.name) / \(space.name)", .space(space.id), in: $draft.chosenPlaces)
-                            .padding(.leading, 16)
+                        setToggle(HookSummary.name(of: .space(space.id), places: draft.places), .space(space.id), in: $draft.chosenPlaces)
+                            .padding(.leading, namesPersonas ? 16 : 0)
                     }
                 }
             }
