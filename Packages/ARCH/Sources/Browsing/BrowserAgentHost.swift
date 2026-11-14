@@ -177,12 +177,13 @@ import Foundation
         let tabID = tab.id
         let observer = tab.$folderID.combineLatest(session.$folders)
             .dropFirst()
-            .sink { [weak self] folderID, folders in
+            .sink { [weak self, weak tab] folderID, folders in
                 guard folders.first(where: { $0.id == folderID })?.agentSessionID != owner else { return }
                 // Published values arrive before storage changes. Deliver the takeover afterwards, even if the user immediately closes their tab.
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.async { [weak self, weak tab] in
                     MainActor.assumeIsolated {
                         guard let self, self.followed[tabID]?.owner == owner else { return }
+                        tab?.researchLoad = nil
                         self.followed[tabID] = nil
                         self.agentTabDidReport?(owner, tabID, .takenOver)
                     }
@@ -214,6 +215,7 @@ extension BrowserAgentHost: AgentTabMonitor {
 
     nonisolated func agentTabDidClose(_ tab: Tab, owner: UUID) {
         MainActor.assumeIsolated {
+            tab.researchLoad = nil
             guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
             agentTabDidReport?(owner, tab.id, .closed)
         }

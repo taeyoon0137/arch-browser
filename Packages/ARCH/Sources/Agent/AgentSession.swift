@@ -416,8 +416,16 @@ extension AgentAPISession: AgentSessionRunning {
         transcript.append(.notice("Another program tried to use this session\u{2019}s access."))
     }
 
+    /// Ending research ownership retires its original handle even if the user subsequently shares this tab again.
+    func forgetResearchTab(_ id: UUID) {
+        guard researchPages.removeValue(forKey: id) != nil else { return }
+        handles.tabs.remove(id)
+        snapshots.remove(id)
+    }
+
     /// A tab the user shares later, with its handle; its site joins the scope.
     func share(tabID: UUID, url: URL?) -> String {
+        forgetResearchTab(tabID)
         if !handles.sharedTabIDs.contains(tabID) {
             objectWillChange.send()
             handles.sharedTabIDs.append(tabID)
@@ -442,6 +450,7 @@ extension AgentAPISession: AgentSessionRunning {
     func end(keepingThread: Bool, because reason: String = "The session was deleted.") async {
         guard !hasEnded else { return }
         hasEnded = true
+        for id in researchPages.keys { forgetResearchTab(id) }
         snapshots = AgentSnapshotStore()
         readerExcerpt = nil
         queuedMessages = []

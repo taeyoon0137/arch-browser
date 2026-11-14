@@ -97,9 +97,71 @@ import Testing
         host.tabs[0] = tab
         service.stopSharing(tab.id, with: session)
         #expect(host.closedTabIDs.contains(copy.id))
+        #expect(session.handles.tabs.id(for: "t2") == nil && session.researchPages[copy.id] == nil)
         #expect(service.share(tab, with: session))
         #expect(!service.openResearchPage(page, in: session))
         #expect(service.researchChoices(for: session).first?.source != page.source)
+    }
+
+    @Test(arguments: [false, true])
+    func keptResearchPagesReceiveFreshSharedHandlesEvenBeforeTheTakeoverNotification(shareImmediately: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let address = URL(string: "https://research.example/article")!
+        let (session, runner) = try start(service, harness, task: "Read " + address.absoluteString)
+        let page = try #require(service.researchChoices(for: session).first)
+        #expect(service.openResearchPage(page, in: session))
+        let id = try #require(host.agentTabs(of: session.id).first?.id)
+        try await waitUntil { host.tabs.first?.url == address }
+        host.pages[address] = ("Article", "Reviewed article body")
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
+        #expect(try await client.callTool("list_tabs", [:]).text.contains("t1"))
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).status == .ok)
+        session.snapshots.counts[id] = 1
+        host.tabs[0].agentOwnerID = nil
+        host.userTabIDs.insert(id)
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "P17")
+        host.tabs[0].documentID = UUID()
+        if shareImmediately { #expect(service.share(host.tabs[0], with: session)) }
+        host.agentTabDidReport?(session.id, id, .takenOver)
+        if !shareImmediately { #expect(service.share(host.tabs[0], with: session)) }
+        #expect(session.researchPages[id] == nil && session.snapshots.counts[id] == nil)
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
+        #expect(try await client.callTool("list_tabs", ["scope": "shared"]).text.contains("t2"))
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).text.contains("Reviewed article body"))
+        service.stopSharing(id, with: session)
+        #expect(host.closedTabIDs.isEmpty && host.tabs.first?.id == id)
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "tabNotFound")
+        #expect(service.researchChoices(for: session) == [page])
+    }
+
+    @Test func aSessionDropsResearchHandlesAndOutlinesAcrossRepeatedClosesAndItsOwnEnd() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let (session, _) = try start(service, harness, task: "Read https://research.example/article")
+        let source = try #require(service.researchChoices(for: session).first)
+        for _ in 0..<25 {
+            #expect(service.openResearchPage(source, in: session))
+            let tab = try #require(host.agentTabs(of: session.id).first)
+            let handle = session.handles.tabs.handle(for: tab.id)
+            session.snapshots.counts[tab.id] = 1
+            host.closeAgentTab(tab.id)
+            host.agentTabDidReport?(session.id, tab.id, .closed)
+            #expect(session.researchPages.isEmpty && session.snapshots.counts.isEmpty && session.handles.tabs.id(for: handle) == nil)
+        }
+        #expect(service.openResearchPage(source, in: session))
+        let remaining = try #require(host.agentTabs(of: session.id).first)
+        let handle = session.handles.tabs.handle(for: remaining.id)
+        await session.end(keepingThread: false)
+        #expect(session.researchPages.isEmpty && session.handles.tabs.id(for: handle) == nil)
+        #expect(host.agentTabs(of: session.id).isEmpty)
     }
 
     @Test func researchChoicesRequireAnEligibleHTTPAddressInTheCurrentPersona() async throws {
