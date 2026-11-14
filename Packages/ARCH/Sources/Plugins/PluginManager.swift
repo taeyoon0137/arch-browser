@@ -582,7 +582,7 @@ public final class PluginManager: ObservableObject {
         if let refusal = proofRefusal(joining: package.manifest, proof: package.proof, with: plugin) { throw PluginError.invalidPackage(refusal) }
         let manifestID = package.manifest.id
         guard !plugins.contains(where: { $0.id != plugin.id && $0.manifest.id == manifestID }) else {
-            throw PluginError.invalidPackage("Another installed plugin has this package's identifier, so it cannot join \u{201C}\(plugin.manifest.name)\u{201D} here. Join With\u{2026} joins installed plugins.")
+            throw PluginError.invalidPackage("Another installed plugin has this package\u{2019}s identifier, so it cannot join \u{201C}\(plugin.manifest.name)\u{201D} here. Join With\u{2026} joins installed plugins.")
         }
         let candidates = plugin.manifest.id == manifestID ? [manifestID.version(for: engine), manifestID] : [manifestID]
         guard let entryID = candidates.compactMap({ $0 }).first(where: { candidate in !plugins.contains { $0.id == candidate } }) else {
@@ -596,7 +596,7 @@ public final class PluginManager: ObservableObject {
         guard let nativeAppGate, (proof == nil) != (plugin.proof == nil) else { return nil }
         let unproven = proof == nil ? manifest : plugin.manifest
         guard nativeAppGate.refusal(of: unproven, proof: nil, predatesProof: false) != nil else { return nil }
-        return "Arch can prove the identifier of only one of the two, and a native app on this Mac accepts the other's, so they cannot be one plugin."
+        return "Arch can prove the identifier of only one of the two, and a native app on this Mac accepts the other\u{2019}s, so they cannot be one plugin."
     }
 
     /// The review's lines on where the package runs (`PluginPackage.engineNotes`), with the native app gate's sentence as its Chromium line when the gate would keep a package that Chromium runs out of it.
@@ -624,7 +624,7 @@ public final class PluginManager: ObservableObject {
               case let .file(source) = plugin.origin, case let .file(packageSource) = package.origin,
               source.standardizedFileURL.path != packageSource.standardizedFileURL.path else { return nil }
         let name = "\u{201C}\(plugin.manifest.name)\u{201D}"
-        return "\(name), which you installed from \(source.lastPathComponent), has this package's identifier, so as its \(engine.displayName) version the package takes over the data that \(name) keeps on \(engine.displayName) tabs. Join only if both come from the same developer."
+        return "\(name), which you installed from \(source.lastPathComponent), has this package\u{2019}s identifier, so as its \(engine.displayName) version the package takes over the data that \(name) keeps on \(engine.displayName) tabs. Join only if both come from the same developer."
     }
 
     /// Why the package cannot update the plugin `id`, or `package.updates`, while its pair lasts: its check refuses the engine that the pair's record gives that version, such as "WebKit cannot run this package, and the other version of “Reader” runs on Chromium tabs." Nil when it can.

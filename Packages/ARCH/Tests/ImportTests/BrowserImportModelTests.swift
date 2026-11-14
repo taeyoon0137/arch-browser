@@ -157,10 +157,10 @@ import Testing
         #expect(model.engineOffers.map(\.id) == [Self.source.id])
         // The profile brings nothing, so only the engine can make Import do something.
         #expect(!model.canImport)
-        model.engineBrowserID = Self.source.id
+        model.chosenEngine = otherEngine
         #expect(model.canImport)
         #expect(model.selection.searchEngine == otherEngine)
-        model.engineBrowserID = sameSource.id
+        model.chosenEngine = SearchEngine.current
         #expect(model.selection.searchEngine == nil)
     }
 

@@ -250,7 +250,7 @@ import Testing
         // With the store's current version installed from the store, nothing downloads.
         offer(published)
         await #expect(throws: WebStoreError.alreadyInstalled(name: "Packed", version: "2")) { try await installer.stage(extensionID, in: manager) }
-        #expect(WebStoreError.alreadyInstalled(name: "Packed", version: "2").localizedDescription == "\u{201C}Packed\u{201D} 2 is installed, the Web Store's current version.")
+        #expect(WebStoreError.alreadyInstalled(name: "Packed", version: "2").localizedDescription == "\u{201C}Packed\u{201D} 2 is installed, the Web Store\u{2019}s current version.")
         #expect(StoreStub.requests.count == 1)
         // A newer version stages as an update of the installed plugin.
         offer(try crx("newer", #""manifest_version": 3, "name": "Packed", "version": "3""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: "3")
@@ -286,7 +286,7 @@ import Testing
             (#"<app appid="\#(extensionID)" status="error-unknownApplication"/>"#, "The Web Store has no extension with the identifier \u{201C}\(extensionID)\u{201D}."),
             (#"<app appid="\#(extensionID)" status="ok"><updatecheck status="noupdate"/></app>"#, "The Web Store did not offer \u{201C}\(extensionID)\u{201D}: noupdate."),
             (#"<app appid="\#(extensionID)" status="ok"><updatecheck status="error-osnotsupported"/></app>"#, "The Web Store did not offer \u{201C}\(extensionID)\u{201D}: error-osnotsupported."),
-            ("", "The Web Store's answer does not read."),
+            ("", "The Web Store\u{2019}s answer could not be read."),
         ]
         for (app, message) in cases {
             StoreStub.answer { _ in StoreStub.Reply(body: updateResponse([app])) }

@@ -38,7 +38,7 @@ struct CommandLineProvider: AIProvider {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
             // A folder that cannot be made, as on a full disk, keeps the tool from starting; it is not a request the tool refused.
-            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start: \(error.localizedDescription)")
+            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start. \(error.localizedDescription)")
         }
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
@@ -46,7 +46,7 @@ struct CommandLineProvider: AIProvider {
             process = try CommandLineProcess(executable: tool.executable, arguments: tool.arguments(forModel: request.model),
                                              environment: environment, directory: directory, input: input)
         } catch let error as POSIXError {
-            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start: \(String(cString: strerror(error.code.rawValue))).")
+            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start (\(String(cString: strerror(error.code.rawValue)))).")
         }
         do {
             try await withTaskCancellationHandler {

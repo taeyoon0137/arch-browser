@@ -210,13 +210,13 @@ extension PluginError: LocalizedError {
         case .noPage: return "The command needs a page."
         case let .invalidMatchPattern(text): return "“\(text)” is not a site pattern."
         case let .invalidShortcut(text): return "“\(text)” is not a shortcut."
-        case let .reservedKey(key): return "The storage key “\(key)” belongs to the plugin's settings."
+        case let .reservedKey(key): return "The storage key “\(key)” belongs to the plugin\u{2019}s settings."
         case .quotaExceeded: return "The plugin has no room left for the value."
         case let .invalidPackage(reason): return reason
         case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
         case .timedOut: return "The plugin did not answer in time."
         case let .invalidVersions(reason): return reason
-        case .closed: return "The plugin's Persona was deleted."
+        case .closed: return "The plugin\u{2019}s Persona was deleted."
         }
     }
 }

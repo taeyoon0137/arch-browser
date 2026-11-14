@@ -671,7 +671,7 @@ struct ProofGateTests {
         try launch.manager.remove(version)
         staged = try await launch.manager.stage(claim.package)
         #expect(staged.counterpart == proven.id && staged.joinableEngines.isEmpty)
-        let refusal = "Arch can prove the identifier of only one of the two, and a native app on this Mac accepts the other's, so they cannot be one plugin."
+        let refusal = "Arch can prove the identifier of only one of the two, and a native app on this Mac accepts the other\u{2019}s, so they cannot be one plugin."
         #expect(launch.manager.versionRefusal(for: staged, joining: proven.id, for: .chromium) == refusal)
         launch.manager.discard(staged)
         // Join With… refuses the same for an unproven plugin of its own whose identifier a linked app accepts.

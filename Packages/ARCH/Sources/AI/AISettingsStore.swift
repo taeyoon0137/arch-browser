@@ -74,6 +74,24 @@ public final class AISettingsStore: ObservableObject {
         return route
     }
 
+    /// The interface's sentence for the error. An error about one provider names it as the user named it, in place of "The provider", so that after a route has moved through several models the user can tell whose key or service to look at; a provider no longer listed stays "The provider".
+    public func message(for error: AIError) -> String {
+        func name(of id: AIProviderID) -> String {
+            providers.first { $0.id == id }.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "The provider"
+        }
+        switch error {
+        case .authentication(let id):
+            return "\(name(of: id)) did not accept the API key."
+        case .providerUnavailable(let id, let detail):
+            return "\(name(of: id)) is unavailable: \(detail)"
+        case .rateLimited(let id, let until):
+            guard let until, until > Date() else { return "\(name(of: id)) is limiting requests. Try again shortly." }
+            return "\(name(of: id)) is limiting requests. Try again in \(Int(until.timeIntervalSinceNow.rounded(.up))) seconds."
+        default:
+            return error.localizedDescription
+        }
+    }
+
     public func setRoute(_ route: AIRoute, for feature: AIFeatureID) {
         var route = route
         route.models = Array(route.models.prefix(AIRoute.maximumModels))

@@ -82,8 +82,8 @@ enum WebExtensionEnginePrompt {
     /// Reload, then Cancel, naming the extensions that run on the page once it loads again.
     static func reloadAlert(names: [String]) -> NSAlert {
         let alert = NSAlert()
-        let list = names.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ")
-        alert.messageText = "Reload This Page?"
+        let list = names.map { "\u{201C}\($0)\u{201D}" }.formatted(.list(type: .and))
+        alert.messageText = "Reload this page?"
         alert.informativeText = "\(list.isEmpty ? "The extension" : list) can run on this page once it loads again."
         alert.addButton(withTitle: "Reload")
         alert.addButton(withTitle: "Cancel")

@@ -146,7 +146,7 @@ struct EngineRequestsTests {
         host.sheetAnswer = .alertSecondButtonReturn
         answer = nil
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .reload(["Asker"]), tab: nil)) { answer = $0 }
-        #expect(answer == false && host.sheets.last?.messageText == "Reload This Page?")
+        #expect(answer == false && host.sheets.last?.messageText == "Reload this page?")
         // A question from an extension that the engine did not load is refused without a sheet.
         let sheets = host.sheets.count
         answer = nil

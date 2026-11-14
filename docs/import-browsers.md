@@ -101,7 +101,7 @@ Checked on 2026-10-25 on macOS 27.2 with Chrome 155.0.8059.85, Arc 1.170.0, and 
 
 ## Personas
 
-- Each row's destination menu lists the current Persona (the last main window's), the other Personas, and New Persona "\<profile name>". The profile name comes from `Local State`, and Safari's row uses "Safari".
+- Each row's destination menu lists the current Persona (the last main window's), the other Personas, and, after a separator, New Persona "\<profile name>". The profile name comes from `Local State`, and Safari's row uses "Safari". The menu is disabled while the row is unchecked or none of its Favorites, Spaces, and Bookmark Folders is checked, since history and search shortcuts go to every Persona.
 - Defaults: the Persona that the record under Duplicates names for the profile, while it exists. Otherwise, a Persona with the profile's name. Otherwise, the browser's first profile in `profiles_order` with something to bring goes to the current Persona, and the others, including rows for missing profile folders, go to new Personas. Repeat imports thus use the same Persona whichever window opens the sheet.
 - A new Persona gets the row's imported spaces. If there are none, it gets one space named Personal, as New Persona does, so every Persona has a space.
 - Several rows may share a destination; they merge into it in row order.
@@ -126,12 +126,12 @@ Importing the same source again adds only what is not there yet. Names and addre
 
 - File ▸ Import from Browser… sits above Import Bookmarks and History…. It follows the same rules: one import at a time, a main window opens when none is open, and the item is disabled while the window shows a sheet.
 - A sheet on the last main window shows "Looking for browsers…" while a background queue finds the sources and reads their data. The sheet shows each item's full count, except that Spaces counts only spaces with pinned tabs or folders, since no other space is created; the summary reports additions after skipping duplicates.
-- One section per browser found, with the app's icon from `NSWorkspace` by bundle identifier, then one row per profile:
+- One section per browser found, with the app's icon from `NSWorkspace` by bundle identifier, or a globe symbol in the same 18-point box when the app is not installed, then one row per profile:
   - A checkbox and the profile's name, with a destination menu (see Personas).
   - A checkbox per item with its count: Favorites (12), Spaces (3) with 24 pinned tabs, Bookmark Folders (6) with 40 bookmarks, History (5,210 pages), Search Shortcuts (3). Missing items are hidden. Unreadable items show the reason and are unchecked and disabled.
-  - Spaces and Bookmark Folders say that each of their pinned tabs loads whenever Arch opens. When the sheet opens, these boxes start checked in sheet order if each keeps the total at or below 50 pinned tabs; the others start unchecked. When more are checked, the sheet says how many pinned tabs will load at each launch.
+  - Spaces says that each pinned tab loads whenever Arch opens, and Bookmark Folders that each bookmark becomes a pinned tab, which loads whenever Arch opens. When the sheet opens, these boxes start checked in sheet order if each keeps the total at or below 50 pinned tabs; the others start unchecked. When more are checked, a warning in orange, the app's warning color, says "The checked items add \<count> pinned tabs, which load whenever Arch opens."
   - History and Search Shortcuts say that they apply to every Persona.
-- Below the sections, "Use \<engine> as the search engine, as in \<browser>" for each browser that offers one (see What each source brings), unchecked. Checking one unchecks the others.
+- Below the browsers, a Search Engine section, labeled as theirs are, offers each engine that a browser offers (see What each source brings) once, with the browsers that offer it, unchecked. One engine is a checkbox, "Use \<engine> as the search engine, as in \<browsers>". Two engines, the most there can be since Arch never offers its own, are radio buttons: "Keep \<Arch's engine>", selected, then "Use \<engine>, as in \<browsers>" for each. The browsers' names are listed with "and".
 - A browser whose files macOS blocks Arch from reading shows "Arch needs \<setting> to read \<browser>'s bookmarks and history." Each source's definition names the setting and its pane in Privacy & Security: Full Disk Access for Safari, and for Chrome the setting that check 1 under Checks with the app finds, using Full Disk Access until then. The section has:
   - Open System Settings, which opens that pane. When Arch becomes active again, the sheet reads that browser again.
   - Choose Exported File…, which closes the sheet and opens the file import's panel for a bookmarks file exported by the browser.

@@ -64,7 +64,7 @@ import Testing
             (reply(files: ["lib/background.js": ""]), "files names “lib/background.js”, which is not a plain file name that ends in .js."),
             (reply(files: ["notes.txt": ""]), "files names “notes.txt”, which is not a plain file name that ends in .js."),
             (reply(files: ["background.js": "", "format.js": ""]),
-             "files names “format.js”, which is not the manifest's background script. Only the background script runs, so put all the code in it."),
+             "files names “format.js”, which is not the manifest\u{2019}s background script. Only the background script runs, so put all the code in it."),
             (reply(files: ["background.js": 1]), "files.background.js must be text."),
             // Staging checks what it checks for every package.
             (reply(["permissions": ["notifications"]]), "plugin.json: permissions lists “notifications”, which Arch does not grant."),
@@ -81,7 +81,7 @@ import Testing
 
     @Test func endsAtOnceWithAReplyLargerThanAPlugin() async throws {
         let (composer, _) = composer(replying: [reply(files: ["background.js": "//" + String(repeating: "a", count: 256 * 1024)])])
-        await #expect(throws: PluginComposerError.unusableReply("The plugin's files come to more than 256 KB.")) { try await composer.write(request) }
+        await #expect(throws: PluginComposerError.unusableReply("The plugin\u{2019}s files come to more than 256 KB.")) { try await composer.write(request) }
         #expect(log.requests.count == 1 && stagedPackages().isEmpty)
     }
 
