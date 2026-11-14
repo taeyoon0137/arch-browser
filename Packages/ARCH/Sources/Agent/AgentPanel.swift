@@ -57,13 +57,18 @@ public struct AgentSessionPanel: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
+                if session.isTakenOver {
+                    Button("Hand Back", action: session.handBack).controlSize(.small)
+                }
                 if session.isTurnRunning {
                     Button("Stop", action: session.stop)
                         .controlSize(.small)
                 }
                 Menu {
-                    Button(session.isTakenOver ? "Hand Back" : "Take Over") { session.isTakenOver ? session.handBack() : session.takeOver() }
-                        .disabled(session.hasEnded)
+                    if !session.isTakenOver {
+                        Button("Take Over") { service.takeOver(session, showTab: actions.showTab) }
+                            .disabled(session.hasEnded)
+                    }
                     Divider()
                     Button("Delete Session", role: .destructive) { Task { await service.deleteSession(session.id) } }
                 } label: {
@@ -73,6 +78,7 @@ public struct AgentSessionPanel: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Session")
+                .accessibilityLabel("Session actions")
             }
             Text(details)
                 .font(.system(size: 11))
@@ -146,6 +152,7 @@ public struct AgentSessionPanel: View {
     }
 
     private var stateText: String? {
+        if session.isTakenOver { return "You have control" }
         switch session.state {
         case .starting: return "Starting"
         case .running: return "Working"

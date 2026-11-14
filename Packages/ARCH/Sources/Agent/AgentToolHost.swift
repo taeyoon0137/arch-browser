@@ -1033,6 +1033,8 @@ extension AgentToolHost {
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
+            let reading = session.beganReading(id)
+            defer { session.finishedReading(reading) }
             let epoch = session.callEpoch
             func mayRead(_ current: AgentTabInfo) -> Bool {
                 guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.handles.tabs.id(for: handle) == id else { return false }
