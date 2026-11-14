@@ -1,4 +1,4 @@
-// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), and asks the agent monitor about each navigation (P16).
+// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), answers every file chooser with no file and no sheet (P7), and asks the agent monitor about each navigation (P16).
 import AppKit
 import Agent
 import ARCHEngine
@@ -157,6 +157,16 @@ import Testing
                                     .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
                                     .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
         #expect(monitor.owners == Set([owner]))
+        // P7: an agent tab's chooser gets nil and never reaches the session's panel; the user's own tab's does.
+        var queued = 0
+        let chooser = EngineFileChooserRequest(mode: .openFile, acceptedTypes: ["image/*"])
+        agentTab.chooseFiles = { _, completion in
+            queued += 1
+            completion([URL(fileURLWithPath: "/tmp/picked.png")])
+        }
+        var chosen: [URL]?? = .none
+        agentTab.webContents(page, runFileChooser: chooser) { chosen = .some($0) }
+        #expect(chosen == .some(nil) && queued == 0)
 
         // The user's own tab asks, shows its alerts, and downloads, and the monitor hears nothing of it.
         let (userTab, userPage) = tab(in: nil, folders: folders)
@@ -168,6 +178,12 @@ import Testing
         userTab.webContents(userPage, requestPermission: EnginePermissionRequest(origin: URL(string: "https://example.org")!, types: [.camera]), completion: { granted = $0 })
         #expect(granted == true && asked == 1)
         #expect(userTab.webContents(userPage, shouldDownload: URL(string: "https://example.org/file.zip")!, hasPage: true))
+        userTab.chooseFiles = { _, completion in
+            queued += 1
+            completion([URL(fileURLWithPath: "/tmp/picked.png")])
+        }
+        userTab.webContents(userPage, runFileChooser: chooser) { chosen = .some($0) }
+        #expect(chosen == .some([URL(fileURLWithPath: "/tmp/picked.png")]) && queued == 1)
         #expect(monitor.reports.count == 6)
     }
 }

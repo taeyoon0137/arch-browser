@@ -283,14 +283,25 @@ import Testing
     func endProcesses() { processID = nil }
 }
 
-/// Answers each sheet with the next of `answers`, or Don't Allow once they run out.
+/// Answers each sheet with the next of `answers`, or Don't Allow once they run out; while `holdsAnswers` is set, a sheet waits for `release()`, as one the user has not answered yet.
 @MainActor final class FakePrompt: AgentGrantPrompting {
     var answers: [AgentGrantChoice?] = []
+    var holdsAnswers = false
     private(set) var requests: [AgentGrantRequest] = []
+    private var held: [CheckedContinuation<Void, Never>] = []
 
     func ask(_ request: AgentGrantRequest) async -> AgentGrantChoice? {
         requests.append(request)
+        if holdsAnswers { await withCheckedContinuation { held.append($0) } }
         return answers.isEmpty ? nil : answers.removeFirst()
+    }
+
+    /// Answers the sheets that wait.
+    func release() {
+        holdsAnswers = false
+        let waiting = held
+        held = []
+        waiting.forEach { $0.resume() }
     }
 
     func cancelAll() {}
@@ -505,7 +516,7 @@ final class TestClient: @unchecked Sendable {
     }
 
     /// Says `hello` as `arch-cli`, or as `arch-mcp --session` when it presents a ticket, as only that client does.
-    func hello(protocol version: Int = AgentControlProtocol.version, ticket: String? = nil, client: AgentClientKind? = nil) async throws -> AgentHelloAnswer {
+    func hello(protocol version: Int = AgentControlProtocol.version, ticket: String? = nil, client: AgentControl.AgentClientKind? = nil) async throws -> AgentHelloAnswer {
         let kind = client ?? (ticket == nil ? .cli : .mcp)
         return try await Task.detached { try self.connection.hello(AgentHello(protocol: version, client: kind, version: "9.9.9", ticket: ticket), timeout: 5) }.value
     }

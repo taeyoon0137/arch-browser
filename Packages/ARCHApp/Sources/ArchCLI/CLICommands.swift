@@ -116,7 +116,7 @@ enum CLICommands {
     private static func callWaiting(_ call: AgentToolCall, on connection: AgentControlConnection) throws -> AgentToolResult {
         var result = try connection.callTool(call) { printError($0) }
         var told = false
-        while result.status == .approvalPending, let approval = result.structured?["approval"]?.stringValue {
+        while result.status == .approvalPending, let approval = result.approval {
             if !told { printError("Waiting for your approval in Arch\u{2026}") }
             told = true
             result = try connection.callTool(AgentToolCall(name: "approval_wait", arguments: ["approval": .string(approval)])) { printError($0) }

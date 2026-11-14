@@ -136,7 +136,9 @@ import Testing
         #expect(shot.status == .ok, "\(shot.text)")
         #expect(shot.text.hasPrefix("t1: a screenshot of the viewport, 1,568 \u{00D7} 1,176 pixels, JPEG. Arch painted over"))
         let data = try #require(shot.content.compactMap(\.imageData).first)
-        #expect(data.count <= AgentLimits.screenshotBytes && shot.content.first { $0.type == "image" }?.mimeType == "image/jpeg")
+        #expect(data.count <= AgentLimits.screenshotBytes && shot.content.contains { if case .image(_, "image/jpeg") = $0 { return true } else { return false } })
+        // The page the image shows, as read_text names it, from which an API-key session names the image's source.
+        #expect(shot.structured?["url"] == "https://fixture.example/form.html")
         let image = try #require(NSBitmapImageRep(data: data))
         #expect(max(image.pixelsWide, image.pixelsHigh) <= AgentLimits.screenshotLongestSide)
         // The password field's box is the painted gray, not the page's red.

@@ -330,8 +330,9 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: File choosers
 
+    /// An agent tab's chooser gets no file and queues no panel, whatever started it, also a DOM `click()` from the agents' world, until the tool host asks about it (rule P7, plan task VII.22).
     public func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) {
-        guard let chooseFiles else { return completion(nil) }
+        guard agentOwnerID == nil, let chooseFiles else { return completion(nil) }
         chooseFiles(request, completion)
     }
 

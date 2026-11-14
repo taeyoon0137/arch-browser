@@ -28,6 +28,8 @@ import Foundation
     var settlePause: TimeInterval = 0.3
     /// The connection the call came on, which its cards name so that they end when the client leaves.
     var connectionID: UUID?
+    /// The call's request ID on its connection, which a client's `tools/cancel` names.
+    var callID: Int?
     /// Deny and Stop: the service disconnects the client.
     var stopClient: ((UUID) -> Void)?
 
@@ -67,7 +69,7 @@ import Foundation
     /// Runs a call for the grant, as a task the grant's state keeps until it ends, so that Stop, Stop All Agents, revocation, expiry, and the connection's close cancel it (`AgentGrantState.cancelCalls(onConnection:)`). A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result.
     func run(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
         if call.name == "approval_wait" { return await approvalWait(call, for: grant, state: state) }
-        let box = AgentCallBox(connectionID: connectionID)
+        let box = AgentCallBox(connectionID: connectionID, callID: callID)
         state.runningCalls.append(box)
         box.task = Task {
             let outcome = await runNow(call, for: grant, state: state, box: box)
@@ -105,10 +107,10 @@ import Foundation
         Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."))
     }
 
-    /// The answer of a call that waits for the user.
+    /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp` and API-key sessions, which tell the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.
     static func pending(_ handle: String, tool: String) -> Outcome {
-        Outcome(result: AgentToolResult(status: .approvalPending, text: "Waiting for the user in Arch; call approval_wait with approval \(handle).",
-                                        structured: ["approval": .string(handle)]), step: nil)
+        Outcome(result: AgentToolResult(status: .approvalPending, content: [.text("\(tool) waits for the user in Arch; call approval_wait with approval \(handle).")],
+                                        structured: ["approval": .string(handle)], approval: handle), step: nil)
     }
 
     /// Runs a call now and adds the events since the client's previous call.

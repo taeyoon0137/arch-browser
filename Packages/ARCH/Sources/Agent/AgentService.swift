@@ -412,7 +412,7 @@ import Foundation
     }
 
     /// The grant for a call from a client without one: the sheet, at most once a minute per client, then Touch ID where the choice needs it. Replies the error itself when there is none.
-    private func grantForCall(from connection: ClientConnection, _ identity: AgentClientIdentity, requestID: AgentRPCID) async -> AgentGrant? {
+    private func grantForCall(from connection: ClientConnection, _ identity: AgentClientIdentity, requestID: AgentRPCID, call: ConnectionCall? = nil) async -> AgentGrant? {
         if let grant = grant(for: identity) { return grant }
         guard acceptsOutsideClients else {
             replyError(connection, requestID, Self.noGrantError("Outside access is off. Turn on Allow Outside Clients in Settings \u{25B8} AI \u{25B8} Agents."))
@@ -435,7 +435,8 @@ import Foundation
             questions[identity.key] = question
         }
         guard let grant = await question.value else {
-            replyError(connection, requestID, Self.noGrantError("You did not allow \(identity.displayName) to use Arch."))
+            // A call the client cancelled while it waited on the sheet was answered then.
+            if call?.isCancelled != true { replyError(connection, requestID, Self.noGrantError("You did not allow \(identity.displayName) to use Arch.")) }
             return nil
         }
         return grant
@@ -543,12 +544,13 @@ import Foundation
     }
 
     /// The tool host for a call on a connection, or for what agent tabs report, with the service's cards and waits.
-    func toolHost(connectionID: UUID? = nil) -> AgentToolHost {
+    func toolHost(connectionID: UUID? = nil, callID: Int? = nil) -> AgentToolHost {
         var tools = AgentToolHost(host: host, allowsAI: dependencies.allowsAI, now: dependencies.now)
         tools.approvals = approvals
         tools.answerWait = dependencies.answerWait
         tools.approvalWindow = dependencies.approvalWindow
         tools.connectionID = connectionID
+        tools.callID = callID
         tools.stopClient = { [weak self] in self?.stopClient($0) }
         return tools
     }
@@ -830,7 +832,7 @@ import Foundation
     }
 
     private func listedTools(for session: AgentSession) -> [String] {
-        AgentToolHost.tools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false)).map(\.name)
+        AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false)).map(\.name)
     }
 
     /// `tools/list` on a session's connection: the tools its mode allows. A list that differs from the last one reported, as after a mode change, reaches the runner, whose start check accepts it in a later `init`.
@@ -858,16 +860,17 @@ import Foundation
         guard let call = try? params?.decode(as: AgentToolCall.self) else {
             return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
         }
-        connection.runningCalls += 1
+        let running = connection.startCall(requestID)
         let runner = session.runner
         let epoch = session.callEpoch
         runner?.toolCallDidStart()
-        Task {
+        running.task = Task {
             defer {
-                connection.runningCalls -= 1
+                connection.endCall(running)
                 runner?.toolCallDidEnd()
             }
-            let result = await sessionResult(of: call, in: session, arrivedAt: epoch, on: connection)
+            // A call the client cancelled was answered then, and one cancelled before it ran ran nothing.
+            guard let result = await sessionResult(of: call, in: session, arrivedAt: epoch, on: connection, call: running), !running.isCancelled else { return }
             guard connections[connection.id] != nil else { return }
             let tool = AgentToolCatalog.tool(named: call.name)
             let tabHandle = call.arguments["tab"]?.stringValue
@@ -879,7 +882,8 @@ import Foundation
         }
     }
 
-    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, on connection: ClientConnection) async -> AgentToolResult {
+    /// The result of a session's call, or nil for a call that its client cancelled before it ran, which was answered then.
+    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, on connection: ClientConnection, call running: ConnectionCall) async -> AgentToolResult? {
         guard await session.ready.wait(timeout: sessionReadyWait) else {
             if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
             return AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls.")
@@ -892,6 +896,7 @@ import Foundation
         }
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         guard connections[connection.id] != nil else { return AgentToolResult(status: .refused, code: "stopped", text: "The connection closed, so Arch did not run this call.") }
+        guard !running.isCancelled else { return nil }
         if let refusal = session.countCall() { return refusal }
         var handles = session.handles
         let result = AgentToolHost(host: host, allowsAI: dependencies.allowsAI).run(call, for: AgentToolClient(session: session, searchesHistory: searchesHistory(session)), handles: &handles)
@@ -977,7 +982,10 @@ import Foundation
     // MARK: Messages
 
     private func handle(_ message: AgentRPCMessage, on connection: ClientConnection) {
-        // Arch acts on clients' `tools/cancel` from plan task VII.13 on, and asks clients nothing.
+        // Arch acts on a client's `tools/cancel` and asks clients nothing.
+        if case .notification(let method, let params) = message, method == AgentControlMethod.toolsCancelNotification, connection.stage == .ready {
+            return cancelCall(params, on: connection)
+        }
         guard case .request(let requestID, let method, let params) = message else { return }
         switch (connection.stage, method) {
         case (.new, AgentControlProtocol.helloMethod):
@@ -1070,15 +1078,15 @@ import Foundation
         guard let call = try? params?.decode(as: AgentToolCall.self) else {
             return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
         }
-        connection.runningCalls += 1
-        Task {
-            defer { connection.runningCalls -= 1 }
-            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
             updateConnectedGrants()
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
             describeInPanel(grant)
-            let outcome = await toolHost(connectionID: connection.id).run(call, for: grant, state: state(for: grant))
+            let outcome = await toolHost(connectionID: connection.id, callID: running.callID).run(call, for: grant, state: state(for: grant))
             let result = outcome.result
             if call.name == "approval_wait" {
                 // A plain read: the call it waited on records its own entry and step when it ends.
@@ -1094,8 +1102,20 @@ import Foundation
                 recordCall(outcome, of: call, for: grant, client: identity.displayName)
                 recordStep(outcome, of: call, for: grant)
             }
+            // A call the client cancelled was answered then.
+            guard !running.isCancelled else { return }
             reply(connection, requestID, Self.json(result))
         }
+    }
+
+    /// A client's `tools/cancel` for a call on this connection: the call stops waiting, whether on its card, which is withdrawn, on the grant sheet, which stays open for the client's next call, or on an in-app session's gates, runs no further step, ends with status `error` and code `cancelled`, which `arch-mcp` drops, and frees its slot. A call that has ended, or one of another connection, is left alone.
+    private func cancelCall(_ params: AgentJSON?, on connection: ClientConnection) {
+        guard let cancel = try? params?.decode(as: AgentToolCancel.self), let running = connection.cancelCall(cancel.call) else { return }
+        for state in states.values {
+            for card in state.cancelCall(cancel.call, onConnection: connection.id) { approvals.end(card, because: "The client cancelled the call.") }
+        }
+        reply(connection, .number(cancel.call), Self.json(AgentToolResult(status: .error, code: "cancelled", text: "The client cancelled the call, so Arch stopped it.")))
+        running.task?.cancel()
     }
 
     /// A call's entry in the activity log: its tool and class, the site, and the decision, the given one or else the refusal's or the outcome's.
@@ -1191,10 +1211,47 @@ private final class ClientConnection {
     /// The in-app session whose ticket the connection presented.
     var sessionID: UUID?
     var runningCalls = 0
+    /// The calls that run on the connection by their request ID, which a client's `tools/cancel` names.
+    private var calls: [Int: ConnectionCall] = [:]
 
     init(id: UUID, peer: AgentPeer) {
         self.id = id
         self.peer = peer
+    }
+
+    /// A call takes one of the connection's slots until it ends or the client cancels it.
+    func startCall(_ requestID: AgentRPCID) -> ConnectionCall {
+        let call = ConnectionCall(requestID: requestID)
+        runningCalls += 1
+        if let callID = call.callID { calls[callID] = call }
+        return call
+    }
+
+    /// Frees the call's slot unless `tools/cancel` freed it.
+    func endCall(_ call: ConnectionCall) {
+        guard !call.isCancelled else { return }
+        runningCalls -= 1
+        if let callID = call.callID, calls[callID] === call { calls[callID] = nil }
+    }
+
+    /// The running call that `tools/cancel` names, marked cancelled with its slot freed, or nil once it has ended.
+    func cancelCall(_ callID: Int) -> ConnectionCall? {
+        guard let call = calls.removeValue(forKey: callID), !call.isCancelled else { return nil }
+        call.isCancelled = true
+        runningCalls -= 1
+        return call
+    }
+}
+
+/// One `tools/call` on a connection, which its client may cancel.
+private final class ConnectionCall {
+    /// The request ID, when it is a number, as `tools/cancel` names calls.
+    let callID: Int?
+    var task: Task<Void, Never>?
+    var isCancelled = false
+
+    init(requestID: AgentRPCID) {
+        if case .number(let number) = requestID { callID = number } else { callID = nil }
     }
 }
 

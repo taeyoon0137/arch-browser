@@ -279,6 +279,11 @@ public struct AgentApproval: Identifiable {
         }
     }
 
+    /// Withdraws one card, as for a call that its client cancelled with `tools/cancel`.
+    func end(_ id: UUID, because reason: String) {
+        finish(id, .ended(reason))
+    }
+
     /// Ends the cards of the calls that came on a connection that closed, as when `arch-cli` is interrupted.
     func end(connection connectionID: UUID, because reason: String) {
         for approval in pending where approval.connectionID == connectionID {

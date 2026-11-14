@@ -39,16 +39,16 @@ import Testing
         AgentElementFacts(tag: "button", role: "button", name: name, submitsForm: submits, formKey: submits ? "0:0" : nil, formFields: formFields, formActionHost: action)
     }
 
-    static func click(_ element: AgentElementFacts, tab: AgentTabAccess = .agentTab, submits: Bool = false, typed: Bool = false) -> AgentStep {
+    static func click(_ element: AgentElementFacts, tab: AgentTabAccess = .agentTab, submits: Bool = false, typed: Bool = false) -> AgentPolicyStep {
         .interaction(AgentInteraction(tool: "click", tab: tab, element: element, submits: submits || element.submitsForm, typedIntoForm: typed, pageHost: "shop.example"))
     }
 
-    static func type(into element: AgentElementFacts, inScope: Bool = true, submits: Bool = false) -> AgentStep {
+    static func type(into element: AgentElementFacts, inScope: Bool = true, submits: Bool = false) -> AgentPolicyStep {
         .interaction(AgentInteraction(tool: "type", siteInScope: inScope, element: element, text: "hello", submits: submits, pageHost: "shop.example"))
     }
 
     /// One row per rule: the step that triggers it and the decision in Read Only, Ask Before Acting, and Act in Agent Tabs, for an in-app session and then for an outside client.
-    static let table: [(rule: AgentRule, step: AgentStep, inApp: [Expected], outside: [Expected])] = [
+    static let table: [(rule: AgentRule, step: AgentPolicyStep, inApp: [Expected], outside: [Expected])] = [
         (.p1, type(into: field(.hidden, name: "Password")), [.refused(.p1), .refused(.p1), .refused(.p1)], [.refused(.p1), .refused(.p1), .refused(.p1)]),
         (.p2, type(into: field(.personal, name: "Email")), [.readOnly, .asksSensitive([.p2]), .asksSensitive([.p2])], [.readOnly, .asksSensitive([.p2]), .asksSensitive([.p2])]),
         (.p3, click(button("Continue", submits: true, formFields: [.password])), [.readOnly, .asksSensitive([.p3]), .asksSensitive([.p3])],
@@ -141,9 +141,9 @@ import Testing
         var comment = Self.field(name: "Comment", action: "post.other.example")
         comment.submitterName = "Post comment"
         for tool in ["type", "press"] {
-            let enter = AgentStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "Enter", submits: true, typedIntoForm: true, pageHost: "shop.example"))
+            let enter = AgentPolicyStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "Enter", submits: true, typedIntoForm: true, pageHost: "shop.example"))
             #expect(Expected(AgentPolicy.decide(enter, client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p4, .p5]), "\(tool)")
-            let plain = AgentStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "a", pageHost: "shop.example"))
+            let plain = AgentPolicyStep.interaction(AgentInteraction(tool: tool, element: comment, text: tool == "type" ? "Nice" : "a", pageHost: "shop.example"))
             #expect(AgentPolicy.decide(plain, client: .outside, mode: .actInAgentTabs) == .allow, "\(tool)")
         }
     }

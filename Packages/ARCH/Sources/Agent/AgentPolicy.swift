@@ -48,7 +48,7 @@ public enum AgentTabAccess: Equatable, Sendable {
 }
 
 /// What a step does, as the host classifies it for the policy.
-public enum AgentStep: Equatable, Sendable {
+public enum AgentPolicyStep: Equatable, Sendable {
     /// An action tool of class I (`click`, `type`, `press`, `select_option`, `scroll`, `hover`) on an element, or on the page for `press` and `scroll` without a ref.
     case interaction(AgentInteraction)
     /// `open_tab` or `navigate`, or a redirect hop of a navigation the agent started.
@@ -224,7 +224,7 @@ public enum AgentPolicy {
     // MARK: Decisions
 
     /// The decision for a step: refusals first, then sensitive cards, which no allowance covers, then the cards the mode asks for, which earlier allowances cover. No mode, grant, or setting turns a rule into an automatic approval.
-    public static func decide(_ step: AgentStep, client: AgentClientKind, mode: AgentAccessLevel, allowances: AgentAllowances = AgentAllowances()) -> AgentDecision {
+    public static func decide(_ step: AgentPolicyStep, client: AgentClientKind, mode: AgentAccessLevel, allowances: AgentAllowances = AgentAllowances()) -> AgentDecision {
         switch step {
         case .interaction(let interaction): return decide(interaction, client: client, mode: mode, allowances: allowances)
         case .navigation(let facts):

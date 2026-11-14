@@ -280,8 +280,11 @@ extension AgentToolHost {
         var text = "\(handle): a screenshot of \(what), \(Self.number(shot.width)) \u{00D7} \(Self.number(shot.height)) pixels, JPEG."
         if shot.painted > 0 { text += " Arch painted over \(shot.painted == 1 ? "1 private field or frame" : "\(shot.painted) private fields and frames")." }
         if shot.cutAtCSSHeight { text += " The page is taller than \(Self.number(AgentLimits.screenshotFullPageCSSHeight)) CSS pixels, so the image ends there." }
-        var result = AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "area": .string(area), "width": .number(Double(shot.width)), "height": .number(Double(shot.height)),
-                                                                          "painted": .number(Double(shot.painted)), "cut": .bool(shot.cutAtCSSHeight), "mimeType": "image/jpeg"])
+        var structured: [String: AgentJSON] = ["tab": .string(handle), "area": .string(area), "width": .number(Double(shot.width)), "height": .number(Double(shot.height)),
+                                               "painted": .number(Double(shot.painted)), "cut": .bool(shot.cutAtCSSHeight), "mimeType": "image/jpeg"]
+        // The page the capture shows, reduced as `read_text` gives it, from which an API-key session names the image's source.
+        if let url = URL(string: capture.boxes.url) ?? tab.url { structured["url"] = .string(AgentAddress.reduced(url).absoluteString) }
+        var result = AgentToolResult(status: .ok, text: text, structured: .object(structured))
         result.content.append(.image(shot.data, mimeType: "image/jpeg"))
         return Outcome(result: result, site: site, step: "Took a screenshot of \(handle) on \(site ?? "a page")")
     }

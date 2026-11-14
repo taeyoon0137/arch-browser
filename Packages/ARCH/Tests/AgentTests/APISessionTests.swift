@@ -78,7 +78,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
 @MainActor final class GrantSessionTools: AgentSessionTools {
     let toolHost: AgentToolHost
     let grant: AgentGrant
-    var handles = AgentGrantHandles()
+    let state = AgentGrantState()
 
     init(toolHost: AgentToolHost, grant: AgentGrant) {
         self.toolHost = toolHost
@@ -88,7 +88,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
     var tools: [AgentTool] { AgentToolHost.tools(for: grant.level, scopes: grant.scopes) }
 
     func run(_ call: AgentToolCall) async -> AgentToolResult {
-        toolHost.run(call, for: grant, handles: &handles)
+        await toolHost.run(call, for: grant, state: state).result
     }
 }
 
@@ -376,19 +376,19 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
 
     @Test func aRunOverTheToolHostSendsTitlesAsPagesAndExcludedTabsByHandle() async throws {
         let host = FakeHost()
-        let docs = AgentTabInfo(id: UUID(), spaceID: nil, title: "Docs", url: URL(string: "https://docs.example/a?token=1")!, isLoading: false, engine: .webKit)
-        let excluded = AgentTabInfo(id: UUID(), spaceID: nil, title: "Secret plans", url: URL(string: "https://excluded.example/plans")!, isLoading: false, engine: .chromium)
-        host.tabs = [docs, excluded]
         let grant = AgentGrant(client: AgentClientIdentity(key: .unsigned(path: "/opt/agent", codeHash: "00"), name: "agent", executablePath: "/opt/agent", host: nil, isInterpreter: false),
                                personaID: FakeHost.defaultPersona.id, spaceID: UUID(), level: .readOnly, scopes: AgentGrantScopes(), expiry: .whenArchQuits, grantedAt: Date())
+        // The grant's agent tabs, which an agent folder of the grant holds.
+        let docs = AgentTabInfo(id: UUID(), spaceID: nil, title: "Docs", url: URL(string: "https://docs.example/a?token=1")!, isLoading: false, engine: .webKit, agentOwnerID: grant.id)
+        let excluded = AgentTabInfo(id: UUID(), spaceID: nil, title: "Secret plans", url: URL(string: "https://excluded.example/plans")!, isLoading: false, engine: .chromium, agentOwnerID: grant.id)
+        host.tabs = [docs, excluded]
         let tools = GrantSessionTools(toolHost: AgentToolHost(host: host, allowsAI: { $0.host != "excluded.example" }), grant: grant)
-        tools.handles.agentTabIDs = [docs.id, excluded.id]
         let client = ScriptedClient { number in number == 0 ? roundSteps([toolCall("c1", "list_tabs")]) : roundSteps(text: "Two tabs.") }
         let session = AgentAPISession(client: client, tools: tools)
         let events = SessionEvents(session)
         session.send("Which tabs?")
         try await waitUntil { events.entries.contains("turnFinished:completed") }
-        #expect(client.requests[0].tools.map(\.name) == AgentToolHost.servedTools)
+        #expect(client.requests[0].tools.map(\.name) == AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name))
         let parts = try #require(toolResults(in: client.requests[1].messages.last).first?.parts)
         let pages = parts.compactMap { part -> AIPageContent? in
             if case .page(let page) = part { return page }
@@ -400,7 +400,7 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
             if case .text(let text) = part { return text }
             return nil
         }.joined()
-        #expect(text.contains("t2  (a site excluded from AI)"))
+        #expect(text.contains("t2  (a page agents do not read)"))
         #expect(!text.contains("Secret plans") && !text.contains("token") && !text.contains("excluded.example"))
     }
 }

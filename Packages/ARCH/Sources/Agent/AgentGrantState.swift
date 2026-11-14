@@ -27,16 +27,18 @@ struct AgentSnapshotRecord {
 
 /// A call that runs: its task, which Stop, Stop All Agents, revocation, expiry, and its connection's close cancel, and once it answered `approvalPending`, the outcome that `approval_wait` takes and the service records when it comes.
 @MainActor final class AgentCallBox {
-    /// The connection the call came on.
+    /// The connection the call came on, and its request ID there, which a client's `tools/cancel` names.
     let connectionID: UUID?
+    let callID: Int?
     var task: Task<Void, Never>?
     private(set) var outcome: AgentToolHost.Outcome?
     /// The card the call waits on.
     var approvalID: UUID?
     private var finished: [(AgentToolHost.Outcome) -> Void] = []
 
-    init(connectionID: UUID?) {
+    init(connectionID: UUID?, callID: Int? = nil) {
         self.connectionID = connectionID
+        self.callID = callID
     }
 
     func finish(_ outcome: AgentToolHost.Outcome) {
@@ -180,6 +182,16 @@ struct AgentTabActivity: Equatable {
     /// Cancels the calls that still run, or those of one connection: each answers that the client's work ended at its next step, and opens no card.
     func cancelCalls(onConnection connectionID: UUID? = nil) {
         for call in runningCalls where connectionID == nil || call.connectionID == connectionID { call.task?.cancel() }
+    }
+
+    /// A client's `tools/cancel`: cancels the call with that request ID on the connection, which then runs no further step and opens no card, and returns the card it waits on, for the service to withdraw.
+    func cancelCall(_ callID: Int, onConnection connectionID: UUID) -> [UUID] {
+        var cards: [UUID] = []
+        for call in runningCalls where call.connectionID == connectionID && call.callID == callID {
+            call.task?.cancel()
+            if let approvalID = call.approvalID { cards.append(approvalID) }
+        }
+        return cards
     }
 
     /// The last event's sequence number, from which a call tells the events it caused.

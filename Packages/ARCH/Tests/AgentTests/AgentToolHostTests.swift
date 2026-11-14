@@ -76,6 +76,8 @@ import Testing
         #expect(text.status == .ok)
         #expect(text.text.hasPrefix("t1: characters 0 to 43 of 43 of the page's text.\n<untrusted source=\"page\" url=\"https://docs.example/guide\">Hello world."))
         #expect(!text.text.contains("secret"))
+        // The tab's address, reduced as untrusted blocks name it, which an API-key session reads as a page's source.
+        #expect(text.structured?["url"] == "https://docs.example/guide")
 
         let info = await fixture.call("session_info")
         #expect(info.text.contains("Agent tabs: 1 open"))

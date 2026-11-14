@@ -79,7 +79,7 @@ import Foundation
     public func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
         guard let tab = session.openAgentTab(url: url, engine: engine, owner: owner.id, folderName: owner.folderName, in: owner.spaceID) else { return nil }
         follow(tab, owner: owner.id)
-        return Self.info(tab)
+        return Self.info(of: tab)
     }
 
     public func navigate(_ tabID: UUID, _ navigation: AgentNavigation) {
@@ -126,7 +126,7 @@ import Foundation
     }
 
     public func userTabs(in personaID: UUID) -> [AgentTabInfo] {
-        session.tabsInSidebarOrder.filter { $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info)
+        session.tabsInSidebarOrder.filter { $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info(of:))
     }
 
     public func showTab(_ tabID: UUID) {

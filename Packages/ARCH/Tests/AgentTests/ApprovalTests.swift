@@ -140,8 +140,9 @@ import Testing
     @Test func aCallThatWaitsAnswersApprovalPendingAndApprovalWaitTakesItsResult() async throws {
         let fixture = Fixture()
         let first = await fixture.call("request_approval", ["summary": "Send the reply to Dana", "kind": "send"])
-        #expect(first.status == .approvalPending && first.structured?["approval"] == "a1")
-        #expect(first.text == "Waiting for the user in Arch; call approval_wait with approval a1.")
+        // The protocol's approval names what approval_wait waits on, for arch-mcp and API-key sessions, and structured names it for arch-cli --json.
+        #expect(first.status == .approvalPending && first.approval == "a1" && first.structured?["approval"] == "a1")
+        #expect(first.text == "request_approval waits for the user in Arch; call approval_wait with approval a1.")
         let card = try #require(fixture.toolHost.approvals.pending.first)
         #expect(card.isSensitive && card.rules == [.p15] && card.agentSays == "Send the reply to Dana" && card.action == "Approve the agent's request to send a message")
         #expect(card.offers == [.allowOnce, .deny, .denyAndStop, .reply(""), .takeOver])
@@ -335,6 +336,59 @@ import Testing
         // The service records each ended call before the harness goes.
         try await waitUntil { service.activity.entries.filter { $0.tool == "request_approval" }.count == 3 }
         #expect(service.activity.entries.filter { $0.tool == "request_approval" }.allSatisfy { $0.decision == .denied && $0.outcome == "denied" })
+    }
+
+    @Test func aClientsToolsCancelEndsTheCallAsCancelledWithdrawsItsCardOrLeavesTheSheetOpenAndFreesItsSlot() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.holdsAnswers = true
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let connection = client.connection
+        /// The answer to the call with this ID, past the progress and list notifications.
+        func answer(to id: Int) async throws -> AgentJSON? {
+            try await Task.detached {
+                while true {
+                    if case .result(.number(id), let result) = try connection.receive(timeout: 5) { return result }
+                }
+            }.value
+        }
+        func cancelled(_ result: AgentJSON?) -> Bool {
+            guard let result = try? result?.decode(as: AgentToolResult.self) else { return false }
+            return result.status == .error && result.code == "cancelled"
+        }
+
+        // A call that waits on the grant sheet stops waiting, and the sheet stays open for the client's next call.
+        try connection.send(.request(id: .number(41), method: "tools/call", params: AgentToolCall(name: "session_info").params))
+        try await waitUntil { harness.prompt.requests.count == 1 }
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 41).params))
+        #expect(cancelled(try await answer(to: 41)))
+        let next = Task { try await client.callTool("session_info") }
+        harness.prompt.release()
+        #expect(try await next.value.status == .ok)
+        #expect(harness.prompt.requests.count == 1)
+        // The cancelled call ran nothing once the user allowed the client.
+        try await waitUntil { service.activity.entries.contains { $0.tool == "session_info" } }
+        #expect(service.activity.entries.filter { $0.tool == "session_info" }.count == 1)
+
+        // A call that waits on its card: the card is withdrawn, and the slot frees, so the connection's fifth call runs while three others wait.
+        for id in 42 ... 45 {
+            try connection.send(.request(id: .number(id), method: "tools/call", params: AgentToolCall(name: "request_approval", arguments: ["summary": .string("Send reply \(id)"), "kind": "send"]).params))
+        }
+        try await waitUntil { service.approvals.pending.count == 4 }
+        let card = try #require(service.approvals.pending.first { $0.agentSays == "Send reply 42" })
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 42).params))
+        #expect(cancelled(try await answer(to: 42)))
+        #expect(service.approvals.outcomes[card.id] == .ended("The client cancelled the call."))
+        #expect(service.approvals.pending.count == 3)
+        #expect(try await client.callTool("list_tabs").status == .ok)
+        // A call that has ended, or one that never ran, is left alone.
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 42).params))
+        try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 99).params))
+        #expect(service.approvals.pending.count == 3)
+        service.stopAllAgents()
     }
 
     @Test func aCallThatGoesOnAfterApprovalPendingRecordsItsOwnEntryAndStep() async throws {
