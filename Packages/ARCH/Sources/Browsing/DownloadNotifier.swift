@@ -1,4 +1,5 @@
-// Posts a local notification when a download finishes while the app is not active. Clicking the notification reveals the file in the Finder, or opens its folder once a hook has renamed it.
+// Handles Arch’s local notification responses. A finished download opens in the Finder. An agent alert returns to its waiting conversation.
+import Agent
 import AppKit
 import UserNotifications
 
@@ -7,6 +8,7 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
     private static let pathKey = "ARCHDownloadPath"
     private let center: UNUserNotificationCenter? = Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil
     private let authorization: NotificationAuthorization
+    var showWaitingAgent: (@MainActor (UUID) -> Void)?
 
     /// Becoming the delegate at launch, before the session starts an engine, lets a click on a notification from an earlier run still reveal its file. Chromium's notification service, which posts websites' notifications through the same center, makes itself the delegate while it runs, passes the calls for the app's own notifications on to the delegate it replaced, and puts that delegate back when it ends (`docs/plan.md`, engine changes table), so the notifier never takes the role back and passes nothing on.
     init(authorization: NotificationAuthorization) {
@@ -32,8 +34,12 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// The center can call its delegate off the main thread, so the Finder is asked on the main thread.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        guard let path = response.notification.request.content.userInfo[Self.pathKey] as? String else { return completionHandler() }
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+        defer { completionHandler() }
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let request = response.notification.request
+        if let owner = AgentAttention.ownerID(in: request.identifier) {
+            DispatchQueue.main.async { [weak self] in self?.showWaitingAgent?(owner) }
+        } else if let path = request.content.userInfo[Self.pathKey] as? String {
             // The notification keeps the name the file finished with, so a file a hook renamed since shows in its folder.
             let file = URL(fileURLWithPath: path)
             DispatchQueue.main.async {
@@ -44,7 +50,6 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
                 }
             }
         }
-        completionHandler()
     }
 
     /// A download notification that arrives after the app becomes active stays hidden.

@@ -75,14 +75,27 @@ public struct AgentPanelOwner: Equatable {
 }
 
 /// Says only that an agent waits, since notifications show on the lock screen. A bare build has no notification center.
-enum AgentAttention {
-    static func notify() {
+public enum AgentAttention {
+    private static let prefix = "arch.agent.waiting."
+
+    public static func identifier(for ownerID: UUID) -> String { prefix + ownerID.uuidString }
+
+    public static func ownerID(in identifier: String) -> UUID? {
+        guard identifier.hasPrefix(prefix) else { return nil }
+        return UUID(uuidString: String(identifier.dropFirst(prefix.count)))
+    }
+
+    static func request(for ownerID: UUID) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = "An agent is waiting for you in Arch"
+        return UNNotificationRequest(identifier: identifier(for: ownerID), content: content, trigger: nil)
+    }
+
+    static func notify(_ ownerID: UUID) {
         guard Bundle.main.bundleURL.pathExtension == "app", !NSApp.isActive else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "An agent is waiting for you in Arch"
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert]) { granted, _ in
+            if granted { center.add(request(for: ownerID)) }
         }
     }
 }

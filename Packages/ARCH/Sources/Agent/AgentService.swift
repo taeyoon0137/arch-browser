@@ -88,7 +88,7 @@ import Foundation
         var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
         var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
         /// Called when a card opens, for the notification without content while Arch is in the background.
-        var attention: () -> Void = AgentAttention.notify
+        var attention: (UUID) -> Void = AgentAttention.notify
     }
 
     /// Don't Allow remembers nothing, but the next call of the same client asks again only after this long, so that a looping client cannot flood the user.
@@ -567,7 +567,11 @@ import Foundation
             if let grant = grants.first(where: { $0.id == approval.ownerID }) { describeInPanel(grant) }
             host.showAgentPanel(for: approval.ownerID)
         }
-        if approvals.pending.allSatisfy({ $0.ownerID != approval.ownerID || $0.id == approval.id }) { dependencies.attention() }
+        if approvals.pending.allSatisfy({ $0.ownerID != approval.ownerID || $0.id == approval.id }) { dependencies.attention(approval.ownerID) }
+    }
+
+    public func pendingAttention(for ownerID: UUID) -> Bool {
+        approvals.pending.contains { $0.ownerID == ownerID }
     }
 
     /// The panel's header for a grant: the client, its access, and its place as "Persona / Space".
