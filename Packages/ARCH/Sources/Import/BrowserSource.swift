@@ -2,7 +2,7 @@
 import Foundation
 
 /// A browser Arch imports from, with the places and formats of its data, and the folders where native app vendors install host manifests for other browsers.
-public struct BrowserSource: Hashable, Identifiable {
+public struct BrowserSource: Hashable, Identifiable, Sendable {
     /// The name the import sheet shows.
     let name: String
     /// Identifies the source in the import record and gives the sheet the app's icon.
@@ -30,7 +30,7 @@ public struct BrowserSource: Hashable, Identifiable {
     }()
 
     /// Where a browser keeps the data Arch reads, by format.
-    enum Layout: Hashable {
+    enum Layout: Hashable, Sendable {
         /// Chromium-format profiles in a user data folder, and for a browser with spaces, its sidebar file.
         case chromium(userData: URL, sidebarFile: URL?)
         /// WebKit-format bookmarks and a `history_items` database.
@@ -75,7 +75,7 @@ public struct BrowserSource: Hashable, Identifiable {
 }
 
 /// A setting in System Settings ▸ Privacy & Security.
-struct PrivacySetting: Hashable {
+struct PrivacySetting: Hashable, Sendable {
     let name: String
     /// Opens the setting's pane. The anchor is undocumented (see Open decisions in `docs/import-browsers.md`); without it, System Settings opens at Privacy & Security.
     let paneURL: URL

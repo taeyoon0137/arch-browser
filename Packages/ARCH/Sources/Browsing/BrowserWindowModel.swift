@@ -1,5 +1,4 @@
 // The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and the prompt cards of the tabs on its screen, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the prompts waiting for their tabs, the page reader's conversations, engines, and persistence.
-// Isolation: AppKit, SwiftUI, and the session use the model on the main thread only. The members that reach the main actor types of `AI` and `Plugins` (the page assistant, page conversations, and plugin managers) are marked `@MainActor`, so only main actor code can call them; the rest stays unmarked, because the session, which calls it, is not isolated yet (`docs/plan.md`, task I.18). A new member follows the same rule. `selectTab(_:)` reaches one of the marked members through `MainActor.assumeIsolated`, which stops the app if it ever runs off the main thread.
 import Agent
 import AI
 import AppKit
@@ -20,7 +19,7 @@ public enum BrowserWindowKind {
 }
 
 /// The state of one browser window: what it shows and what the user is doing in it. Its commands read and change the user's data through the session.
-public final class BrowserWindowModel: ObservableObject {
+@MainActor public final class BrowserWindowModel: ObservableObject {
     unowned let session: BrowserSession
     /// The window's identity in `session.json`, which it keeps across launches.
     let id: UUID
@@ -164,7 +163,7 @@ public final class BrowserWindowModel: ObservableObject {
                 findResult = nil
             }
             // The question popover belongs to the page it opened over.
-            MainActor.assumeIsolated { closePageQuestion() }
+            closePageQuestion()
         }
         // 3.
         session.windowDidSelect(self)
@@ -282,7 +281,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes. The explanation leaves out what the Persona has none of, and names one space, tab, or download without a number, as the Quit sheet names one download; every Persona has a space.
-    static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
+    nonisolated static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
         let spaces = spaceCount == 1 ? "Its space" : "Its \(spaceCount) spaces"
         let favorites = favoriteCount == 0 ? "" : favoriteCount == 1 ? " and 1 favorite" : " and \(favoriteCount) favorites"
         let removed = spaces + favorites + (spaceCount == 1 && favoriteCount == 0 ? " is removed" : " are removed")
@@ -294,7 +293,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
-    static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+    nonisolated static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
         return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
     }
@@ -462,7 +461,7 @@ public final class BrowserWindowModel: ObservableObject {
         // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
         hideFindBar()
         cancelRegionCapture()
-        MainActor.assumeIsolated { closePageQuestion() }
+        closePageQuestion()
         let runtime = session.runtime(for: engine, in: personaID)
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
         let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
@@ -703,31 +702,31 @@ public final class BrowserWindowModel: ObservableObject {
     // MARK: Plugins
 
     /// The plugins of the window's Persona, whose contributions the window shows.
-    @MainActor var plugins: PluginManager {
+    var plugins: PluginManager {
         session.plugins(in: personaID)
     }
 
     /// Runs a plugin command on the selected tab through the plugins of the window's Persona, as the palette, the Plugins menu, and sidebar items do.
-    @MainActor public func runPluginCommand(_ command: PluginCommandRef) {
+    public func runPluginCommand(_ command: PluginCommandRef) {
         let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID))
         let plugins = self.plugins
         Task { await plugins.run(command, invocation) }
     }
 
     /// Runs a plugin command from a tab row's context menu on that tab, with the plugins of the tab's Persona.
-    @MainActor func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
+    func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
         let invocation = PluginInvocation(tab: session.pluginTab(tab))
         Task { await session.plugins(in: tab.personaID).run(command, invocation) }
     }
 
     /// Runs a plugin command from a space's menu on the selected tab, with the space and the plugins of its Persona.
-    @MainActor func runPluginCommand(_ command: PluginCommandRef, inSpace space: Space) {
+    func runPluginCommand(_ command: PluginCommandRef, inSpace space: Space) {
         let invocation = PluginInvocation(tab: selectedPluginTab(of: space.resolvedPersonaID), spaceID: space.id)
         Task { await session.plugins(in: space.resolvedPersonaID).run(command, invocation) }
     }
 
     /// The selected tab, for the plugins of `personaID`, before the manager applies a plugin's grant. A plugin sees only its Persona's tabs, so it gets no tab of another Persona, such as a favorite's, and none while an internal page or the preview panel covers the tab's page.
-    @MainActor private func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
+    private func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
         guard !isSelectedPageCovered, let tab = selectedTab, tab.personaID == personaID else { return nil }
         return session.pluginTab(tab)
     }
@@ -740,7 +739,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`). The agent panel, which takes the same place, closes.
-    @MainActor public func togglePageReader() {
+    public func togglePageReader() {
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible.toggle()
             if isPageReaderVisible { agentPanel = nil }
@@ -755,12 +754,12 @@ public final class BrowserWindowModel: ObservableObject {
     // MARK: Agent panel
 
     /// Whether a connected model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
-    @MainActor var canStartAgentTask: Bool {
+    var canStartAgentTask: Bool {
         !(session.agents?.agentModels().isEmpty ?? true)
     }
 
     /// Where a session started in this window goes and what it starts with: the window's current space, which for a small window is the space Move to Main Window would use, its Persona, and the selected tab unless an internal page or the preview covers it.
-    @MainActor func agentComposerContext(text: String = "") -> AgentComposerContext {
+    func agentComposerContext(text: String = "") -> AgentComposerContext {
         Self.agentComposerContext(in: currentSpace, personas: session.personas, selectedTab: selectedTab.map(BrowserAgentHost.info(of:)),
                                   isPageCovered: isSelectedPageCovered, text: text)
     }
@@ -772,7 +771,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
-    @MainActor func sidebarAgentDraft(for tab: Tab) -> AgentComposerContext? {
+    func sidebarAgentDraft(for tab: Tab) -> AgentComposerContext? {
         guard kind == .main, canStartAgentTask, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
         return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
@@ -785,18 +784,18 @@ public final class BrowserWindowModel: ObservableObject {
         return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
     }
 
-    @MainActor func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
+    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
         guard let context = sidebarAgentDraft(for: tab), context.tab?.documentID == reviewed.tab?.documentID, context.tab?.url == reviewed.tab?.url else { return }
         showAgentPanel(.composer(context))
     }
 
     /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
-    @MainActor public func showAgentComposer(text: String = "") {
+    public func showAgentComposer(text: String = "") {
         showAgentPanel(.composer(agentComposerContext(text: text)))
     }
 
     /// The palette's Ask Agent row: starts a session with the palette's text at once, in Settings' mode for new sessions, and shows it. A start the service refuses shows the composer with the task and the refusal's sentence instead.
-    @MainActor func askAgent(_ offer: AskAgentOffer) {
+    func askAgent(_ offer: AskAgentOffer) {
         guard let agents = session.agents else { return }
         var context = agentComposerContext(text: offer.task)
         do {
@@ -809,7 +808,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
-    @MainActor func continueAsAgentTask(_ question: String, excerpt: AgentReaderExcerpt?) {
+    func continueAsAgentTask(_ question: String, excerpt: AgentReaderExcerpt?) {
         var context = agentComposerContext(text: question)
         context.readerExcerpt = excerpt
         closePageQuestion()
@@ -817,12 +816,12 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Shows a session in the panel, as a row or the indicator's menu does.
-    @MainActor public func showAgentSession(_ id: UUID) {
+    public func showAgentSession(_ id: UUID) {
         showAgentPanel(.session(id))
     }
 
     /// A step's tab button: a small window's tab brings its small window forward, since another window that selected it would close that window and keep the tab out of every list; any other tab is selected here, or, since a small window shows only its own tab, in the main window, which comes forward. A tab that has closed shows nothing.
-    @MainActor func showAgentTab(_ id: UUID) {
+    func showAgentTab(_ id: UUID) {
         guard let tab = session.allTabs.first(where: { $0.id == id }) else { return }
         guard !tab.isInSmallWindow else {
             session.window(showing: tab)?.nsWindow?.makeKeyAndOrderFront(nil)
@@ -835,7 +834,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// A link in the agent panel opens as a page the window opened: a selected tab of the window's current space, or beside a small window a small window of its own.
-    @MainActor func openAgentPanelLink(_ url: URL) {
+    func openAgentPanelLink(_ url: URL) {
         switch kind {
         case .main: openTab(url: url)
         case .small: showOpenedPage(session.makeWebContents(url: url, engine: nil, state: nil, in: personaID), personaID: personaID)
@@ -843,7 +842,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// View ▸ Show Agent Panel: hides the panel, or shows the latest session of the window's current space, or the composer when it has none.
-    @MainActor public func toggleAgentPanel() {
+    public func toggleAgentPanel() {
         guard agentPanel == nil else { return hideAgentPanel() }
         if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
             showAgentSession(latest.id)
@@ -852,11 +851,11 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    @MainActor public func hideAgentPanel() {
+    public func hideAgentPanel() {
         withAnimation(SidebarView.pageSpring) { agentPanel = nil }
     }
 
-    @MainActor private func showAgentPanel(_ content: AgentPanelContent) {
+    private func showAgentPanel(_ content: AgentPanelContent) {
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible = false
@@ -865,40 +864,40 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that neither an internal page nor the preview panel covers.
-    @MainActor var canAskAboutPage: Bool {
+    var canAskAboutPage: Bool {
         guard !isSelectedPageCovered, !hasPromptOnSelectedTab, let url = selectedTab?.url else { return false }
         return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
     }
 
-    @MainActor func askAboutPage() {
+    func askAboutPage() {
         guard canAskAboutPage, let tab = selectedTab else { return }
         openPageQuestion(in: tab, selection: nil)
     }
 
     /// From the page's context menu, so the tab is this window's selected tab: a click in another pane selects that pane's tab first.
-    @MainActor func askAboutSelection(_ selection: AISelection, in tab: Tab) {
+    func askAboutSelection(_ selection: AISelection, in tab: Tab) {
         guard selectedTabID == tab.id, PageAssistant.isQuestionAvailable, !session.prompts.hasPrompt(for: tab.id),
               selection.pageURL == tab.url, PageAssistant.canRead(selection.pageURL) else { return }
         openPageQuestion(in: tab, selection: selection)
     }
 
     /// Closes the popover the user dismissed and gives the page keyboard focus again.
-    @MainActor func dismissPageQuestion() {
+    func dismissPageQuestion() {
         closePageQuestion()
         focusPage()
     }
 
     /// Closes the popover when it is about the tab's page.
-    @MainActor func closePageQuestion(ofTab id: UUID) {
+    func closePageQuestion(ofTab id: UUID) {
         if pageQuestion?.tabID == id { closePageQuestion() }
     }
 
-    @MainActor private func openPageQuestion(in tab: Tab, selection: AISelection?) {
+    private func openPageQuestion(in tab: Tab, selection: AISelection?) {
         pageQuestion?.conversation.cancel()
         pageQuestion = PageQuestion(tabID: tab.id, documentID: tab.documentID, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(for: tab))
     }
 
-    @MainActor private func closePageQuestion() {
+    private func closePageQuestion() {
         guard let pageQuestion else { return }
         pageQuestion.conversation.cancel()
         self.pageQuestion = nil
@@ -907,13 +906,13 @@ public final class BrowserWindowModel: ObservableObject {
     // MARK: Closing
 
     /// Shows an outside client's agent panel when its card opens, with its steps and the cards that wait for the user, in place of the page reader, which hides. A composer or a session the column shows stays (`agentPanel(showingClient:over:)`).
-    @MainActor public func showAgentPanel(for ownerID: UUID) {
+    public func showAgentPanel(for ownerID: UUID) {
         guard let content = Self.agentPanel(showingClient: ownerID, over: agentPanel), content != agentPanel else { return }
         showAgentPanel(content)
     }
 
     /// The agents indicator's row for a connected client: its panel, in place of whatever the column shows.
-    @MainActor func showClientPanel(_ ownerID: UUID) {
+    func showClientPanel(_ ownerID: UUID) {
         showAgentPanel(.client(ownerID))
     }
 
@@ -931,7 +930,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Lets go of what the window shows as it closes, so that other windows can show its tabs, which stay open (window rule 5): the page reader's replies about them, the palette, find, region capture, page fullscreen, the preview panel, the question popover, and the docked developer tools. The tabs' prompts stay with them and show in the next window that shows them.
-    @MainActor func prepareToClose() {
+    func prepareToClose() {
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         commandPaletteMode = nil
         hideFindBar()
@@ -1308,7 +1307,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// The space a sheet or card about a tab's Persona names with it (Persona rule 7): the tab's space, or for a favorite's tab, which belongs to no space and shows in the window's current space, that space while it belongs to the tab's Persona, as the window title names it.
-    static func sheetSpace(ofTabIn spaceID: UUID?, personaID: Persona.ID, spaces: [Space], currentSpace: Space) -> Space? {
+    nonisolated static func sheetSpace(ofTabIn spaceID: UUID?, personaID: Persona.ID, spaces: [Space], currentSpace: Space) -> Space? {
         if let space = spaces.first(where: { $0.id == spaceID }) { return space }
         return currentSpace.resolvedPersonaID == personaID ? currentSpace : nil
     }
@@ -1354,7 +1353,7 @@ public final class BrowserWindowModel: ObservableObject {
     // MARK: Live folders
 
     /// New Live Folder…: the sheet that makes a live folder in the space (`docs/bookmarks.md`, Live folders ▸ Interface), with the Address field prefilled with the selected tab's address when it shows a web page. Add puts the folder in the space and shows the space. Nothing shows while the window shows another sheet.
-    @MainActor public func showNewLiveFolderSheet(inSpace spaceID: UUID) {
+    public func showNewLiveFolderSheet(inSpace spaceID: UUID) {
         guard nsWindow?.attachedSheet == nil, let space = session.spaces.first(where: { $0.id == spaceID }) else { return }
         let address = selectedTab?.url.flatMap { url in ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? url : nil }
         let model = LiveFolderSheetModel(newIn: space, personas: session.personas, liveFolderCount: session.liveFolderCount, address: address,
@@ -1366,7 +1365,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Edit Live Folder…: the same sheet with the folder's values, a private feed's whole address read from the Keychain first (live folder rule 8).
-    @MainActor func showEditLiveFolderSheet(_ folderID: UUID) {
+    func showEditLiveFolderSheet(_ folderID: UUID) {
         guard nsWindow?.attachedSheet == nil, let live = session.folders.first(where: { $0.id == folderID })?.live else { return }
         guard case .feed(_, isPrivate: true) = live.source else { return presentEditLiveFolderSheet(folderID, wholeAddress: nil, keychainReadError: nil) }
         let addresses = session.liveFolderService.addresses
@@ -1382,7 +1381,7 @@ public final class BrowserWindowModel: ObservableObject {
         }
     }
 
-    @MainActor private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
+    private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
         guard let folder = session.folders.first(where: { $0.id == folderID }), let live = folder.live,
               let space = session.spaces.first(where: { $0.id == folder.spaceID }) else { return }
         let model = LiveFolderSheetModel(editing: folder, configuration: live, in: space, personas: session.personas, wholeAddress: wholeAddress,
@@ -1393,7 +1392,7 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Shows the sheet on the window. Its Add, Save, and Cancel end it; closing the window from code ends it too (`close()`). The form's size pins the sheet's, so the sheet grows and shrinks with the form, as when a page's feeds appear.
-    @MainActor private func presentLiveFolderSheet(_ model: LiveFolderSheetModel) {
+    private func presentLiveFolderSheet(_ model: LiveFolderSheetModel) {
         guard let nsWindow, nsWindow.attachedSheet == nil else { return }
         let controller = NSHostingController(rootView: LiveFolderSheetView(model: model))
         controller.sizingOptions = [.minSize, .maxSize]

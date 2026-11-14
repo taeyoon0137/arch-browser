@@ -87,7 +87,7 @@ public final class DevToolsDock: ObservableObject {
     var dockedSide: DevToolsSide? { view != nil && settings.side != .floating ? settings.side : nil }
 
     /// Follows the tools of `tab`, the window's selected tab, or none.
-    func track(_ tab: Tab?) {
+    @MainActor func track(_ tab: Tab?) {
         track(tab?.webContents.devTools, titles: tab.map(Self.titles(of:)) ?? Empty().eraseToAnyPublisher())
     }
 
@@ -122,7 +122,7 @@ public final class DevToolsDock: ObservableObject {
     }
 
     /// The tab's title as it changes. The tab announces a change before it makes it, so the title is read on the next turn of the run loop.
-    private static func titles(of tab: Tab) -> AnyPublisher<String, Never> {
+    @MainActor private static func titles(of tab: Tab) -> AnyPublisher<String, Never> {
         tab.objectWillChange
             .receive(on: DispatchQueue.main)
             .compactMap { [weak tab] _ in tab?.displayTitle }

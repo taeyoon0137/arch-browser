@@ -6,7 +6,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// What the source follows of a browser window.
-protocol BrowserEventWindow: AnyObject {
+@MainActor protocol BrowserEventWindow: AnyObject {
     var id: UUID { get }
     var selectedTabIDs: AnyPublisher<UUID?, Never> { get }
     var currentSpaceIDs: AnyPublisher<UUID, Never> { get }
@@ -228,7 +228,7 @@ final class BrowserEventSource {
     }
 
     /// A tab that an agent folder holds (`Tab.agentOwnerID`) is an agent's, whatever else it is, and becomes the user's kind again once it leaves the folder.
-    nonisolated static func kind(of tab: Tab) -> BrowserTabKind {
+    static func kind(of tab: Tab) -> BrowserTabKind {
         if tab.agentOwnerID != nil { return .agent }
         if tab.spaceID == nil { return .favorite }
         if tab.isInSmallWindow { return .smallWindow }

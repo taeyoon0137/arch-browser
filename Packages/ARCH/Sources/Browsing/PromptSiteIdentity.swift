@@ -2,7 +2,7 @@
 import AppKit
 
 enum PromptSiteIdentity {
-    static func make(for url: URL?, in tab: Tab) -> PromptIdentity {
+    @MainActor static func make(for url: URL?, in tab: Tab) -> PromptIdentity {
         make(for: url, tabURL: tab.url, favicon: tab.favicon)
     }
 

@@ -67,7 +67,7 @@ enum LiveFolderTabs {
     // MARK: Item tabs
 
     /// The item tabs of a live folder, in sidebar order.
-    static func itemTabs(inFolder id: UUID, among tabs: [Tab]) -> [Tab] {
+    @MainActor static func itemTabs(inFolder id: UUID, among tabs: [Tab]) -> [Tab] {
         tabs.filter { $0.folderID == id && $0.liveItemID != nil }
     }
 
@@ -77,7 +77,7 @@ enum LiveFolderTabs {
     }
 
     /// Makes a new pinned tab the item's tab in the live folder `folderID`, saved at the item's address and title (bookmark rule 2).
-    static func prepare(_ tab: Tab, as item: LiveItem, inFolder folderID: UUID) {
+    @MainActor static func prepare(_ tab: Tab, as item: LiveItem, inFolder folderID: UUID) {
         tab.folderID = folderID
         tab.liveItemID = item.id
         tab.liveItem = item
@@ -85,14 +85,14 @@ enum LiveFolderTabs {
     }
 
     /// The folder's item tabs as `LiveFolderReconciler.plan(items:tabs:dismissed:)` weighs them.
-    static func reconcilerTabs(_ tabs: [Tab], isShown: (Tab) -> Bool) -> [LiveItemTab] {
+    @MainActor static func reconcilerTabs(_ tabs: [Tab], isShown: (Tab) -> Bool) -> [LiveItemTab] {
         tabs.compactMap { tab in
             tab.liveItemID.map { LiveItemTab(tabID: tab.id, itemID: $0, hasPage: tab.isLoaded, isShown: isShown(tab), title: tab.savedPage?.title ?? tab.title) }
         }
     }
 
     /// `tabs` with the plan applied to the live folder `folderID`: the retitled tabs' saved pages take their items' titles, the removed tabs leave, `makeTab` makes each new item's tab, and the folder's item tabs take the plan's order where the first of them was, or at the end without one. Returns the new list and the tabs it removed, which have no pages and no window shows.
-    static func applying(_ plan: LiveFolderPlan, toFolder folderID: UUID, in tabs: [Tab], makeTab: (LiveItem) -> Tab) -> (tabs: [Tab], removed: [Tab]) {
+    @MainActor static func applying(_ plan: LiveFolderPlan, toFolder folderID: UUID, in tabs: [Tab], makeTab: (LiveItem) -> Tab) -> (tabs: [Tab], removed: [Tab]) {
         let byID = Dictionary(tabs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (id, title) in plan.retitled { byID[id]?.savedPage?.title = title }
         let removedIDs = Set(plan.removals)
@@ -120,7 +120,7 @@ enum LiveFolderTabs {
     }
 
     /// Gives each of a folder's item tabs its item as the folder's state lists it, its unread dot (live folder rule 5), and its item's saved page, whose address a feed can change under the same ID; a tab without its page that is still on the old saved page moves there. A tab whose item the source no longer lists keeps its page without an item or a dot.
-    static func update(_ itemTabs: [Tab], from state: LiveFolderState) {
+    @MainActor static func update(_ itemTabs: [Tab], from state: LiveFolderState) {
         let items = Dictionary(state.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let unread = state.unreadItemIDs
         for tab in itemTabs {
@@ -141,14 +141,14 @@ enum LiveFolderTabs {
     }
 
     /// An item tab that leaves its live folder, by a drag, Move to Folder, another space's symbol, or Unpin Tab, or whose folder is converted or deleted, becomes an ordinary tab: it keeps its saved page while pinned (bookmark rule 2) and loses its item and its dot.
-    static func takeOut(_ tab: Tab) {
+    @MainActor static func takeOut(_ tab: Tab) {
         tab.liveItemID = nil
         tab.liveItem = nil
         tab.isUnread = false
     }
 
     /// Runs `change`, a change of tabs' places, and returns the item tabs among `tabs` that it took out of their live folders, each with the folder it left.
-    static func itemTabsLeaving(_ tabs: [Tab], during change: () -> Void) -> [(tab: Tab, folderID: UUID)] {
+    @MainActor static func itemTabsLeaving(_ tabs: [Tab], during change: () -> Void) -> [(tab: Tab, folderID: UUID)] {
         let itemTabs = tabs.filter { $0.liveItemID != nil }.map { (tab: $0, folderID: $0.folderID) }
         change()
         return itemTabs.compactMap { entry in

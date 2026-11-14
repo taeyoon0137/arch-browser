@@ -60,7 +60,7 @@ public struct TabCloseLogEntry: Identifiable {
     /// The engines' total of page process crashes this launch when the tab closed.
     public let sessionCrashCount: Int
 
-    init(reason: TabCloseReason, tab: Tab, sessionCrashCount: Int) {
+    @MainActor init(reason: TabCloseReason, tab: Tab, sessionCrashCount: Int) {
         self.reason = reason
         title = tab.displayTitle
         url = tab.url

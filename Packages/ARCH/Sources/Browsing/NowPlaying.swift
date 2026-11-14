@@ -5,7 +5,7 @@ import Combine
 import MediaPlayer
 
 /// Feeds `MPNowPlayingInfoCenter` from the media session of the focused tab, the active window's selected tab, while it plays sound, and otherwise of the tab that played sound last, and sends `MPRemoteCommandCenter` commands to that session. The page's Media Session metadata names the media; without it, the page's title and site stand in.
-final class NowPlaying: EngineMediaSessionDelegate {
+@MainActor final class NowPlaying: @preconcurrency EngineMediaSessionDelegate {
     private weak var session: BrowserSession?
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
@@ -132,14 +132,16 @@ final class NowPlaying: EngineMediaSessionDelegate {
     }
 
     /// Runs a command on the shown tab's media session. The header does not say on which thread commands arrive, so one from another thread moves to the main thread.
-    private func run(_ command: @escaping (any EngineMediaSession) -> Void) -> MPRemoteCommandHandlerStatus {
+    nonisolated private func run(_ command: @escaping @MainActor (any EngineMediaSession) -> Void) -> MPRemoteCommandHandlerStatus {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in _ = self?.run(command) }
             return .success
         }
-        guard let media = shownTab?.webContents.mediaSession else { return .noActionableNowPlayingItem }
-        command(media)
-        return .success
+        return MainActor.assumeIsolated {
+            guard let media = shownTab?.webContents.mediaSession else { return .noActionableNowPlayingItem }
+            command(media)
+            return .success
+        }
     }
 
     /// The most bytes an artwork image may have. Larger artwork shows none.
