@@ -937,6 +937,8 @@ Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePa
 
 ## Facts
 
+- On both signed engines, a partially typed clarification was lost on switching to New Agent Task and returning to the waiting question at `e39ed97`. At `8d9bc17` the field retained the same text. Each loopback model received just the initial request during the switch. Pressing Answer in Chromium sent the restored text once. The WebKit question remained unsent.
+
 - A signed debug bundle on Chromium and WebKit exercised three clarification cards on each engine with isolated profiles and a loopback HTTP model. Selecting a choice and submitting typed text returned the chosen answer. Cancel returned a denial. Return in the answer field left the question open, and the agents indicator reopened a waiting conversation from another panel. Each engine made six model requests. An earlier Chromium run recorded two identical initial requests after Start, neither with a tool answer. Five fresh Chromium profiles each made one initial request, including three quick Returns. The duplicate remains unconfirmed.
 
 - On November 14, 2026, a signed Chromium app sent four requests to a loopback HTTP model. The model listed the shared tab and read its text. The third request contained the article title, heading and link text. After the user chose Stop Sharing and sent a follow-up, the fourth request replaced the earlier result with a refusal and contained none of those three strings. The input field’s value appeared in none of the requests.
