@@ -48,6 +48,7 @@ struct FavoritesGridView: View {
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Each tile's frame in the window, used to find the tile under a dragged favorite.
     @State private var tileFrames: [UUID: CGRect] = [:]
+    @State private var reorderHover = SidebarReorderHover()
 
     var body: some View {
         let favorites = session.favorites(in: personaID)
@@ -57,6 +58,9 @@ struct FavoritesGridView: View {
             }
         }
         .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
+        .onChange(of: sidebarDrag.item) { _, item in
+            if item == nil { reorderHover = SidebarReorderHover() }
+        }
     }
 
     private func tile(_ favorite: Favorite, selected: Favorite.ID?) -> some View {
@@ -87,7 +91,10 @@ struct FavoritesGridView: View {
 
     /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
     private func reorder(_ favorite: Favorite, at location: CGPoint) {
-        guard let target = session.favorites(in: personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
+        guard sidebarDrag.item == .favorite(favorite.id), personaID == windowModel.personaID, reorderHover.canMove(at: location),
+              let target = session.favorites(in: personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }),
+              let frame = tileFrames[target.id] else { return }
+        reorderHover.moved(into: frame)
         withAnimation(.easeInOut(duration: 0.15)) { session.moveFavorite(favorite.id, to: target) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
