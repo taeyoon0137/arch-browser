@@ -569,11 +569,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if !closesOrReopens { session.forgetUndoableCloses() }
             return event
         }
-        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page.
+        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page. The click also lets the page start one more download without asking.
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let session = self?.session, let view = session.window(for: event.window)?.selectedTab?.webContents.view, view.window === event.window,
-               view.bounds.contains(view.convert(event.locationInWindow, from: nil)) {
+            if let session = self?.session, let tab = session.window(for: event.window)?.selectedTab, tab.webContents.view.window === event.window,
+               tab.webContents.view.bounds.contains(tab.webContents.view.convert(event.locationInWindow, from: nil)) {
                 session.forgetUndoableCloses()
+                tab.userDidClickInPage()
             }
             return event
         }

@@ -60,6 +60,20 @@ import Testing
         #expect(shown.map(\.id) == [tabs[0].id, tabs[1].id])
     }
 
+    /// WebKit reports the address it loaded with a user name and password, which the page's own `location.href` leaves out. The tab shows and saves it without them, and history records it without them.
+    @Test func aTabKeepsItsAddressWithoutAUserNameAndPassword() {
+        var saved = record(5)
+        saved.url = URL(string: "https://alice:SECRETPW@site5.example/docs/page#part")
+        let restored = restoredTab(saved)
+        #expect(restored.url?.absoluteString == "https://site5.example/docs/page#part")
+        #expect(savedRecord(of: restored).url == restored.url)
+        let opened = Tab(id: UUID(), webContents: UnloadedWebContents(record: saved, defaultEngine: .webKit), spaceID: spaceID, isPinned: false, personaID: personaID)
+        var visits: [URL] = []
+        opened.recordVisit = { url, _ in visits.append(url) }
+        opened.webContentsDidChangeLoadingState(opened.webContents)
+        #expect(visits.map(\.absoluteString) == ["https://site5.example/docs/page#part"])
+    }
+
     /// A record from a file without engines gets a stand-in, and so a page, of the default engine.
     @Test func aRecordWithoutAnEngineGetsTheDefaultEngine() {
         var record = record(3)

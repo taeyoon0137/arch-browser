@@ -74,7 +74,8 @@ public final class BrowserSession: ObservableObject {
 
     /// The results page of the search engine chosen in Settings.
     public static var searchURL: URL { SearchEngine.current.resultsURL }
-    public static let newTabURL = URL(string: "https://www.google.com")!
+    /// The page a tab opens without an address: the home page of the search engine chosen in Settings.
+    public static var newTabURL: URL { SearchEngine.current.homeURL }
 
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
@@ -85,6 +86,8 @@ public final class BrowserSession: ObservableObject {
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. Each closes once the engine creates the download its page started.
     private var downloadOnlyTabIDs: Set<UUID> = []
+    /// The downloads a page's `PageDownloadGate` let through. WebKit asks for a destination again when Resume starts a download over without resume data, which the gate does not count again.
+    private let admittedDownloads = NSHashTable<AnyObject>.weakObjects()
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
@@ -889,28 +892,30 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab once its page agrees to close, then runs `didClose`.
+    /// Closes a tab once its page agrees to close, then runs `didClose` if this close removed it.
     private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
         // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
         guard !tab.webContents.closingStopsDownloads else {
-            closeTab(tab)
-            return didClose()
+            if closeTab(tab) { didClose() }
+            return
         }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
-            guard closing, let self, let tab else { return }
-            self.closeTab(tab)
+            guard closing, let self, let tab, self.closeTab(tab) else { return }
             didClose()
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
-    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
+    /// Closes a tab and returns whether it was still open. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
+    @discardableResult
+    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) -> Bool {
+        guard tabs.contains(where: { $0.id == tab.id }) || favoriteTabs.values.contains(where: { $0 === tab }) else { return false }
+        windows.forEach { $0.setPageFullscreen(false, of: tab) }
+        // Ending a visible sheet runs the run loop (`TabSheetQueue.deferSheet(of:)`), so another close, of this tab or of another one, can finish before `cancel` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
+        sheets.cancel(for: tab)
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
-        guard index != nil || favoriteID != nil else { return }
+        guard index != nil || favoriteID != nil else { return false }
         recordClose(of: tab, reason: reason)
-        windows.forEach { $0.setPageFullscreen(false, of: tab) }
-        sheets.cancel(for: tab)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
@@ -920,8 +925,9 @@ public final class BrowserSession: ObservableObject {
             addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
-        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
+        // Leaving the split view can end a sheet too, so the opener is looked up after it.
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
+        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         for window in windows where window.selectedTabID == tab.id {
             guard window.kind == .main else {
                 window.close()
@@ -931,6 +937,7 @@ public final class BrowserSession: ObservableObject {
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
         }
+        return true
     }
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
@@ -1047,12 +1054,22 @@ public final class BrowserSession: ObservableObject {
         tab.isPinned.toggle()
     }
 
-    /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or a dotted host without spaces. Adds `https://` to a dotted host. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
+    /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or an address without spaces whose host is dotted, `localhost` or a name under it, or an IPv6 address in brackets. Adds `http://` to an address on this Mac, where development servers run without TLS, and `https://` to the others. `localhost:3000` is thus an address, though it parses as a URL whose scheme is `localhost`. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
     public static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let parsed = URL(string: text), let scheme = parsed.scheme, parsed.host != nil || scheme.lowercased() == "file" { return parsed }
-        if !text.contains(" "), let parsed = URL(string: "https://\(text)"), parsed.host?.contains(".") == true { return parsed }
-        return nil
+        guard !text.contains(" "), let parsed = URL(string: "https://\(text)"), let host = parsed.host?.lowercased(), !host.isEmpty else { return nil }
+        if isOnThisMac(host) { return URL(string: "http://\(text)") }
+        return host.contains(".") || host.contains(":") ? parsed : nil
+    }
+
+    /// Whether `host`, in lowercase, names this Mac: `localhost`, a name under it, or a loopback address (127.0.0.0/8 or ::1).
+    private static func isOnThisMac(_ host: String) -> Bool {
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, host, &ipv4) == 1 { return withUnsafeBytes(of: &ipv4) { $0[0] } == 127 }
+        var ipv6 = in6_addr()
+        return inet_pton(AF_INET6, host, &ipv6) == 1 && withUnsafeBytes(of: &ipv6) { Array($0) } == [UInt8](repeating: 0, count: 15) + [1]
     }
 
     /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, such as a keyword whose template makes no web address, or `nil` for empty text.
@@ -1245,9 +1262,10 @@ public final class BrowserSession: ObservableObject {
 
     /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. A space of another Persona refuses the tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
-        guard canMoveTab(id, toSpace: spaceID), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
-        // The other panes of its split view stay together in the space it leaves.
-        leaveSplitView(tabs[index])
+        guard canMoveTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }), moving.spaceID != spaceID else { return }
+        // The other panes of its split view stay together in the space it leaves. Leaving can end a sheet, which runs the run loop (`TabSheetQueue.deferSheet(of:)`), so the tab's place is looked up afterwards, and a tab that closed meanwhile stays closed.
+        leaveSplitView(moving)
+        guard let index = tabs.firstIndex(where: { $0 === moving }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
         tab.spaceID = spaceID
@@ -1649,8 +1667,39 @@ extension BrowserSession: EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
+    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a sheet on the tab, and a refused one ends; a tab that only pointed at the file, or a page without a tab, has nothing to ask about. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+        let choose = { [weak self] in self?.chooseDestination(in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
+        guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, !admittedDownloads.contains(item) else { return choose() }
+        let decide = { [weak self] (allowed: Bool) in
+            guard allowed else { return completion(nil) }
+            self?.admittedDownloads.add(item)
+            choose()
+        }
+        switch tab.pageDownloads.admit(decide) {
+        case .allow: decide(true)
+        case .deny: decide(false)
+        case .wait: break
+        case .ask: askToAllowDownloads(from: tab)
+        }
+    }
+
+    /// Asks whether the tab's page may download more files. Closing the tab answers no.
+    private func askToAllowDownloads(from tab: Tab) {
+        let alert = NSAlert()
+        alert.messageText = "Allow \u{201C}\(tab.url?.host ?? tab.title)\u{201D} to download multiple files?"
+        alert.informativeText = "The page started another download without a click in it. If you allow it, it can download files until it loads another page."
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Don\u{2019}t Allow")
+        enqueueSheet(alert, for: tab) { [weak tab] response in
+            guard let tab else { return }
+            let allowed = response == .alertFirstButtonReturn
+            tab.pageDownloads.answer(allowed).forEach { $0(allowed) }
+        }
+    }
+
+    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
+    private func chooseDestination(in downloads: any EngineDownloads, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         guard runtime(owning: downloads)?.context.preferences.promptForDownloadPath == true else {
             return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
         }

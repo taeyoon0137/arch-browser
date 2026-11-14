@@ -81,6 +81,8 @@ public final class BrowserWindowModel: ObservableObject {
     }
     /// The last result for `findText`. `nil` while no search has finished.
     @Published public private(set) var findResult: EngineFindResult?
+    /// Advances with each search, so that only the latest search's result shows: an earlier one, as from the tab selected before, can arrive after it.
+    private var findGeneration = 0
     /// The space whose name is being edited in the sidebar.
     @Published public var renamingSpaceID: UUID?
     /// The tab whose name is being edited in the sidebar.
@@ -723,6 +725,8 @@ public final class BrowserWindowModel: ObservableObject {
 
     private func runFind(forward: Bool) {
         guard isFindBarVisible, let tab = selectedTab else { return }
+        findGeneration += 1
+        let generation = findGeneration
         let text = findText
         guard !text.isEmpty else {
             tab.webContents.stopFind()
@@ -730,8 +734,7 @@ public final class BrowserWindowModel: ObservableObject {
             return
         }
         tab.webContents.find(text, forward: forward, matchCase: false) { [weak self] result in
-            // Ignore results for text the user has since changed.
-            guard let self, self.isFindBarVisible, self.findText == text else { return }
+            guard let self, self.isFindBarVisible, self.findGeneration == generation else { return }
             self.findResult = result
         }
     }

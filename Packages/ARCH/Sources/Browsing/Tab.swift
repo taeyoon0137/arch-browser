@@ -85,7 +85,9 @@ public final class Tab: ObservableObject, Identifiable {
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
-    private var isDownloadOnly = false
+    private(set) var isDownloadOnly = false
+    /// Whether the current document may start downloads without asking (`BrowserSession`'s download delegate).
+    var pageDownloads = PageDownloadGate()
 
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
@@ -94,7 +96,7 @@ public final class Tab: ObservableObject, Identifiable {
         self.isPinned = isPinned
         self.personaID = personaID
         self.title = webContents.title
-        self.url = webContents.url
+        self.url = webContents.url?.withoutCredentials
         self.isLoading = webContents.isLoading
         self.canGoBack = webContents.canGoBack
         self.canGoForward = webContents.canGoForward
@@ -123,7 +125,7 @@ public final class Tab: ObservableObject, Identifiable {
         suggestedTitle = record.suggestedTitle
         self.folderID = folderID
         isRestored = true
-        recordedURL = record.url
+        recordedURL = record.url?.withoutCredentials
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
@@ -148,12 +150,17 @@ public final class Tab: ObservableObject, Identifiable {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }
+
+    /// The user clicked in the tab's page, which lets the page start one more download without asking, as for the link of a file.
+    public func userDidClickInPage() {
+        pageDownloads.userDidClick()
+    }
 }
 
 extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
-        url = webContents.url
+        url = webContents.url?.withoutCredentials
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
@@ -165,18 +172,22 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         isLoading = webContents.isLoading
-        // The Chromium engine reloads a page once after its first crash; any new load clears the notice.
+        // The Chromium engine reloads a page after a crash unless it crashed just after its last reload; any new load clears the notice.
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading { didFinishLoad?() }
         // Record a page when it finishes loading, when its title is usually known.
-        if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if !isLoading, !isDownloadOnly, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }
     }
-    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }
+    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
+        pageDownloads.documentDidLoad()
+        didLoadDocument.send()
+    }
+
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
     }
@@ -462,6 +473,14 @@ extension URL {
     var withoutFragment: URL {
         guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false), components.fragment != nil else { return self }
         components.fragment = nil
+        return components.url ?? self
+    }
+
+    /// The address without a user name and password, as a page's own `location.href` has it. WebKit reports the address it loaded with them, and the sidebar, the history, and `session.json` keep the address without them.
+    var withoutCredentials: URL {
+        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false), components.user != nil || components.password != nil else { return self }
+        components.user = nil
+        components.password = nil
         return components.url ?? self
     }
 }
