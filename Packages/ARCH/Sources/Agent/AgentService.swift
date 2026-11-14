@@ -427,6 +427,8 @@ import Foundation
 
     /// A deleted Persona takes its grants with it, and a deleted Agents Persona leaves none recorded.
     private func personasDidChange() {
+        // A rename changes the destination shown by an open draft or conversation.
+        objectWillChange.send()
         let personas = Set(host.personas.map(\.id))
         for grant in grants where !personas.contains(grant.personaID) {
             end(grant, as: .revoked, telling: "The Persona of this client's access was deleted.")
@@ -944,11 +946,20 @@ import Foundation
         return "\(persona) / \(space)"
     }
 
-    /// "Persona / Space", as the interface names a session's place, also once its space is deleted.
+    /// The current names for these IDs. A session keeps its place after its Persona or space is deleted.
+    private func place(personaID: UUID, spaceID: UUID, fallback: String? = nil) -> String {
+        let persona = host.personas.first { $0.id == personaID }?.name
+        let space = host.spaces(in: personaID).first { $0.id == spaceID }?.name
+        if let fallback, persona == nil || space == nil { return fallback }
+        return "\(persona ?? "Deleted Persona") / \(space ?? "Deleted Space")"
+    }
+
     public func place(of session: AgentSession) -> String {
-        let persona = host.personas.first { $0.id == session.personaID }?.name ?? "Deleted Persona"
-        let space = host.spaces(in: session.personaID).first { $0.id == session.spaceID }?.name ?? "Deleted Space"
-        return "\(persona) / \(space)"
+        place(personaID: session.personaID, spaceID: session.spaceID)
+    }
+
+    func place(of draft: AgentComposerContext) -> String {
+        draft.usesAgentsPersona ? agentsPersonaPlace : place(personaID: draft.personaID, spaceID: draft.spaceID, fallback: draft.place)
     }
 
     // MARK: Session settings

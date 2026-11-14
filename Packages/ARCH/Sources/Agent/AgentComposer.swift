@@ -71,7 +71,7 @@ public struct AgentReaderExcerpt: Equatable {
     public let id = UUID()
     public var personaID: UUID
     public var spaceID: UUID
-    /// "Persona / Space".
+    /// The "Persona / Space" name when this draft was created.
     public var place: String
     /// The document reviewed when this draft opened.
     public var tab: AgentTabInfo?
@@ -227,6 +227,10 @@ public struct AgentComposer: View {
     private var modelSetup: some View {
         let isEnabled = settings.route(for: .agent).isEnabled
         return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                label("In")
+                destination
+            }
             Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
                 .font(.system(size: 13, weight: .medium))
             Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
@@ -239,12 +243,16 @@ public struct AgentComposer: View {
         }
     }
 
+    private var destination: some View {
+        Text(service.place(of: context)).font(.system(size: 12))
+    }
+
     private var options: some View {
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
             GridRow {
                 label("In")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(context.usesAgentsPersona ? service.agentsPersonaPlace : context.place).font(.system(size: 12))
+                    destination
                     Toggle("Use the Agents Persona", isOn: $context.usesAgentsPersona)
                         .toggleStyle(.checkbox)
                         .font(.system(size: 11))

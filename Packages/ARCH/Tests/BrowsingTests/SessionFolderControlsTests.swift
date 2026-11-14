@@ -101,6 +101,39 @@ import Testing
         #expect(!native.isVisible && window.agentPanel == nil && service.sessions.isEmpty)
     }
 
+    @Test func renamingTheDestinationWhileItsDraftIsOpenOrHiddenKeepsTheReviewedTask() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let persona = browser.addPersona(named: "Work")
+        let space = try #require(browser.spaces.first { $0.resolvedPersonaID == persona.id })
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
+        let draft = try #require(window.sidebarAgentDraft(for: tab))
+        window.askAgentAboutSidebarTab(tab, reviewed: draft)
+        guard case .composer(let context) = window.agentPanel else { Issue.record("Expected the reviewed draft"); return }
+        context.text = "Compare this report"
+        context.attachesTab = false
+        let reviewed = try #require(context.tab)
+        #expect(service.agentModels().isEmpty && service.place(of: context) == "Work / \(space.name)")
+        window.renameSpace(space.id, to: "Archive")
+        #expect(service.place(of: context) == "Work / Archive")
+        window.hideAgentPanel()
+        browser.renamePersona(persona.id, to: "Research")
+        window.toggleAgentPanel()
+        #expect(window.agentPanel == .composer(context) && service.place(of: context) == "Research / Archive")
+        #expect(context.text == "Compare this report" && context.tab == reviewed && !context.attachesTab)
+        #expect(context.personaID == persona.id && context.spaceID == space.id && service.sessions.isEmpty)
+        context.usesAgentsPersona = true
+        #expect(service.place(of: context) == service.agentsPersonaPlace)
+        context.usesAgentsPersona = false
+        _ = browser.makeSpace(in: persona.id, named: "Other")
+        browser.deleteSpace(space.id)
+        #expect(window.agentPanel == nil && !window.canToggleAgentPanel)
+        #expect(service.place(of: context) == context.place)
+    }
+
     @Test func anOpenFavoritesDraftUsesTheReviewedDocumentAndSpace() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
