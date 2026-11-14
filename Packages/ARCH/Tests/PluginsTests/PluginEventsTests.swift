@@ -1,4 +1,4 @@
-// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, and the context's tabs and renames through the browser host, under the grant, with the plugin as the rename's cause.
+// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, never for the plugin's own renames and at most 10 for one tab a minute, and the context's tabs and renames through the browser host, under the grant, with the plugin as the rename's cause.
 import ARCHEngine
 import Events
 import Foundation
@@ -17,13 +17,17 @@ private final class FakeTabsHost: PluginBrowserHost {
 
     var tabs: [PersonaID: [PluginTab]] = [:]
     private(set) var renames: [Rename] = []
+    /// Called after each rename, as the session posts the rename's title change.
+    var onRename: ((Rename) -> Void)?
 
     func tabs(in persona: PersonaID) -> [PluginTab] {
         tabs[persona] ?? []
     }
 
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool {
-        renames.append(Rename(tab: id, name: name, document: document, cause: cause))
+        let rename = Rename(tab: id, name: name, document: document, cause: cause)
+        renames.append(rename)
+        onRename?(rename)
         return applying
     }
 }
@@ -129,6 +133,54 @@ private final class RenamingPlugin: BuiltInPlugin {
         guard case .object(let coveredListed)? = first["tab"], case .object(let otherListed)? = second["tab"] else { return }
         #expect(coveredListed["title"] == .string("Title") && coveredListed["url"] == .string("https://example.org/a"))
         #expect(otherListed["title"] == nil && otherListed["url"] == nil && otherListed["isPinned"] == .bool(true))
+    }
+
+    /// A listener that renames the tab of each title change would otherwise run again for its own rename without end; changes from elsewhere, such as a hook that answers each rename, are capped instead.
+    @Test func aPluginGetsNoEventsOfItsOwnRenamesAndAtMostTenForOneTabAMinute() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let background = """
+        let runs = 0;
+        arch.events.on("titleChanged", async (event) => {
+          runs += 1;
+          await arch.storage.set("runs", runs);
+          await arch.tabs.rename(event.tab.id, "Run " + runs);
+        });
+        """
+        let package = try await manager.stage(try writePackage([
+            "plugin.json": manifest + #", "permissions": ["tabs.rename"], "events": ["titleChanged"], "background": "b.js"}"#, "b.js": background,
+        ]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let installed = try #require(manager.plugins.first)
+        func tab() -> BrowserTabRef {
+            BrowserTabRef(id: UUID(), personaID: persona, spaceID: UUID(), kind: .open, engine: .webKit, url: URL(string: "https://example.org/a"))
+        }
+        let first = tab()
+        let second = tab()
+        host.tabs[persona] = [first, second].map {
+            PluginTab(id: $0.id, spaceID: $0.spaceID, title: "Title", url: $0.url, engine: $0.engine, isPinned: false, isSelected: false, kind: $0.kind)
+        }
+        host.onRename = { [bus] rename in
+            bus.post(.titleChanged(tab: rename.tab == first.id ? first : second, source: .suggested), cause: rename.cause)
+        }
+        let storage = manager.makeContext(for: installed).storage
+        func runs() -> PluginValue? { storage.value(forKey: "runs") }
+
+        bus.post(.titleChanged(tab: first, source: .page))
+        #expect(await eventually { host.renames.count == 1 })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(runs() == .number(1) && host.renames.count == 1)
+        #expect(host.renames.first?.cause == BrowserEventCause(origin: .plugin(id: installed.id.rawValue)))
+
+        for _ in 0..<12 {
+            bus.post(.titleChanged(tab: first, source: .page))
+        }
+        #expect(await eventually { runs() == .number(10) })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(runs() == .number(10))
+        // Another tab's changes still arrive.
+        bus.post(.titleChanged(tab: second, source: .page))
+        #expect(await eventually { runs() == .number(11) })
     }
 
     @Test func tabCallsGoThroughTheBrowserHostUnderTheGrant() async throws {

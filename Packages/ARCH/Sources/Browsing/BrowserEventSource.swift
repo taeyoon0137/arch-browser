@@ -45,6 +45,8 @@ final class BrowserEventSource {
         var shown: Shown
         /// The inputs as the source last read the shown name, while the tab showed its committed address.
         var named: Shown
+        /// The cause of the latest change to the tab's suggested name while its address waited to settle, which the title change that names it posts with once the address settles.
+        var unsettledNameCause: BrowserEventCause?
         /// Set at the tab's `tabOpened` until its first load of a web address.
         var awaitsFirstLoadAfterOpen = false
         var hasLoaded = false
@@ -147,7 +149,7 @@ final class BrowserEventSource {
             .store(in: &followed.observers)
     }
 
-    /// A new committed address (`Tab.committedURL`) posts `addressChanged` with the tab's pending cause. A new shown name posts `titleChanged` with the input that supplies it while the tab shows its committed address; a name that changes while the tab's address waits to settle posts once it settles, if it differs then, since the tab may leave that address before it commits.
+    /// A new committed address (`Tab.committedURL`) posts `addressChanged` with the tab's pending cause. A new shown name posts `titleChanged` with the input that supplies it while the tab shows its committed address; a name that changes while the tab's address waits to settle posts once it settles, if it differs then, since the tab may leave that address before it commits. A suggested name that code gave while the address waited keeps its cause for that later title change, so a hook or plugin still sees its own rename as its own.
     private func tab(_ tab: Tab, didChangeTo shown: Shown) {
         guard let followed = tabs[tab.id], followed.shown != shown else { return }
         let previous = followed.shown
@@ -155,11 +157,18 @@ final class BrowserEventSource {
         if shown.committedURL != previous.committedURL {
             bus.post(.addressChanged(tab: ref(tab, url: shown.committedURL), previousURL: previous.committedURL), cause: tab.pendingCause)
         }
-        guard shown.isSettled else { return }
+        guard shown.isSettled else {
+            if shown.suggestedTitle != previous.suggestedTitle { followed.unsettledNameCause = bus.currentCause }
+            return
+        }
         let named = followed.named
         followed.named = shown
+        let unsettledNameCause = followed.unsettledNameCause
+        followed.unsettledNameCause = nil
         guard shown.name != named.name else { return }
-        bus.post(.titleChanged(tab: ref(tab, url: shown.committedURL), source: Self.titleSource(of: shown, after: named)))
+        let source = Self.titleSource(of: shown, after: named)
+        // Without a cause of its own, the post takes the enclosing `withCause` block's, as a change that settles at once does.
+        bus.post(.titleChanged(tab: ref(tab, url: shown.committedURL), source: source), cause: source == .suggested ? unsettledNameCause : nil)
     }
 
     /// The input that supplies a new shown name: the user's name or its removal, and the user turning down a hook's name, are `user`; a hook's name is `suggested`; the page's title or host, also once another address drops a hook's name, is `page`.

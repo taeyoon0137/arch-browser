@@ -98,8 +98,8 @@ public final class AIHookScheduler: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events, and `urls` are the addresses that site exclusions apply to. A step with a feature whose event has an excluded address skips at once, and a post left without steps changes no chain.
-    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, urls: [URL] = []) {
+    /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events, and `urls` are the addresses that site exclusions apply to. `causes` are the owners whose runs led to the event, from its cause: an event that the running step's owner caused, such as the title change of the step's own rename, joins that chain after its waiting steps instead of replacing it, so a step is never stopped by its own effect. A step with a feature whose event has an excluded address skips at once, and a post left without steps changes no chain.
+    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, urls: [URL] = [], causes: Set<String> = []) {
         let reachesAI = urls.allSatisfy(service.settings.allowsAI(on:))
         var accepted: [AIHookStep] = []
         for step in steps {
@@ -113,9 +113,15 @@ public final class AIHookScheduler: ObservableObject {
         }
         guard !accepted.isEmpty else { return }
         let key = ChainKey(kind: kind, subject: subject)
-        if let chain = chains[key], chain.event == event, !chain.isCanceled, !chain.isFinished {
-            chain.add(accepted)
-            return
+        if let chain = chains[key], !chain.isCanceled, !chain.isFinished {
+            if chain.events.contains(event) {
+                chain.add(accepted)
+                return
+            }
+            if let running = chain.running, causes.contains(running.step.owner) {
+                chain.append(accepted, for: event)
+                return
+            }
         }
         let previous = chains[key]
         previous?.cancel()
@@ -132,7 +138,7 @@ public final class AIHookScheduler: ObservableObject {
 
     /// The subject went away: cancels its chains, except the chain of `event`, the close's own.
     public func cancel(subject: UUID, except event: UUID? = nil) {
-        for (key, chain) in chains where key.subject == subject && chain.event != event {
+        for (key, chain) in chains where key.subject == subject && !(event.map(chain.events.contains) ?? false) {
             chain.cancel()
         }
     }
@@ -167,10 +173,11 @@ public final class AIHookScheduler: ObservableObject {
         var subject: UUID
     }
 
-    /// The steps one event runs, one at a time.
+    /// The steps one event runs, one at a time, followed by those of the events its running steps caused.
     @MainActor
     private final class Chain {
-        let event: UUID
+        /// The event the chain was posted for, and the events of its steps' own effects that joined it.
+        private(set) var events: Set<UUID>
         let document: URL?
         let urls: [URL]
         let postedAt = ContinuousClock.now
@@ -183,7 +190,7 @@ public final class AIHookScheduler: ObservableObject {
         var isFinished = false
 
         init(event: UUID, document: URL?, urls: [URL]) {
-            self.event = event
+            events = [event]
             self.document = document
             self.urls = urls
         }
@@ -193,6 +200,19 @@ public final class AIHookScheduler: ObservableObject {
             for step in steps {
                 let index = waiting.firstIndex { $0.order > step.order } ?? waiting.endIndex
                 waiting.insert(step, at: index)
+            }
+        }
+
+        /// Adds the steps of an event that a running step caused after every waiting step, in ascending order among themselves, so they run once the earlier steps have. Their delays count from now, as from their own event's post.
+        func append(_ steps: [AIHookStep], for event: UUID) {
+            events.insert(event)
+            let start = waiting.endIndex
+            let elapsed = ContinuousClock.now - postedAt
+            for step in steps {
+                var joined = step
+                joined.delay += elapsed
+                let index = waiting[start...].firstIndex { $0.order > step.order } ?? waiting.endIndex
+                waiting.insert(joined, at: index)
             }
         }
 

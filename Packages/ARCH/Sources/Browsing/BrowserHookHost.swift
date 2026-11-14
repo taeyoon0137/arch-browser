@@ -34,13 +34,13 @@ import Hooks
         session.tabsInSidebarOrder.filter { $0.personaID == id }.map(Self.ref).filter { $0.kind != .agent }
     }
 
-    /// The session posts `tabClosed` while it still lists the tab, so during that delivery this is the closing tab's last name and address.
+    /// The session posts `tabClosed` while it still lists the tab, so during that delivery this is the closing tab's last name and committed address.
     public func closingTab(_ id: UUID) -> AgentRunClosedTab? {
-        session.allTabs.first { $0.id == id }.map { AgentRunClosedTab(name: $0.displayTitle, url: $0.url) }
+        session.allTabs.first { $0.id == id }.map { AgentRunClosedTab(name: $0.displayTitle, url: $0.committedURL) }
     }
 
-    /// The tab as `BrowserEventSource` describes it in events.
-    private static func ref(_ tab: Tab) -> BrowserTabRef {
-        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: BrowserEventSource.kind(of: tab), engine: tab.engineKind, url: tab.url)
+    /// The tab as `BrowserEventSource` describes it in events: with its committed address, not the address a WebKit navigation shows before it commits, so a run's documents and site checks follow the page the tab shows.
+    static func ref(_ tab: Tab) -> BrowserTabRef {
+        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: BrowserEventSource.kind(of: tab), engine: tab.engineKind, url: tab.committedURL)
     }
 }

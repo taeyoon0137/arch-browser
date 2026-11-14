@@ -1,4 +1,4 @@
-// The shared hook scheduler: steps of one event from several owners in one chain in order, another event replacing the chain once its running step stops, a close keeping its own chain, a new document ending only other documents' chains, canceling an owner, the per-owner pause after three authentication or provider errors with its resume when one of the step's routes changes, the feature checks for steps with a feature and none for steps without, and a `perRequest` feature's model found only through the step's route. Every step ends exactly once.
+// The shared hook scheduler: steps of one event from several owners in one chain in order, another event replacing the chain once its running step stops, an event of the running step's own effect joining its chain after its waiting steps instead, a close keeping its own chain, a new document ending only other documents' chains, canceling an owner, the per-owner pause after three authentication or provider errors with its resume when one of the step's routes changes, the feature checks for steps with a feature and none for steps without, and a `perRequest` feature's model found only through the step's route. Every step ends exactly once.
 import Foundation
 import Testing
 @testable import AI
@@ -30,6 +30,23 @@ import Testing
         scheduler.post([step("second")], kind: "pageLoaded", subject: tab, event: UUID(), document: page("/b"))
         #expect(await eventually { log.entries.contains("second finished") })
         #expect(log.entries == ["start first", "waiting skipped canceled", "stop first", "first stopped", "start second", "second finished"])
+    }
+
+    @Test func anEventThatTheRunningStepsOwnerCausedJoinsItsChainInsteadOfStoppingIt() async {
+        scheduler.post([step("renaming", work: { _ in try await Task.sleep(for: .milliseconds(300)) }), step("waiting", owner: "hook.b", order: 2_000)],
+                       kind: "titleChanged", subject: tab, event: UUID(), document: page("/a"))
+        #expect(await eventually { log.entries == ["start renaming"] })
+        // The title change of the running step's own rename names its owner among its causes; its steps run after the chain's waiting ones.
+        scheduler.post([step("effect late", owner: "hook.c", order: 3_000), step("effect", owner: "hook.b", order: 1_500)],
+                       kind: "titleChanged", subject: tab, event: UUID(), document: page("/a"), causes: ["hook.a"])
+        #expect(await eventually { log.entries.contains("effect late finished") })
+        #expect(log.entries == ["start renaming", "renaming finished", "start waiting", "waiting finished", "start effect", "effect finished", "start effect late", "effect late finished"])
+        // An event that another owner caused still replaces the chain.
+        scheduler.post([step("held", work: untilCanceled("held"))], kind: "titleChanged", subject: tab, event: UUID(), document: page("/a"))
+        #expect(await eventually { log.entries.last == "start held" })
+        scheduler.post([step("other")], kind: "titleChanged", subject: tab, event: UUID(), document: page("/a"), causes: ["hook.b"])
+        #expect(await eventually { log.entries.contains("other finished") })
+        #expect(log.entries.suffix(4) == ["stop held", "held stopped", "start other", "other finished"])
     }
 
     @Test func aDeclinedStepSkipsAndTheNextRuns() async {

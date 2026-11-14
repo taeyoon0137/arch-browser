@@ -297,6 +297,29 @@ import Testing
         #expect(runner.invocations[0].cause.hookChain == [other, hook.id])
     }
 
+    /// A hook's rename posts its title change while the run still runs; another hook's step for that change waits for the run instead of stopping it.
+    @Test func aRunsOwnEffectJoinsItsChainWithoutStoppingIt() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let titles = HookTrigger.titleChanged(sources: [.page, .suggested])
+        let renaming = try harness.add(instantHook("Renaming", titles))
+        let following = try harness.add(instantHook("Following", titles))
+        let tab = harness.tab()
+        harness.host.show(tab)
+        runner.onRun = { invocation in
+            guard invocation.hook.id == renaming.id else { return }
+            harness.bus.post(.titleChanged(tab: tab, source: .suggested), cause: invocation.cause)
+        }
+        harness.bus.post(.titleChanged(tab: tab, source: .page))
+        #expect(await eventually(within: .seconds(20)) { runner.invocations(of: following.id).count == 2 && harness.entries(of: renaming.id).count == 2 })
+        // The renaming hook completed, and skipped the change it caused itself.
+        #expect(harness.entries(of: renaming.id).map(\.outcome) == [.skipped, .completed])
+        #expect(harness.entries(of: renaming.id).first?.reason == .loop)
+        #expect(runner.cancelled.isEmpty)
+        // The following hook ran for the page's change, then for the rename's, whose chain names the renaming hook.
+        #expect(runner.invocations(of: following.id).map(\.cause.hookChain) == [[following.id], [renaming.id, following.id]])
+    }
+
     @Test func runsPastTheRateCapsAreSkippedWithoutAPauseAndLoggedOnceAMinute() async throws {
         defer { harness.cleanUp() }
         try await harness.start()
@@ -333,7 +356,7 @@ import Testing
         let hook = try harness.add(instantHook("Titles", .titleChanged(sources: [.page])))
         let tab = harness.tab()
         harness.host.show(tab)
-        for _ in 0...HookRateLimiter.runsPerSubject {
+        for _ in 0...BrowserEventRateLimiter.runsPerSubject {
             harness.bus.post(.titleChanged(tab: tab, source: .page))
         }
         #expect(registry.hooks[0].state == .paused(.ranTooOften))
@@ -487,6 +510,26 @@ import Testing
         try relaunched.update(relaunched.hooks[0], script: Data("reviewed".utf8))
         relaunched.resume(hook.id)
         #expect(relaunched.hooks[0].state == .active)
+    }
+
+    /// Edit…, Review, and Duplicate read the file through `scriptFile(of:)`, which tells a changed file and pauses its hook at once, before any run.
+    @Test func aScriptFileChangedOutsideArchSaysSoAndPausesItsHook() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let hook = try harness.add(instantHook("Edited", .tabOpened), script: "original")
+        #expect(registry.scriptFile(of: hook.id) == HookScriptFile(contents: Data("original".utf8), matchesDigest: true))
+        #expect(registry.hooks[0].state == .active)
+        try Data("changed".utf8).write(to: harness.store.scriptURL(of: hook))
+        #expect(registry.scriptFile(of: hook.id) == HookScriptFile(contents: Data("changed".utf8), matchesDigest: false))
+        #expect(registry.hooks[0].state == .paused(.scriptChanged))
+        // A hook the user paused keeps its reason.
+        let paused = try harness.add(instantHook("Paused", .tabOpened), script: "original")
+        registry.pause(paused.id)
+        try Data("changed".utf8).write(to: harness.store.scriptURL(of: paused))
+        #expect(registry.scriptFile(of: paused.id)?.matchesDigest == false)
+        #expect(registry.hooks[1].state == .paused(.user))
+        try FileManager.default.removeItem(at: harness.store.scriptURL(of: paused))
+        #expect(registry.scriptFile(of: paused.id) == nil)
     }
 
     @Test func theDailyCountSkipsRunsPastItUntilTheNextDay() async throws {

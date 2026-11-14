@@ -112,6 +112,18 @@ public enum HookRunResult: Sendable {
     case notRun(String)
 }
 
+/// A hook's script file as it is now.
+public struct HookScriptFile: Equatable, Sendable {
+    public var contents: Data
+    /// false for a file changed outside Arch, which the editor opens only for review and no copy takes (hook decision 8).
+    public var matchesDigest: Bool
+
+    public init(contents: Data, matchesDigest: Bool) {
+        self.contents = contents
+        self.matchesDigest = matchesDigest
+    }
+}
+
 /// A run as a hook's row shows it, in memory only.
 public struct HookRunSummary: Identifiable, Sendable {
     public var id: UUID
@@ -230,7 +242,7 @@ public final class HookRegistry: ObservableObject {
     private var seenProviders: [AIProviderID: String]
     private var subscription: BrowserEventSubscription?
     private var cancellables: Set<AnyCancellable> = []
-    private var limiter = HookRateLimiter()
+    private var limiter = BrowserEventRateLimiter()
     private let slots = HookRunSlots(total: HookRegistry.maximumRunning, perHook: HookRegistry.maximumRunningPerHook, waiting: HookRegistry.maximumWaiting)
     private var failureCounts: [UUID: Int] = [:]
     /// Each tab's last loaded document, which `newAddress` compares.
@@ -395,7 +407,7 @@ public final class HookRegistry: ObservableObject {
         dayCounts[id] = nil
         failureCounts[id] = nil
         loggedSkips[id] = nil
-        limiter.reset(hook: id)
+        limiter.reset(hook.owner)
         for tab in firstLoadCarryOvers.keys { firstLoadCarryOvers[tab]?.remove(id) }
         persist()
     }
@@ -410,10 +422,12 @@ public final class HookRegistry: ObservableObject {
     /// Every Persona with its spaces, in the session's order, for filters and the names Settings gives them.
     public var places: [HookPersonaPlaces] { host.places }
 
-    /// The bytes of the hook's script file as they are now, also when they no longer match its digest, for the editor's Edit and Review; nil when the file is missing.
-    public func scriptContents(of id: UUID) -> Data? {
-        guard let hook = hook(withID: id) else { return nil }
-        return try? Data(contentsOf: store.scriptURL(of: hook))
+    /// The hook's script file as it is now, also when it no longer matches its digest, for the editor's Edit, Review, and Duplicate; nil when the file is missing. An active hook whose file no longer matches pauses with `scriptChanged`, as its next run would, so that its row offers Review.
+    public func scriptFile(of id: UUID) -> HookScriptFile? {
+        guard let hook = hook(withID: id), let contents = try? Data(contentsOf: store.scriptURL(of: hook)) else { return nil }
+        let matchesDigest = HookStore.digest(of: contents) == hook.script.digest
+        if !matchesDigest { pauseHook(id, .scriptChanged) }
+        return HookScriptFile(contents: contents, matchesDigest: matchesDigest)
     }
 
     /// The user's pause: the hook's waiting runs skip and its running run stops.
@@ -429,7 +443,7 @@ public final class HookRegistry: ObservableObject {
         guard let index = index(of: id), let reason = hooks[index].state.pauseReason, mayResume(hooks[index], from: reason) else { return }
         hooks[index].state = .active
         failureCounts[id] = nil
-        limiter.reset(hook: id)
+        limiter.reset(hooks[index].owner)
         scheduler.resume(owner: hooks[index].owner)
         persist()
     }
@@ -627,7 +641,7 @@ public final class HookRegistry: ObservableObject {
                 recordSkip(of: hook, event: event, .loop)
                 continue
             }
-            switch limiter.admit(hook: hook.id, subject: event.subject, at: now()) {
+            switch limiter.admit(hook.owner, subject: event.subject, at: now()) {
             case .allowed:
                 break
             case .overSubject:
@@ -635,7 +649,7 @@ public final class HookRegistry: ObservableObject {
                 if hook.trigger.kind == .titleChanged { pauseHook(hook.id, .ranTooOften) }
                 recordSkip(of: hook, event: event, .rateLimit)
                 continue
-            case .overHook:
+            case .overOwner:
                 recordSkip(of: hook, event: event, .rateLimit)
                 continue
             }
@@ -645,7 +659,9 @@ public final class HookRegistry: ObservableObject {
             steps.append(step(for: hook, at: index, event: event, closedTab: closedTab))
         }
         guard !steps.isEmpty else { return }
-        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event), urls: event.urls)
+        // The effect of a running hook's own run, such as its rename's title change, joins that run's chain rather than stopping the run.
+        let causes = Set((event.cause?.hookChain ?? []).map(Hook.owner(of:)))
+        scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event), urls: event.urls, causes: causes)
     }
 
     /// The address a page, address, or title event belongs to, whose chain ends when the tab commits another document.
@@ -918,7 +934,7 @@ public final class HookRegistry: ObservableObject {
         let date = now()
         switch reason {
         case .rateLimit, .budget:
-            if let last = loggedSkips[hook.id]?[reason], date.timeIntervalSince(last) < HookRateLimiter.window { return }
+            if let last = loggedSkips[hook.id]?[reason], date.timeIntervalSince(last) < BrowserEventRateLimiter.window { return }
         case .dailyLimit:
             if let last = loggedSkips[hook.id]?[reason], Calendar.current.isDate(last, inSameDayAs: date) { return }
         case .loop, .dropped:
@@ -1011,32 +1027,6 @@ final class HookRun {
 }
 
 // MARK: - Limits
-
-/// Loop protection's rate (`docs/hooks.md`, Loop protection): a hook's runs within a minute, at most 10 for one subject and 60 in all. Runs past the caps are not counted.
-struct HookRateLimiter {
-    static let window: TimeInterval = 60
-    static let runsPerSubject = 10
-    static let runsPerHook = 60
-
-    enum Admission: Equatable {
-        case allowed, overSubject, overHook
-    }
-
-    private var admitted: [UUID: [(subject: UUID, date: Date)]] = [:]
-
-    mutating func admit(hook: UUID, subject: UUID, at date: Date) -> Admission {
-        var recent = (admitted[hook] ?? []).filter { date.timeIntervalSince($0.date) < Self.window }
-        defer { admitted[hook] = recent }
-        if recent.filter({ $0.subject == subject }).count >= Self.runsPerSubject { return .overSubject }
-        if recent.count >= Self.runsPerHook { return .overHook }
-        recent.append((subject, date))
-        return .allowed
-    }
-
-    mutating func reset(hook: UUID) {
-        admitted[hook] = nil
-    }
-}
 
 /// The registry's concurrency (`docs/hooks.md`, Running, step 5): at most `total` runs at once and `perHook` for one hook. Waiting runs start in arrival order as slots free, a run blocked by its hook's cap letting later ones pass; beyond `waiting` waiting runs, the oldest is dropped.
 @MainActor

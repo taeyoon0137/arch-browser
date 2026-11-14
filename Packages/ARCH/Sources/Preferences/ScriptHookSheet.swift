@@ -125,6 +125,28 @@ struct ScriptHookDraft: Identifiable {
         return filter
     }
 
+    /// The tab kinds Where offers, which all on stand for an empty set.
+    static let offeredTabKinds: Set<BrowserTabKind> = [.open, .pinned, .favorite, .smallWindow]
+
+    /// Whether the hook runs for tabs of the kind: every kind when the set is empty.
+    func includes(_ kind: BrowserTabKind) -> Bool {
+        tabKinds.isEmpty || tabKinds.contains(kind)
+    }
+
+    /// Whether Where lets the user turn the kind off: not the last kind left on, since no kind at all would read as every kind.
+    func mayExclude(_ kind: BrowserTabKind) -> Bool {
+        let included = tabKinds.isEmpty ? Self.offeredTabKinds : tabKinds.intersection(Self.offeredTabKinds)
+        return included != [kind]
+    }
+
+    /// Turns the kind on or off; all four on become the empty set, and the last kind left on stays on.
+    mutating func setIncludes(_ kind: BrowserTabKind, _ isOn: Bool) {
+        guard isOn || mayExclude(kind) else { return }
+        var kinds = tabKinds.isEmpty ? Self.offeredTabKinds : tabKinds
+        if isOn { kinds.insert(kind) } else { kinds.remove(kind) }
+        tabKinds = kinds == Self.offeredTabKinds ? [] : kinds
+    }
+
     /// The chosen places in the session's order.
     static func ordered(_ chosen: Set<BrowserPlace>, in places: [HookPersonaPlaces]) -> [BrowserPlace] {
         places.flatMap { persona in [BrowserPlace.persona(persona.id)] + persona.spaces.map { BrowserPlace.space($0.id) } }.filter(chosen.contains)
@@ -285,14 +307,10 @@ struct ScriptHookSheet: View {
         }))
     }
 
-    /// The four kinds all on stand for an empty set, which matches every kind but agent tabs.
+    /// The four kinds all on stand for an empty set, which matches every kind but agent tabs, so the last kind left on cannot be turned off.
     private func tabKindToggle(_ title: String, _ kind: BrowserTabKind) -> some View {
-        let all: Set<BrowserTabKind> = [.open, .pinned, .favorite, .smallWindow]
-        return Toggle(title, isOn: Binding(get: { draft.tabKinds.isEmpty || draft.tabKinds.contains(kind) }, set: { isOn in
-            var kinds = draft.tabKinds.isEmpty ? all : draft.tabKinds
-            if isOn { kinds.insert(kind) } else { kinds.remove(kind) }
-            draft.tabKinds = kinds == all ? [] : kinds
-        }))
+        Toggle(title, isOn: Binding(get: { draft.includes(kind) }, set: { draft.setIncludes(kind, $0) }))
+            .disabled(draft.includes(kind) && !draft.mayExclude(kind))
     }
 
     private func save() {
@@ -313,7 +331,7 @@ struct ScriptHookSheet: View {
             problem = "Choose which title changes start the hook."
             return
         }
-        if draft.tabKinds.isEmpty == false && draft.tabKinds.isDisjoint(with: [.open, .pinned, .favorite, .smallWindow]) {
+        if draft.tabKinds.isEmpty == false && draft.tabKinds.isDisjoint(with: ScriptHookDraft.offeredTabKinds) {
             problem = "Choose the tabs the hook runs for."
             return
         }
@@ -334,7 +352,8 @@ struct ScriptHookSheet: View {
                 try registry.add(hook, script: data)
             } else {
                 try registry.update(hook, script: data)
-                if draft.isReview { registry.resume(hook.id) }
+                // The reviewed script lets a hook that its change paused run again; a hook paused for another reason stays paused.
+                if draft.isReview, registry.hooks.first(where: { $0.id == hook.id })?.state == .paused(.scriptChanged) { registry.resume(hook.id) }
             }
             dismiss()
         } catch {

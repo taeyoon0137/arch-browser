@@ -48,7 +48,10 @@ public struct Hook: Identifiable, Codable, Sendable {
     public var usesAgent: Bool { grant.permissions.contains(.agent) }
 
     /// The scheduler's owner of the hook's steps.
-    public var owner: String { "hook.\(id.uuidString)" }
+    public var owner: String { Self.owner(of: id) }
+
+    /// The scheduler's owner of the steps of the hook with the identifier.
+    public static func owner(of id: UUID) -> String { "hook.\(id.uuidString)" }
 }
 
 public enum HookTrigger: Codable, Hashable, Sendable {

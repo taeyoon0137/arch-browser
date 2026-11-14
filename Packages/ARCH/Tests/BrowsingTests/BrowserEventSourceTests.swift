@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, a name from code under the suggested name rules with its cause, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source on fake web contents: a new tab but no restored tabs, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -137,6 +137,39 @@ import Testing
         tab.customTitle = "Mine"
         #expect(!BrowserHooks.suggest("Again", for: document, to: tab, applying: true))
         #expect(!BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
+    }
+
+    /// A name from code that comes while a WebKit navigation waits to commit posts its title change once the address settles, still with the cause of the code that gave it, so a hook does not run again for its own rename.
+    @Test func aNameFromCodeWhileTheAddressWaitsPostsWithItsCauseOnceTheAddressSettles() {
+        let named = URL(string: "https://example.org/pricing")!
+        let (tab, page) = makeTab(named.absoluteString, space: space, engine: .webKit)
+        source.follow(tabs: [tab], postingNewTabs: false)
+        let cause = BrowserEventCause(origin: .hookRun(hook: UUID(), run: UUID()), hookChain: [UUID()])
+        load(tab, page) {
+            page.url = URL(string: "https://example.org/pricing.pdf")
+            tab.webContentsDidChangeURL(page)
+            #expect(bus.withCause(cause) { BrowserHooks.suggest("Plans", for: named, to: tab, applying: true) })
+            #expect(recorder.events.isEmpty)
+            // The navigation becomes a download, and the tab shows its committed address again.
+            page.isLoading = false
+            page.url = named
+            tab.webContentsDidChangeURL(page)
+        }
+        #expect(recorder.events.map(Self.describeAddress) == ["titleChanged suggested https://example.org/pricing"])
+        #expect(recorder.events.first?.cause == cause)
+        // The user's own name after it carries no cause.
+        tab.customTitle = "Mine"
+        #expect(recorder.events.count == 2 && recorder.events.last?.cause == nil)
+    }
+
+    /// The hook registry's tabs give each run tab its document and site checks, so they name the address the tab committed, not one a WebKit navigation shows before it commits.
+    @Test func theHookHostDescribesATabByItsCommittedAddress() {
+        let (tab, page) = makeTab("https://example.org/a", space: space, engine: .webKit)
+        page.isLoading = true
+        page.url = URL(string: "https://example.net/b")
+        tab.webContentsDidChangeURL(page)
+        #expect(tab.url == URL(string: "https://example.net/b") && tab.committedURL == URL(string: "https://example.org/a"))
+        #expect(BrowserHookHost.ref(tab) == BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: URL(string: "https://example.org/a")))
     }
 
     @Test func titleChangesNameTheirSourceAndNoneWhenTheShownNameStays() {

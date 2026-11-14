@@ -6,7 +6,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The name under which documents reach the handler, `window.webkit.messageHandlers.arch`.
     static let handlerName = "arch"
 
-    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null, and runs an event's listeners one after another; a command or an event without a listener throws `noListener`.
+    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
     static let script = #"""
     (() => {
       const handler = window.webkit.messageHandlers.arch;
@@ -18,6 +18,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
       const commandListeners = new Map();
       const eventListeners = new Map();
       let messageListener = null;
+      // What a listener threw as text: an error's message, after its name unless it is a plain Error, or the value itself.
+      const describe = (thrown) => {
+        try {
+          if (thrown instanceof Error) return thrown.name === "Error" ? thrown.message : `${thrown.name}: ${thrown.message}`;
+          return String(thrown);
+        } catch {
+          return "The listener threw a value that has no text.";
+        }
+      };
       Object.defineProperty(window, "__archDeliver", {
         value: async (kind, payload) => {
           const body = JSON.parse(payload);
@@ -29,8 +38,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           }
           if (kind === "event") {
             const listeners = eventListeners.get(body.kind) ?? [];
-            if (listeners.length === 0) throw new Error("noListener");
-            for (const listener of listeners) await listener(body.event);
+            if (listeners.length === 0) return JSON.stringify({ noListener: true });
+            try {
+              for (const listener of listeners) await listener(body.event);
+            } catch (thrown) {
+              return JSON.stringify({ error: describe(thrown) });
+            }
             return null;
           }
           if (!messageListener) return null;
@@ -171,6 +184,8 @@ private extension PluginError {
         case .invalidVersions: return "invalidVersions"
         case .closed: return "closed"
         case .notGranted: return "notGranted"
+        case .noListener: return "noListener"
+        case .listenerFailed: return "listenerFailed"
         }
     }
 }

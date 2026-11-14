@@ -95,10 +95,11 @@ struct AgentHooksPage: View {
         HStack {
             Text(HookSummary.sentence(for: reason)).font(.callout).foregroundStyle(.orange)
             switch reason {
-            case .scriptChanged, .unknownProvider:
+            case .scriptChanged:
                 Button("Review") { edit(hook, reviewing: true) }
                     .disabled(hook.script.isShell)
-            case .user, .needsNewerArch:
+            case .user, .needsNewerArch, .unknownProvider:
+                // An unknown provider's Review, which names the provider and records it, comes with the agent run API (VII.27), which is what pauses a hook for one.
                 EmptyView()
             default:
                 Button("Resume") { registry.resume(hook.id) }
@@ -114,7 +115,7 @@ struct AgentHooksPage: View {
             Button("Run on Current Tab") { runOnCurrentTab(hook) }
                 .disabled(!isReadable)
             Button("Duplicate") { duplicate(hook) }
-                .disabled(!isReadable)
+                .disabled(!isReadable || hook.state == .paused(.scriptChanged))
             Divider()
             Button("Delete…", role: .destructive) { deleting = hook }
         } label: {
@@ -144,8 +145,7 @@ struct AgentHooksPage: View {
     // MARK: Actions
 
     private func edit(_ hook: Hook, reviewing: Bool) {
-        let script = registry.scriptContents(of: hook.id).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        sheet = ScriptHookDraft(editing: hook, script: script, places: registry.places, reviewing: reviewing)
+        sheet = HookScriptActions.draft(editing: hook, file: registry.scriptFile(of: hook.id), places: registry.places, reviewing: reviewing)
     }
 
     private func runOnCurrentTab(_ hook: Hook) {
@@ -159,23 +159,41 @@ struct AgentHooksPage: View {
         }
     }
 
-    /// A copy after the list's last hook, with the original's script, switched on and the user's.
     private func duplicate(_ hook: Hook) {
-        guard let script = registry.scriptContents(of: hook.id) else {
-            message = "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}."
-            return
+        do {
+            let copy = try HookScriptActions.copy(of: hook, file: registry.scriptFile(of: hook.id))
+            try registry.add(copy.hook, script: copy.script)
+        } catch {
+            message = error.localizedDescription
         }
+    }
+}
+
+/// What Edit…, Review, and Duplicate make of a hook and its script file. A file changed outside Arch opens only for review, with its notice, and no copy takes it, so bytes that another program wrote run only once the user has read and saved them (hook decision 8).
+enum HookScriptActions {
+    struct Refusal: LocalizedError {
+        let sentence: String
+        var errorDescription: String? { sentence }
+    }
+
+    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest.
+    static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) -> ScriptHookDraft {
+        let script = file.flatMap { String(data: $0.contents, encoding: .utf8) } ?? ""
+        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || file?.matchesDigest == false)
+    }
+
+    /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch.
+    static func copy(of hook: Hook, file: HookScriptFile?) throws -> (hook: Hook, script: Data) {
+        let name = "\u{201C}\(hook.name)\u{201D}"
+        guard let file else { throw Refusal(sentence: "Arch cannot read the script of \(name).") }
+        guard file.matchesDigest else { throw Refusal(sentence: "The script of \(name) changed outside Arch. Review it before you duplicate the hook.") }
         var copy = hook
         copy.id = UUID()
         copy.name = "\(hook.name) Copy"
         copy.state = .active
         copy.origin = .user
         copy.created = Date()
-        do {
-            try registry.add(copy, script: script)
-        } catch {
-            message = error.localizedDescription
-        }
+        return (copy, file.contents)
     }
 }
 

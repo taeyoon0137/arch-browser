@@ -122,6 +122,8 @@ public final class PluginManager: ObservableObject {
     private let browserHost: (any PluginBrowserHost)?
     /// The Persona's events on the session's bus, which reach the plugins whose manifests list their kinds.
     private var events: BrowserEventSubscription?
+    /// The events each plugin received in the last minute, which loop protection's rate caps (`docs/hooks.md`, Plugins).
+    private var eventLimiter = BrowserEventRateLimiter()
 
     /// A started plugin, its context, and its activation, which its commands, panels, and page script values wait for.
     private struct RunningPlugin {
@@ -927,12 +929,14 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Events
 
-    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
+    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin never receives the events its own calls caused, such as the title change of its rename, and receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to another plugin's or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
     private func deliver(_ event: BrowserEvent) {
         guard !isClosed else { return }
         for installed in plugins where installed.isEnabled && installed.unavailability == nil && installed.manifest.events.contains(event.kind) {
+            if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
             let grant = installed.grant
-            guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: grant.covers)) else { continue }
+            guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: grant.covers)),
+                  eventLimiter.admit(installed.id.rawValue, subject: event.subject, at: Date()) == .allowed else { continue }
             Task { try? await start(installed)?.handle(.browser(view)) }
         }
     }

@@ -107,7 +107,7 @@ public final class HookScriptRunner: HookScriptRunning {
         }
     }
 
-    /// An idle kept instance of the run's hook and Persona with its configuration, or a new one: kept while the hook has fewer than two, otherwise, for a test that comes while both run, one that ends with the run. Kept instances of an older configuration end, once their runs end for those that run.
+    /// An idle kept instance of the run's hook and Persona with its configuration, or a new one: kept while the hook has fewer than two, otherwise, for a test that comes while both run, one that ends with the run. Kept instances of an older configuration end, once their runs end for those that run. The instance is held until the run ends, so its idle stop cannot end it before the event reaches it.
     private func instance(for invocation: HookInvocation) -> Instance {
         let key = InstanceKey(hook: invocation.hook.id, persona: invocation.personaID)
         let configuration = Configuration(invocation.hook)
@@ -117,10 +117,12 @@ public final class HookScriptRunner: HookScriptRunning {
         }
         if let idle = instances[key]?.first(where: { $0.run == nil && !$0.isRetired }) {
             idle.run = invocation.run
+            idle.plugin.isHeld = true
             return idle
         }
         let instance = makeInstance(for: invocation, key: key, configuration: configuration)
         instance.run = invocation.run
+        instance.plugin.isHeld = true
         if (instances[key]?.count ?? 0) < Self.instancesPerHook {
             instances[key, default: []].append(instance)
         } else {
@@ -149,9 +151,10 @@ public final class HookScriptRunner: HookScriptRunning {
         return instance
     }
 
-    /// A run that ended normally leaves its instance idle, or ends it when it was retired or kept for that run only.
+    /// A run that ended normally leaves its instance idle, where its idle stop counts again, or ends it when it was retired or kept for that run only.
     private func release(_ instance: Instance) {
         instance.run = nil
+        instance.plugin.isHeld = false
         if instance.isRetired { end(instance, as: nil) }
     }
 
@@ -228,19 +231,12 @@ public final class HookScriptRunner: HookScriptRunning {
         return .object(["id": .string(hook.id.uuidString), "name": .string(hook.name), "agent": agent ?? .null])
     }
 
-    /// A failed run: a listener that threw or rejected, with its message, or a script that set no listener for the kind.
+    /// A failed run: a script that set no listener for the kind, a listener that threw or rejected, with what it threw, or another error of the delivery, with its description.
     static func outcome(of error: any Error, kind: BrowserEventKind) -> HookRunOutcome {
-        let message = scriptMessage(of: error)
-        if message == "noListener" {
-            return .failed(code: "noListener", message: "The script set no listener for \(kind.rawValue) with arch.events.on.")
+        switch error as? PluginError {
+        case .noListener?: return .failed(code: "noListener", message: "The script set no listener for \(kind.rawValue) with arch.events.on.")
+        case .listenerFailed(let message)?: return .failed(code: "scriptError", message: message)
+        default: return .failed(code: "scriptError", message: error.localizedDescription)
         }
-        return .failed(code: "scriptError", message: message)
-    }
-
-    /// The message of what a listener threw, without WebKit's `Error: ` before it.
-    static func scriptMessage(of error: any Error) -> String {
-        let error = error as NSError
-        guard let text = error.userInfo["WKJavaScriptExceptionMessage"] as? String else { return error.localizedDescription }
-        return text.hasPrefix("Error: ") ? String(text.dropFirst("Error: ".count)) : text
     }
 }

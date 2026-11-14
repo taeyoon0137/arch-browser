@@ -16,7 +16,7 @@ public protocol Plugin: AnyObject {
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
     /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows.
     func panel(for sidebarItemID: String) -> NSViewController?
-    /// An event of a kind the manifest's `events` lists. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws.
+    /// An event of a kind the manifest's `events` lists. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws, a script plugin's with `PluginError.noListener` or `listenerFailed` for its listeners.
     func handle(_ event: PluginEvent) async throws
 }
 
@@ -247,6 +247,10 @@ public enum PluginError: Error, Hashable, Sendable {
     case closed
     /// The call names a tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
     case notGranted(UUID)
+    /// A script plugin's background script set no listener for the event's kind with `arch.events.on`.
+    case noListener
+    /// A listener of the event threw, or its promise rejected, with what it threw as text, such as an error's message.
+    case listenerFailed(String)
 }
 
 extension PluginError: LocalizedError {
@@ -265,6 +269,8 @@ extension PluginError: LocalizedError {
         case let .invalidVersions(reason): return reason
         case .closed: return "The plugin's Persona was deleted."
         case .notGranted: return "The tab is not one this plugin or hook may reach."
+        case .noListener: return "The plugin's script set no listener for the event."
+        case let .listenerFailed(message): return message
         }
     }
 }

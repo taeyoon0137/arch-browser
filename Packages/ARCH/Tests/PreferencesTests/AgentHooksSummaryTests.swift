@@ -1,4 +1,4 @@
-// The texts of Settings ▸ AI ▸ Agent Hooks: a hook's situation, its places as "Persona" and "Persona / Space", its sites, and its pause, and a script hook draft turned back into its trigger and filter.
+// The texts of Settings ▸ AI ▸ Agent Hooks: a hook's situation, its places as "Persona" and "Persona / Space", its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
 import AI
 import Events
 import Foundation
@@ -36,5 +36,36 @@ import Testing
         new.siteChoice = .only
         new.siteList = "example.org, not a site"
         #expect(new.sitePatterns().problem == "\u{201C}not a site\u{201D} is not a site.")
+    }
+
+    @Test func theLastTabKindLeftOnStaysOn() {
+        var draft = ScriptHookDraft(new: places)
+        #expect(draft.tabKinds.isEmpty && draft.includes(.favorite))
+        for kind in [BrowserTabKind.open, .pinned, .favorite] {
+            #expect(draft.mayExclude(kind))
+            draft.setIncludes(kind, false)
+        }
+        #expect(draft.tabKinds == [.smallWindow])
+        // Turning the last one off would leave an empty set, which reads as every kind.
+        #expect(!draft.mayExclude(.smallWindow))
+        draft.setIncludes(.smallWindow, false)
+        #expect(draft.tabKinds == [.smallWindow] && !draft.includes(.open))
+        for kind in [BrowserTabKind.open, .pinned, .favorite] {
+            draft.setIncludes(kind, true)
+        }
+        #expect(draft.tabKinds.isEmpty)
+    }
+
+    @Test func aScriptChangedOutsideArchOpensOnlyForReviewAndIsNotCopied() throws {
+        let hook = Hook(name: "Names", trigger: .tabOpened)
+        let changed = HookScriptFile(contents: Data("changed".utf8), matchesDigest: false)
+        let checked = HookScriptFile(contents: Data("checked".utf8), matchesDigest: true)
+        let review = HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
+        #expect(review.isReview && review.script == "changed")
+        #expect(!HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: changed) }
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: nil) }
+        let copy = try HookScriptActions.copy(of: hook, file: checked)
+        #expect(copy.script == Data("checked".utf8) && copy.hook.name == "Names Copy" && copy.hook.id != hook.id && copy.hook.state == .active)
     }
 }

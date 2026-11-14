@@ -589,7 +589,7 @@ public protocol Plugin: AnyObject {
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
     /// The panel for a sidebar item whose action is `.panel`. The manager asks each time the item opens it.
     func panel(for sidebarItemID: String) -> NSViewController?
-    /// Receives only the events the manifest lists. The manager ignores what it throws; a hook script's run fails with it.
+    /// The manager hands it only the events the manifest lists, never one the plugin's own calls caused, and at most 10 for one subject and 60 in all within a minute, and ignores what it throws; a hook script's run fails with it. A script plugin throws `noListener` when its script set no listener for the kind and `listenerFailed` with what a listener threw.
     func handle(_ event: PluginEvent) async throws
     // Not built yet.
     func settingsPage() -> NSViewController?
@@ -787,6 +787,10 @@ public enum PluginError: Error, Hashable, Sendable {
     case closed
     /// A tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
     case notGranted(UUID)
+    /// A script plugin's background script set no listener for the event's kind.
+    case noListener
+    /// A listener of the event threw, or its promise rejected, with what it threw as text.
+    case listenerFailed(String)
     // Not built yet: a page outside the plugin's sites, and a host outside its `network`.
     case siteNotGranted(URL)
     case networkHostNotGranted(String)
@@ -1100,7 +1104,7 @@ public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts).
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1117,6 +1121,8 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
 - A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, and an event listener the event's script view with its dates in ISO 8601; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
+- An event's listeners run one after another. The delivery function returns what the first that throws or rejects threw, as an error's message after its name unless it is a plain `Error`, or as the thrown value's text, and that no listener was set for the kind, as JSON, which `Plugin.handle(_:)` throws as `PluginError.listenerFailed` and `noListener`. The manager ignores both; a hook script's run fails with them.
+- A plugin never receives an event its own calls caused, such as the title change of its own rename, and receives at most 10 events for one subject and 60 in all within a minute (`docs/hooks.md`, Plugins). Its listeners run outside hook chains, so this cap is what stops two plugins, or a plugin and a hook, that answer each other's renames.
 - `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
 
 Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves with the plugin's reply, and `arch.onMessage((message) => …)` receives `postMessage(_:toTab:)`.

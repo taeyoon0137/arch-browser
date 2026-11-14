@@ -38,6 +38,17 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Settles the call that waits for the background document to load.
     private var settleLoad: (@MainActor (Result<Any?, any Error>) -> Void)?
     private var idleStop: Task<Void, Never>?
+    /// While true, the instance does not stop for being idle. The hook runner holds an instance from when it picks it for a run until the run ends, so the idle stop cannot end it between the pick and the event's delivery.
+    public var isHeld = false {
+        didSet {
+            if isHeld {
+                idleStop?.cancel()
+                idleStop = nil
+            } else if oldValue {
+                stopWhenIdle()
+            }
+        }
+    }
 
     /// An instance of a script plugin's package, installed or held in memory, as a hook script's is.
     public init(package: PluginPackage, limits: ScriptPluginLimits) {
@@ -94,10 +105,13 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         return try JSONDecoder().decode(PluginValue.self, from: Data(reply.utf8))
     }
 
-    /// Runs, one after another, the listeners that the background script set with `arch.events.on(kind, listener)` for the event's kind, and returns once the last one's promise settles. Throws `noListener` as a script error when the script set none for the kind, and the error a listener throws.
+    /// Runs, one after another, the listeners that the background script set with `arch.events.on(kind, listener)` for the event's kind, and returns once the last one's promise settles. Throws `PluginError.noListener` when the script set none for the kind, and `listenerFailed` with what a listener threw.
     public func handle(_ event: PluginEvent) async throws {
-        guard package.background != nil else { return }
-        _ = try await deliver("event", EventDelivery(try event.scriptValue()))
+        guard package.background != nil,
+              let reply = try await deliver("event", EventDelivery(try event.scriptValue())) as? String else { return }
+        let failure = try JSONDecoder().decode(EventFailure.self, from: Data(reply.utf8))
+        if failure.noListener == true { throw PluginError.noListener }
+        throw PluginError.listenerFailed(failure.error ?? "")
     }
 
     /// Hands the payload to the bridge script's delivery function and returns what it returns.
@@ -130,10 +144,10 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Stops the instance once it has gone without calls for the idle limit.
+    /// Stops the instance once it has gone without calls for the idle limit, unless it is held.
     private func stopWhenIdle() {
         idleStop?.cancel()
-        guard waitingCalls.isEmpty, webView != nil else { return }
+        guard waitingCalls.isEmpty, webView != nil, !isHeld else { return }
         idleStop = Task { [weak self, idle = limits.idle] in
             try? await Task.sleep(for: .seconds(idle))
             guard let self, !Task.isCancelled else { return }
@@ -221,6 +235,12 @@ private struct PageMessageDelivery: Encodable {
         isMainFrame = message.isMainFrame
         body = message.body
     }
+}
+
+/// How the delivery function reports an event its listeners did not handle: `noListener` when the script set none for the kind, or `error` with what a listener threw.
+private struct EventFailure: Decodable {
+    let noListener: Bool?
+    let error: String?
 }
 
 /// An event as the delivery function receives it: its kind, which picks the listeners, and its JSON.
