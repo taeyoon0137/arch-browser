@@ -145,14 +145,33 @@ import Testing
 
     @Test func cancellingEndsTheProcessGroup() async throws {
         let pidFile = pidFileURL()
-        // The background sleep is in the same process group.
-        let tool = try toolScript("echo $$ > \"$PID_FILE\"\necho started\nsleep 30 &\nwait")
+        let tool = try toolScript("""
+            mkfifo hold || exit 1
+            group=$$
+            trap 'echo parent >> "$PID_FILE.signals"' TERM
+            (
+                trap 'echo child >> "$PID_FILE.signals"; exit 0' TERM
+                # Keep read blocked without starting another process.
+                exec 3<>hold
+                echo "$group" > "$PID_FILE"
+                read -r line <&3
+            ) &
+            wait
+            # A trapped signal can interrupt wait before the child has exited.
+            wait
+            """)
         let stream = commandLineProvider(tool, environment: ["PID_FILE": pidFile.path]).stream(providerRequest())
         let reader = Task { await collect(stream) }
+        defer { reader.cancel() }
         let group = try await processGroup(in: pidFile)
         reader.cancel()
-        // Before the SIGKILL that follows two seconds after SIGTERM.
-        #expect(await processGroupEnds(group, within: .seconds(1.5)))
+
+        let ended = await processGroupEnds(group, within: .seconds(6))
+        if !ended { kill(-group, SIGKILL) }
+        #expect(ended)
+        // SIGKILL can remove the whole group but cannot produce either receipt.
+        let signals = (try? String(contentsOf: pidFile.appendingPathExtension("signals"), encoding: .utf8)) ?? ""
+        #expect(signals.split(separator: "\n").sorted() == ["child", "parent"])
     }
 
     @Test func aToolThatIgnoresSIGTERMGetsSIGKILL() async throws {
@@ -444,9 +463,9 @@ private func processGroup(in pidFile: URL) async throws -> pid_t {
 /// Whether every process of the group has ended within `timeout`.
 private func processGroupEnds(_ group: pid_t, within timeout: Duration) async -> Bool {
     let deadline = ContinuousClock.now + timeout
-    while ContinuousClock.now < deadline {
+    while true {
         if kill(-group, 0) == -1, errno == ESRCH { return true }
+        if ContinuousClock.now >= deadline { return false }
         try? await Task.sleep(for: .milliseconds(20))
     }
-    return false
 }
