@@ -162,11 +162,15 @@ public final class AIService: ObservableObject, AIClient {
         throw lastError
     }
 
-    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, or the request's route, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:route:carryingPageData:)` does when none is left.
+    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, so that a stored automatic feature takes only one of the models the user chose for it, or the request's route, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:route:carryingPageData:)` does when none is left.
     private func models(for request: AIRequest, feature: AIFeature) throws -> [AIRouteModel] {
         let carriesPageData = AIPartText.carriesData(request.messages)
         var models: [AIRouteModel]
         if let ref = request.pinnedModel {
+            // A tool loop pins its later rounds to the model that served the first, which an automatic feature's own route gave, so nothing pins Tab Names to another model.
+            if feature.routing == .stored, feature.trigger == .automatic, !settings.route(for: feature.id).models.contains(ref) {
+                throw AIError.blockedByPolicy(.routeNotAllowed)
+            }
             guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
             guard let provider = settings.providers.first(where: { $0.id == ref.provider }),
                   let model = provider.models.first(where: { $0.name == ref.model }),

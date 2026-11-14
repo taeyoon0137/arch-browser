@@ -1,4 +1,4 @@
-// Model tiers and request routes (`docs/hooks.md`, Model choice and tiers): tiers resolved with fallbacks, an empty tier's error, request routes accepted for `perRequest` and user features and refused for stored automatic ones, capability drops after a tier, budgets for `perRequest` automatic features, Activity without content, and the tier routes in `ai.json`.
+// Model tiers and request routes (`docs/hooks.md`, Model choice and tiers): tiers resolved with fallbacks, an empty tier's error, request routes accepted for `perRequest` and user features and refused for stored automatic ones, which take a pinned model only from their own route, capability drops after a tier, budgets for `perRequest` automatic features, Activity without content, and the tier routes in `ai.json`.
 import Foundation
 import Testing
 @testable import AI
@@ -155,6 +155,27 @@ private func answering(_ text: String) -> [Step] {
         #expect(log.requests.isEmpty)
         #expect(!service.isAvailable(automaticFeature.id, route: .tier(.fast)))
         #expect(service.usage.automaticRequestCount(for: automaticFeature.id) == 0)
+    }
+
+    /// A pinned model, as a tool loop's later rounds carry, follows the same rule: a stored automatic feature serves only on one of its own models.
+    @Test func aStoredAutomaticFeatureIsPinnedOnlyToItsOwnModels() async {
+        let first = provider("First", models: [AIModelConfiguration(name: "model-a"), AIModelConfiguration(name: "model-b")])
+        let log = ProviderLog()
+        let service = scriptedService(providers: [first], script: ["model-a": answering("ok"), "model-b": answering("other")], log: log)
+        service.register(automaticFeature)
+        let own = AIModelRef(provider: first.id, model: "model-a")
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [own]), for: automaticFeature.id)
+        var other = request(automaticFeature, route: nil)
+        other.pinnedModel = AIModelRef(provider: first.id, model: "model-b")
+        let error = await collect(service.stream(other)).error
+        guard case .blockedByPolicy(.routeNotAllowed) = error else {
+            Issue.record("Expected routeNotAllowed, got \(String(describing: error))")
+            return
+        }
+        #expect(log.requests.isEmpty)
+        var pinned = request(automaticFeature, route: nil)
+        pinned.pinnedModel = own
+        #expect(await collect(service.stream(pinned)).events == ["started:model-a", "text:ok", "finished:completed"])
     }
 
     /// A route names a model and at most two fallbacks.
