@@ -814,6 +814,26 @@ public final class BrowserWindowModel: ObservableObject {
         showAgentPanel(.composer(context))
     }
 
+    /// Resolve the live owner again when a menu action or its confirmation returns.
+    @MainActor func agentSession(of folder: TabFolder) -> AgentSession? {
+        guard let id = folder.agentSessionID, let owner = session.agents?.session(withID: id),
+              !owner.hasEnded, owner.spaceID == currentSpaceID, owner.personaID == personaID,
+              session.folders.contains(where: { $0.id == folder.id && $0.agentSessionID == id && $0.spaceID == currentSpaceID }) else { return nil }
+        return owner
+    }
+
+    enum AgentFolderAction { case show, stop, keepTabs, deleteSession }
+
+    @MainActor func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
+        guard agentSession(of: folder) === owner else { return }
+        switch action {
+        case .show: showAgentSession(owner.id)
+        case .stop: if owner.isTurnRunning { owner.stop() }
+        case .keepTabs: session.keepTabs(ofFolder: folder.id)
+        case .deleteSession: await session.agents?.deleteSession(owner.id)
+        }
+    }
+
     /// Shows a session in the panel, as a row or the indicator's menu does.
     @MainActor public func showAgentSession(_ id: UUID) {
         showAgentPanel(.session(id))

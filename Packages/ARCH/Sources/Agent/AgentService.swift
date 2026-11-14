@@ -751,6 +751,10 @@ import Foundation
     }
 
     private func configure(_ session: AgentSession) {
+        session.closeOwnedTabs = { [weak host, id = session.id] in
+            guard let host else { return }
+            for tab in host.agentTabs(of: id) { host.closeAgentTab(tab.id) }
+        }
         session.modeDidChange = { [weak self, weak session] in
             guard let self, let session else { return }
             self.toolsDidChange(forSession: session.id)

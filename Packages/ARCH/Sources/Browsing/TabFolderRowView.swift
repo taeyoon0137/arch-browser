@@ -1,4 +1,5 @@
 // A folder's row in a space's tab list, above the folder's indented folders and tabs, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row, drags it, and reports its frame, so a dragged tab or folder can find it.
+import Agent
 import LiveFolders
 import SwiftUI
 
@@ -14,6 +15,7 @@ struct TabFolderRowView: View {
     @Environment(\.isDraggingTab) private var isDraggingTab
     @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
+    @State private var deleting: AgentSession?
 
     init(session: BrowserSession, folder: TabFolder) {
         _session = ObservedObject(wrappedValue: session)
@@ -51,6 +53,9 @@ struct TabFolderRowView: View {
                 SidebarNameField(placeholder: "Folder Name", name: folder.name,
                                  onRename: { windowModel.renameFolder(folder.id, to: $0) }, onEnd: { windowModel.endRenamingFolder(folder.id) })
             } else {
+                if let owner = windowModel.agentSession(of: folder) {
+                    SessionFolderState(owner: owner)
+                }
                 Text(folder.name)
                     .font(.system(size: 14))
                     .lineLimit(1)
@@ -95,25 +100,35 @@ struct TabFolderRowView: View {
         .onTapGesture(perform: toggleCollapsed)
         .onHover { isHovering = $0 }
         .contextMenu {
-            if folder.live != nil {
-                Button("Refresh Now") { session.refreshLiveFolder(folder.id) }
-                Button("Mark All as Read") { session.markAllAsRead(inLiveFolder: folder.id) }
-                    .disabled(status.unreadCount == 0)
-                if status.dismissedCount > 0 {
-                    Button("Show Dismissed Items (\(status.dismissedCount))") { withAnimation(.easeInOut(duration: 0.15)) { session.showDismissedItems(inLiveFolder: folder.id) } }
+            if let owner = folder.agentSessionID.flatMap({ session.agents?.session(withID: $0) }) {
+                SessionFolderMenu(owner: owner, perform: { action in
+                    Task { await windowModel.perform(action, on: folder, reviewed: owner) }
+                }, delete: { deleting = owner })
+                .disabled(windowModel.agentSession(of: folder) == nil)
+            } else {
+                if folder.live != nil {
+                    Button("Refresh Now") { session.refreshLiveFolder(folder.id) }
+                    Button("Mark All as Read") { session.markAllAsRead(inLiveFolder: folder.id) }
+                        .disabled(status.unreadCount == 0)
+                    if status.dismissedCount > 0 {
+                        Button("Show Dismissed Items (\(status.dismissedCount))") { withAnimation(.easeInOut(duration: 0.15)) { session.showDismissedItems(inLiveFolder: folder.id) } }
+                    }
+                    Button("Edit Live Folder\u{2026}") { windowModel.showEditLiveFolderSheet(folder.id) }
+                    Divider()
                 }
-                Button("Edit Live Folder\u{2026}") { windowModel.showEditLiveFolderSheet(folder.id) }
+                // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
+                if folder.isAgentFolder { Button("Keep Tabs") { session.keepTabs(ofFolder: folder.id) } }
+                Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
+                FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
                 Divider()
+                if folder.live != nil {
+                    Button("Convert to Folder") { session.convertToFolder(folder.id) }
+                }
+                Button("Delete Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
             }
-            // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
-            if folder.isAgentFolder { Button("Keep Tabs") { session.keepTabs(ofFolder: folder.id) } }
-            Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
-            FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
-            Divider()
-            if folder.live != nil {
-                Button("Convert to Folder") { session.convertToFolder(folder.id) }
-            }
-            Button("Delete Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
+        }
+        .confirmAgentSessionDeletion($deleting) { owner in
+            Task { await windowModel.perform(.deleteSession, on: folder, reviewed: owner) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
@@ -139,6 +154,31 @@ struct TabFolderRowView: View {
     private func toggleCollapsed() {
         guard !isRenaming, sidebarDrag.item == nil else { return }
         withAnimation(.easeInOut(duration: 0.2)) { session.toggleCollapsed(ofFolder: folder.id) }
+    }
+}
+
+private struct SessionFolderState: View {
+    @ObservedObject var owner: AgentSession
+
+    var body: some View {
+        Text(owner.statusText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+}
+
+private struct SessionFolderMenu: View {
+    @ObservedObject var owner: AgentSession
+    let perform: (BrowserWindowModel.AgentFolderAction) -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        Button("Show Session") { perform(.show) }
+        Button("Stop") { perform(.stop) }.disabled(!owner.isTurnRunning)
+        Button("Keep Tabs") { perform(.keepTabs) }
+        Divider()
+        Button("Delete Session…", role: .destructive, action: delete)
     }
 }
 

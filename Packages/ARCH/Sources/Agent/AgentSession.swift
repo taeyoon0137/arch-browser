@@ -124,6 +124,8 @@ extension AgentAPISession: AgentSessionRunning {
     var reportedTools: [String]
     /// The service's: tells the session's connections that their tools changed, after a mode change.
     var modeDidChange: (() -> Void)?
+    /// Closes the browser tabs the session still owns before waiting for its model to end.
+    var closeOwnedTabs: (() -> Void)?
     /// The service's: what the session did, for the `task/event` notifications of the client that started it.
     var taskEvent: ((AgentTaskEvent.Kind, String) -> Void)?
     /// The service's: one sentence and an action for an error, with the tool's name.
@@ -132,6 +134,19 @@ extension AgentAPISession: AgentSessionRunning {
     var readerExcerpt: AgentReaderExcerpt?
     private var hasSentFirstMessage = false
     private var hasNotedForeignTicket = false
+
+    /// The status shown beside the conversation and its sidebar folder.
+    public var statusText: String {
+        if isTakenOver && !hasEnded { return "You have control" }
+        switch state {
+        case .starting: return "Starting"
+        case .running: return "Working"
+        case .waitingForUser: return "Waiting for you"
+        case .done: return "Done"
+        case .stopped: return "Stopped"
+        case .failed: return "Failed"
+        }
+    }
 
     public var items: [AgentTranscriptItem] { transcript.items }
 
@@ -435,6 +450,7 @@ extension AgentAPISession: AgentSessionRunning {
         handedBack.shut()
         if isTurnRunning || state == .starting || state == .running { state = .stopped }
         isTurnRunning = false
+        closeOwnedTabs?()
         await runner?.end(keepingThread: keepingThread)
         isCleanedUp = true
     }
