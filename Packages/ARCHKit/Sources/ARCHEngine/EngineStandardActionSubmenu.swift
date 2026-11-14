@@ -6,8 +6,8 @@ enum EngineStandardActionSubmenu {
     enum Entry {
         /// AppKit's standard action, sent to the view. Left out when the view does not take it.
         case action(String, Selector)
-        /// An item that runs a closure, for what the view's actions do not do alike on both engines.
-        case run(String, () -> Void)
+        /// An action sent to another object than the view, for what the view's actions do not do alike on both engines.
+        case send(String, Selector, to: AnyObject)
         case separator
     }
 
@@ -21,8 +21,10 @@ enum EngineStandardActionSubmenu {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = view
                 menu.addItem(item)
-            case let .run(title, handler):
-                menu.addItem(EngineActionMenuItem(title, handler: handler))
+            case let .send(title, action, target):
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = target
+                menu.addItem(item)
             case .separator:
                 if let last = menu.items.last, !last.isSeparatorItem { menu.addItem(.separator()) }
             }

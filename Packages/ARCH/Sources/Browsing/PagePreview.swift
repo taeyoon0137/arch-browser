@@ -50,6 +50,11 @@ extension PagePreview: EngineWebContentsUIDelegate {
     }
     /// A preview's page does not download, so closing the panel always closes the page at once. Once a tab takes the page, the tab decides.
     func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool { false }
+    /// Places the items the engine hands as a tab's menu places them, in the order of WebKit's own menu. The tab's own items, which open tabs, ask about the selection, or move in the tab's history, and the plugins' items, stay out, as a preview belongs to no tab.
+    func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
+        let handed = PageContextMenuSections(takingItemsOf: menu, for: element)
+        PageContextMenuSections.show([handed.suggestions, handed.spelling, handed.lookUp, handed.editing, handed.fieldSubmenus, handed.share], in: menu)
+    }
 }
 
 // MARK: Panel

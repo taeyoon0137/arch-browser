@@ -1,4 +1,4 @@
-// macOS's text items in the page context menu, which `EngineTextMenuItems` builds alike for both engines from its parts: which items an element gets, in WebKit's order and wording; the submenus of standard actions aimed at the page view, which leave out what the view does not take; the closure items; Share…'s contents; and the translation popover's anchor. A text view stands in for the page view, since it takes every standard action the submenus send. No menu or popover opens.
+// macOS's text items in the page context menu, which `EngineTextMenuItems` builds alike for both engines from its parts: which items an element gets, in WebKit's order and wording; the submenus of standard actions aimed at the page view, which leave out what the view does not take; the closure items; Share…'s contents; Replace with Translation in a field; and the translation popover's anchor. A text view stands in for the page view, since it takes every standard action the submenus send. No menu, panel, or popover opens.
 import AppKit
 import Testing
 @testable import ARCHEngine
@@ -103,7 +103,7 @@ import Testing
         #expect(parents.allSatisfy { $0.isEnabled })
     }
 
-    /// Showing a panel goes to the page view; hiding one hides the system's panel itself, which neither page view's action does.
+    /// Showing a panel goes to the page view; hiding one sends `orderOut:` to the system's panel itself, which neither page view's action does. The panels are only named, never shown.
     @Test func thePanelItemsShowThroughThePageViewAndHideThroughThePanel() {
         let page = NSTextView()
         let element = EngineContextMenuElement(isEditable: true)
@@ -113,8 +113,12 @@ import Testing
         #expect(submenu(EngineContextMenuItem.spellingAndGrammar, of: hidden)?.items.first?.target === page)
         let shown = EngineTextMenuItems.items(for: element, pageView: page, anchor: NSView(), at: .zero,
                                               panels: .init(isSpellingVisible: true, isSubstitutionsVisible: true))
-        #expect(submenu(EngineContextMenuItem.spellingAndGrammar, of: shown)?.items.first is EngineActionMenuItem)
-        #expect(submenu(EngineContextMenuItem.substitutions, of: shown)?.items.first is EngineActionMenuItem)
+        let hideSpelling = submenu(EngineContextMenuItem.spellingAndGrammar, of: shown)?.items.first
+        let hideSubstitutions = submenu(EngineContextMenuItem.substitutions, of: shown)?.items.first
+        #expect(hideSpelling?.action == #selector(NSWindow.orderOut(_:)))
+        #expect(hideSpelling?.target === NSSpellChecker.shared.spellingPanel)
+        #expect(hideSubstitutions?.action == #selector(NSWindow.orderOut(_:)))
+        #expect(hideSubstitutions?.target === NSSpellChecker.shared.substitutionsPanel)
     }
 
     @Test func everySubmenuActionGoesToThePageView() {
@@ -134,6 +138,8 @@ import Testing
         #expect(both.last as? String == "Next page")
         #expect(EngineTextMenuItems.shareItems(for: EngineContextMenuElement(selectedText: "secret", isEditable: true, isPasswordField: true)).isEmpty)
         #expect(EngineTextMenuItems.shareItems(for: EngineContextMenuElement(linkURL: URL(string: "javascript:void(0)"))).isEmpty)
+        // Only web addresses are shared, so an image of a page opened from a file shares nothing.
+        #expect(EngineTextMenuItems.shareItems(for: EngineContextMenuElement(imageURL: URL(string: "file:///Users/me/page/a.png"))).isEmpty)
         let share = items(EngineContextMenuElement(imageURL: image)).first
         #expect(share?.identifier == EngineContextMenuItem.share)
         #expect(share?.isEnabled == true)
@@ -158,7 +164,7 @@ import Testing
         #expect(item?.submenu?.items.first?.target === view)
         // A submenu whose view takes none of its actions is left out, even with an item of its own.
         #expect(EngineStandardActionSubmenu.item("Transformations", EngineContextMenuItem.transformations, sendingTo: NSView(), [
-            .run("Show") {},
+            .send("Hide", #selector(NSObject.copy), to: NSObject()),
             .action("Make Upper Case", #selector(NSResponder.uppercaseWord(_:))),
         ]) == nil)
     }
@@ -183,12 +189,29 @@ import Testing
         _ = item.perform(action, with: item)
         #expect(runs == 1)
         #expect(item.isEnabled)
+        #expect(!EngineActionMenuItem("Back", isEnabled: false) {}.isEnabled)
+    }
+
+    // MARK: Translate
+
+    /// Replace with Translation shows in a field's popover, as in WebKit's own menu, and puts the translation in place of the field's selection through the page view's `insertText(_:)`.
+    @Test func aFieldsTranslationReplacesItsSelectionThroughThePageView() throws {
+        let page = InsertingView()
+        let replace = try #require(EngineTextMenuItems.translationReplacement(for: EngineContextMenuElement(selectedText: "Hallo", isEditable: true), pageView: page))
+        replace("Hello")
+        #expect(page.inserted == ["Hello"])
+        // Outside a field, in a password field, and without a page view, the popover offers no replacement.
+        #expect(EngineTextMenuItems.translationReplacement(for: EngineContextMenuElement(selectedText: "Hallo"), pageView: page) == nil)
+        #expect(EngineTextMenuItems.translationReplacement(for: EngineContextMenuElement(selectedText: "secret", isEditable: true, isPasswordField: true),
+                                                           pageView: page) == nil)
+        #expect(EngineTextMenuItems.translationReplacement(for: EngineContextMenuElement(selectedText: "Hallo", isEditable: true), pageView: nil) == nil)
     }
 
     @Test func theTranslationAnchorIsOnePointAtTheClick() {
         guard #available(macOS 14.4, *) else { return }
         let anchor = EngineTranslationPopover.anchor(for: "fox", at: NSPoint(x: 12, y: 34))
         #expect(anchor.frame == NSRect(x: 12, y: 34, width: 1, height: 1))
+        #expect(EngineTranslationPopover.anchor(for: "fox", at: NSPoint(x: 12, y: 34)) { _ in }.frame == anchor.frame)
         // Without a window the popover has nowhere to show, so nothing is added to the view.
         let view = NSView()
         EngineTranslationPopover.show("fox", at: .zero, in: view)
@@ -199,4 +222,13 @@ import Testing
 /// A page view that takes only Start Speaking.
 private final class SpeakingView: NSView {
     @objc func startSpeaking(_ sender: Any?) {}
+}
+
+/// A page view that records the text it is given to insert.
+private final class InsertingView: NSView {
+    private(set) var inserted: [String] = []
+
+    override func insertText(_ insertString: Any) {
+        inserted.append(insertString as? String ?? "")
+    }
 }

@@ -34,7 +34,7 @@ public enum EngineTextMenuItems {
         if let selection {
             items.append(lookUpItem(selection, anchor: anchor, at: location))
             if #available(macOS 14.4, *) {
-                items.append(translateItem(selection, anchor: anchor, at: location))
+                items.append(translateItem(selection, anchor: anchor, at: location, replace: translationReplacement(for: element, pageView: pageView)))
             }
         }
         let isField = element.isEditable && !element.isPasswordField
@@ -57,7 +57,7 @@ public enum EngineTextMenuItems {
         return "“" + (line.count > limit ? line.prefix(limit) + "…" : line) + "”"
     }
 
-    /// What Share… shares, as WebKit's share item does: the link, web media, and image by address, then the selected text. Nothing in a password field.
+    /// What Share… shares, as WebKit's share item does: the link, media, and image by their web (http or https) addresses, then the selected text. Nothing in a password field, and no address of another kind, such as a `file:`, `blob:`, or `mailto:` address.
     public static func shareItems(for element: EngineContextMenuElement) -> [Any] {
         guard !element.isPasswordField else { return [] }
         let addresses = [element.linkURL, element.mediaURL, element.imageURL].compactMap { $0 }.filter { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
@@ -70,6 +70,12 @@ public enum EngineTextMenuItems {
 
     // MARK: Items
 
+    /// Replace with Translation in the translation popover of a field that is not a password field, as WebKit's own menu offers it there: the translation takes the place of the field's selection through `pageView`'s `insertText(_:)`, AppKit's standard text input action, which both page views take. Nil outside a field and without a page view.
+    static func translationReplacement(for element: EngineContextMenuElement, pageView: NSView?) -> ((String) -> Void)? {
+        guard element.isEditable, !element.isPasswordField, let pageView else { return nil }
+        return { [weak pageView] translation in pageView?.insertText(translation) }
+    }
+
     /// Shows the dictionary's definition of the selection at the click through `NSView.showDefinition(for:at:)`, which works in any view, so both engines show the same panel for the whole selection. A page view's `quickLookWithEvent:` would look up only the word under the click on Chromium.
     private static func lookUpItem(_ selection: String, anchor: NSView, at location: NSPoint) -> NSMenuItem {
         let item = EngineActionMenuItem("Look Up \(quoted(selection))") { [weak anchor] in
@@ -81,19 +87,19 @@ public enum EngineTextMenuItems {
     }
 
     @available(macOS 14.4, *)
-    private static func translateItem(_ selection: String, anchor: NSView, at location: NSPoint) -> NSMenuItem {
+    private static func translateItem(_ selection: String, anchor: NSView, at location: NSPoint, replace: ((String) -> Void)?) -> NSMenuItem {
         let item = EngineActionMenuItem("Translate \(quoted(selection))") { [weak anchor] in
             guard let anchor else { return }
-            EngineTranslationPopover.show(selection, at: location, in: anchor)
+            EngineTranslationPopover.show(selection, at: location, in: anchor, replace: replace)
         }
         item.identifier = EngineContextMenuItem.translate
         return item
     }
 
-    /// Showing the panel goes to the page view, which moves to the next misspelled word as it shows it; hiding it hides the system's panel, which both engines then find hidden.
+    /// Showing the panel goes to the page view, which moves to the next misspelled word as it shows it; hiding it sends `orderOut:` to the system's panel, which both engines then find hidden.
     private static func spellingAndGrammarItem(pageView: NSView, panels: Panels) -> NSMenuItem? {
         EngineStandardActionSubmenu.item("Spelling and Grammar", EngineContextMenuItem.spellingAndGrammar, sendingTo: pageView, [
-            panels.isSpellingVisible ? .run("Hide Spelling and Grammar") { NSSpellChecker.shared.spellingPanel.orderOut(nil) }
+            panels.isSpellingVisible ? .send("Hide Spelling and Grammar", #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.spellingPanel)
                 : .action("Show Spelling and Grammar", #selector(NSText.showGuessPanel(_:))),
             .action("Check Document Now", #selector(NSText.checkSpelling(_:))),
             .separator,
@@ -101,10 +107,10 @@ public enum EngineTextMenuItems {
         ])
     }
 
-    /// Hiding the panel hides the system's panel, because the page views' action only shows it.
+    /// Hiding the panel sends `orderOut:` to the system's panel, because the page views' action only shows it.
     private static func substitutionsItem(pageView: NSView, panels: Panels) -> NSMenuItem? {
         EngineStandardActionSubmenu.item("Substitutions", EngineContextMenuItem.substitutions, sendingTo: pageView, [
-            panels.isSubstitutionsVisible ? .run("Hide Substitutions") { NSSpellChecker.shared.substitutionsPanel.orderOut(nil) }
+            panels.isSubstitutionsVisible ? .send("Hide Substitutions", #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.substitutionsPanel)
                 : .action("Show Substitutions", #selector(NSTextView.orderFrontSubstitutionsPanel(_:))),
             .separator,
             .action("Smart Quotes", #selector(NSTextView.toggleAutomaticQuoteSubstitution(_:))),

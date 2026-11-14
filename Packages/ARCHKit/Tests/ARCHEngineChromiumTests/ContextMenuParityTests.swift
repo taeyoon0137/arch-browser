@@ -80,6 +80,10 @@ private enum Parity {
     static let situations: [Situation] = [
         // Without a selection, Select All is enabled, but it shows only in a field.
         Situation(name: "page background", webKit: [.item(12)], editCommands: [.selectAll], items: [], enabled: []),
+        // A right click away from a selection, as on a part of the page a click cannot select, keeps the selection. WebKit's script still reads it, but WebKit's menu, built for a click off the selection, has no Copy, and Blink hands a selection only for a click on it (`IsSelected`), so neither engine's menu has it.
+        Situation(name: "page background with a selection elsewhere", webKit: [.item(12)], recorded: false,
+                  element: EngineContextMenuElement(selectedText: "quick brown fox"), editCommands: [.copy, .selectAll], chromiumElement: EngineContextMenuElement(),
+                  items: [], enabled: []),
         // A right click inside a selection keeps it. WebKit's view offers no Services for it.
         Situation(name: "selected text outside fields", webKit: textItems + [.item(8), .item(102, enabled: false), .separator, .share, .submenu([49, 50])],
                   element: EngineContextMenuElement(selectedText: "quick brown fox"), editCommands: [.copy, .selectAll],
@@ -120,6 +124,10 @@ private enum Parity {
                   textItems: [EngineContextMenuItem.share], asks: .link),
         Situation(name: "image", webKit: [.item(4), .item(5, enabled: false), .item(6), .item(97, enabled: false), .item(94, enabled: false), .separator, .share],
                   element: EngineContextMenuElement(imageURL: image), editCommands: [.selectAll], items: [], enabled: [], textItems: [EngineContextMenuItem.share]),
+        Situation(name: "image with a selection elsewhere", webKit: [.item(4), .item(5, enabled: false), .item(6), .item(97, enabled: false), .item(94, enabled: false),
+                                                                    .separator, .share],
+                  recorded: false, element: EngineContextMenuElement(imageURL: image, selectedText: "quick brown fox"), editCommands: [.copy, .selectAll],
+                  chromiumElement: EngineContextMenuElement(imageURL: image), items: [], enabled: [], textItems: [EngineContextMenuItem.share]),
         // The link's and the image's records together. Neither engine selects anything above an image.
         Situation(name: "link around an image", webKit: [.item(33), .item(1), .item(2), .item(3), .separator, .item(4), .item(5), .item(6), .separator, .share],
                   recorded: false, element: EngineContextMenuElement(linkURL: link, imageURL: image), editCommands: [.selectAll], items: [], enabled: [],
@@ -195,9 +203,10 @@ private enum Parity {
         let chromiumTextItems = situation.chromiumTextItems ?? situation.textItems
         #expect(chromium.map(\.identifier) == situation.items + chromiumTextItems)
         #expect(chromium.map(\.isEnabled) == (situation.chromiumEnabled ?? situation.enabled) + chromiumTextItems.map { _ in true })
-        // The text items both engines hand read the same, down to their submenus' items.
+        // The text items both engines hand read the same, down to their submenus' items, and act on the same selection.
         if situation.chromiumTextItems == nil {
             #expect(webKit.textTitles == MenuRecorder.Menu(chromium).textTitles)
+            #expect(webKit.selectedText == element.selectedText)
         }
 
         let subject = EngineContextMenuPresenter.subject(for: element, textInputView: page)
@@ -263,11 +272,13 @@ private enum Parity {
             var isEditable: Bool
             /// The titles of the text items, each followed by its submenu's titles.
             var textTitles: [String]
+            var selectedText: String?
 
-            init(_ items: [NSMenuItem], isEditable: Bool = false) {
+            init(_ items: [NSMenuItem], isEditable: Bool = false, selectedText: String? = nil) {
                 self.items = items.map(\.identifier)
                 enabled = items.map(\.isEnabled)
                 self.isEditable = isEditable
+                self.selectedText = selectedText
                 let engineRoles = [EngineContextMenuItem.spellingSuggestion, EngineContextMenuItem.noSpellingSuggestions, EngineContextMenuItem.ignoreSpelling,
                                    EngineContextMenuItem.learnSpelling] + Parity.fieldItems
                 textTitles = items.filter { !engineRoles.contains($0.identifier ?? NSUserInterfaceItemIdentifier("")) }
@@ -278,7 +289,7 @@ private enum Parity {
         private(set) var menus: [Menu] = []
 
         func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
-            menus.append(Menu(menu.items, isEditable: element.isEditable))
+            menus.append(Menu(menu.items, isEditable: element.isEditable, selectedText: element.selectedText))
         }
     }
 }

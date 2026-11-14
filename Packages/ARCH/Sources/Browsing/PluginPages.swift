@@ -70,7 +70,7 @@ final class PluginPages {
             if menu.numberOfItems > 0 { menu.addItem(.separator()) }
             menu.addItem(.sectionHeader(title: section.pluginName))
             for entry in section.items {
-                menu.addItem(ActionMenuItem(entry.title) { Task { await plugins.run(entry.command, invocation) } })
+                menu.addItem(EngineActionMenuItem(entry.title) { Task { await plugins.run(entry.command, invocation) } })
             }
         }
     }

@@ -1,4 +1,4 @@
-// The tab places the items an engine hands it in the page context menu in the order of WebKit's own menu, the same on both engines: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, the link and image items, editing or Copy, the field's text submenus, and Share… with Speech outside a field, separated by lines; Back, Forward, and Reload only when nothing else applies. The engine's own items take the tab's titles, and macOS's text items keep theirs. The tests hand the tab the items an adapter would and open no menu.
+// The tab places the items an engine hands it in the page context menu in the order of WebKit's own menu, the same on both engines: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, the link and image items, editing or Copy, the field's text submenus, and Share… with Speech outside a field, separated by lines; Back, Forward, and Reload only when nothing else applies. The engine's own items take the tab's titles, and macOS's text items keep theirs. The preview panel places the same items in the same sections, without the tab's own. The tests hand the tab and the preview the items an adapter would and open no menu.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -50,6 +50,27 @@ import Testing
         #expect(titles(menu) == ["0", "—", "Ignore Spelling", "Learn Spelling", "—", "Look Up “mispeled”"] + translate("“mispeled”") + ["—", search, "—",
                                  "Cut", "Copy", "Paste", "Select All", "—", "Spelling and Grammar", "Substitutions", "Transformations", "Speech", "—", share])
         #expect(!menu.autoenablesItems)
+    }
+
+    @Test func thePreviewPlacesTheHandedItemsAsTheTabDoesWithoutTheTabsOwn() throws {
+        let contents = UnloadedWebContents(url: URL(string: "https://example.com/"), title: "", engine: .webKit, state: nil)
+        let preview = PagePreview(webContents: contents, personaID: UUID(), openedURL: URL(string: "https://example.com/")!)
+        let element = EngineContextMenuElement(selectedText: "mispeled", isEditable: true)
+        let menu = handedMenu([EngineContextMenuItem.spellingSuggestion, EngineContextMenuItem.ignoreSpelling, EngineContextMenuItem.learnSpelling,
+                               EngineContextMenuItem.cut, EngineContextMenuItem.copy, EngineContextMenuItem.paste, EngineContextMenuItem.selectAll], for: element)
+        let share = try shareTitle(menu)
+        preview.webContents(contents, willShowContextMenuFor: element, menu: menu)
+        #expect(titles(menu) == ["0", "—", "Ignore Spelling", "Learn Spelling", "—", "Look Up “mispeled”"] + translate("“mispeled”") + ["—",
+                                 "Cut", "Copy", "Paste", "Select All", "—", "Spelling and Grammar", "Substitutions", "Transformations", "Speech", "—", share])
+        #expect(!menu.autoenablesItems)
+        // A link shows only Share…, and the page background nothing, since Open Link in New Tab, Back, Forward, and Reload belong to a tab.
+        let link = EngineContextMenuElement(linkURL: URL(string: "https://example.com/next"), selectedText: "Next page")
+        let linkMenu = handedMenu([], for: link)
+        preview.webContents(contents, willShowContextMenuFor: link, menu: linkMenu)
+        #expect(titles(linkMenu) == [share])
+        let background = handedMenu([], for: EngineContextMenuElement())
+        preview.webContents(contents, willShowContextMenuFor: EngineContextMenuElement(), menu: background)
+        #expect(background.items.isEmpty)
     }
 
     @Test func aSelectionOutsideAFieldPutsSpeechAfterShare() throws {

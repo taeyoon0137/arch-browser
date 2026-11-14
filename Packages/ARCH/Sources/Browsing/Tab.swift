@@ -274,75 +274,41 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Context menus
 
-    /// Builds the same menu on both engines, in the order of WebKit's own menu: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, then the link, the image, editing or Copy, Ask About Selection, the field's text submenus, and Share… (with Speech outside a field), separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow. The engine's own items keep their actions and enabled state, and macOS's text items (`EngineTextMenuItems`) also keep their titles.
+    /// Builds the same menu on both engines, in the order of WebKit's own menu: the sections of the items the engine hands (`PageContextMenuSections`) with the tab's own between them: spelling suggestions, Ignore and Learn Spelling, Look Up and Translate, Search with, then the link, the image, editing or Copy, Ask About Selection, the field's text submenus, and Share… (with Speech outside a field), separated by lines. Back, Forward, and Reload show only when none of those apply. The plugins' items follow.
     public func webContents(_ webContents: any EngineWebContents, willShowContextMenuFor element: EngineContextMenuElement, menu: NSMenu) {
-        let engineItems = menu.items
-        menu.removeAllItems()
-        menu.autoenablesItems = false
-        func engineItem(_ identifier: NSUserInterfaceItemIdentifier, _ title: String) -> NSMenuItem? {
-            guard let item = handedItem(identifier) else { return nil }
-            item.title = title
-            return item
-        }
-        func handedItem(_ identifier: NSUserInterfaceItemIdentifier) -> NSMenuItem? {
-            engineItems.first { $0.identifier == identifier }
-        }
-        var sections: [[NSMenuItem]] = []
-        let suggestions = engineItems.filter { $0.identifier == EngineContextMenuItem.spellingSuggestion }
-        if !suggestions.isEmpty {
-            sections.append(Array(suggestions.prefix(5)))
-        } else if let noGuesses = engineItem(EngineContextMenuItem.noSpellingSuggestions, "No Guesses Found") {
-            noGuesses.isEnabled = false
-            sections.append([noGuesses])
-        }
-        sections.append([engineItem(EngineContextMenuItem.ignoreSpelling, "Ignore Spelling"), engineItem(EngineContextMenuItem.learnSpelling, "Learn Spelling")]
-            .compactMap { $0 })
-        sections.append([handedItem(EngineContextMenuItem.lookUp), handedItem(EngineContextMenuItem.translate)].compactMap { $0 })
+        let handed = PageContextMenuSections(takingItemsOf: menu, for: element)
+        var sections = [handed.suggestions, handed.spelling, handed.lookUp]
         if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
-            sections.append([ActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
+            sections.append([EngineActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
         }
         if let link = element.linkURL {
-            sections.append([newTabItem("Open Link in New Tab", for: link), ActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
+            sections.append([newTabItem("Open Link in New Tab", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
-            sections.append([newTabItem("Open Image in New Tab", for: image), ActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+            sections.append([newTabItem("Open Image in New Tab", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
         }
-        if element.isEditable {
-            sections.append([engineItem(EngineContextMenuItem.cut, "Cut"), engineItem(EngineContextMenuItem.copy, "Copy"),
-                             engineItem(EngineContextMenuItem.paste, "Paste"), engineItem(EngineContextMenuItem.selectAll, "Select All")].compactMap { $0 })
-        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = engineItem(EngineContextMenuItem.copy, "Copy") {
-            // WebKit offers Copy outside fields only when the click is not on a link, image, or media, so Chromium follows it.
-            sections.append([copy])
-        }
+        sections.append(handed.editing)
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
            let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
-            sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
+            sections.append([EngineActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
         }
-        // WebKit puts Speech among a field's submenus, and after Share… outside a field.
-        let fieldSubmenus = [EngineContextMenuItem.spellingAndGrammar, EngineContextMenuItem.substitutions, EngineContextMenuItem.transformations]
-            + (element.isEditable ? [EngineContextMenuItem.speech] : [])
-        sections.append(fieldSubmenus.compactMap(handedItem))
-        sections.append(([EngineContextMenuItem.share] + (element.isEditable ? [] : [EngineContextMenuItem.speech])).compactMap(handedItem))
-        sections.removeAll { $0.isEmpty }
-        if sections.isEmpty {
-            sections.append([
-                ActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak webContents] in webContents?.navigationController.goBack() },
-                ActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak webContents] in webContents?.navigationController.goForward() },
-                ActionMenuItem("Reload") { [weak webContents] in webContents?.navigationController.reload() },
-            ])
+        sections += [handed.fieldSubmenus, handed.share]
+        if sections.allSatisfy(\.isEmpty) {
+            sections = [[
+                EngineActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak webContents] in webContents?.navigationController.goBack() },
+                EngineActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak webContents] in webContents?.navigationController.goForward() },
+                EngineActionMenuItem("Reload") { [weak webContents] in webContents?.navigationController.reload() },
+            ]]
         }
-        for (index, section) in sections.enumerated() {
-            if index > 0 { menu.addItem(.separator()) }
-            section.forEach(menu.addItem)
-        }
+        PageContextMenuSections.show(sections, in: menu)
         addPluginMenuItems?(element, menu)
     }
 
     /// Only web addresses open in a tab; a link for another app offers just Copy Link.
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return ActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
+        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
     }
 
     private static func copyToPasteboard(_ url: URL) {
@@ -464,25 +430,5 @@ extension URL {
         components.user = nil
         components.password = nil
         return components.url ?? self
-    }
-}
-
-/// A menu item that runs a closure, because a tab is not an Objective-C object that menu actions can target.
-final class ActionMenuItem: NSMenuItem {
-    private let handler: () -> Void
-
-    init(_ title: String, isEnabled: Bool = true, handler: @escaping () -> Void) {
-        self.handler = handler
-        super.init(title: title, action: #selector(run), keyEquivalent: "")
-        target = self
-        self.isEnabled = isEnabled
-    }
-
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc private func run() {
-        handler()
     }
 }
