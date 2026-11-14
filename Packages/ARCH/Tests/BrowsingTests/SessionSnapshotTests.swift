@@ -1,4 +1,5 @@
 // Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, a scheduled save writes the snapshot taken last, or nothing without one, and the page state is sealed in a file only the user can read.
+import CoreGraphics
 import CryptoKit
 import Foundation
 import LiveFolders
@@ -398,6 +399,27 @@ import Testing
         #expect(try folder.fileNames() == ["session.json"])
     }
 
+    /// A directory in place of the backup makes the rename fail even on a writable volume.
+    @Test func aFailedBackupPreservesTheNewerSessionUntilTheWriteCanRetry() throws {
+        let folder = try SessionFolder()
+        let store = folder.store
+        let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99, "laterField": true,"#)
+        try folder.write(newer)
+        let backup = folder.url.appendingPathComponent("session-v99.json")
+        try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
+
+        var snapshot = try #require(store.load())
+        snapshot.tabs.removeAll()
+        #expect(throws: (any Error).self) { try store.saveNow(snapshot).get() }
+        #expect(try folder.contents(of: "session.json") == Data(newer.utf8))
+        #expect(try folder.fileNames() == ["session-v99.json", "session.json"])
+
+        try FileManager.default.removeItem(at: backup)
+        try store.saveNow(snapshot).get()
+        #expect(try folder.contents(of: "session-v99.json") == Data(newer.utf8))
+        #expect(try #require(folder.store.load()).tabs.isEmpty)
+    }
+
     @Test func unreadableFilesMoveAside() throws {
         let folder = try SessionFolder()
         let unreadable = version8File + "x"
@@ -412,6 +434,19 @@ import Testing
         let folder = try SessionFolder()
         #expect(folder.store.load() == nil)
         #expect(try folder.fileNames().isEmpty)
+    }
+
+    @Test func anUnencodableSessionPreservesTheLastSaveAndANewSaveRecovers() throws {
+        let folder = try SessionFolder()
+        let store = folder.store
+        try folder.write(version11File)
+        var snapshot = try #require(store.load())
+        snapshot.windows?[0].frame = CGRect(x: CGFloat.nan, y: 0, width: 100, height: 100)
+        #expect(throws: (any Error).self) { try store.saveNow(snapshot).get() }
+        #expect(try folder.contents(of: "session.json") == Data(version11File.utf8))
+        snapshot.windows?[0].frame = nil
+        try store.saveNow(snapshot).get()
+        #expect(try #require(store.load()).windows?.first?.frame == nil)
     }
 
     @Test func theClosedListKeepsTheNewestRecordsWithoutTheirPageState() {

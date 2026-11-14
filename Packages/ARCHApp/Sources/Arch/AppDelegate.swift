@@ -117,9 +117,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the tabs' prompts, so that Cancel leaves their cards showing. Closing the last main window quits through the same path.
+    /// Confirm interrupted work, then save while the user can still cancel quitting and keep working.
     func confirmsQuit() -> Bool {
-        confirmsQuitStoppingDownloads() && TerminalWindowController.allowsQuit()
+        guard confirmsQuitStoppingDownloads(), TerminalWindowController.allowsQuit() else { return false }
+        guard let session, case let .failure(error) = session.saveNow() else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Arch couldn’t save your session."
+        alert.informativeText = "\(error.localizedDescription)\n\nIf you quit now, changes to your tabs, windows, and sidebar since the last save may be lost."
+        alert.addButton(withTitle: "Keep Working")
+        alert.addButton(withTitle: "Quit Without Saving").hasDestructiveAction = true
+        NSApp.activate()
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     private func confirmsQuitStoppingDownloads() -> Bool {
@@ -147,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits.
     func applicationWillTerminate(_ notification: Notification) {
-        session?.saveAtQuit()
+        session?.finishWritesAtQuit()
         session?.history.finishWrites()
     }
 
