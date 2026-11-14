@@ -153,12 +153,12 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
     @Test func inAppGuidanceOnlyNamesOfferedToolsAndKeepsTheOutsideGuide() {
         let guide = AgentHarness.guideResult(arguments: [:], inSession: true)
         #expect(guide.text == AgentHarness.sessionInstructions)
-        for name in ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"] {
+        for name in ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"] {
             #expect(guide.text.contains(name))
         }
         for topic in AgentGuideTopic.allCases {
             let text = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true).text
-            for unavailable in ["open_tab", "navigate(", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
+            for unavailable in ["navigate(", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
                 #expect(!text.contains(unavailable), "\(topic) describes \(unavailable)")
             }
         }

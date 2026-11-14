@@ -85,7 +85,7 @@ git config core.hooksPath .githooks
 
 1. In **Settings ▸ AI ▸ Providers**, add a tool-capable HTTP model or a Claude Code or Codex preset. For the preset, sign in through Arch’s terminal. In **AI ▸ Features**, choose a model for **Agent Tasks**.
 2. Right-click a web tab in the sidebar and choose **Ask Agent About This Tab…**. Review the attached tab and model, type a question, and choose **Start**. The conversation opens beside the page. If the agent asks a question, choose a suggested answer, enter your own, or cancel.
-3. Open **Shared Tabs** in the session to add or remove a tab. If the agent requests a tab, review the address in the panel before choosing **Share**. To continue a question from the page reader, choose **Continue as Agent Task**. You can preview and attach the reader excerpt before starting.
+3. Open **Shared Tabs** in the session to add or remove a tab. If the agent requests a tab, review the address in the panel before choosing **Share**. To open an address the agent suggests from your task or a shared tab, choose **Open in Research Tab**. To continue a question from the page reader, choose **Continue as Agent Task**. You can preview and attach the reader excerpt before starting.
 
 <a id="docs"></a>
 
