@@ -1,7 +1,7 @@
 // A native window's session-folder actions use its current Persona, space and the live folder owner.
 import AppKit
 import AgentControl
-import AI
+@testable import AI
 import ARCHEngine
 import Foundation
 import SwiftUI
@@ -53,6 +53,52 @@ import Testing
         #expect(window.canToggleAgentPanel)
         window.toggleAgentPanel()
         #expect(window.agentPanel == .composer(draft) && draft.text == "Compare these notes" && service.sessions.isEmpty)
+    }
+
+    @Test func aMountedSidebarMenuFollowsSiteExclusionsInBothDirections() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let space = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let url = try #require(URL(string: "https://fixture.invalid/note"))
+        let tab = browser.openTab(url: url, in: space.id, select: false)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let host = NSHostingController(rootView: Text("Fixture tab").frame(width: 200, height: 50).contentShape(Rectangle()).contextMenu {
+            SidebarAgentMenuItem(windowModel: window, tab: tab, settings: settings)
+            Button("Copy Address") {}
+        })
+        let native = NSWindow(contentViewController: host)
+        native.setContentSize(NSSize(width: 200, height: 50))
+        host.view.layoutSubtreeIfNeeded()
+        for allowed in [true, false, true] {
+            settings.setAllowsAI(allowed, on: url)
+            var matched = false
+            for _ in 0..<100 {
+                host.view.layoutSubtreeIfNeeded()
+                let point = NSPoint(x: host.view.bounds.midX, y: host.view.bounds.midY)
+                let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: host.view.convert(point, to: nil),
+                                                           modifierFlags: [], timestamp: 0, windowNumber: native.windowNumber,
+                                                           context: nil, eventNumber: 1, clickCount: 1, pressure: 0.5))
+                var hit = host.view.hitTest(point)
+                while let view = hit {
+                    if let menu = view.menu(for: event) {
+                        menu.delegate?.menuNeedsUpdate?(menu)
+                        menu.update()
+                        if menu.item(withTitle: "Copy Address") != nil {
+                            matched = (menu.item(withTitle: "Ask Agent About This Tab…") != nil) == allowed
+                            break
+                        }
+                    }
+                    hit = view.superview
+                }
+                if matched { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(matched, "The same sidebar menu should reflect the current site choice.")
+        }
+        #expect(!native.isVisible && window.agentPanel == nil && service.sessions.isEmpty)
     }
 
     @Test func anOpenFavoritesDraftUsesTheReviewedDocumentAndSpace() throws {

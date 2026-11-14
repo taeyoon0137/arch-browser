@@ -1,4 +1,5 @@
 // A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, for a live folder item's tab, dismiss, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
+import AI
 import AppKit
 import LiveFolders
 import SwiftUI
@@ -132,9 +133,7 @@ struct TabRowView: View {
             Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
             Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
         }
-        if let context = windowModel.sidebarAgentDraft(for: tab) {
-            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context) }
-        }
+        SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
         Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
         Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
         Divider()
@@ -146,6 +145,19 @@ struct TabRowView: View {
             Button("Delete Tab") { session.requestDeleteTab(tab) }
         }
         PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
+    }
+}
+
+/// A tab or favorite’s menu follows the reviewed page and changes in Settings while the sidebar stays mounted.
+struct SidebarAgentMenuItem: View {
+    let windowModel: BrowserWindowModel
+    @ObservedObject var tab: Tab
+    @ObservedObject var settings = AIService.shared.settings
+
+    var body: some View {
+        if let context = windowModel.sidebarAgentDraft(for: tab, settings: settings) {
+            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context) }
+        }
     }
 }
 

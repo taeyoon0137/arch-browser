@@ -788,11 +788,11 @@ public enum BrowserWindowKind {
     }
 
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
-    func sidebarAgentDraft(for tab: Tab) -> AgentComposerContext? {
+    func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
         guard kind == .main, session.agents != nil, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
         return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
-                                     allowsAI: AIService.shared.settings.allowsAI(on:))
+                                     allowsAI: (settings ?? AIService.shared.settings).allowsAI(on:))
     }
 
     static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {

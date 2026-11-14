@@ -36,9 +36,7 @@ struct FavoritesGridView: View {
                         // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
                         if let tab = session.openTab(ofFavorite: favorite) {
                             FavoriteTabSavedPageItems(tab: tab, session: session)
-                            if let context = windowModel.sidebarAgentDraft(for: tab) {
-                                Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context) }
-                            }
+                            SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
                         } else {
                             Button("Use Current Page as Saved Page") {}.disabled(true)
                         }
