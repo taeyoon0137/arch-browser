@@ -378,6 +378,103 @@ import UserNotifications
         #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
     }
 
+    enum ResearchConsentChange: CaseIterable {
+        case approve, deny, reload, query, path, close, exclude, removeSpace, stopSharingAndReattach, takeOverAndHandBack, stop, cancelCall
+    }
+
+    @Test(arguments: ResearchConsentChange.allCases)
+    func ticketOpensOnlyTheExactResearchPageStillUnderReview(_ change: ResearchConsentChange) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let host = harness.host
+        let service = try harness.makeService()
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let address = URL(string: "https://review.example/reports/one?version=a#detail")!
+        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Source title sentinel", url: address, isLoading: false, engine: .webKit)
+        host.tabs = [source]
+        host.userTabIDs = [source.id]
+        let (session, runner) = try start(service, harness, task: "Check the shared reference", attaching: [source.id], mode: .readOnly)
+        let client = try await connectQuestionClient(session, runner, harness)
+        let call = AgentToolCall(name: "open_tab", arguments: ["url": .string(address.absoluteString)])
+        try client.connection.send(.request(id: .number(81), method: AgentControlMethod.toolsCall, params: call.params))
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        #expect(card.ownerID == session.id && card.kind == .openSessionResearch(address) && card.connectionID != nil)
+        #expect(session.state == .waitingForUser && host.openedOwners.isEmpty && host.shownTabIDs.isEmpty)
+        #expect(!service.activity.entries.contains { $0.tool == "open_tab" })
+        switch change {
+        case .approve, .deny: break
+        case .reload: host.tabs[0].documentID = UUID()
+        case .query: host.tabs[0].url = URL(string: "https://review.example/reports/one?version=b#detail")
+        case .path: host.tabs[0].url = URL(string: "https://review.example/reports/two?version=a#detail")
+        case .close: host.tabs.removeAll()
+        case .exclude: harness.excludedHosts.value.insert("review.example")
+        case .removeSpace: host.spacesByPersona[session.personaID]?.removeAll { $0.id == space.id }
+        case .stopSharingAndReattach:
+            service.stopSharing(source.id, with: session)
+            try #require(service.share(source, with: session))
+        case .takeOverAndHandBack:
+            session.takeOver()
+            session.handBack()
+        case .stop: session.stop()
+        case .cancelCall:
+            try client.connection.send(.notification(method: AgentControlMethod.toolsCancelNotification, params: AgentToolCancel(call: 81).params))
+            try await waitUntil { !service.approvals.isPending(card.id) }
+        }
+        let counted = await service.approvals.answer(card.id, with: change == .deny ? .deny : .allowOnce)
+        let response: AgentToolResult
+        while true {
+            if case .result(.number(81), let payload) = try await client.receive() {
+                response = try payload.decode(as: AgentToolResult.self)
+                break
+            }
+        }
+        #expect(host.shownTabIDs.isEmpty && host.shownPanels.isEmpty && service.approvals.pending.isEmpty)
+        if change == .approve {
+            let copies = host.agentTabs(of: session.id)
+            try #require(copies.count == 1)
+            let copy = try #require(copies.first)
+            let handle = try #require(response.structured?["tab"]?.stringValue)
+            #expect(counted && copy.spaceID == space.id && response.status == .ok)
+            #expect(response.structured == ["tab": .string(handle)] && session.handles.tabs.id(for: handle) == copy.id)
+            #expect(response.text.contains(handle) && !response.text.contains(address.absoluteString) && !response.text.contains(source.title))
+            let entries = service.activity.entries.filter { $0.sessionID == session.id && $0.tool == "open_tab" }
+            #expect(entries.map(\.decision) == [.approved])
+            #expect(!String(decoding: try JSONEncoder().encode(entries), as: UTF8.self).contains("version=a"))
+            let step = session.items.compactMap { if case .step(let item) = $0.kind { return item }; return nil }.last
+            #expect(step?.tabID == copy.id && step?.tabHandle == handle)
+            try await waitUntil { host.agentTabs(of: session.id).first?.url == address }
+            #expect(host.researchLoads[copy.id]?(address) == false)
+        } else {
+            #expect(response.status != .ok && response.structured?["tab"] == nil)
+            #expect(host.openedOwners.isEmpty && host.researchLoads.isEmpty)
+            #expect(!service.activity.entries.contains { $0.tool == "open_tab" && $0.outcome == "ok" })
+        }
+    }
+
+    @Test func ticketRefusesUnreviewableResearchAddressesWithoutShowingACard() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let url = "https://review.example/report?edition=public#summary"
+        let (session, runner) = try start(service, harness, task: "Review " + url)
+        let client = try await connectQuestionClient(session, runner, harness)
+        // A mistaken card must finish promptly and be detectable even after its deadline.
+        service.sessionQuestionWindow = 0.1
+        let refused: [[String: AgentJSON]] = [
+            [:], ["url": 17], ["url": .string(url), "engine": "webkit"], ["ref": "e1", "tab": "t1"],
+            ["url": "https://review.example/other?edition=public#summary"],
+            ["url": "https://review.example/report?edition=private#summary"],
+            ["url": "https://review.example/report?edition=public#other"], ["url": "file:///fixture"],
+        ]
+        for arguments in refused {
+            let response = try await client.callTool("open_tab", arguments)
+            #expect(response.status != .ok && response.status != .timeout && response.structured?["tab"] == nil)
+        }
+        #expect(session.state == .running && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
+        #expect(harness.host.shownTabIDs.isEmpty && harness.attentionOwners.isEmpty)
+    }
+
     enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, liveFolderItem, exclude, revoke, takeOver, stop, decline }
 
     @Test(arguments: ChangeBeforeTabConsent.allCases)
@@ -1224,7 +1321,9 @@ import UserNotifications
         let denied = try await bound.callTool("ask_user", ["question": "Show a question despite the task setting"])
         #expect(denied.status == .denied && service.approvals.pending.isEmpty)
         let tools = try await bound.call(AgentControlMethod.toolsList).decode(as: AgentToolList.self)
-        #expect(!tools.tools.contains("request_tab"))
+        #expect(!tools.tools.contains("request_tab") && !tools.tools.contains("open_tab"))
+        let outsideOpen = try await bound.callTool("open_tab", ["url": "https://research.example/report"])
+        #expect(outsideOpen.status == .refused && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
         let outsidePick = try await bound.callTool("request_tab", ["access": "read", "reason": "Pick any tab"])
         #expect(outsidePick.status == .refused && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         // A space of another Persona is not the grant's.
