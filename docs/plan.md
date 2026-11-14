@@ -698,6 +698,8 @@ The engine repository keeps an unfinished start of VI.10 on its local branch `wi
 
 Completed in-app turns list the still-accessible pages the model actually read. Native source links on Chromium and WebKit selected the original document among two with identical titles. After reload, a previously retained link did nothing. These checks used hidden windows with intercepted raise requests.
 
+The signed source-return check covered an already-selected tab beneath a preview, including an independent conversation in another window. The destination dismisses its preview and palette while retaining the original live document.
+
 ### Primary browser acceptance checklist
 
 Assessment on November 14, 2026. Open rows describe what still needs to pass for the user's own workload. Two-Mac sync and protected playback apply when that workflow is used. Run the checks on the same signed build intended for everyday use.
