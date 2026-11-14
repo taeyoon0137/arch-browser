@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, and the Settings list. Queue tasks V.9.5 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, and the check whether this Mac can sync. Queue tasks V.9.6 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, the `Sync` module creates no CloudKit object and makes no network request.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -21,7 +21,7 @@
 - Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
 - The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
 - `scripts/bundle_app.sh` signs the app with `codesign --deep`, without entitlements or a provisioning profile.
-- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, `SyncMirror`, and `SyncedSettings`. No other target depends on it yet, and nothing in it reaches CloudKit's servers. `SyncTests` also depends on `ARCHEngine`, `Browsing`, and `Preferences` to compare the synced keys and values with the app's constants and enums.
+- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, `SyncMirror`, `SyncedSettings`, and `SyncAvailability`. No other target depends on it yet, and nothing in it sends or fetches records. `SyncTests` also depends on `ARCHEngine`, `Browsing`, and `Preferences` to compare the synced keys and values with the app's constants and enums.
 
 ### CloudKit
 
@@ -38,6 +38,7 @@ Checked on macOS 27.2 by `SyncTests`, whose test runner has no iCloud entitlemen
 - A process without iCloud entitlements creates `CKRecord` values in a custom zone, sets their `encryptedValues`, and archives and unarchives them with secure coding, encrypted values included. It reaches no server.
 - `allKeys()` lists the encrypted keys too. A plain read of an encrypted key returns nil, and an encrypted read of a plain key does too. Setting a key in one of the two, even to nil, while the other holds it raises an exception.
 - An array of records unarchives with `unarchivedObject(ofClasses:from:)` given `NSArray` and `CKRecord`. `unarchivedArrayOfObjects(ofClass:from:)` refuses it because of the dictionaries inside a record.
+- `SecTaskCopyValueForEntitlement` on the test runner's own task returns nil for `com.apple.developer.icloud-services` and `com.apple.developer.icloud-container-identifiers`.
 
 ## Decisions
 
@@ -199,7 +200,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## Accounts and removed data
 
-- Before creating the sync engine, Sync reads its own entitlements and then calls `accountStatus()` on the container (Requirements). Without the entitlement or an available account, sync stays off and the toggle explains why.
+- Before creating the sync engine, Sync reads its own entitlements and then calls `accountStatus()` on the container (Requirements). Without the entitlement or an available account, sync stays off and the toggle explains why. `SyncAvailability` makes this check, and the controller makes it again when the app becomes active. `couldNotDetermine` and a status this build does not know count as temporarily unavailable. A check that fails with `missingEntitlement` or `badContainer` counts as not signed for iCloud, since only another build fixes it, and one that fails otherwise counts as temporarily unavailable. An available account comes with the container identifier, which the engine opens and nothing logs or shows.
 - Signing out of iCloud (`accountChange`, `.signOut`) or switching accounts (`.switchAccounts`) turns sync off, keeps the local sidebar, and deletes `sync.json`. Settings says why. Turning sync on again runs a first sync with the current account and merges this Mac's sidebar into it (decision 5). A `.signIn` while the toggle is on starts or resumes sync.
 - When the zone disappears (`fetchedDatabaseChanges` deletions), Sync acts on the reason:
   - `.deleted`: another Mac chose Delete iCloud Data. Sync turns off here, deletes `sync.json`, and keeps local data.
@@ -219,7 +220,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 - `CKSyncEngine` needs macOS 14, the package's deployment target.
 - The iCloud capability needs an Apple Developer Program membership (Not verified 4), an explicit App ID for the app's bundle identifier with iCloud (CloudKit) and Push Notifications, an iCloud container assigned to it, and a provisioning profile for the App ID: macOS App Development with each Mac's device, or Developer ID.
 - `scripts/bundle_app.sh` takes the profile from `ARCH_PROVISIONING_PROFILE`. It embeds the profile as `Contents/embedded.provisionprofile` and decodes it with `security cms -D`. It checks that the profile's App ID matches the bundle identifier. It also checks that the profile allows the chosen CloudKit environment and includes the signing identity among its certificates. It writes an entitlements file under `build/` with the application and team identifiers, `com.apple.developer.icloud-services` (`CloudKit`), `com.apple.developer.icloud-container-identifiers` with the profile's first container (or `ARCH_ICLOUD_CONTAINER`), `com.apple.developer.aps-environment` as given by the profile, and `com.apple.developer.icloud-container-environment` (decision 6). Working Rule 8 keeps these identifiers out of the repository. The script reads them at bundle time and prints none. It signs the frameworks and helper apps inside out without these entitlements, then the app with them. `codesign --deep` would give them to every helper. Without `ARCH_PROVISIONING_PROFILE` it signs as it does today, and Settings says the build is not signed for iCloud. IV.14 needs the same profile step for its passkey entitlement.
-- Without the container entitlement, as with ad hoc signing, `CKContainer` raises an exception. Sync first reads `com.apple.developer.icloud-services` and `com.apple.developer.icloud-container-identifiers` through `SecTaskCopyValueForEntitlement`. It creates no CloudKit object when either is missing.
+- Without the container entitlement, as with ad hoc signing, `CKContainer` raises an exception. Sync first reads `com.apple.developer.icloud-services` and `com.apple.developer.icloud-container-identifiers` through `SecTaskCopyValueForEntitlement`. It creates no CloudKit object when either is missing, when the first lacks `CloudKit`, or when the second's first entry is empty.
 - While sync is on, the app calls `NSApplication.registerForRemoteNotifications()` so CloudKit's change notifications reach the sync engine (Not verified 1).
 
 ## User interface
@@ -247,7 +248,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | Built |
 | `Sync/SyncMirror.swift` | Reads and writes `sync.json` | Built |
 | `Sync/SyncedSettings.swift` | The Settings list: reading, validating, and applying values, the keys changed here, and the settings comparison's records and scope | Built |
-| `Sync/SyncAvailability.swift` | Entitlement and account checks | V.9.5 |
+| `Sync/SyncAvailability.swift` | Entitlement and account checks | Built |
 | `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | V.9.6 |
 | `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | V.9.6 |
 | `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | V.9.7 |
@@ -263,7 +264,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## User steps
 
-Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.5 to V.9.13.
+Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.6 to V.9.13.
 
 1. In the Apple Developer account, make an explicit App ID for the app's bundle identifier (`CFBundleIdentifier` in `scripts/bundle_app.sh`) with the iCloud capability, CloudKit selected, and Push Notifications.
 2. Create an iCloud container and assign it to the App ID. Its identifier stays out of the repository.
