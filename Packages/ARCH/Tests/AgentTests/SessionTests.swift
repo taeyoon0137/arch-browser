@@ -213,6 +213,43 @@ import UserNotifications
         #expect(otherRunner.sent.count == 1)
     }
 
+    @Test func theResearchSheetKeepsDistinctOutlineRefsAndClearsAnUnavailableSelection() async throws {
+        let url = try #require(URL(string: "https://docs.example/article?edition=two#terms"))
+        let sourceURL = try #require(URL(string: "https://docs.example/index"))
+        let tab = UUID(), document = UUID()
+        let manual = AgentResearchPage(url: url, source: .message(UUID()))
+        func outline(_ ref: String) -> AgentResearchPage {
+            let link = AgentOutlineLink(ref: ref, name: "Terms", fingerprint: "a|link||Terms", url: url)
+            return AgentResearchPage(url: url, source: .outline(tab: tab, document: document, address: sourceURL, handle: "t1", link: link))
+        }
+        let first = outline("e3"), second = outline("e7")
+        #expect(first.outlineLabel != second.outlineLabel && first.url == second.url)
+        var selected: AgentResearchPage?
+        var opens = 0
+        func sheet(_ pages: [AgentResearchPage]) -> AgentResearchSheet {
+            AgentResearchSheet(pages: pages, choice: Binding(get: { selected }, set: { selected = $0 }),
+                               open: { _ in opens += 1; return true }, close: {})
+        }
+        let host = NSHostingController(rootView: sheet([manual, first, second]))
+        let window = NSWindow(contentViewController: host)
+        host.view.layoutSubtreeIfNeeded()
+        #expect(selected == nil && opens == 0)
+        selected = second
+        host.rootView = sheet([manual, first, second])
+        func hasAddressViewport(_ view: NSView) -> Bool {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 20 { return true }
+            return view.subviews.contains(where: hasAddressViewport)
+        }
+        try await waitUntil {
+            host.view.layoutSubtreeIfNeeded()
+            return hasAddressViewport(host.view)
+        }
+        #expect(opens == 0)
+        host.rootView = sheet([manual, first])
+        try await waitUntil { selected == nil }
+        #expect(opens == 0 && !window.isVisible)
+    }
+
     @Test func researchPagesOpenOnlyTheReviewedAddressAndRefuseEverySubsequentNavigation() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
