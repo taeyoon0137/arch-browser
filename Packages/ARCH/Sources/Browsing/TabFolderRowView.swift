@@ -61,9 +61,10 @@ struct TabFolderRowView: View {
                 }
             }
             Spacer(minLength: 0)
+            // A status mark, drawn as a tab row's sound and prompt marks are.
             if folder.live != nil, let error = status.error {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .help(Self.failureHelp(error, nextAttempt: status.nextAttempt))
                     .accessibilityLabel("Refresh Failed")
