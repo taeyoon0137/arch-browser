@@ -353,13 +353,16 @@ extension AgentTabInfo {
         return "\(title) · \(address)"
     }
 
-    /// Add query and fragment only to choices whose title and reduced address would otherwise be identical.
+    /// Use the full local address to distinguish matching labels. For identical choices, keep their order in the picker.
     static func attachmentLabels(for tabs: [Self]) -> [UUID: String] {
         var labels = [UUID: String]()
         for (label, group) in Dictionary(grouping: tabs, by: \.attachmentLabel) {
             let needsFullAddress = group.count > 1 && Set(group.compactMap(\.attachmentAddress)).count > 1
-            for tab in group {
-                labels[tab.id] = needsFullAddress ? tab.attachmentLabel(address: tab.attachmentAddress) : label
+            let byAddress = Dictionary(grouping: group) { needsFullAddress ? $0.attachmentLabel(address: $0.attachmentAddress) : label }
+            for (addressLabel, matches) in byAddress {
+                for (index, tab) in matches.enumerated() {
+                    labels[tab.id] = matches.count > 1 ? "Tab \(index + 1) · \(addressLabel)" : addressLabel
+                }
             }
         }
         return labels

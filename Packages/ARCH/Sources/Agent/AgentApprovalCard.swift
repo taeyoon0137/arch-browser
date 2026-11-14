@@ -88,7 +88,7 @@ struct AgentApprovalCard: View {
                 .foregroundStyle(.secondary)
             TextField("A note for the agent (optional)", text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
-        case .shareSessionTab(let tabs):
+        case .shareSessionTab(let tabs), .requestTab(let tabs, _):
             if tabs.isEmpty {
                 Text("No eligible tabs to share in this Persona.")
                     .font(.caption)
@@ -104,18 +104,6 @@ struct AgentApprovalCard: View {
                 if let selected = tabs.first(where: { $0.id == chosenTab }) {
                     AgentAttachmentLabel(tab: selected)
                 }
-            }
-        case .requestTab(let tabs, _):
-            if tabs.isEmpty {
-                Text("You have no open tab in this Persona.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Picker("Tab", selection: $chosenTab) {
-                    Text("Choose a tab").tag(UUID?.none)
-                    ForEach(tabs) { tab in Text([tab.title, tab.host].compactMap { $0 }.joined(separator: " \u{2014} ")).tag(Optional(tab.id)) }
-                }
-                .labelsHidden()
             }
         default:
             EmptyView()

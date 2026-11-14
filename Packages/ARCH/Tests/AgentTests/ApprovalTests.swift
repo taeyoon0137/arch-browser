@@ -147,12 +147,12 @@ import Testing
         var grant: AgentGrant
         var toolHost: AgentToolHost
 
-        init(level: AgentAccessLevel = .askBeforeActing) {
+        init(level: AgentAccessLevel = .askBeforeActing, allowsAI: @escaping (URL) -> Bool = { $0.host != "excluded.example" }) {
             grant = AgentGrant(client: AgentClientIdentity(key: .signed(identifier: "com.example.codex", team: "ABCDE12345"), name: "codex", executablePath: "/usr/local/bin/codex", host: "Terminal",
                                                            isInterpreter: false),
                                personaID: FakeHost.defaultPersona.id, spaceID: host.spaces(in: FakeHost.defaultPersona.id)[0].id, level: level, scopes: AgentGrantScopes(), expiry: .whenArchQuits,
                                grantedAt: Date())
-            toolHost = AgentToolHost(host: host, allowsAI: { $0.host != "excluded.example" })
+            toolHost = AgentToolHost(host: host, allowsAI: allowsAI)
             toolHost.answerWait = 0.3
             toolHost.approvalWindow = 30
             toolHost.approvals.authenticator = FakeAuthenticator()
@@ -214,7 +214,7 @@ import Testing
         fixture.host.pages[userTab.url!] = ("Inbox", "Three new messages.")
         async let requested = fixture.call("request_tab", ["reason": "To read the latest message", "access": "read"])
         let pick = try await fixture.waitForCard()
-        #expect(pick.kind == .requestTab([AgentTabChoice(id: userTab.id, title: "Inbox", host: "mail.example")], acting: false))
+        #expect(pick.kind == .requestTab([userTab], acting: false))
         #expect(pick.needsAuthentication(for: .tab(userTab.id)) && !pick.needsAuthentication(for: .deny))
         let authenticator = try #require(fixture.toolHost.approvals.authenticator as? FakeAuthenticator)
         authenticator.answer = false
@@ -243,6 +243,74 @@ import Testing
         async let refused = fixture.call("request_tab", ["reason": "More", "access": "act"])
         await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .deny)
         #expect(await refused.status == .denied)
+    }
+
+    enum SharedTabChange: CaseIterable { case reload, address, excluded, unloaded, owner, leftPersona, unoffered }
+
+    @Test(arguments: SharedTabChange.allCases) func anOutsideShareRequiresTheReviewedEligibleDocument(_ change: SharedTabChange) async throws {
+        struct ExcludeDuringAuthentication: AgentAuthenticating {
+            let siteAllowed: Shared<Bool>
+
+            func authenticate(reason: String) async -> Bool {
+                siteAllowed.value = false
+                return true
+            }
+        }
+        let siteAllowed = Shared(true)
+        let fixture = Fixture(allowsAI: { _ in siteAllowed.value })
+        fixture.toolHost.answerWait = 10
+        let tab = AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Source", url: URL(string: "https://docs.example/report?id=1"),
+                               isLoading: false, engine: .webKit)
+        fixture.host.tabs = [tab]
+        fixture.host.userTabIDs = [tab.id]
+        async let request = fixture.call("request_tab", ["access": "act", "reason": "Review a source"])
+        let card = try await fixture.waitForCard()
+        #expect(card.kind == .requestTab([tab], acting: true))
+        var chosenID = tab.id
+        switch change {
+        case .reload: fixture.host.tabs[0].documentID = UUID()
+        case .address: fixture.host.tabs[0].url = URL(string: "https://docs.example/report?id=2")
+        case .excluded: fixture.toolHost.approvals.authenticator = ExcludeDuringAuthentication(siteAllowed: siteAllowed)
+        case .unloaded: fixture.host.tabs[0].isLoaded = false
+        case .owner: fixture.host.tabs[0].agentOwnerID = UUID()
+        case .leftPersona: fixture.host.userTabIDs.remove(tab.id)
+        case .unoffered:
+            var later = tab
+            later.id = UUID()
+            fixture.host.tabs.append(later)
+            fixture.host.userTabIDs.insert(later.id)
+            chosenID = later.id
+        }
+        #expect(await fixture.toolHost.approvals.answer(card.id, with: .tab(chosenID)))
+        let refused = await request
+        #expect(refused.status == .stale && refused.code == "stale" && refused.structured == nil)
+        #expect(fixture.state.handles.sharedTabIDs.isEmpty && fixture.state.handles.actingSharedTabIDs.isEmpty)
+        #expect(fixture.state.handles.tabs.id(for: "t1") == nil)
+    }
+
+    @Test func anOutsidePickerOnlyOffersEligiblePagesAndSharesTheChosenTabAfterReordering() async throws {
+        let fixture = Fixture()
+        fixture.toolHost.answerWait = 10
+        let tabs = ["https://docs.example/report?id=first", "https://docs.example/report?id=second",
+                    "https://excluded.example", "arch://settings", "https://unloaded.example", "https://agent.example"].map {
+            AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Report", url: URL(string: $0), isLoading: false, engine: .webKit)
+        }
+        fixture.host.tabs = tabs
+        fixture.host.tabs[1].isLiveFolderItem = true
+        fixture.host.tabs[4].isLoaded = false
+        fixture.host.tabs[5].agentOwnerID = UUID()
+        fixture.host.userTabIDs = Set(tabs.map(\.id))
+        async let request = fixture.call("request_tab", ["access": "act", "reason": "Use the chosen page"])
+        let card = try await fixture.waitForCard()
+        #expect(card.kind == .requestTab(Array(fixture.host.tabs.prefix(2)), acting: true))
+        let chosen = tabs[1]
+        fixture.host.tabs.reverse()
+        #expect(await fixture.toolHost.approvals.answer(card.id, with: .tab(chosen.id)))
+        let allowed = await request
+        #expect(allowed.status == .ok && allowed.structured?["access"] == "act" && allowed.structured?["host"] == "docs.example")
+        #expect(!allowed.text.contains("?id=") && !String(describing: allowed.structured).contains("?id="))
+        #expect(fixture.state.handles.tabs.id(for: "t1") == chosen.id)
+        #expect(fixture.state.handles.sharedTabIDs == [chosen.id] && fixture.state.handles.actingSharedTabIDs == [chosen.id])
     }
 
     @Test func aPagesDownloadAndLinkToAnotherAppAskOnCardsOfTheirOwn() async throws {

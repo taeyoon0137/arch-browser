@@ -57,8 +57,12 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
         self.agentOwnerID = agentOwnerID
     }
 
+    func canShareWithAgent(allowsAI: (URL) -> Bool) -> Bool {
+        isLoaded && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
+    }
+
     func canAttachToSession(allowsAI: (URL) -> Bool) -> Bool {
-        isLoaded && !isLiveFolderItem && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
+        !isLiveFolderItem && canShareWithAgent(allowsAI: allowsAI)
     }
 
     func showsSameDocument(as other: Self) -> Bool {

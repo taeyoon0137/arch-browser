@@ -6,27 +6,26 @@ extension AgentToolHost {
     func requestTab(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let acting = arguments["access"]?.stringValue == "act"
         let reason = arguments["reason"]?.stringValue ?? ""
-        let tabs = host.userTabs(in: grant.personaID)
-        let choices = tabs.map { AgentTabChoice(id: $0.id, title: $0.title, host: $0.url?.host) }
+        let choices = host.userTabs(in: grant.personaID).filter { $0.canShareWithAgent(allowsAI: allowsAI) }
         let card = AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: .requestTab(choices, acting: acting),
                                  isSensitive: false, offers: [.deny], action: acting ? "Share one of your tabs for the agent to read and act in" : "Share one of your tabs for the agent to read",
                                  agentSays: reason, connectionID: connectionID, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         box.approvalID = card.id
         let answer = await approvals.request(card)
-        guard case .tab(let tabID) = answer, let tab = host.userTabs(in: grant.personaID).first(where: { $0.id == tabID }) else {
+        guard case .tab(let tabID) = answer else {
             return userEnded(answer, ask: "share a tab", decision: answer == .timedOut ? .timedOut : .denied)
+        }
+        guard let choice = choices.first(where: { $0.id == tabID }),
+              let tab = host.userTabs(in: grant.personaID).first(where: { $0.showsSameDocument(as: choice) && $0.canShareWithAgent(allowsAI: allowsAI) }) else {
+            return Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared."), decision: .refused)
         }
         let handle = state.handles.tabs.handle(for: tab.id)
         if !state.handles.sharedTabIDs.contains(tab.id) { state.handles.sharedTabIDs.append(tab.id) }
         if acting { state.handles.actingSharedTabIDs.insert(tab.id) } else { state.handles.actingSharedTabIDs.remove(tab.id) }
-        let readable = AgentPolicy.showsTitle(of: tab.url, allowsAI: allowsAI)
-        let described = readable ? "\(Self.pageName(tab.title, url: tab.url)) on \(tab.url?.host ?? "a page")" : "a page that agents do not read"
-        let text = "The user shared \(handle): \(described), for \(acting ? "reading and acting; every action there asks the user (P12)" : "reading only")."
-        var structured: [String: AgentJSON] = ["tab": .string(handle), "access": .string(acting ? "act" : "read")]
-        if readable {
-            structured["title"] = .string(Self.pageName(tab.title, url: tab.url))
-            structured["host"] = tab.url?.host.map(AgentJSON.string) ?? .null
-        }
+        let title = Self.pageName(tab.title, url: tab.url)
+        let text = "The user shared \(handle): \(title) on \(tab.url?.host ?? "a page"), for \(acting ? "reading and acting; every action there asks the user (P12)" : "reading only")."
+        let structured: [String: AgentJSON] = ["tab": .string(handle), "access": .string(acting ? "act" : "read"),
+                                                "title": .string(title), "host": tab.url?.host.map(AgentJSON.string) ?? .null]
         // An outside client's Share counted only after Touch ID or the login password (`AgentApproval.needsAuthentication(for:)`).
         return Outcome(result: AgentToolResult(status: .ok, text: text, structured: .object(structured)), site: tab.url.flatMap(AgentActivityEntry.site(of:)),
                        step: "You shared \(handle) for \(acting ? "reading and acting" : "reading")", decision: card.needsAuthentication(for: answer) ? .approvedWithTouchID : .approved)

@@ -14,26 +14,13 @@ public enum AgentApprovalKind: Equatable, Sendable {
     /// `hand_to_user`, with its reason.
     case handToUser(String)
     /// `request_tab`, with the tabs the user can pick and whether the agent asks to act in it.
-    case requestTab([AgentTabChoice], acting: Bool)
+    case requestTab([AgentTabInfo], acting: Bool)
     /// The app session may read the one document the user explicitly chooses.
     case shareSessionTab([AgentTabInfo])
     /// A download a page in an agent tab started (P6).
     case download
     /// A link to another app that a page in an agent tab opened (P11), with the app's name.
     case externalApp(String)
-}
-
-/// A tab `request_tab` offers.
-public struct AgentTabChoice: Identifiable, Equatable, Sendable {
-    public var id: UUID
-    public var title: String
-    public var host: String?
-
-    public init(id: UUID, title: String, host: String?) {
-        self.id = id
-        self.title = title
-        self.host = host
-    }
 }
 
 /// How a card ended.
