@@ -527,6 +527,8 @@ public protocol Engine: AnyObject {
 
 ## session.json
 
+A signed fixture exercised the normal browser session across three processes with the same temporary profile and one pinned local page. Chromium loaded the page on the first launch. With Chromium omitted from the engine registry on the second launch, WebKit rendered the page and the saved snapshot still named Chromium. On the third launch Chromium returned and rendered the same tab. The UUID and preferred engine stayed the same, and each renderer returned the fixture’s title and text. The fixture used unseen windows and kept the foreground app in place. This check simulates an unavailable engine by omitting its registration.
+
 ```swift
 struct SessionSnapshot: Codable {
     /// Each step that adds fields takes the next free number when it lands, as folders (III.3) do. The doc comment lists what each version adds.
