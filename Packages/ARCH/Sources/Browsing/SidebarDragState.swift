@@ -43,6 +43,58 @@ struct SidebarReorderHover {
     }
 }
 
+/// The dimmed slot follows the pointer without moving a real tab. A shortcut drop discards
+/// this slot. An ordinary drop resolves it against the current tabs and folders.
+@MainActor enum SidebarTabSlot: Equatable {
+    case beside(UUID, folder: UUID?, pinned: Bool, after: Bool)
+    case end(pinned: Bool)
+
+    var pinned: Bool {
+        switch self {
+        case .beside(_, _, let pinned, _), .end(let pinned): return pinned
+        }
+    }
+
+    var folderID: UUID? {
+        if case .beside(_, let folder, _, _) = self { return folder }
+        return nil
+    }
+
+    /// Move only the dragged row in this render's lists. Its identity stays with the gesture.
+    func project(_ tab: Tab, pinnedRows: inout [FolderTree.Row], openRows: inout [FolderTree.Row]) {
+        var destination = (pinned ? pinnedRows : openRows).filter { $0.id != tab.id }
+        switch self {
+        case .beside(let id, let folder, _, let after):
+            guard let index = destination.firstIndex(where: { $0.id == id }),
+                  case .tab(let target, let depth) = destination[index], target.folderID == folder else { return }
+            destination.insert(.tab(tab, depth: depth), at: after ? index + 1 : index)
+        case .end:
+            destination.append(.tab(tab, depth: 0))
+        }
+        if pinned {
+            pinnedRows = destination
+            openRows.removeAll { $0.id == tab.id }
+        } else {
+            openRows = destination
+            pinnedRows.removeAll { $0.id == tab.id }
+        }
+    }
+
+    func commit(_ tab: Tab, in space: Space, session: BrowserSession) {
+        guard tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
+              session.tabs.contains(where: { $0 === tab }) else { return }
+        switch self {
+        case .end(let pinned):
+            session.moveTabToListEnd(tab.id, pinned: pinned)
+        case .beside(let id, let folder, let pinned, let after):
+            guard let target = session.tabs.first(where: { $0.id == id && $0.spaceID == space.id }),
+                  target.isPinned == pinned, target.folderID == folder, target.isListedInSidebar,
+                  !session.folderTree.isInCollapsedFolder(target) else { return }
+            session.moveTab(tab.id, to: target, after: after)
+        }
+    }
+}
+
 /// A drag in the window's sidebar: the tab row, folder row, favorite, or space symbol it lifts, its drop target, and the frames of the space symbols and the page area's panes that a dragged row's targets are found in. The window draws the lifted item above the sidebar and the page, so it can follow the pointer out of the list.
 final class SidebarDragState: ObservableObject {
     /// How long a lifted item's shadow and its slot's dimming take to appear and disappear.

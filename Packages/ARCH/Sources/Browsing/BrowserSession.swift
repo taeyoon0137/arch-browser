@@ -1318,8 +1318,8 @@ final class EngineRuntime {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. Within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
-    @discardableResult public func moveTab(_ id: UUID, to target: Tab) -> Bool {
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
+    @discardableResult public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) -> Bool {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
         let tab = tabs[from]
@@ -1332,7 +1332,7 @@ final class EngineRuntime {
             tab.spaceID = spaceID
             tab.isPinned = target.isPinned
             tab.folderID = target.folderID
-            reordered.insert(tab, at: isSameList && from < to ? targetIndex + 1 : targetIndex)
+            reordered.insert(tab, at: (after ?? (isSameList && from < to)) ? targetIndex + 1 : targetIndex)
             tabs = reordered
         }
         return true

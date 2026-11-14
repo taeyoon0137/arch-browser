@@ -104,6 +104,67 @@ import Testing
         #expect(drag.targetFavoriteSpaceID == nil)
     }
 
+    @Test(arguments: [false, true]) func favoritingAcrossThePinDividerKeepsTheSourceInItsFolder(pinned: Bool) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let folder = session.makeFolder(in: space.id, pinned: pinned)
+        let tabs = ["before", "page", "after"].map {
+            session.openTab(url: URL(string: "about:blank#\($0)")!, in: space.id, select: false)
+        }
+        for tab in tabs { session.moveTab(tab.id, toFolder: folder.id) }
+        let tab = tabs[1], contents = tab.webContents
+        let saved = pinned ? SavedPage(url: URL(string: "about:blank#original")!, title: "Original title") : nil
+        tab.savedPage = saved
+
+        let slot = SidebarTabSlot.end(pinned: !pinned)
+        var pins = session.folderTree.rows(in: space.id, pinned: true)
+        var open = session.folderTree.rows(in: space.id, pinned: false)
+        slot.project(tab, pinnedRows: &pins, openRows: &open)
+        #expect((pinned ? open : pins).last?.id == tab.id)
+        #expect(!(pinned ? pins : open).contains { $0.id == tab.id })
+
+        session.moveTab(tabs[2], up: true)
+        let another = session.openTab(url: URL(string: "about:blank#later")!, in: space.id, select: false)
+        session.moveTab(another.id, toFolder: folder.id)
+        session.addFavorite(tab)
+        #expect(session.favorites(in: space.resolvedPersonaID).map(\.url) == [tab.url])
+        #expect(session.folderTree.tabs(inFolder: folder.id).map(\.id) == [tabs[0].id, tabs[2].id, tab.id, another.id])
+        #expect(tab.isPinned == pinned && tab.savedPage == saved && tab.folderID == folder.id && tab.webContents === contents)
+    }
+
+    @Test func releasingTheRowCommitsItsDisplayedSideOnlyWhileItsTargetStillExists() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let tab = session.openTab(url: URL(string: "about:blank#source")!, in: space.id, select: false)
+        let target = session.openTab(url: URL(string: "about:blank#target")!, in: space.id, select: false)
+        let neighbor = session.openTab(url: URL(string: "about:blank#neighbor")!, in: space.id, select: false)
+        let slot = SidebarTabSlot.beside(target.id, folder: nil, pinned: false, after: true)
+        // An independent move before release must not reverse the displayed side.
+        session.moveTabToListEnd(tab.id, pinned: false)
+        slot.commit(tab, in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [target.id, tab.id, neighbor.id])
+
+        SidebarTabSlot.end(pinned: true).commit(tab, in: space, session: session)
+        let saved = try #require(tab.savedPage)
+        #expect(tab.isPinned && saved.url == tab.url)
+        session.togglePinned(target)
+        slot.commit(tab, in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: true).contains { $0 === tab })
+        _ = session.closeTab(target)
+        slot.commit(tab, in: space, session: session)
+        #expect(tab.isPinned && tab.savedPage == saved)
+    }
+
     @Test func movingToAnEmptyPinnedListReportsOnlyAnActualChange() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
