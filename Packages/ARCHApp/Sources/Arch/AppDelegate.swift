@@ -42,6 +42,9 @@ import Terminal
     private var pluginsMenu: PluginsMenu?
     /// URLs the app receives before the session exists. They open once the session is created.
     private var pendingURLs: [URL] = []
+    // Held through quit-time writes and engine shutdown. Process exit releases the directory lock.
+    private var profileOwnership: ProfileOwnership?
+    private var isAbandoningLaunch = false
     /// When Arch last became active. A link that arrives just after came with the activation the sending app gave Arch, so it counts as arriving in the background.
     private var becameActiveAt: Date?
     private static let askedDefaultBrowserKey = "ARCHAskedDefaultBrowser"
@@ -49,6 +52,43 @@ import Terminal
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The app's Application Support folder, which the session keeps its files and stores in (`BrowserSession.userDataDirectory`). Only `AIService.shared`, which views of several modules read, names it as well.
         let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Arch")
+        startWithProfile(in: supportDirectory)
+    }
+
+    private func startWithProfile(in directory: URL) {
+        guard profileOwnership == nil, !isAbandoningLaunch else { return }
+        do {
+            profileOwnership = try ProfileOwnership(directory: directory)
+        } catch {
+            // Leave AppKit's launch callback before showing a modal alert. Incoming links can wait as at first launch.
+            DispatchQueue.main.async { [weak self] in self?.offerProfileRetry(after: error, in: directory) }
+            return
+        }
+        startSession(in: directory)
+    }
+
+    private func offerProfileRetry(after error: Error, in directory: URL) {
+        guard profileOwnership == nil, !isAbandoningLaunch else { return }
+        let alert = NSAlert()
+        if let error = error as? POSIXError, error.code == .EWOULDBLOCK {
+            alert.messageText = "This Arch profile is already open."
+            alert.informativeText = "Quit the other copy of Arch, then try again. Links sent to this copy will open if you try again successfully."
+        } else {
+            alert.messageText = "Arch couldn’t open its data folder."
+            alert.informativeText = error.localizedDescription
+        }
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Try Again")
+        if alert.runModal() == .alertSecondButtonReturn {
+            startWithProfile(in: directory)
+        } else {
+            isAbandoningLaunch = true
+            pendingURLs.removeAll()
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func startSession(in supportDirectory: URL) {
         // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
         PluginIdentifierMigration.runAtLaunch(in: supportDirectory)
@@ -145,6 +185,7 @@ import Terminal
 
     /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, while Settings ▸ General allows small windows, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; otherwise links open in new tabs of the sidebar target. Only http and https addresses open (`BrowserSession.webAddress(forOpened:)`); a script's text without a scheme is read as the address field reads it, and anything else is dropped.
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard !isAbandoningLaunch else { return }
         let urls = urls.compactMap(BrowserSession.webAddress(forOpened:))
         guard !urls.isEmpty else { return }
         guard let session else {
@@ -167,7 +208,7 @@ import Terminal
         UserDefaults.standard.object(forKey: BrowserSession.opensLinksInSmallWindowKey) as? Bool ?? BrowserSession.opensLinksInSmallWindowByDefault
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { session != nil }
 
     /// The first item of `menu` or its submenus, in menu bar order, whose action has the name, leaving out hidden twins such as the second Zoom In.
     private static func visibleItem(withAction name: String, in menu: NSMenu) -> NSMenuItem? {
@@ -180,6 +221,11 @@ import Terminal
 
     /// Agent sessions end before Arch quits, so that their CLI processes and folders go and Codex's copies of their threads are deleted unless the user keeps them; Arch waits at most five seconds for them.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard session != nil else {
+            isAbandoningLaunch = true
+            pendingURLs.removeAll()
+            return .terminateNow
+        }
         guard let agents, agents.sessions.contains(where: { !$0.hasEnded }) else { return .terminateNow }
         Task { @MainActor [weak self] in
             await agents.endSessionsForQuit()
