@@ -303,7 +303,7 @@ extension AgentAPISession: AgentSessionRunning {
     /// Sends one message to the runner; a retry sends the last one again without showing it twice.
     private func startTurn(_ text: String, isRetry: Bool = false) {
         guard let runner else { return }
-        if !isRetry { transcript.userMessage(text) }
+        transcript.beginTurn(text, isRetry: isRetry)
         // The user's own addresses join the scope; an outside client's never do.
         if !isFromOutsideClient { scope.addAddresses(inUserText: text) }
         callsThisTurn = 0
@@ -356,7 +356,7 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// An error that is not the runner's, such as a skill folder that could not be written for a retry.
     func noteError(_ error: Error) {
-        transcript.append(.error(error.localizedDescription, nil))
+        transcript.append(.error(error.localizedDescription, .retry))
     }
 
     // MARK: Mode and take-over

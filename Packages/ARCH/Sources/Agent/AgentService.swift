@@ -114,6 +114,7 @@ import Foundation
     var sessionTakeOverWait = AgentSession.takeOverWait
     /// Republish each session's turn starting and ending, which the bottom bar's indicator reads, and its waiting for the user starting and ending, which the bar's space symbols read.
     private var sessionObservers: [UUID: AnyCancellable] = [:]
+    private var restartingSessions: Set<UUID> = []
 
     /// Set while an in-app session on a CLI lives, which then keeps the channel listening with outside access off.
     var sessionsNeedChannel = false {
@@ -810,10 +811,16 @@ import Foundation
     }
 
     /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again. A conversation a model held has no Retry, since a new runner would not carry it.
-    public func retry(_ session: AgentSession) async {
-        guard case .failed = session.state, !session.hasEnded, session.model == nil, let old = session.runner else { return session.retryLastMessage() }
+    public func retry(_ session: AgentSession, errorID: UUID? = nil) async {
+        guard let currentError = session.transcript.retryableErrorID, errorID == nil || errorID == currentError else { return }
+        guard !session.hasEnded, !restartingSessions.contains(session.id) else { return }
+        guard case .failed = session.state else { return session.retryLastMessage() }
+        guard session.model == nil, let old = session.runner else { return }
+        restartingSessions.insert(session.id)
+        defer { restartingSessions.remove(session.id) }
+        let epoch = session.callEpoch
         await old.end(keepingThread: false)
-        guard !session.hasEnded else { return }
+        guard !session.hasEnded, session.callEpoch == epoch, !Task.isCancelled else { return }
         do {
             session.replaceRunner(try makeRunner(for: session), processRecord: dependencies.processRecord)
             updateSessionsChannel()
