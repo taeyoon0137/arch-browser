@@ -17,6 +17,7 @@ import Testing
     private(set) var agentOnlyPersonaID: UUID?
     private(set) var madeAgentsPersonas = 0
     var personasDidChange: (() -> Void)?
+    var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?

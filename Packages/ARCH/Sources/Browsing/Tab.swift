@@ -19,7 +19,11 @@ import LiveFolders
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
     /// The current main document, including reloads at the same address. Never stored or sent to a model.
-    @Published private(set) var documentID = UUID()
+    @Published private(set) var documentID = UUID() {
+        didSet {
+            if agentOwnerID == nil { agentMonitor?.userDocumentDidEnd(in: id, document: oldValue) }
+        }
+    }
     /// Pinning saves the page the tab shows as its saved page, or the first address its page reports when it shows none yet, and unpinning forgets it (bookmark rule 2). Pin Tab, Unpin Tab, and drops among the pinned or open tabs or into a folder of either list all set it, so each follows the rule; a tab made pinned, as one that restores or reopens, takes its saved page from the caller.
     @Published public var isPinned: Bool {
         didSet {
@@ -279,6 +283,7 @@ import LiveFolders
 
 /// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
 protocol AgentTabMonitor: AnyObject {
+    func userDocumentDidEnd(in tabID: UUID, document: UUID)
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
     func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
     /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).

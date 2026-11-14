@@ -752,7 +752,7 @@ import UserNotifications
         }
     }
 
-    enum OutlineConsentChange: CaseIterable { case deny, href, document, exclude, takeOver, reattach }
+    enum OutlineConsentChange: CaseIterable { case deny, href, document, exclude, takeOver, reattach, reload, unload, close }
 
     @Test(arguments: OutlineConsentChange.allCases)
     func ticketCannotOpenAChangedOrDeclinedOutlineLink(_ change: OutlineConsentChange) async throws {
@@ -778,7 +778,18 @@ import UserNotifications
         let card = try #require(service.approvals.pending.first)
         let address = URL(string: "https://fixture.example/report?version=one")!
         try #require(card.kind == .openSessionResearch(address, source: "t1 [e1] · Report") && host.openedOwners.isEmpty)
+        host.userDocumentDidEnd?(UUID(), source.documentID)
+        host.userDocumentDidEnd?(source.id, UUID())
+        #expect(service.approvals.isPending(card.id))
         switch change {
+        case .reload, .unload, .close:
+            switch change {
+            case .reload: host.tabs[0].documentID = UUID()
+            case .unload: host.tabs[0].isLoaded = false
+            default: host.tabs.removeAll()
+            }
+            host.userDocumentDidEnd?(source.id, source.documentID)
+            #expect(!service.approvals.isPending(card.id))
         case .deny: break
         case .href: _ = try await page.evaluate("document.querySelector('a').href = '/report?version=two'")
         case .document: host.onPageScript = { host.tabs[0].documentID = UUID() }
@@ -795,7 +806,9 @@ import UserNotifications
         _ = await service.approvals.answer(card.id, with: change == .deny ? .deny : .allowOnce)
         let result = try await proposal.value
         switch change {
-        case .deny, .reattach: #expect(result.status == .denied)
+        case .deny: #expect(result.status == .denied)
+        case .reload, .unload, .close, .reattach:
+            #expect(result.status == .stale && result.text.contains("fresh outline"))
         case .href, .document, .exclude: #expect(result.status == .stale)
         case .takeOver: #expect(result.status == .refused)
         }

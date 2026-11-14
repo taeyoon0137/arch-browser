@@ -164,6 +164,12 @@ import Foundation
         state = FileManager.default.fileExists(atPath: file.fileURL.path) ? .reading : .ready
         applyAgentOnlyPersona()
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
+        host.userDocumentDidEnd = { [weak approvals] tabID, documentID in
+            guard let approvals else { return }
+            for card in approvals.pending where card.tabID == tabID && card.researchDocumentID == documentID {
+                approvals.withdrawResearch(card.id)
+            }
+        }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
         host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }
@@ -851,7 +857,7 @@ import Foundation
             guard let approvals else { return }
             for card in approvals.pending where card.ownerID == id {
                 if case .openSessionResearch = card.kind, card.tabID == tabID {
-                    approvals.end(card.id, because: "The research tab’s source changed.")
+                    approvals.withdrawResearch(card.id)
                 }
                 if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
                     approvals.end(card.id, because: "The tabs available to share changed.")
@@ -1339,10 +1345,11 @@ import Foundation
             kind = .shareSessionTab(choices)
             action = "Choose a tab for this session to read"
         }
-        let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
+        var card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
                                  kind: kind, isSensitive: false, offers: [.deny], action: action, tabID: research?.source.attachmentID,
                                  agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
                                  deadline: now.addingTimeInterval(sessionQuestionWindow))
+        card.researchDocumentID = research?.source.documentID
         let answer = await approvals.request(card)
         func stillRequested() -> Bool {
             !Task.isCancelled && isConnected() && session.callEpoch == epoch && session.takeoverGeneration == generation
@@ -1351,6 +1358,11 @@ import Foundation
         guard stillRequested() else { return AgentToolHost.ended.result }
         if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
         if let research {
+            if answer == .withdrawn {
+                let reason = research.isOutlineLink ? "The shared document is no longer available. Read a fresh outline before requesting the link again."
+                    : "The shared document is no longer available. Review its current address before requesting it again."
+                return AgentToolResult(status: .stale, code: "stale", text: reason)
+            }
             guard answer == .allowOnce else { return AgentToolResult(status: .denied, text: "No research tab was opened.") }
             if research.isOutlineLink {
                 let review = await liveOutlineLink(research, in: session)

@@ -1153,6 +1153,7 @@ final class EngineRuntime {
         recordClose(of: tab, reason: reason, logs: logs)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
+        if owner == nil { agentMonitor?.userDocumentDidEnd(in: tab.id, document: tab.documentID) }
         tabObservers[tab.id] = nil
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)

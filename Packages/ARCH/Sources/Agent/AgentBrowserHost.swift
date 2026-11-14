@@ -198,6 +198,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     func windowForSheet() -> NSWindow?
     /// Set by the service; the host calls it after Personas or spaces change, as when the user deletes one.
     var personasDidChange: (() -> Void)? { get set }
+    /// A user's tab closed, replaced its web contents or committed a new main document. Names the document that ended.
+    var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)? { get set }
     /// The search engine's results address, which every in-app session's site scope holds (docs/agents.md, Site scope and navigation).
     var searchResultsAddress: AgentSearchResultsAddress? { get }
     /// Set by the service; the host calls it with what happened in an agent tab and the tab's owner, the owner before a take-over for `takenOver`.

@@ -97,6 +97,8 @@ public struct AgentApproval: Identifiable {
     /// The step in a sentence, as "Click “Place order” on shop.example".
     public var action: String
     public var tabID: UUID?
+    /// Only an app session’s research card can depend on a shared source document.
+    var researchDocumentID: UUID?
     /// The tab's handle for the agent, as t3.
     public var tabHandle: String?
     public var site: String?
@@ -266,6 +268,12 @@ public struct AgentApproval: Identifiable {
             if document != nil, approval.document == nil { continue }
             finish(approval.id, .withdrawn)
         }
+    }
+
+    /// The attachment supplying the research address changed while this card was waiting.
+    func withdrawResearch(_ id: UUID) {
+        guard case .openSessionResearch? = cards[id]?.kind else { return }
+        finish(id, .withdrawn)
     }
 
     /// Ends the waiting cards of one client, or of every client, as denied: at Stop All Agents, a revocation, and quit.

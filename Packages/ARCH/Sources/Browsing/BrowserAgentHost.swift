@@ -10,6 +10,7 @@ import Foundation
 
     private unowned let session: BrowserSession
     public var personasDidChange: (() -> Void)?
+    public var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
     public var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
@@ -194,6 +195,10 @@ import Foundation
 }
 
 extension BrowserAgentHost: AgentTabMonitor {
+    nonisolated func userDocumentDidEnd(in tabID: UUID, document: UUID) {
+        MainActor.assumeIsolated { userDocumentDidEnd?(tabID, document) }
+    }
+
     nonisolated func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
         MainActor.assumeIsolated { agentTabMayLoad?(owner, tab.id, url) ?? false }
     }

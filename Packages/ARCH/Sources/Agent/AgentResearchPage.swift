@@ -19,6 +19,13 @@ struct AgentResearchPage: Hashable {
             case .attachment(let id, _, _), .outline(let id, _, _, _, _): return id
             }
         }
+
+        var documentID: UUID? {
+            switch self {
+            case .message: return nil
+            case .attachment(_, let document, _), .outline(_, let document, _, _, _): return document
+            }
+        }
     }
 
     let url: URL

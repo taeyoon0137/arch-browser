@@ -224,6 +224,32 @@ import Testing
         #expect(reopened.webContents(reopened.webContents, decidePolicyFor: .init(url: other, disposition: .currentTab, isUserInitiated: true)) == .allow)
     }
 
+    @Test func researchSourceEventsNameTheDocumentThatCommittedUnloadedOrClosed() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchSourceTests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let host = BrowserAgentHost(session: session)
+        let space = try #require(session.spaces.first)
+        let address = URL(string: "https://example.org/source")!
+        let source = session.openTab(url: address, in: space.id, pinned: true, select: false, engine: .webKit)
+        let other = session.openTab(url: address, in: space.id, select: false, engine: .webKit)
+        var ended: [UUID: [UUID]] = [:]
+        host.userDocumentDidEnd = { tab, document in ended[tab, default: []].append(document) }
+
+        let initial = source.documentID
+        source.webContents(source.webContents, didCommitDocumentAt: address)
+        let reloaded = source.documentID
+        #expect(reloaded != initial && ended[source.id] == [initial])
+        let closed = other.documentID
+        #expect(session.closeTab(other))
+        #expect(ended[other.id] == [closed] && ended[source.id] == [initial])
+        #expect(session.closeTab(source))
+        #expect(!source.isLoaded && ended[source.id] == [initial, reloaded])
+    }
+
     @Test func sessionProtectsAgentTabsUntilTakeoverOrClose() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentSessionTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -410,6 +436,8 @@ private final class MonitorDouble: AgentTabMonitor {
         reports.append(report)
         owners.insert(owner)
     }
+
+    func userDocumentDidEnd(in tabID: UUID, document: UUID) {}
 
     func agentTabDidClose(_ tab: Tab, owner: UUID) {}
 }
