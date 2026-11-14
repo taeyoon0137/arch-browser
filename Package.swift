@@ -96,7 +96,8 @@ let package = Package(
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences"], path: "Packages/ARCH/Tests/PreferencesTests"),
-        .testTarget(name: "SyncTests", dependencies: ["Sync"], path: "Packages/ARCH/Tests/SyncTests"),
+        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`, which `Sync` does not use.
+        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20
