@@ -11,11 +11,21 @@ extension AgentToolHost {
         let host = host
         let wait = scriptWait
         let source = AgentPageScripts.source(for: operation)
-        let answer: Result<String?, any Error>? = await withCheckedContinuation { continuation in
-            let once = AgentOnce(continuation)
-            host.runPageScript(source, world: AgentPageScripts.world, in: tab.id) { once.resume(with: $0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { once.resume(with: nil) }
+        let pending = AgentOnce<Result<String?, any Error>>()
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(wait))
+            pending.resume(with: nil)
         }
+        defer { timeout.cancel() }
+        let answer = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard pending.begin(continuation) else { return }
+                host.runPageScript(source, world: AgentPageScripts.world, in: tab.id) { pending.resume(with: $0) }
+            }
+        } onCancel: {
+            pending.resume(with: nil)
+        }
+        guard !Task.isCancelled else { return .outcome(Self.ended) }
         switch answer {
         case nil:
             return .outcome(Outcome(result: AgentToolResult(status: .timeout, code: "notResponding", text: "\(handle.isEmpty ? "The tab" : handle) shows a dialog or does not respond. It waits for the user.")))
@@ -41,8 +51,12 @@ extension AgentToolHost {
 
     /// After a script ran: the tab's page may have moved on to one agents do not read, and the user may have taken the tab over.
     private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, _ grant: AgentGrant, state: AgentGrantState) -> Outcome? {
+        stillReadable(tab, handle: handle, reportedURL: reportedURL) { mayStillRead($0, grant, state: state) }
+    }
+
+    private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, mayRead: (AgentTabInfo) -> Bool) -> Outcome? {
         guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) is closed.") }
-        guard mayStillRead(current, grant, state: state) else {
+        guard mayRead(current) else {
             return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))
         }
         let address = URL(string: reportedURL)
@@ -82,18 +96,29 @@ extension AgentToolHost {
         case .value(let resolved): tab = resolved.0
         case .outcome(let failure): return failure
         }
+        let shared = isShared(tab, grant, state: state)
+        let pages = state.activity(of: tab.id).pages
+        return await snapshot(arguments, tab: tab, handle: handle, shared: shared, store: state.snapshots, pages: pages) { current in
+            state.activity(of: tab.id).pages == pages && isShared(current, grant, state: state) == shared && mayStillRead(current, grant, state: state)
+        }
+    }
+
+    func snapshot(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, shared: Bool, store: AgentSnapshotStore, pages: Int,
+                  mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
+        guard !Task.isCancelled else { return Self.ended }
+        guard mayRead(tab) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)) }
+        if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
+            return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle))
+        }
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let full = arguments["mode"]?.stringValue == "full"
         var target: AgentRefTarget?
         if let ref = arguments["ref"]?.stringValue {
-            guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref], let resolved = AgentRefTarget(ref, fingerprint: entry.fingerprint) else {
+            guard let record = store.current(tab, pages: pages), let entry = record.refs[ref], let resolved = AgentRefTarget(ref, fingerprint: entry.fingerprint) else {
                 return Self.stale(handle)
             }
             target = resolved
         }
-        let shared = isShared(tab, grant, state: state)
-        // The page count before the script, so that a page that changes while the script reads leaves a record already stale.
-        let pages = state.activity(of: tab.id).pages
         let reply: AgentSnapshotReply
         switch await pageScript(.snapshot(full: full, ref: target, shared: shared), in: tab, as: AgentSnapshotReply.self, handle: handle) {
         case .value(let value): reply = value
@@ -101,22 +126,24 @@ extension AgentToolHost {
             failure.site = site
             return failure
         }
-        if let refusal = stillReadable(tab, handle: handle, reportedURL: reply.url, grant, state: state) { return refusal }
+        guard !Task.isCancelled else { return Self.ended }
+        if let refusal = stillReadable(tab, handle: handle, reportedURL: reply.url, mayRead: mayRead) { return refusal }
         if reply.stale == true { return Self.stale(handle) }
         guard let url = URL(string: reply.url) else { return Self.error("unreadable", "\(handle) has no document Arch can read.") }
         let lines = outline(reply.nodes, full: full, shared: shared, pageURL: url)
         // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
-        var record = state.snapshots[tab.id].flatMap { $0.url == url && $0.document == pages ? $0 : nil } ?? AgentSnapshotRecord(url: url, document: pages, refs: [:], lines: [])
+        let prior = store.current(tab, pages: pages)
+        var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, document: pages, refs: [:], lines: [])
         if target == nil { record.refs = [:] }
         for node in reply.nodes {
             guard let ref = node.ref, let fingerprint = node.fingerprint else { continue }
             record.refs[ref] = AgentSnapshotRecord.Ref(fingerprint: fingerprint, href: node.href.flatMap(URL.init(string:)))
         }
-        let previous = state.snapshots[tab.id]?.lines
-        let number = (state.snapshotCounts[tab.id] ?? 0) + 1
-        state.snapshotCounts[tab.id] = number
+        let previous = prior?.lines
+        let number = (store.counts[tab.id] ?? 0) + 1
+        store.counts[tab.id] = number
         if target == nil { record.lines = lines }
-        state.snapshots[tab.id] = record
+        store.records[tab.id] = record
 
         var shown = lines
         var note: String?
