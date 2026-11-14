@@ -71,7 +71,10 @@ private let searchResponse = """
         try gh(in: folder, answer(searchResponse))
         let cli = GitHubCLI(shell: try loginShell(in: folder))
         let search = GitHubSearch(host: "github.com", kind: .search, text: "repo:owner/secret-project is:open")
-        let items = try await cli.search(search, limit: 25)
+        let result = try await cli.search(search, limit: 25)
+        let items = result.items
+        // A null result without an error about it withholds nothing.
+        #expect(result.isComplete)
 
         let arguments = try recorded("arguments", in: folder).split(separator: "\n").map(String.init)
         #expect(arguments == ["api", "graphql", "--hostname", "github.com", "--input", "-"])
@@ -184,8 +187,14 @@ private let searchResponse = """
     @Test func errorsAboutSingleResultsLeaveTheOthers() async throws {
         let partial = try temporaryDirectory()
         try gh(in: partial, answer(#"{"data":{"search":{"nodes":[{"__typename":"PullRequest","number":12,"title":"Kept","url":"https://github.com/owner/repo/pull/12","updatedAt":"2026-11-13T10:00:00Z","state":"OPEN","isDraft":false,"repository":{"nameWithOwner":"owner/repo"},"author":{"login":"octo"}},null]},"rateLimit":{"resetAt":"2026-11-13T11:00:00Z"}},"errors":[{"type":"FORBIDDEN","path":["search","nodes",1],"message":"Resource protected by organization SAML enforcement."}]}"#, status: 1))
-        let items = try await GitHubCLI(shell: try loginShell(in: partial), isOffline: { false }).search(GitHubSearch(kind: .myPullRequests), limit: 25)
-        #expect(items.map(\.id) == ["https://github.com/owner/repo/pull/12"])
+        let result = try await GitHubCLI(shell: try loginShell(in: partial), isOffline: { false }).search(GitHubSearch(kind: .myPullRequests), limit: 25)
+        #expect(result.items.map(\.id) == ["https://github.com/owner/repo/pull/12"])
+        #expect(!result.isComplete)
+
+        // With every result withheld, the search fails with GitHub's message, so the folder keeps its items.
+        let withheld = try temporaryDirectory()
+        try gh(in: withheld, answer(#"{"data":{"search":{"nodes":[null,null]},"rateLimit":{"resetAt":"2026-11-13T11:00:00Z"}},"errors":[{"type":"FORBIDDEN","path":["search","nodes",0],"message":"Resource protected by organization SAML enforcement."},{"type":"FORBIDDEN","path":["search","nodes",1],"message":"Resource protected by organization SAML enforcement."}]}"#, status: 1))
+        #expect(await searchError(GitHubCLI(shell: try loginShell(in: withheld), isOffline: { false })) == .gitHubFailed("Resource protected by organization SAML enforcement."))
 
         // An error about the search itself still fails the folder.
         let whole = try temporaryDirectory()

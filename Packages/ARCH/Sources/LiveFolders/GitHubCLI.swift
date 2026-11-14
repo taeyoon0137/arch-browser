@@ -9,6 +9,18 @@ public enum GitHubCLIStatus: Equatable, Sendable {
     case signedIn
 }
 
+/// A search's items, and whether GitHub withheld none of its results.
+public struct GitHubSearchResult: Equatable, Sendable {
+    public var items: [LiveItem]
+    /// False when GitHub answered some results as null with an error about them alone, so the items leave them out and the folder keeps their read state and dismissals.
+    public var isComplete: Bool
+
+    public init(items: [LiveItem], isComplete: Bool = true) {
+        self.items = items
+        self.isComplete = isComplete
+    }
+}
+
 public actor GitHubCLI {
     public static let shared = GitHubCLI()
 
@@ -72,8 +84,8 @@ public actor GitHubCLI {
         }
     }
 
-    /// The first `limit` results of `search`, in GitHub's order, which the built-in searches sort by the latest update, without those that GitHub answers as null with an error about them alone. Throws `LiveFolderError`: signed out at exit 4, GitHub's or `gh`'s message at exit 1, `offline` for such a failure while the Mac has no network, `rateLimited` for a `RATE_LIMITED` error, and the limits.
-    public func search(_ search: GitHubSearch, limit: Int) async throws -> [LiveItem] {
+    /// The first `limit` results of `search`, in GitHub's order, which the built-in searches sort by the latest update, without those that GitHub answers as null with an error about them alone. Throws `LiveFolderError`: signed out at exit 4, GitHub's or `gh`'s message at exit 1, also when GitHub withheld every result, `offline` for such a failure while the Mac has no network, `rateLimited` for a `RATE_LIMITED` error, and the limits.
+    public func search(_ search: GitHubSearch, limit: Int) async throws -> GitHubSearchResult {
         guard GitHubSearch.isValidHost(search.host) else { throw LiveFolderError.gitHubFailed("\(search.host) is not a GitHub host.") }
         let body: [String: Any] = ["query": Self.query, "variables": ["q": search.query, "n": limit]]
         let input = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
@@ -225,7 +237,7 @@ public actor GitHubCLI {
         var commits: Commits?
     }
 
-    private static func items(from run: Run, host: String) throws -> [LiveItem] {
+    private static func items(from run: Run, host: String) throws -> GitHubSearchResult {
         if run.termination == .exited(4) { throw LiveFolderError.gitHubSignedOut(host: host) }
         let response = try? JSONDecoder().decode(Response.self, from: run.output)
         let problems = response?.errors ?? []
@@ -233,10 +245,11 @@ public actor GitHubCLI {
             let reset = response?.data?.rateLimit?.resetAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }
             throw LiveFolderError.rateLimited(until: reset ?? Date().addingTimeInterval(rateLimitWait))
         }
-        // Errors about single results alone leave the other results; `gh` exits 1 for them.
+        // Errors about single results alone leave the other results; `gh` exits 1 for them. With none left, the first error fails the search, so the folder keeps its items and shows GitHub's message.
         let answered = run.termination == .exited(0) || (run.termination == .exited(1) && !problems.isEmpty)
         if answered, problems.allSatisfy(\.isAboutOneResult), let nodes = response?.data?.search?.nodes {
-            return nodes.compactMap { $0.flatMap(item) }
+            let items = nodes.compactMap { $0.flatMap(item) }
+            if problems.isEmpty || !items.isEmpty { return GitHubSearchResult(items: items, isComplete: problems.isEmpty) }
         }
         if let message = problems.compactMap(\.message).first(where: { !$0.isEmpty }) {
             throw LiveFolderError.gitHubFailed(String(message.prefix(messageLimit)))

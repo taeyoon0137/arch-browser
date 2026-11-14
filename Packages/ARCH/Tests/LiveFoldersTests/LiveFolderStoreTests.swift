@@ -61,6 +61,20 @@ private let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
         #expect(state.firstSuccess == date)
         #expect(state.lastSuccess == date + 60)
     }
+
+    @Test func anAnswerThatWithholdsResultsKeepsTheReadStateAndDismissalsOfTheItemsItLeavesOut() {
+        var state = LiveFolderState()
+        state.recordSuccess(items: [item("a"), item("b"), item("c")], at: date)
+        state.dismiss("b")
+        state.recordSuccess(items: [item("a")], isComplete: false, at: date + 60)
+        #expect(state.items.map(\.id) == ["a"])
+        #expect(Set(state.viewedAt.keys) == ["a", "b", "c"])
+        #expect(state.dismissed == ["b"])
+        // The withheld items return still read and dismissed.
+        state.recordSuccess(items: [item("a"), item("b"), item("c")], at: date + 120)
+        #expect(state.unreadItemIDs.isEmpty)
+        #expect(state.dismissed == ["b"])
+    }
 }
 
 @Suite struct LiveFolderKeychainTests {

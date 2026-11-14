@@ -65,7 +65,7 @@ private final class StubFetchers: LiveFolderFetching, @unchecked Sendable {
         return .fetched(Feed(title: "Stub", items: items, interval: nil), FeedValidators(entityTag: "\"1\""))
     }
 
-    func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> [LiveItem] {
+    func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> GitHubSearchResult {
         let items = locked {
             searched.append(search)
             running.gitHub += 1
@@ -74,7 +74,7 @@ private final class StubFetchers: LiveFolderFetching, @unchecked Sendable {
         }
         try? await Task.sleep(for: delay)
         locked { running.gitHub -= 1 }
-        return items
+        return GitHubSearchResult(items: items)
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -258,6 +258,22 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         #expect(await waitUntil { keychain.folders.isEmpty })
     }
 
+    @Test func aRegisteredPrivateFeedThatGoesTakesAnAddressWrittenSinceAlong() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let service = try service(StubFetchers(), addresses: keychain)
+        let folder = UUID()
+        let first = URL(string: "https://tracker.example.org/feed.php?cat=1&key=abc123")!
+        let second = URL(string: "https://tracker.example.org/feed.php?cat=2&key=abc123")!
+        try await service.setPrivateAddress(first, for: folder, folderName: "Tracker")
+        service.register([folder: LiveFolderConfiguration(source: try LiveFolderSource.makeFeed(address: first).source)])
+        #expect(await waitUntil { service.store[folder].lastSuccess != nil })
+        // Edit Live Folder… changes only the query, which leaves the configuration as it was, and Delete Folder follows.
+        try await service.setPrivateAddress(second, for: folder, folderName: "Tracker")
+        #expect(keychain.folders == [folder])
+        service.register([:])
+        #expect(await waitUntil { keychain.folders.isEmpty })
+    }
+
     @Test func aCleanupThatChoseWhatToKeepBeforeAWriteLeavesTheWrittenAddress() async throws {
         let keychain = GatedKeychain()
         let service = try service(StubFetchers(), addresses: keychain)
@@ -282,14 +298,17 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         service.register([folder: LiveFolderConfiguration(source: source, itemLimit: 10)])
         #expect(await waitUntil { service.store[folder].lastSuccess != nil })
         #expect(service.store[folder].items.count == 10)
-        // Raised: the next request sends no validators, which would bring a 304 and keep 10 items.
+        // Raised: the next request sends no validators, which would bring a 304 and keep 10 items. The older items it adds count as read; a newer one does not.
+        fetchers.answer(items: [item("new")] + (1...30).map { item("\($0)") })
         service.register([folder: LiveFolderConfiguration(source: source, itemLimit: 25)])
         #expect(service.isRefreshing(folder))
         #expect(await waitUntil { service.store[folder].items.count == 25 })
         #expect(fetchers.validators.map(\.entityTag) == [nil, nil])
+        #expect(service.store[folder].unreadItemIDs == ["new"])
+        #expect(service.store[folder].itemLimitRose == nil)
         // Lowered: the first items stay at once.
         service.register([folder: LiveFolderConfiguration(source: source, itemLimit: 10)])
-        #expect(service.store[folder].items.map(\.id) == (1...10).map { "\($0)" })
+        #expect(service.store[folder].items.map(\.id) == ["new"] + (1...9).map { "\($0)" })
         #expect(await waitUntil { !service.isRefreshing(folder) })
         #expect(service.store[folder].items.count == 10)
     }

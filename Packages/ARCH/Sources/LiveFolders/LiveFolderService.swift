@@ -4,7 +4,7 @@ import Foundation
 /// What fetches a folder's items. Tests replace it.
 public protocol LiveFolderFetching: Sendable {
     func fetchFeed(_ address: URL, validators: FeedValidators) async throws -> FeedFetchResult
-    func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> [LiveItem]
+    func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> GitHubSearchResult
 }
 
 /// Feeds through `FeedFetcher` and GitHub through `GitHubCLI`.
@@ -21,7 +21,7 @@ public struct LiveFolderFetchers: LiveFolderFetching {
         try await feeds.fetch(address, validators: validators)
     }
 
-    public func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> [LiveItem] {
+    public func searchGitHub(_ search: GitHubSearch, limit: Int) async throws -> GitHubSearchResult {
         try await gitHub.search(search, limit: limit)
     }
 }
@@ -59,9 +59,13 @@ public final class LiveFolderService {
         self.now = now
     }
 
-    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet.
+    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items; after a raise, that refresh counts the older items it adds as read. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet.
     public func register(_ folders: [UUID: LiveFolderConfiguration]) {
-        for folder in self.folders.keys where folders[folder] == nil { cancel(folder) }
+        for folder in self.folders.keys where folders[folder] == nil {
+            cancel(folder)
+            // A registered folder that goes takes its address along, also one written for it since.
+            unregisteredAddresses.remove(folder)
+        }
         self.folders = folders
         unregisteredAddresses.subtract(Self.privateFeeds(in: folders))
         store.removeFolders(notIn: Set(folders.keys))
@@ -73,6 +77,7 @@ public final class LiveFolderService {
             } else if state.itemLimit != configuration.itemLimit {
                 cancel(folder)
                 store.update(folder) { state in
+                    if let previous = state.itemLimit, configuration.itemLimit > previous { state.itemLimitRose = true }
                     state.items = Array(state.items.prefix(configuration.itemLimit))
                     state.validators = FeedValidators()
                     state.itemLimit = configuration.itemLimit
@@ -85,15 +90,21 @@ public final class LiveFolderService {
         startWaitingFolders()
     }
 
-    /// Writes a private feed's whole address to `addresses` (live folder rule 8) before its folder is registered; registering keeps it from then on. A registered private feed whose address changed, as when Edit Live Folder… changes only the query that its source leaves out, starts over and refreshes.
+    /// Writes a private feed's whole address to `addresses` (live folder rule 8) before its folder is registered; registering keeps it from then on, and a later register without the folder removes it. A registered private feed whose address changed, as when Edit Live Folder… changes only the query that its source leaves out, starts over and refreshes.
     public func setPrivateAddress(_ address: URL, for folder: UUID, folderName: String) async throws {
         unregisteredAddresses.insert(folder)
         let addresses = addresses
-        let changed = try await afterEarlierAddressWork {
-            let previous = try? await addresses.address(for: folder)
-            try await addresses.setAddress(address, for: folder, folderName: folderName)
-            return previous != address
-        }.value
+        let changed: Bool
+        do {
+            changed = try await afterEarlierAddressWork {
+                let previous = try? await addresses.address(for: folder)
+                try await addresses.setAddress(address, for: folder, folderName: folderName)
+                return previous != address
+            }.value
+        } catch {
+            unregisteredAddresses.remove(folder)
+            throw error
+        }
         guard changed, let configuration = folders[folder], case .feed(_, isPrivate: true) = configuration.source else { return }
         startOver(folder, configuration)
     }
@@ -217,7 +228,7 @@ public final class LiveFolderService {
     }
 
     private enum Fetched {
-        case items([LiveItem], FeedValidators, title: String?, interval: TimeInterval?)
+        case items([LiveItem], FeedValidators, title: String?, interval: TimeInterval?, isComplete: Bool)
         case notModified
     }
 
@@ -237,10 +248,11 @@ public final class LiveFolderService {
             }
             switch try await fetchers.fetchFeed(whole, validators: validators) {
             case .notModified: return .notModified
-            case .fetched(let feed, let sent): return .items(Array(feed.items.prefix(configuration.itemLimit)), sent, title: feed.title, interval: feed.interval)
+            case .fetched(let feed, let sent): return .items(Array(feed.items.prefix(configuration.itemLimit)), sent, title: feed.title, interval: feed.interval, isComplete: true)
             }
         case .gitHub(let search):
-            return .items(try await fetchers.searchGitHub(search, limit: configuration.itemLimit), FeedValidators(), title: nil, interval: nil)
+            let result = try await fetchers.searchGitHub(search, limit: configuration.itemLimit)
+            return .items(result.items, FeedValidators(), title: nil, interval: nil, isComplete: result.isComplete)
         }
     }
 
@@ -252,8 +264,8 @@ public final class LiveFolderService {
             store.update(folder) { state in
                 state.lastAttempt = started
                 switch outcome {
-                case .success(.items(let items, let validators, let title, let interval)):
-                    state.recordSuccess(items: items, validators: validators, feedTitle: title, feedInterval: interval, at: date)
+                case .success(.items(let items, let validators, let title, let interval, let isComplete)):
+                    state.recordSuccess(items: items, validators: validators, feedTitle: title, feedInterval: interval, isComplete: isComplete, at: date)
                 case .success(.notModified):
                     state.recordNotModified(at: date)
                 case .failure(let error):

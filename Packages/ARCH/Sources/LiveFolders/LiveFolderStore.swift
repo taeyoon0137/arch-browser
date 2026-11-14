@@ -7,6 +7,8 @@ public struct LiveFolderState: Codable, Equatable, Sendable {
     public var source: LiveFolderSource?
     /// The item limit the items and validators are for. A folder whose configuration names another limit keeps the items within it and refreshes without validators.
     public var itemLimit: Int?
+    /// Set when the item limit rose, until the next success, which counts as viewed the items it lists after the last of the earlier items: older items that the lower limit left out (Read and unread).
+    public var itemLimitRose: Bool?
     /// When the last attempt that ended started.
     public var lastAttempt: Date?
     public var lastSuccess: Date?
@@ -33,16 +35,25 @@ public struct LiveFolderState: Codable, Equatable, Sendable {
         self.itemLimit = itemLimit
     }
 
-    /// Records a fetch's items. Items seen at the folder's first success count as viewed then, and `viewedAt` and the dismissed items lose entries for items the source no longer lists (Read and unread).
-    public mutating func recordSuccess(items: [LiveItem], validators: FeedValidators = FeedValidators(), feedTitle: String? = nil, feedInterval: TimeInterval? = nil, at date: Date) {
+    /// Records a fetch's items. Items seen at the folder's first success count as viewed then, as do the older items that a raised item limit adds. `viewedAt` and the dismissed items lose entries for items the source no longer lists, unless the answer is not complete, as when GitHub withholds results whose items may return (Read and unread).
+    public mutating func recordSuccess(items: [LiveItem], validators: FeedValidators = FeedValidators(), feedTitle: String? = nil, feedInterval: TimeInterval? = nil,
+                                       isComplete: Bool = true, at date: Date) {
         if firstSuccess == nil {
             firstSuccess = date
             for item in items { viewedAt[item.id] = date }
+        } else if itemLimitRose == true {
+            let earlier = Set(self.items.map(\.id))
+            if let last = items.lastIndex(where: { earlier.contains($0.id) }) {
+                for item in items[(last + 1)...] { viewedAt[item.id] = date }
+            }
         }
+        itemLimitRose = nil
         self.items = items
-        let listed = Set(items.map(\.id))
-        viewedAt = viewedAt.filter { listed.contains($0.key) }
-        dismissed.formIntersection(listed)
+        if isComplete {
+            let listed = Set(items.map(\.id))
+            viewedAt = viewedAt.filter { listed.contains($0.key) }
+            dismissed.formIntersection(listed)
+        }
         self.validators = validators
         self.feedTitle = feedTitle
         self.feedInterval = feedInterval
